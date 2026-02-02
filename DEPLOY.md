@@ -5,9 +5,10 @@ Para ejecutar este proyecto en otro ordenador, **necesitas tener Bun instalado**
 ## Pasos para la instalación
 
 ### 1. Instalar Bun
-Abre **PowerShell** como administrador y ejecuta:
+Abre **PowerShell** o  **Linux** como administrador y ejecuta:
 ```powershell
 powershell -c "irm bun.sh/install.ps1 | iex"
+curl -fsSL https://bun.sh/install | bash
 ```
 
 > **Nota**: Si este comando falla, puedes instalar [Node.js](https://nodejs.org/) primero y luego ejecutar `npm install -g bun`.
