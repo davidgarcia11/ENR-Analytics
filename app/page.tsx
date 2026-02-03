@@ -12,56 +12,94 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
-import { Search, Loader2, Factory, Calendar } from "lucide-react"
+import { Search, Loader2, Factory, Calendar, Download, ChevronDown } from "lucide-react"
+import * as XLSX from 'xlsx';
 
 export default function Dashboard() {
   const [data, setData] = useState<any[]>([])
   const [loading, setLoading] = useState(false)
+  const [page, setPage] = useState(1);
+  const [hasMore, setHasMore] = useState(true);
   const [filters, setFilters] = useState({
     plant: "all",
-
+    article: "",
     startDate: "",
     endDate: "",
   })
 
+  // Metrics need to be calculated on ALL data theoretically, 
+  // currently calculated on loaded data.
+  // For a "Load More" scenario, it's better if metrics come from API or strictly based on loaded keys.
+  // We will keep metrics on loaded data for simplicity now.
   const [metrics, setMetrics] = useState({
     totalQty: 0,
     totalOrders: 0,
     byPlant: {} as Record<string, number>
   })
 
-  // Set default dates to current month on init
+  // Set default dates to current date on init
   useEffect(() => {
     const today = new Date();
-    const firstDay = new Date(today.getFullYear(), today.getMonth(), 1);
-    const lastDay = new Date(today.getFullYear(), today.getMonth() + 1, 0);
+    // Adjust for timezone offset to ensure correct date string in local time
+    // OR simply use split('T')[0] if UTC is fine, but for "current local day" usually we want local.
+    // However, pure toISOString uses UTC.
+    // Let's stick to the previous pattern but use 'today' for both.
+    // To minimize timezone issues, constructing a local YYYY-MM-DD string is better.
+    const year = today.getFullYear();
+    const month = String(today.getMonth() + 1).padStart(2, '0');
+    const day = String(today.getDate()).padStart(2, '0');
+    const todayStr = `${year}-${month}-${day}`;
 
     setFilters(prev => ({
       ...prev,
-      startDate: firstDay.toISOString().split('T')[0],
-      endDate: lastDay.toISOString().split('T')[0]
+      startDate: todayStr,
+      endDate: todayStr
     }))
   }, [])
 
-  const fetchData = async () => {
+  // Reset data when filters change (except page if page change is internal, but here we likely want full reset on filter change)
+  const applyFilters = () => {
+    setPage(1);
+    setData([]);
+    fetchData(1, true);
+  }
+
+  const loadMore = () => {
+    const nextPage = page + 1;
+    setPage(nextPage);
+    fetchData(nextPage, false);
+  };
+
+  const fetchData = async (pageNum: number, isNewSearch: boolean) => {
     setLoading(true)
     try {
       const params = new URLSearchParams()
       if (filters.plant !== 'all') params.append('plant', filters.plant)
       if (filters.startDate) params.append('startDate', filters.startDate)
       if (filters.endDate) params.append('endDate', filters.endDate)
+      if (filters.article) params.append('article', filters.article)
+
+      params.append('page', pageNum.toString());
+      params.append('limit', '50');
 
       const res = await fetch(`/api/production?${params.toString()}`)
       const json = await res.json()
 
       if (Array.isArray(json)) {
-        setData(json)
-        // Calculate Metrics
+        if (json.length < 50) setHasMore(false);
+        else setHasMore(true);
+
+        const newData = isNewSearch ? json : [...data, ...json];
+        setData(newData)
+
+        // Calculate Metrics (On currently loaded data for now)
+        // Note: Ideally metrics should be a separate API call returning aggregations over the full dataset.
+        // Re-calculating on client side with partial data is an approximation.
         let qty = 0;
         const plants: Record<string, number> = {};
         const orders = new Set();
 
-        json.forEach(item => {
+        newData.forEach(item => {
           qty += item.quantity || 0;
           orders.add(item.order);
           const pName = item.subLine || 'Desconocido';
@@ -81,29 +119,25 @@ export default function Dashboard() {
     }
   }
 
-  // Auto fetch on mount after date set? Or manual?
-  // Let's do manual or effect on filters?
-  // User might prefer manual to avoid spamming if changing dates.
-  // But let's load initial data once dates are set in the first effect?
-  // We'll use a separate effect for initial load or just let user click.
-  // Better: separate load effect dependent on `filters.startDate` becoming available.
-  /*
   useEffect(() => {
-    if (filters.startDate && filters.endDate) {
-       fetchData()
-    }
-  }, [filters.startDate, filters.endDate]) // This might trigger too often while typing.
-  */
-  // I'll stick to manual "Filtrar" button + Initial Load.
+    if (filters.startDate) fetchData(1, true);
+  }, [filters.startDate])
 
-  useEffect(() => {
-    // Initial load when component mounts?
-    // Maybe wait for user interaction to avoid heavy query on start, 
-    // but dashboard usually shows something.
-    // I'll skip auto-load and let user choose filters, or load with defaults.
-    // Let's load with defaults.
-    if (filters.startDate) fetchData();
-  }, [filters.startDate]) // Only run once when start date is set by the first effect.
+  const exportToExcel = () => {
+    const ws = XLSX.utils.json_to_sheet(data.map(item => ({
+      Fecha: item.date ? new Date(item.date).toLocaleDateString() : item.productionDateRaw,
+      Orden: item.order,
+      Articulo: item.article,
+      Descripcion: item.description,
+      Planta: item.subLine,
+      Codigo_Planta: item.plantCode,
+      Cantidad: item.quantity,
+      Unidad: item.unit
+    })));
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "Produccion");
+    XLSX.writeFile(wb, `Produccion_${filters.startDate}_${filters.endDate}.xlsx`);
+  };
 
   return (
     <div className="min-h-screen bg-gray-100 p-8 font-sans text-gray-900">
@@ -115,6 +149,16 @@ export default function Dashboard() {
             <p className="text-gray-600">Visualización de órdenes de fabricación y cantidades.</p>
           </div>
           <div className="flex flex-wrap items-end gap-4 bg-white p-4 rounded-xl shadow-sm border border-gray-200">
+            <div className="grid gap-1.5">
+              <label className="text-xs font-semibold text-gray-700">Artículo</label>
+              <Input
+                type="text"
+                placeholder="Buscar art..."
+                value={filters.article}
+                onChange={(e) => setFilters({ ...filters, article: e.target.value })}
+                className="w-[120px] border-gray-300 focus:border-slate-500 font-medium"
+              />
+            </div>
             <div className="grid gap-1.5">
               <label className="text-xs font-semibold text-gray-700">Fecha Inicio</label>
               <Input
@@ -147,9 +191,13 @@ export default function Dashboard() {
               </select>
             </div>
 
-            <Button onClick={fetchData} disabled={loading} className="bg-slate-800 hover:bg-slate-700 text-white font-semibold">
+            <Button onClick={applyFilters} disabled={loading} className="bg-slate-800 hover:bg-slate-700 text-white font-semibold">
               {loading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Search className="mr-2 h-4 w-4" />}
               Filtrar
+            </Button>
+            <Button onClick={exportToExcel} variant="outline" disabled={data.length === 0} className="border-green-600 text-green-700 hover:bg-green-50">
+              <Download className="mr-2 h-4 w-4" />
+              Excel
             </Button>
           </div>
         </div>
@@ -163,7 +211,7 @@ export default function Dashboard() {
             </CardHeader>
             <CardContent>
               <div className="text-2xl font-black text-gray-900">{metrics.totalQty.toLocaleString('es-ES', { minimumFractionDigits: 2 })}</div>
-              <p className="text-xs text-gray-500 font-medium">Unidades fabricadas en el periodo</p>
+              <p className="text-xs text-gray-500 font-medium">Unidades fabricadas (cargadas)</p>
             </CardContent>
           </Card>
           <Card className="border-gray-200 shadow-sm">
@@ -173,7 +221,7 @@ export default function Dashboard() {
             </CardHeader>
             <CardContent>
               <div className="text-2xl font-black text-gray-900">{metrics.totalOrders}</div>
-              <p className="text-xs text-gray-500 font-medium">Total de órdenes procesadas</p>
+              <p className="text-xs text-gray-500 font-medium">Total de órdenes (cargadas)</p>
             </CardContent>
           </Card>
           <Card className="border-gray-200 shadow-sm">
@@ -185,7 +233,7 @@ export default function Dashboard() {
               <div className="text-2xl font-black text-gray-900">
                 {Object.entries(metrics.byPlant).sort((a, b) => b[1] - a[1])[0]?.[0] || '-'}
               </div>
-              <p className="text-xs text-gray-500 font-medium">Mayor volumen de producción</p>
+              <p className="text-xs text-gray-500 font-medium">Mayor volumen (cargado)</p>
             </CardContent>
           </Card>
         </div>
@@ -209,44 +257,56 @@ export default function Dashboard() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {loading ? (
+                {data.map((row, i) => (
+                  <TableRow key={i} className="hover:bg-slate-50 border-gray-100">
+                    <TableCell className="font-medium text-gray-900">
+                      {row.date ? new Date(row.date).toLocaleDateString() : row.productionDateRaw}
+                    </TableCell>
+                    <TableCell className="text-gray-700">{row.order}</TableCell>
+                    <TableCell className="text-gray-700 font-mono text-xs bg-gray-100 px-2 py-1 rounded w-fit">{row.article}</TableCell>
+                    <TableCell className="text-gray-600 uppercase text-xs font-semibold">{row.description}</TableCell>
+                    <TableCell>
+                      <div className="flex flex-col">
+                        <span className="font-bold text-gray-800 text-xs">{row.subLine}</span>
+                        <span className="text-[10px] text-gray-400 font-mono">{row.subLineCode} · {row.plantCode}</span>
+                      </div>
+                    </TableCell>
+                    <TableCell className="text-right font-bold text-slate-900">
+                      {row.quantity?.toLocaleString('es-ES', { minimumFractionDigits: 2 })}
+                    </TableCell>
+                    <TableCell className="text-center text-xs text-gray-500 font-mono">
+                      {row.unit}
+                    </TableCell>
+                  </TableRow>
+                ))}
+
+                {loading && (
                   <TableRow>
                     <TableCell colSpan={7} className="text-center py-10">
                       <Loader2 className="h-6 w-6 animate-spin mx-auto text-slate-800" />
                     </TableCell>
                   </TableRow>
-                ) : data.length === 0 ? (
+                )}
+
+                {!loading && data.length === 0 && (
                   <TableRow>
                     <TableCell colSpan={7} className="text-center py-10 text-gray-500 font-medium">
                       No se encontraron datos para los filtros seleccionados.
                     </TableCell>
                   </TableRow>
-                ) : (
-                  data.map((row, i) => (
-                    <TableRow key={i} className="hover:bg-slate-50 border-gray-100">
-                      <TableCell className="font-medium text-gray-900">
-                        {row.date ? new Date(row.date).toLocaleDateString() : row.productionDateRaw}
-                      </TableCell>
-                      <TableCell className="text-gray-700">{row.order}</TableCell>
-                      <TableCell className="text-gray-700 font-mono text-xs bg-gray-100 px-2 py-1 rounded w-fit">{row.article}</TableCell>
-                      <TableCell className="text-gray-600 uppercase text-xs font-semibold">{row.description}</TableCell>
-                      <TableCell>
-                        <div className="flex flex-col">
-                          <span className="font-bold text-gray-800 text-xs">{row.subLine}</span>
-                          <span className="text-[10px] text-gray-400 font-mono">{row.subLineCode} · {row.plantCode}</span>
-                        </div>
-                      </TableCell>
-                      <TableCell className="text-right font-bold text-slate-900">
-                        {row.quantity?.toLocaleString('es-ES', { minimumFractionDigits: 2 })}
-                      </TableCell>
-                      <TableCell className="text-center text-xs text-gray-500 font-mono">
-                        {row.unit}
-                      </TableCell>
-                    </TableRow>
-                  ))
                 )}
               </TableBody>
             </Table>
+
+            {/* Load More Button */}
+            {hasMore && data.length > 0 && !loading && (
+              <div className="mt-6 flex justify-center">
+                <Button onClick={loadMore} variant="ghost" className="text-slate-600 hover:text-slate-900 hover:bg-slate-100">
+                  <ChevronDown className="mr-2 h-4 w-4" />
+                  Cargar más resultados
+                </Button>
+              </div>
+            )}
           </CardContent>
         </Card>
 

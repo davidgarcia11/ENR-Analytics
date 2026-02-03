@@ -59,8 +59,19 @@ export async function GET(req: NextRequest) {
             }
         }
 
+        if (searchParams.get('article')) {
+            const article = searchParams.get('article');
+            sql += ` AND TRIM(A.WAAITM) LIKE :article`;
+            binds.article = `%${article}%`;
+        }
+
+        // Pagination
+        const page = parseInt(searchParams.get('page') || '1');
+        const limit = parseInt(searchParams.get('limit') || '50');
+        const offset = (page - 1) * limit;
+
         // Order by Task Date
-        sql += ` ORDER BY B.TO55TAREA DESC FETCH FIRST 500 ROWS ONLY`;
+        sql += ` ORDER BY B.TO55TAREA DESC OFFSET ${offset} ROWS FETCH NEXT ${limit} ROWS ONLY`;
 
         const result = await conn.execute(sql, binds);
 
