@@ -153,10 +153,15 @@ export default function Dashboard() {
               <label className="text-xs font-semibold text-gray-700">Artículo</label>
               <Input
                 type="text"
-                placeholder="Buscar art..."
+                maxLength={10}
+                placeholder="Art. (10 dígitos)"
                 value={filters.article}
-                onChange={(e) => setFilters({ ...filters, article: e.target.value })}
-                className="w-[120px] border-gray-300 focus:border-slate-500 font-medium"
+                onChange={(e) => {
+                  // Allow only numbers
+                  const val = e.target.value.replace(/\D/g, '');
+                  setFilters({ ...filters, article: val })
+                }}
+                className="w-[140px] border-gray-300 focus:border-slate-500 font-medium"
               />
             </div>
             <div className="grid gap-1.5">

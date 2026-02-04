@@ -61,8 +61,18 @@ export async function GET(req: NextRequest) {
 
         if (searchParams.get('article')) {
             const article = searchParams.get('article');
-            sql += ` AND TRIM(A.WAAITM) LIKE :article`;
-            binds.article = `%${article}%`;
+
+            // Control de seguridad: Validar que sea estrictamente numérico y de 10 dígitos
+            // Esto previene inyección y asegura el formato correcto (0000000000 - 9999999999)
+            if (!article || !/^\d{10}$/.test(article)) {
+                return NextResponse.json(
+                    { error: 'Formato inválido: El artículo debe contener exactamente 10 números.' },
+                    { status: 400 }
+                );
+            }
+
+            sql += ` AND TRIM(A.WAAITM) = :article`;
+            binds.article = article;
         }
 
         // Pagination
