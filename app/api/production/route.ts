@@ -77,7 +77,7 @@ export async function GET(req: NextRequest) {
 
         // Pagination
         const page = parseInt(searchParams.get('page') || '1');
-        const limit = parseInt(searchParams.get('limit') || '50');
+        const limit = parseInt(searchParams.get('limit') || '150');
         const offset = (page - 1) * limit;
 
         // Order by Task Date

@@ -22,6 +22,7 @@ export default function Dashboard() {
   const [hasMore, setHasMore] = useState(true);
   const [filters, setFilters] = useState({
     plant: "all",
+    subLine: "all",
     article: "",
     startDate: "",
     endDate: "",
@@ -32,7 +33,8 @@ export default function Dashboard() {
   // For a "Load More" scenario, it's better if metrics come from API or strictly based on loaded keys.
   // We will keep metrics on loaded data for simplicity now.
   const [metrics, setMetrics] = useState({
-    totalQty: 0,
+    totalQtyUN: 0,
+    totalQtyKG: 0,
     totalOrders: 0,
     byPlant: {} as Record<string, number>
   })
@@ -64,6 +66,21 @@ export default function Dashboard() {
     fetchData(1, true);
   }
 
+  const handlePlantChange = (plantValue: string) => {
+    let newSubLine = 'all';
+
+    // Auto-select subline based on plant
+    if (plantValue === '10100') newSubLine = '1';      // Aguilar -> 1
+    else if (plantValue === '10200') newSubLine = '2'; // Corella -> 2
+    // Funes (10300) defaults to 'all' to let user choose 3, 4, 5
+
+    setFilters(prev => ({
+      ...prev,
+      plant: plantValue,
+      subLine: newSubLine
+    }));
+  };
+
   const loadMore = () => {
     const nextPage = page + 1;
     setPage(nextPage);
@@ -75,18 +92,19 @@ export default function Dashboard() {
     try {
       const params = new URLSearchParams()
       if (filters.plant !== 'all') params.append('plant', filters.plant)
+      if (filters.subLine !== 'all') params.append('subLine', filters.subLine)
       if (filters.startDate) params.append('startDate', filters.startDate)
       if (filters.endDate) params.append('endDate', filters.endDate)
       if (filters.article) params.append('article', filters.article)
 
       params.append('page', pageNum.toString());
-      params.append('limit', '50');
+      params.append('limit', '150');
 
       const res = await fetch(`/api/production?${params.toString()}`)
       const json = await res.json()
 
       if (Array.isArray(json)) {
-        if (json.length < 50) setHasMore(false);
+        if (json.length < 150) setHasMore(false);
         else setHasMore(true);
 
         const newData = isNewSearch ? json : [...data, ...json];
@@ -95,19 +113,24 @@ export default function Dashboard() {
         // Calculate Metrics (On currently loaded data for now)
         // Note: Ideally metrics should be a separate API call returning aggregations over the full dataset.
         // Re-calculating on client side with partial data is an approximation.
-        let qty = 0;
+        let qtyUN = 0;
+        let qtyKG = 0;
         const plants: Record<string, number> = {};
         const orders = new Set();
 
         newData.forEach(item => {
-          qty += item.quantity || 0;
+          const u = item.unit ? item.unit.toUpperCase() : '';
+          if (u === 'UN') qtyUN += item.quantity || 0;
+          else if (u === 'KG') qtyKG += item.quantity || 0;
+
           orders.add(item.order);
           const pName = item.subLine || 'Desconocido';
           plants[pName] = (plants[pName] || 0) + (item.quantity || 0);
         });
 
         setMetrics({
-          totalQty: qty,
+          totalQtyUN: qtyUN,
+          totalQtyKG: qtyKG,
           totalOrders: orders.size,
           byPlant: plants
         })
@@ -120,6 +143,8 @@ export default function Dashboard() {
   }
 
   useEffect(() => {
+    // We can auto-fetch when subLine changes if desired, but user clicks Filter button usually.
+    // Given the previous code didn't auto-fetch on plant change (only startDate), we stick to that.
     if (filters.startDate) fetchData(1, true);
   }, [filters.startDate])
 
@@ -187,7 +212,7 @@ export default function Dashboard() {
               <select
                 className="flex h-9 w-[150px] rounded-md border border-gray-300 bg-white px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus:border-slate-500 font-medium"
                 value={filters.plant}
-                onChange={(e) => setFilters({ ...filters, plant: e.target.value })}
+                onChange={(e) => handlePlantChange(e.target.value)}
               >
                 <option value="all">Todas</option>
                 <option value="10100">Aguilar</option>
@@ -195,6 +220,28 @@ export default function Dashboard() {
                 <option value="10300">Funes</option>
               </select>
             </div>
+
+            {/* Sub-line Dropdown - Only visible/enabled for relevant selections */}
+            {(filters.plant === '10300' || filters.plant === 'all') && (
+              <div className="grid gap-1.5 animate-in fade-in duration-300">
+                <label className="text-xs font-semibold text-gray-700">Sub-planta / Línea</label>
+                <select
+                  className="flex h-9 w-[150px] rounded-md border border-gray-300 bg-white px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus:border-slate-500 font-medium disabled:opacity-50"
+                  value={filters.subLine}
+                  onChange={(e) => setFilters({ ...filters, subLine: e.target.value })}
+                  disabled={filters.plant !== '10300' && filters.plant !== 'all'}
+                >
+                  <option value="all">Todas</option>
+                  {filters.plant === '10300' && (
+                    <>
+                      <option value="3">Funes 1</option>
+                      <option value="4">Funes 2</option>
+                      <option value="5">Funes Past.</option>
+                    </>
+                  )}
+                </select>
+              </div>
+            )}
 
             <Button onClick={applyFilters} disabled={loading} className="bg-slate-800 hover:bg-slate-700 text-white font-semibold">
               {loading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Search className="mr-2 h-4 w-4" />}
@@ -215,8 +262,19 @@ export default function Dashboard() {
               <Factory className="h-4 w-4 text-gray-500" />
             </CardHeader>
             <CardContent>
-              <div className="text-2xl font-black text-gray-900">{metrics.totalQty.toLocaleString('es-ES', { minimumFractionDigits: 2 })}</div>
-              <p className="text-xs text-gray-500 font-medium">Unidades fabricadas (cargadas)</p>
+              <div className="flex flex-col space-y-1">
+                <div className="flex items-baseline justify-between">
+                  <div className="text-2xl font-black text-gray-900">{metrics.totalQtyUN.toLocaleString('es-ES', { minimumFractionDigits: 0 })}</div>
+                  <span className="text-xs font-bold text-gray-500">UN</span>
+                </div>
+                {metrics.totalQtyKG > 0 && (
+                  <div className="flex items-baseline justify-between border-t border-gray-100 pt-1">
+                    <div className="text-lg font-bold text-gray-700">{metrics.totalQtyKG.toLocaleString('es-ES', { minimumFractionDigits: 2 })}</div>
+                    <span className="text-xs font-bold text-gray-500">KG</span>
+                  </div>
+                )}
+              </div>
+              <p className="text-xs text-gray-500 font-medium mt-2">Unidades fabricadas (cargadas)</p>
             </CardContent>
           </Card>
           <Card className="border-gray-200 shadow-sm">
