@@ -1,32 +1,40 @@
-import type { Metadata } from "next";
-import { Geist, Geist_Mono } from "next/font/google";
-import "./globals.css";
+import type { Metadata } from "next"; // Tipo de dato para definir metadatos (título, descripción) para SEO
+import { Geist, Geist_Mono } from "next/font/google"; // Fuentes de Google optimizadas por Next.js
+import "./globals.css"; // Importamos los estilos globales (Tailwind, resets, etc.)
 
+// Configuración de la fuente Sans Serif (Geist)
 const geistSans = Geist({
-  variable: "--font-geist-sans",
-  subsets: ["latin"],
+  variable: "--font-geist-sans", // Define variable CSS para usarla en Tailwind
+  subsets: ["latin"], // Descarga solo los caracteres latinos para optimizar
 });
 
+// Configuración de la fuente Monoespaciada
 const geistMono = Geist_Mono({
   variable: "--font-geist-mono",
   subsets: ["latin"],
 });
 
+// Metadatos de la aplicación (Lo que sale en la pestaña del navegador y Google)
 export const metadata: Metadata = {
   title: "Dashboard Producción",
   description: "Dashboard de control de producción",
 };
 
+// RootLayout es el componente PADRE de toda la aplicación.
+// Todas las páginas (page.tsx) se renderizan DENTRO de este 'children'.
 export default function RootLayout({
   children,
 }: Readonly<{
   children: React.ReactNode;
 }>) {
   return (
+    // La etiqueta html y body deben estar aquí porque es el layout raíz
     <html lang="en">
       <body
+        // Aplicamos las clases de las fuentes y el antialiasing para que el texto se vea nítido
         className={`${geistSans.variable} ${geistMono.variable} antialiased`}
       >
+        {/* Aquí se inyecta el contenido de la página que estés visitando */}
         {children}
       </body>
     </html>
