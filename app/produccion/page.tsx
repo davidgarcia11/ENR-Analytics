@@ -1,6 +1,7 @@
-"use client"
+"use client" // Indica que este componente se ejecuta en el navegador del usuario (cliente), no en el servidor
 
-import { useState, useEffect } from "react"
+import { useState, useEffect } from "react" // Hooks de React para manejar estado y efectos secundarios
+// Importamos componentes de interfaz de usuario (UI) reutilizables desde nuestra carpeta local
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
@@ -12,14 +13,19 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
+// Iconos de la librería lucide-react para dar estilo visual
 import { Search, Loader2, Factory, Calendar, Download, ChevronDown } from "lucide-react"
-import * as XLSX from 'xlsx';
+import * as XLSX from 'xlsx'; // Librería 'xlsx' para generar archivos Excel
 
+// Función principal del componente Dashboard
 export default function Dashboard() {
-  const [data, setData] = useState<any[]>([])
-  const [loading, setLoading] = useState(false)
-  const [page, setPage] = useState(1);
-  const [hasMore, setHasMore] = useState(true);
+  // --- ESTADOS (Variables que, al cambiar, actualizan la pantalla) ---
+  const [data, setData] = useState<any[]>([]) // Almacena la lista de datos de producción
+  const [loading, setLoading] = useState(false) // Indica si se están cargando datos (para mostrar spinners)
+  const [page, setPage] = useState(1); // Página actual para la paginación
+  const [hasMore, setHasMore] = useState(true); // Indica si hay más datos para cargar
+
+  // Estado para los filtros de búsqueda
   const [filters, setFilters] = useState({
     plant: "all",
     subLine: "all",
@@ -28,52 +34,62 @@ export default function Dashboard() {
     endDate: "",
   })
 
-  // Metrics need to be calculated on ALL data theoretically, 
-  // currently calculated on loaded data.
-  // For a "Load More" scenario, it's better if metrics come from API or strictly based on loaded keys.
-  // We will keep metrics on loaded data for simplicity now.
+  // Estado para las métricas (totales y resúmenes)
+  // Nota: Actualmente se calculan sobre los datos cargados en pantalla, no sobre el total de la base de datos
   const [metrics, setMetrics] = useState({
-    totalQtyUN: 0,
-    totalQtyKG: 0,
-    totalOrders: 0,
-    byPlant: {} as Record<string, number>
+    totalQtyUN: 0, // Cantidad total en Unidades
+    totalQtyKG: 0, // Cantidad total en Kilos
+    totalOrders: 0, // Número total de órdenes
+    byPlant: {} as Record<string, number> // Desglose por planta
   })
 
-  // Set default dates to current date on init
+  // --- EFECTOS (Lógica que se ejecuta automáticamente) ---
+
+  // useEffect se ejecuta una vez al montar el componente (array vacío [])
+  // Aquí establecemos las fechas por defecto al día de hoy
   useEffect(() => {
     const today = new Date();
-    // Adjust for timezone offset to ensure correct date string in local time
-    // OR simply use split('T')[0] if UTC is fine, but for "current local day" usually we want local.
-    // However, pure toISOString uses UTC.
-    // Let's stick to the previous pattern but use 'today' for both.
-    // To minimize timezone issues, constructing a local YYYY-MM-DD string is better.
+
+    // Construimos la fecha en formato YYYY-MM-DD local
     const year = today.getFullYear();
-    const month = String(today.getMonth() + 1).padStart(2, '0');
+    const month = String(today.getMonth() + 1).padStart(2, '0'); // Meses van de 0-11, sumamos 1
     const day = String(today.getDate()).padStart(2, '0');
     const todayStr = `${year}-${month}-${day}`;
 
+    // Actualizamos el estado de filtros con la fecha de hoy
     setFilters(prev => ({
       ...prev,
       startDate: todayStr,
       endDate: todayStr
     }))
+    // Nota: dependencias vacías [] significa que solo corre al inicio
   }, [])
 
-  // Reset data when filters change (except page if page change is internal, but here we likely want full reset on filter change)
+  // useEffect para recargar datos cuando cambian ciertos filtros
+  // En este caso, solo cuando cambia la fecha de inicio se dispara la búsqueda automática
+  useEffect(() => {
+    if (filters.startDate) fetchData(1, true); // Página 1, nueva búsqueda
+  }, [filters.startDate]) // Array de dependencias: se ejecuta cuando filters.startDate cambia
+
+  // --- FUNCIONES AUXILIARES ---
+
+  // Esta función se llama al pulsar el botón "Filtrar"
   const applyFilters = () => {
-    setPage(1);
-    setData([]);
-    fetchData(1, true);
+    setPage(1); // Reseteamos a la página 1
+    setData([]); // Limpiamos los datos actuales
+    fetchData(1, true); // Llamamos a la API indicando que es una nueva búsqueda
   }
 
+  // Maneja el cambio en el desplegable de Plantas
   const handlePlantChange = (plantValue: string) => {
     let newSubLine = 'all';
 
-    // Auto-select subline based on plant
-    if (plantValue === '10100') newSubLine = '1';      // Aguilar -> 1
-    else if (plantValue === '10200') newSubLine = '2'; // Corella -> 2
-    // Funes (10300) defaults to 'all' to let user choose 3, 4, 5
+    // Lógica para preseleccionar la sub-línea según la planta
+    if (plantValue === '10100') newSubLine = '1';      // Aguilar siempre es 1
+    else if (plantValue === '10200') newSubLine = '2'; // Corella siempre es 2
+    // Funes (10300) se deja en 'all' para que el usuario elija entre 3, 4, 5
 
+    // Actualizamos el estado de filtros
     setFilters(prev => ({
       ...prev,
       plant: plantValue,
@@ -81,15 +97,18 @@ export default function Dashboard() {
     }));
   };
 
+  // Función para cargar la siguiente página de datos (Botón "Cargar más")
   const loadMore = () => {
-    const nextPage = page + 1;
-    setPage(nextPage);
-    fetchData(nextPage, false);
+    const nextPage = page + 1; // Calculamos siguiente página
+    setPage(nextPage); // Actualizamos estado
+    fetchData(nextPage, false); // Llamamos a API, false indica que añada datos a los existentes (no borrar)
   };
 
+  // Función asíncrona principal para pedir datos al servidor (API)
   const fetchData = async (pageNum: number, isNewSearch: boolean) => {
-    setLoading(true)
+    setLoading(true) // Activamos spinner de carga
     try {
+      // Construimos los parámetros de la URL (?plant=X&page=Y...)
       const params = new URLSearchParams()
       if (filters.plant !== 'all') params.append('plant', filters.plant)
       if (filters.subLine !== 'all') params.append('subLine', filters.subLine)
@@ -98,36 +117,42 @@ export default function Dashboard() {
       if (filters.article) params.append('article', filters.article)
 
       params.append('page', pageNum.toString());
-      params.append('limit', '150');
+      params.append('limit', '150'); // Pedimos 150 registros por página
 
+      // Hacemos la petición a nuestra API interna
       const res = await fetch(`/api/production?${params.toString()}`)
-      const json = await res.json()
+      const json = await res.json() // Convertimos respuesta a JSON
 
       if (Array.isArray(json)) {
+        // Si llegaron menos de 150 registros, asumimos que no hay más páginas
         if (json.length < 150) setHasMore(false);
         else setHasMore(true);
 
+        // Si es nueva búsqueda, reemplazamos datos. Si no, añadimos al final (...data, ...json)
         const newData = isNewSearch ? json : [...data, ...json];
         setData(newData)
 
-        // Calculate Metrics (On currently loaded data for now)
-        // Note: Ideally metrics should be a separate API call returning aggregations over the full dataset.
-        // Re-calculating on client side with partial data is an approximation.
+        // --- CÁLCULO DE MÉTRICAS (Lado del Cliente) ---
+        // Recorremos los datos cargados para sumar totales
         let qtyUN = 0;
         let qtyKG = 0;
         const plants: Record<string, number> = {};
-        const orders = new Set();
+        const orders = new Set(); // Set evita duplicados de órdenes
 
         newData.forEach(item => {
           const u = item.unit ? item.unit.toUpperCase() : '';
+          // Sumamos según unidad de medida
           if (u === 'UN') qtyUN += item.quantity || 0;
           else if (u === 'KG') qtyKG += item.quantity || 0;
 
-          orders.add(item.order);
+          orders.add(item.order); // Guardamos orden única
+
           const pName = item.subLine || 'Desconocido';
+          // Acumulamos cantidad por planta
           plants[pName] = (plants[pName] || 0) + (item.quantity || 0);
         });
 
+        // Actualizamos estado de métricas
         setMetrics({
           totalQtyUN: qtyUN,
           totalQtyKG: qtyKG,
@@ -136,19 +161,15 @@ export default function Dashboard() {
         })
       }
     } catch (error) {
-      console.error("Error loading data", error)
+      console.error("Error cargando datos", error) // Si falla, mostramos error en consola
     } finally {
-      setLoading(false)
+      setLoading(false) // Desactivamos spinner, pase lo que pase
     }
   }
 
-  useEffect(() => {
-    // We can auto-fetch when subLine changes if desired, but user clicks Filter button usually.
-    // Given the previous code didn't auto-fetch on plant change (only startDate), we stick to that.
-    if (filters.startDate) fetchData(1, true);
-  }, [filters.startDate])
-
+  // Función para exportar los datos visibles a Excel
   const exportToExcel = () => {
+    // Mapeamos los datos a un formato limpio para el Excel
     const ws = XLSX.utils.json_to_sheet(data.map(item => ({
       Fecha: item.date ? new Date(item.date).toLocaleDateString() : item.productionDateRaw,
       Orden: item.order,
@@ -159,21 +180,30 @@ export default function Dashboard() {
       Cantidad: item.quantity,
       Unidad: item.unit
     })));
+
+    // Creamos libro y hoja
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, "Produccion");
+
+    // Descargamos el archivo
     XLSX.writeFile(wb, `Produccion_${filters.startDate}_${filters.endDate}.xlsx`);
   };
 
+  // --- RENDERIZADO (HTML) ---
   return (
     <div className="min-h-screen bg-gray-100 p-8 font-sans text-gray-900">
       <div className="mx-auto max-w-7xl space-y-8">
 
+        {/* --- CABECERA Y FILTROS --- */}
         <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
           <div>
             <h1 className="text-3xl font-bold tracking-tight text-gray-900">Dashboard de Producción</h1>
             <p className="text-gray-600">Visualización de órdenes de fabricación y cantidades.</p>
           </div>
+
+          {/* Panel de Filtros */}
           <div className="flex flex-wrap items-end gap-4 bg-white p-4 rounded-xl shadow-sm border border-gray-200">
+            {/* Filtro: Artículo */}
             <div className="grid gap-1.5">
               <label className="text-xs font-semibold text-gray-700">Artículo</label>
               <Input
@@ -182,13 +212,15 @@ export default function Dashboard() {
                 placeholder="Art. (10 dígitos)"
                 value={filters.article}
                 onChange={(e) => {
-                  // Allow only numbers
+                  // Reemplaza cualquier caracter que NO sea número (\D) por vacío
                   const val = e.target.value.replace(/\D/g, '');
                   setFilters({ ...filters, article: val })
                 }}
                 className="w-[140px] border-gray-300 focus:border-slate-500 font-medium"
               />
             </div>
+
+            {/* Filtro: Fechas */}
             <div className="grid gap-1.5">
               <label className="text-xs font-semibold text-gray-700">Fecha Inicio</label>
               <Input
@@ -207,6 +239,8 @@ export default function Dashboard() {
                 className="w-[150px] border-gray-300 focus:border-slate-500 font-medium"
               />
             </div>
+
+            {/* Filtro: Planta */}
             <div className="grid gap-1.5">
               <label className="text-xs font-semibold text-gray-700">Planta</label>
               <select
@@ -221,7 +255,7 @@ export default function Dashboard() {
               </select>
             </div>
 
-            {/* Sub-line Dropdown - Only visible/enabled for relevant selections */}
+            {/* Filtro: Sub-planta (Sólo visible para Funes o Todas) */}
             {(filters.plant === '10300' || filters.plant === 'all') && (
               <div className="grid gap-1.5 animate-in fade-in duration-300">
                 <label className="text-xs font-semibold text-gray-700">Sub-planta / Línea</label>
@@ -243,6 +277,7 @@ export default function Dashboard() {
               </div>
             )}
 
+            {/* Botones de Acción */}
             <Button onClick={applyFilters} disabled={loading} className="bg-slate-800 hover:bg-slate-700 text-white font-semibold">
               {loading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Search className="mr-2 h-4 w-4" />}
               Filtrar
@@ -254,8 +289,9 @@ export default function Dashboard() {
           </div>
         </div>
 
-        {/* Metrics */}
+        {/* --- TARJETAS DE MÉTRICAS (KPIs) --- */}
         <div className="grid gap-4 md:grid-cols-3">
+          {/* Tarjeta 1: Cantidad Total */}
           <Card className="border-gray-200 shadow-sm">
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
               <CardTitle className="text-sm font-bold text-gray-700">Cantidad Total</CardTitle>
@@ -277,6 +313,8 @@ export default function Dashboard() {
               <p className="text-xs text-gray-500 font-medium mt-2">Unidades fabricadas (cargadas)</p>
             </CardContent>
           </Card>
+
+          {/* Tarjeta 2: Órdenes */}
           <Card className="border-gray-200 shadow-sm">
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
               <CardTitle className="text-sm font-bold text-gray-700">Órdenes</CardTitle>
@@ -287,6 +325,8 @@ export default function Dashboard() {
               <p className="text-xs text-gray-500 font-medium">Total de órdenes (cargadas)</p>
             </CardContent>
           </Card>
+
+          {/* Tarjeta 3: Planta con mayor volumen */}
           <Card className="border-gray-200 shadow-sm">
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
               <CardTitle className="text-sm font-bold text-gray-700">Top Planta</CardTitle>
@@ -294,6 +334,7 @@ export default function Dashboard() {
             </CardHeader>
             <CardContent>
               <div className="text-2xl font-black text-gray-900">
+                {/* Ordena las plantas por cantidad y coge la primera */}
                 {Object.entries(metrics.byPlant).sort((a, b) => b[1] - a[1])[0]?.[0] || '-'}
               </div>
               <p className="text-xs text-gray-500 font-medium">Mayor volumen (cargado)</p>
@@ -301,7 +342,7 @@ export default function Dashboard() {
           </Card>
         </div>
 
-        {/* Breakdown */}
+        {/* --- TABLA DE DATOS --- */}
         <Card className="col-span-4 border-gray-200 shadow-sm">
           <CardHeader>
             <CardTitle className="text-lg font-bold text-gray-800">Detalle de Producción</CardTitle>
@@ -309,6 +350,7 @@ export default function Dashboard() {
           <CardContent>
             <Table>
               <TableHeader>
+                {/* Cabecera de la tabla */}
                 <TableRow className="border-gray-200 hover:bg-transparent">
                   <TableHead className="font-bold text-gray-700">Fecha</TableHead>
                   <TableHead className="font-bold text-gray-700">Orden</TableHead>
@@ -320,6 +362,7 @@ export default function Dashboard() {
                 </TableRow>
               </TableHeader>
               <TableBody>
+                {/* Mapeamos los datos para crear filas */}
                 {data.map((row, i) => (
                   <TableRow key={i} className="hover:bg-slate-50 border-gray-100">
                     <TableCell className="font-medium text-gray-900">
@@ -343,6 +386,7 @@ export default function Dashboard() {
                   </TableRow>
                 ))}
 
+                {/* Spinner si está cargando */}
                 {loading && (
                   <TableRow>
                     <TableCell colSpan={7} className="text-center py-10">
@@ -351,6 +395,7 @@ export default function Dashboard() {
                   </TableRow>
                 )}
 
+                {/* Mensaje si no hay datos */}
                 {!loading && data.length === 0 && (
                   <TableRow>
                     <TableCell colSpan={7} className="text-center py-10 text-gray-500 font-medium">
@@ -361,7 +406,7 @@ export default function Dashboard() {
               </TableBody>
             </Table>
 
-            {/* Load More Button */}
+            {/* Botón Cargar Más */}
             {hasMore && data.length > 0 && !loading && (
               <div className="mt-6 flex justify-center">
                 <Button onClick={loadMore} variant="ghost" className="text-slate-600 hover:text-slate-900 hover:bg-slate-100">
