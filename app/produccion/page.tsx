@@ -14,8 +14,9 @@ import {
   TableRow,
 } from "@/components/ui/table"
 // Iconos de la librería lucide-react para dar estilo visual
-import { Search, Loader2, Factory, Calendar, Download, ChevronDown } from "lucide-react"
+import { Search, Loader2, Factory, Calendar, Download, ChevronDown, ChevronsDown } from "lucide-react"
 import * as XLSX from 'xlsx'; // Librería 'xlsx' para generar archivos Excel
+import { ArticleMultiSelect } from "@/components/ArticleMultiSelect"
 
 // Función principal del componente Dashboard
 export default function Dashboard() {
@@ -29,10 +30,13 @@ export default function Dashboard() {
   const [filters, setFilters] = useState({
     plant: "all",
     subLine: "all",
-    article: "",
     startDate: "",
     endDate: "",
   })
+
+  // Estado para el filtro de artículos (multi-select)
+  const [selectedArticles, setSelectedArticles] = useState<string[]>([])
+  const [availableArticles, setAvailableArticles] = useState<{ id: string; description: string }[]>([])
 
   // Estado para las métricas (totales y resúmenes)
   // Nota: Actualmente se calculan sobre los datos cargados en pantalla, no sobre el total de la base de datos
@@ -104,8 +108,15 @@ export default function Dashboard() {
     fetchData(nextPage, false); // Llamamos a API, false indica que añada datos a los existentes (no borrar)
   };
 
+  // Función para cargar todos los resultados sin paginación
+  const loadAll = () => {
+    setPage(1);
+    setData([]);
+    fetchData(1, true, true);
+  };
+
   // Función asíncrona principal para pedir datos al servidor (API)
-  const fetchData = async (pageNum: number, isNewSearch: boolean) => {
+  const fetchData = async (pageNum: number, isNewSearch: boolean, allRecords = false) => {
     setLoading(true) // Activamos spinner de carga
     try {
       // Construimos los parámetros de la URL (?plant=X&page=Y...)
@@ -114,23 +125,44 @@ export default function Dashboard() {
       if (filters.subLine !== 'all') params.append('subLine', filters.subLine)
       if (filters.startDate) params.append('startDate', filters.startDate)
       if (filters.endDate) params.append('endDate', filters.endDate)
-      if (filters.article) params.append('article', filters.article)
+      selectedArticles.forEach(a => params.append('article', a))
 
       params.append('page', pageNum.toString());
-      params.append('limit', '150'); // Pedimos 150 registros por página
+      params.append('limit', allRecords ? '0' : '150');
 
       // Hacemos la petición a nuestra API interna
       const res = await fetch(`/api/production?${params.toString()}`)
       const json = await res.json() // Convertimos respuesta a JSON
 
       if (Array.isArray(json)) {
-        // Si llegaron menos de 150 registros, asumimos que no hay más páginas
-        if (json.length < 150) setHasMore(false);
+        // Si se pidieron todos los registros o llegaron menos de 150, no hay más páginas
+        if (allRecords || json.length < 150) setHasMore(false);
         else setHasMore(true);
 
         // Si es nueva búsqueda, reemplazamos datos. Si no, añadimos al final (...data, ...json)
         const newData = isNewSearch ? json : [...data, ...json];
         setData(newData)
+
+        // Extraer artículos únicos de los datos para el multi-select
+        const articleMap = new Map<string, { id: string; description: string }>();
+        if (isNewSearch) {
+          // En nueva búsqueda, construimos la lista desde cero con los nuevos datos
+          newData.forEach((item: any) => {
+            if (item.article && item.description)
+              articleMap.set(String(item.article).trim(), { id: String(item.article).trim(), description: item.description });
+          });
+          setAvailableArticles(Array.from(articleMap.values()));
+        } else {
+          // En "cargar más", acumulamos los nuevos artículos a los ya existentes
+          setAvailableArticles(prev => {
+            prev.forEach(a => articleMap.set(a.id, a));
+            newData.slice(-json.length).forEach((item: any) => {
+              if (item.article && item.description)
+                articleMap.set(String(item.article).trim(), { id: String(item.article).trim(), description: item.description });
+            });
+            return Array.from(articleMap.values());
+          });
+        }
 
         // --- CÁLCULO DE MÉTRICAS (Lado del Cliente) ---
         // Recorremos los datos cargados para sumar totales
@@ -203,21 +235,16 @@ export default function Dashboard() {
 
           {/* Panel de Filtros */}
           <div className="flex flex-wrap items-end gap-4 bg-white p-4 rounded-xl shadow-sm border border-gray-200">
-            {/* Filtro: Artículo */}
+            {/* Filtro: Artículo (multi-select, se popula con los resultados cargados) */}
             <div className="grid gap-1.5">
               <label className="text-xs font-semibold text-gray-700">Artículo</label>
-              <Input
-                type="text"
-                maxLength={10}
-                placeholder="Art. (10 dígitos)"
-                value={filters.article}
-                onChange={(e) => {
-                  // Reemplaza cualquier caracter que NO sea número (\D) por vacío
-                  const val = e.target.value.replace(/\D/g, '');
-                  setFilters({ ...filters, article: val })
-                }}
-                className="w-[140px] border-gray-300 focus:border-slate-500 font-medium"
-              />
+              <div className="w-[200px]">
+                <ArticleMultiSelect
+                  articles={availableArticles}
+                  selected={selectedArticles}
+                  onChange={setSelectedArticles}
+                />
+              </div>
             </div>
 
             {/* Filtro: Fechas */}
@@ -406,12 +433,16 @@ export default function Dashboard() {
               </TableBody>
             </Table>
 
-            {/* Botón Cargar Más */}
+            {/* Botones de Paginación */}
             {hasMore && data.length > 0 && !loading && (
-              <div className="mt-6 flex justify-center">
+              <div className="mt-6 flex justify-center gap-3">
                 <Button onClick={loadMore} variant="ghost" className="text-slate-600 hover:text-slate-900 hover:bg-slate-100">
                   <ChevronDown className="mr-2 h-4 w-4" />
-                  Cargar más resultados
+                  Cargar más (150)
+                </Button>
+                <Button onClick={loadAll} variant="outline" className="text-slate-600 hover:text-slate-900 hover:bg-slate-100 border-slate-300">
+                  <ChevronsDown className="mr-2 h-4 w-4" />
+                  Cargar todos
                 </Button>
               </div>
             )}

@@ -13,7 +13,7 @@ export async function GET(req: NextRequest) {
     const subLine = searchParams.get('subLine'); // Sub-línea (ej: '1', '2')
     const startDateStr = searchParams.get('startDate'); // Fecha inicio (YYYY-MM-DD)
     const endDateStr = searchParams.get('endDate'); // Fecha fin
-    const article = searchParams.get('article'); // Nuevo filtro: Artículo
+    const articles = searchParams.getAll('article'); // Filtro por uno o varios artículos
 
     let conn; // Declaramos la variable para la conexión fuera del try para poder cerrarla en el finally
     try {
@@ -75,28 +75,39 @@ export async function GET(req: NextRequest) {
             }
         }
 
-        if (article) {
-            if (!/^\d{10}$/.test(article)) {
-                return NextResponse.json(
-                    { error: 'Formato inválido: El artículo debe contener exactamente 10 números.' },
-                    { status: 400 }
-                );
+        if (articles.length > 0) {
+            for (const a of articles) {
+                if (!/^\d{10}$/.test(a)) {
+                    return NextResponse.json(
+                        { error: 'Formato inválido: El artículo debe contener exactamente 10 números.' },
+                        { status: 400 }
+                    );
+                }
             }
-            sql += ` AND TRIM(A.WAAITM) = :article`;
-            binds.article = article;
+            const placeholders = articles.map((_, i) => `:article${i}`).join(', ');
+            sql += ` AND TRIM(A.WAAITM) IN (${placeholders})`;
+            articles.forEach((a, i) => { binds[`article${i}`] = a; });
         }
 
         // Paginación
         const page = parseInt(searchParams.get('page') || '1');
         const limit = parseInt(searchParams.get('limit') || '150');
-        const offset = (page - 1) * limit;
 
         // Agrupamos también por C.ILTRUM para poder convertir cada paquete de unidades por separado
-        sql += ` 
-          GROUP BY A.WADOCO, B.TO55TAREA, A.WADL01, A.WAMCU, A.WAAITM, A.WAITM, C.ILTRUM
-          ORDER BY B.TO55TAREA DESC 
-          OFFSET ${offset} ROWS FETCH NEXT ${limit} ROWS ONLY
-        `;
+        if (limit > 0) {
+            const offset = (page - 1) * limit;
+            sql += `
+              GROUP BY A.WADOCO, B.TO55TAREA, A.WADL01, A.WAMCU, A.WAAITM, A.WAITM, C.ILTRUM
+              ORDER BY B.TO55TAREA DESC
+              OFFSET ${offset} ROWS FETCH NEXT ${limit} ROWS ONLY
+            `;
+        } else {
+            // limit=0 significa sin paginación: traer todos los registros
+            sql += `
+              GROUP BY A.WADOCO, B.TO55TAREA, A.WADL01, A.WAMCU, A.WAAITM, A.WAITM, C.ILTRUM
+              ORDER BY B.TO55TAREA DESC
+            `;
+        }
 
         // Ejecutamos la consulta principal
         const result = await conn.execute(sql, binds);
