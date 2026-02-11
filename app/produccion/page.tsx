@@ -1,6 +1,6 @@
 "use client" // Indica que este componente se ejecuta en el navegador del usuario (cliente), no en el servidor
 
-import { useState, useEffect } from "react" // Hooks de React para manejar estado y efectos secundarios
+import { useState, useEffect, useMemo } from "react" // Hooks de React para manejar estado y efectos secundarios
 // Importamos componentes de interfaz de usuario (UI) reutilizables desde nuestra carpeta local
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
@@ -38,6 +38,10 @@ export default function Dashboard() {
   const [selectedArticles, setSelectedArticles] = useState<string[]>([])
   const [availableArticles, setAvailableArticles] = useState<{ id: string; description: string }[]>([])
 
+  // Estado para el filtro de Tipo Proceso OF (IMPRP6)
+  const [selectedPrp6, setSelectedPrp6] = useState<string[]>([])
+  const [availablePrp6, setAvailablePrp6] = useState<{ id: string; description: string }[]>([])
+
   // Estado para las métricas (totales y resúmenes)
   // Nota: Actualmente se calculan sobre los datos cargados en pantalla, no sobre el total de la base de datos
   const [metrics, setMetrics] = useState({
@@ -67,6 +71,14 @@ export default function Dashboard() {
       endDate: todayStr
     }))
     // Nota: dependencias vacías [] significa que solo corre al inicio
+  }, [])
+
+  // Carga los valores disponibles de Tipo Proceso OF una sola vez al montar el componente
+  useEffect(() => {
+    fetch('/api/categories?field=prp6')
+      .then(r => r.json())
+      .then(data => { if (Array.isArray(data)) setAvailablePrp6(data); })
+      .catch(console.error);
   }, [])
 
   // useEffect para recargar datos cuando cambian ciertos filtros
@@ -126,6 +138,7 @@ export default function Dashboard() {
       if (filters.startDate) params.append('startDate', filters.startDate)
       if (filters.endDate) params.append('endDate', filters.endDate)
       selectedArticles.forEach(a => params.append('article', a))
+      selectedPrp6.forEach(v => params.append('prp6', v))
 
       params.append('page', pageNum.toString());
       params.append('limit', allRecords ? '0' : '150');
@@ -134,13 +147,18 @@ export default function Dashboard() {
       const res = await fetch(`/api/production?${params.toString()}`)
       const json = await res.json() // Convertimos respuesta a JSON
 
-      if (Array.isArray(json)) {
-        // Si se pidieron todos los registros o llegaron menos de 150, no hay más páginas
-        if (allRecords || json.length < 150) setHasMore(false);
+      // La API devuelve { data: [...], sqlRowCount: N }
+      const items = json.data ?? json; // Compatibilidad: si es array directo, lo usamos tal cual
+      const sqlRowCount = json.sqlRowCount ?? (Array.isArray(json) ? json.length : items.length);
+
+      if (Array.isArray(items)) {
+        // Usamos sqlRowCount (filas SQL antes de procesar) para determinar si hay más páginas
+        // Esto evita el falso negativo cuando la agrupación reduce el conteo por debajo de 150
+        if (allRecords || sqlRowCount < 150) setHasMore(false);
         else setHasMore(true);
 
         // Si es nueva búsqueda, reemplazamos datos. Si no, añadimos al final (...data, ...json)
-        const newData = isNewSearch ? json : [...data, ...json];
+        const newData = isNewSearch ? items : [...data, ...items];
         setData(newData)
 
         // Extraer artículos únicos de los datos para el multi-select
@@ -156,7 +174,7 @@ export default function Dashboard() {
           // En "cargar más", acumulamos los nuevos artículos a los ya existentes
           setAvailableArticles(prev => {
             prev.forEach(a => articleMap.set(a.id, a));
-            newData.slice(-json.length).forEach((item: any) => {
+            newData.slice(-items.length).forEach((item: any) => {
               if (item.article && item.description)
                 articleMap.set(String(item.article).trim(), { id: String(item.article).trim(), description: item.description });
             });
@@ -221,6 +239,19 @@ export default function Dashboard() {
     XLSX.writeFile(wb, `Produccion_${filters.startDate}_${filters.endDate}.xlsx`);
   };
 
+  // Agrupa los datos por artículo + fecha + línea + unidad para mostrar en tabla
+  const displayData = useMemo(() => {
+    const groupMap = new Map<string, any>();
+    data.forEach(item => {
+      const key = `${item.article}-${item.productionDateRaw}-${item.subLineCode}-${item.unit}`;
+      if (!groupMap.has(key)) {
+        groupMap.set(key, { ...item, quantity: 0 });
+      }
+      groupMap.get(key).quantity += item.quantity || 0;
+    });
+    return Array.from(groupMap.values());
+  }, [data]);
+
   // --- RENDERIZADO (HTML) ---
   return (
     <div className="min-h-screen bg-gray-100 p-8 font-sans text-gray-900">
@@ -243,6 +274,19 @@ export default function Dashboard() {
                   articles={availableArticles}
                   selected={selectedArticles}
                   onChange={setSelectedArticles}
+                />
+              </div>
+            </div>
+
+            {/* Filtro: Tipo Proceso OF (IMPRP6) */}
+            <div className="grid gap-1.5">
+              <label className="text-xs font-semibold text-gray-700">Tipo Proceso OF</label>
+              <div className="w-[200px]">
+                <ArticleMultiSelect
+                  articles={availablePrp6}
+                  selected={selectedPrp6}
+                  onChange={setSelectedPrp6}
+                  label="Tipo Proceso"
                 />
               </div>
             </div>
@@ -380,7 +424,6 @@ export default function Dashboard() {
                 {/* Cabecera de la tabla */}
                 <TableRow className="border-gray-200 hover:bg-transparent">
                   <TableHead className="font-bold text-gray-700">Fecha</TableHead>
-                  <TableHead className="font-bold text-gray-700">Orden</TableHead>
                   <TableHead className="font-bold text-gray-700">Artículo</TableHead>
                   <TableHead className="font-bold text-gray-700">Descripción</TableHead>
                   <TableHead className="font-bold text-gray-700">Planta / Línea</TableHead>
@@ -389,13 +432,12 @@ export default function Dashboard() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {/* Mapeamos los datos para crear filas */}
-                {data.map((row, i) => (
+                {/* Mapeamos los datos agrupados por artículo para crear filas */}
+                {displayData.map((row, i) => (
                   <TableRow key={i} className="hover:bg-slate-50 border-gray-100">
                     <TableCell className="font-medium text-gray-900">
                       {row.date ? new Date(row.date).toLocaleDateString() : row.productionDateRaw}
                     </TableCell>
-                    <TableCell className="text-gray-700">{row.order}</TableCell>
                     <TableCell className="text-gray-700 font-mono text-xs bg-gray-100 px-2 py-1 rounded w-fit">{row.article}</TableCell>
                     <TableCell className="text-gray-600 uppercase text-xs font-semibold">{row.description}</TableCell>
                     <TableCell>
@@ -416,7 +458,7 @@ export default function Dashboard() {
                 {/* Spinner si está cargando */}
                 {loading && (
                   <TableRow>
-                    <TableCell colSpan={7} className="text-center py-10">
+                    <TableCell colSpan={6} className="text-center py-10">
                       <Loader2 className="h-6 w-6 animate-spin mx-auto text-slate-800" />
                     </TableCell>
                   </TableRow>
@@ -425,7 +467,7 @@ export default function Dashboard() {
                 {/* Mensaje si no hay datos */}
                 {!loading && data.length === 0 && (
                   <TableRow>
-                    <TableCell colSpan={7} className="text-center py-10 text-gray-500 font-medium">
+                    <TableCell colSpan={6} className="text-center py-10 text-gray-500 font-medium">
                       No se encontraron datos para los filtros seleccionados.
                     </TableCell>
                   </TableRow>

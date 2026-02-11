@@ -14,30 +14,37 @@ export async function GET(req: NextRequest) {
     const startDateStr = searchParams.get('startDate'); // Fecha inicio (YYYY-MM-DD)
     const endDateStr = searchParams.get('endDate'); // Fecha fin
     const articles = searchParams.getAll('article'); // Filtro por uno o varios artículos
+    const prp6s = searchParams.getAll('prp6'); // Filtro por Tipo Proceso OF (IMPRP6)
 
     let conn; // Declaramos la variable para la conexión fuera del try para poder cerrarla en el finally
     try {
         // Intentamos abrir la conexión a la base de datos
         conn = await getDbConnection();
 
+        // JOIN condicional a F4101 solo cuando se filtra por categoría (evita JOIN innecesario)
+        const extraJoins = prp6s.length > 0
+            ? `INNER JOIN F4101 D ON D.IMITM = A.WAITM`
+            : '';
+
         // Construimos la consulta SQL.
         // F55TAR12 (Tareas) JOIN F4801 (Orden) JOIN F4111 (Item Ledger)
         // Agrupamos por Orden, Día y UNIDAD para luego convertir y sumar
         let sql = `
-          SELECT 
-            A.WADOCO, 
-            B.TO55TAREA, 
-            A.WADL01, 
-            SUM(C.ILTRQT) as WASOQS, 
-            A.WAMCU, 
-            A.WAAITM, 
+          SELECT
+            A.WADOCO,
+            B.TO55TAREA,
+            A.WADL01,
+            SUM(C.ILTRQT) as WASOQS,
+            A.WAMCU,
+            A.WAAITM,
             A.WAITM,
             C.ILTRUM as ILTRUM
           FROM F55TAR12 B
           INNER JOIN F4801 A ON A.WADOCO = B.TODOCO
-          LEFT JOIN F4111 C ON C.ILDOC = A.WADOCO 
-            AND C.ILDCT = 'IC' 
+          LEFT JOIN F4111 C ON C.ILDOC = A.WADOCO
+            AND C.ILDCT = 'IC'
             AND MOD(C.ILTRDJ, 100000) = MOD(B.TO55TAREA, 100000)
+          ${extraJoins}
           WHERE 1=1
         `;
 
@@ -49,11 +56,35 @@ export async function GET(req: NextRequest) {
         }
 
         if (subLine && subLine !== 'all') {
-            const min = parseInt(subLine) * 100000;
-            const max = (parseInt(subLine) + 1) * 100000;
-            sql += ` AND B.TO55TAREA >= :subLineStart AND B.TO55TAREA < :subLineEnd`;
-            binds.subLineStart = min;
-            binds.subLineEnd = max;
+            const subLineNum = parseInt(subLine);
+
+            // Registros antiguos: TODAS las plantas usaban subcode '1'
+            // Mapa de subcode antiguo por planta para incluir ambos rangos (histórico + actual)
+            // Corella: actual '2', antiguo '1'
+            // Funes 1: actual '3', antiguo '1' | Funes 2: actual '4', antiguo '2'
+            const oldSubCodeMap: Record<string, Record<number, number>> = {
+                '10200': { 2: 1 },       // Corella: subcode 2 → antiguo 1
+                '10300': { 3: 1, 4: 2 }, // Funes: subcode 3→1, 4→2
+            };
+
+            const oldSubCode = plant ? oldSubCodeMap[plant]?.[subLineNum] : undefined;
+
+            if (oldSubCode !== undefined && oldSubCode !== null) {
+                sql += ` AND (
+                    (B.TO55TAREA >= :subLineStart AND B.TO55TAREA < :subLineEnd)
+                    OR (B.TO55TAREA >= :subLineOldStart AND B.TO55TAREA < :subLineOldEnd)
+                )`;
+                binds.subLineStart = subLineNum * 100000;
+                binds.subLineEnd = (subLineNum + 1) * 100000;
+                binds.subLineOldStart = oldSubCode * 100000;
+                binds.subLineOldEnd = (oldSubCode + 1) * 100000;
+            } else {
+                const min = subLineNum * 100000;
+                const max = (subLineNum + 1) * 100000;
+                sql += ` AND B.TO55TAREA >= :subLineStart AND B.TO55TAREA < :subLineEnd`;
+                binds.subLineStart = min;
+                binds.subLineEnd = max;
+            }
         }
 
         if (startDateStr && endDateStr) {
@@ -87,6 +118,12 @@ export async function GET(req: NextRequest) {
             const placeholders = articles.map((_, i) => `:article${i}`).join(', ');
             sql += ` AND TRIM(A.WAAITM) IN (${placeholders})`;
             articles.forEach((a, i) => { binds[`article${i}`] = a; });
+        }
+
+        if (prp6s.length > 0) {
+            const placeholders = prp6s.map((_, i) => `:prp6_${i}`).join(', ');
+            sql += ` AND TRIM(D.IMPRP6) IN (${placeholders})`;
+            prp6s.forEach((v, i) => { binds[`prp6_${i}`] = v; });
         }
 
         // Paginación
@@ -259,7 +296,9 @@ export async function GET(req: NextRequest) {
         // Convertimos el Map a array
         const data = Array.from(processedGroups.values());
 
-        return NextResponse.json(data);
+        // Devolvemos los datos junto con el conteo de filas SQL originales
+        // para que el frontend pueda determinar correctamente si hay más páginas
+        return NextResponse.json({ data, sqlRowCount: rows.length });
 
     } catch (err: any) {
         // Si ocurre cualquier error en el bloque try, lo capturamos aquí
