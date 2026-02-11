@@ -26,12 +26,18 @@ export default function Dashboard() {
   const [page, setPage] = useState(1); // Página actual para la paginación
   const [hasMore, setHasMore] = useState(true); // Indica si hay más datos para cargar
 
-  // Estado para los filtros de búsqueda
+  // Fecha de hoy en formato YYYY-MM-DD para inicializar filtros
+  const todayStr = (() => {
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  })();
+
+  // Estado para los filtros de búsqueda (inicializado con la fecha de hoy)
   const [filters, setFilters] = useState({
     plant: "all",
     subLine: "all",
-    startDate: "",
-    endDate: "",
+    startDate: todayStr,
+    endDate: todayStr,
   })
 
   // Estado para el filtro de artículos (multi-select)
@@ -41,6 +47,22 @@ export default function Dashboard() {
   // Estado para el filtro de Tipo Proceso OF (IMPRP6)
   const [selectedPrp6, setSelectedPrp6] = useState<string[]>([])
   const [availablePrp6, setAvailablePrp6] = useState<{ id: string; description: string }[]>([])
+
+  // Estado para el filtro de Formato (IMPRP6 con DRRT='S3')
+  const [selectedSrp3, setSelectedSrp3] = useState<string[]>([])
+  const [availableSrp3, setAvailableSrp3] = useState<{ id: string; description: string }[]>([])
+
+  // Estado para el filtro de Sabor (IMSRP5 con DRRT='S5')
+  const [selectedSrp5, setSelectedSrp5] = useState<string[]>([])
+  const [availableSrp5, setAvailableSrp5] = useState<{ id: string; description: string }[]>([])
+
+  // Estado para el filtro de Familia (IMSRP2 con DRRT='S2')
+  const [selectedSrp2, setSelectedSrp2] = useState<string[]>([])
+  const [availableSrp2, setAvailableSrp2] = useState<{ id: string; description: string }[]>([])
+
+  // Estado para el filtro de Líneas de producción (F30006/F0006 → F4111.ILMCUZ)
+  const [selectedProdLines, setSelectedProdLines] = useState<string[]>([])
+  const [availableProdLines, setAvailableProdLines] = useState<{ id: string; description: string }[]>([])
 
   // Estado para las métricas (totales y resúmenes)
   // Nota: Actualmente se calculan sobre los datos cargados en pantalla, no sobre el total de la base de datos
@@ -53,39 +75,36 @@ export default function Dashboard() {
 
   // --- EFECTOS (Lógica que se ejecuta automáticamente) ---
 
-  // useEffect se ejecuta una vez al montar el componente (array vacío [])
-  // Aquí establecemos las fechas por defecto al día de hoy
-  useEffect(() => {
-    const today = new Date();
-
-    // Construimos la fecha en formato YYYY-MM-DD local
-    const year = today.getFullYear();
-    const month = String(today.getMonth() + 1).padStart(2, '0'); // Meses van de 0-11, sumamos 1
-    const day = String(today.getDate()).padStart(2, '0');
-    const todayStr = `${year}-${month}-${day}`;
-
-    // Actualizamos el estado de filtros con la fecha de hoy
-    setFilters(prev => ({
-      ...prev,
-      startDate: todayStr,
-      endDate: todayStr
-    }))
-    // Nota: dependencias vacías [] significa que solo corre al inicio
-  }, [])
-
-  // Carga los valores disponibles de Tipo Proceso OF una sola vez al montar el componente
+  // Carga inicial: filtros de categoría, líneas de producción y datos del día
   useEffect(() => {
     fetch('/api/categories?field=prp6')
       .then(r => r.json())
       .then(data => { if (Array.isArray(data)) setAvailablePrp6(data); })
       .catch(console.error);
-  }, [])
 
-  // useEffect para recargar datos cuando cambian ciertos filtros
-  // En este caso, solo cuando cambia la fecha de inicio se dispara la búsqueda automática
-  useEffect(() => {
-    if (filters.startDate) fetchData(1, true); // Página 1, nueva búsqueda
-  }, [filters.startDate]) // Array de dependencias: se ejecuta cuando filters.startDate cambia
+    fetch('/api/categories?field=srp3')
+      .then(r => r.json())
+      .then(data => { if (Array.isArray(data)) setAvailableSrp3(data); })
+      .catch(console.error);
+
+    fetch('/api/categories?field=srp5')
+      .then(r => r.json())
+      .then(data => { if (Array.isArray(data)) setAvailableSrp5(data); })
+      .catch(console.error);
+
+    fetch('/api/categories?field=srp2')
+      .then(r => r.json())
+      .then(data => { if (Array.isArray(data)) setAvailableSrp2(data); })
+      .catch(console.error);
+
+    fetch('/api/production-lines')
+      .then(r => r.json())
+      .then(data => { if (Array.isArray(data)) setAvailableProdLines(data); })
+      .catch(console.error);
+
+    // Carga inicial con la fecha de hoy (ya está en el estado)
+    fetchData(1, true);
+  }, [])
 
   // --- FUNCIONES AUXILIARES ---
 
@@ -139,6 +158,10 @@ export default function Dashboard() {
       if (filters.endDate) params.append('endDate', filters.endDate)
       selectedArticles.forEach(a => params.append('article', a))
       selectedPrp6.forEach(v => params.append('prp6', v))
+      selectedSrp3.forEach(v => params.append('srp3', v))
+      selectedSrp5.forEach(v => params.append('srp5', v))
+      selectedSrp2.forEach(v => params.append('srp2', v))
+      selectedProdLines.forEach(v => params.append('prodLine', v))
 
       params.append('page', pageNum.toString());
       params.append('limit', allRecords ? '0' : '150');
@@ -287,6 +310,59 @@ export default function Dashboard() {
                   selected={selectedPrp6}
                   onChange={setSelectedPrp6}
                   label="Tipo Proceso"
+                />
+              </div>
+            </div>
+
+            {/* Filtro: Formato (IMPRP6 con DRRT='S3') */}
+            <div className="grid gap-1.5">
+              <label className="text-xs font-semibold text-gray-700">Formato</label>
+              <div className="w-[200px]">
+                <ArticleMultiSelect
+                  articles={availableSrp3}
+                  selected={selectedSrp3}
+                  onChange={setSelectedSrp3}
+                  label="Formato"
+                />
+              </div>
+            </div>
+
+            {/* Filtro: Sabor (IMSRP5 con DRRT='S5') */}
+            <div className="grid gap-1.5">
+              <label className="text-xs font-semibold text-gray-700">Sabor</label>
+              <div className="w-[200px]">
+                <ArticleMultiSelect
+                  articles={availableSrp5}
+                  selected={selectedSrp5}
+                  onChange={setSelectedSrp5}
+                  label="Sabor"
+                />
+              </div>
+            </div>
+
+            {/* Filtro: Familia (IMSRP2 con DRRT='S2') */}
+            <div className="grid gap-1.5">
+              <label className="text-xs font-semibold text-gray-700">Familia</label>
+              <div className="w-[200px]">
+                <ArticleMultiSelect
+                  articles={availableSrp2}
+                  selected={selectedSrp2}
+                  onChange={setSelectedSrp2}
+                  label="Familia"
+                />
+              </div>
+            </div>
+
+            {/* Filtro: Líneas de producción (F30006/F0006 → F4111.ILMCUZ) */}
+            <div className="grid gap-1.5">
+              <label className="text-xs font-semibold text-gray-700">Línea Producción</label>
+              <div className="w-[200px]">
+                <ArticleMultiSelect
+                  articles={availableProdLines}
+                  selected={selectedProdLines}
+                  onChange={setSelectedProdLines}
+                  label="Línea Producción"
+                  showId={false}
                 />
               </div>
             </div>

@@ -15,6 +15,10 @@ export async function GET(req: NextRequest) {
     const endDateStr = searchParams.get('endDate'); // Fecha fin
     const articles = searchParams.getAll('article'); // Filtro por uno o varios artículos
     const prp6s = searchParams.getAll('prp6'); // Filtro por Tipo Proceso OF (IMPRP6)
+    const prodLines = searchParams.getAll('prodLine'); // Filtro por Línea de producción (F4111.ILMCUZ)
+    const srp3s = searchParams.getAll('srp3'); // Filtro por Formato (IMPRP6 con DRRT='S3')
+    const srp5s = searchParams.getAll('srp5'); // Filtro por Sabor (IMSRP5 con DRRT='S5')
+    const srp2s = searchParams.getAll('srp2'); // Filtro por Familia (IMSRP2 con DRRT='S2')
 
     let conn; // Declaramos la variable para la conexión fuera del try para poder cerrarla en el finally
     try {
@@ -22,7 +26,7 @@ export async function GET(req: NextRequest) {
         conn = await getDbConnection();
 
         // JOIN condicional a F4101 solo cuando se filtra por categoría (evita JOIN innecesario)
-        const extraJoins = prp6s.length > 0
+        const extraJoins = (prp6s.length > 0 || srp3s.length > 0 || srp5s.length > 0 || srp2s.length > 0)
             ? `INNER JOIN F4101 D ON D.IMITM = A.WAITM`
             : '';
 
@@ -124,6 +128,46 @@ export async function GET(req: NextRequest) {
             const placeholders = prp6s.map((_, i) => `:prp6_${i}`).join(', ');
             sql += ` AND TRIM(D.IMPRP6) IN (${placeholders})`;
             prp6s.forEach((v, i) => { binds[`prp6_${i}`] = v; });
+        }
+
+        if (srp3s.length > 0) {
+            const placeholders = srp3s.map((_, i) => `:srp3_${i}`).join(', ');
+            sql += ` AND TRIM(D.IMPRP6) IN (${placeholders})`;
+            srp3s.forEach((v, i) => { binds[`srp3_${i}`] = v; });
+        }
+
+        if (srp5s.length > 0) {
+            const placeholders = srp5s.map((_, i) => `:srp5_${i}`).join(', ');
+            sql += ` AND TRIM(D.IMSRP5) IN (${placeholders})`;
+            srp5s.forEach((v, i) => { binds[`srp5_${i}`] = v; });
+        }
+
+        if (srp2s.length > 0) {
+            const placeholders = srp2s.map((_, i) => `:srp2_${i}`).join(', ');
+            sql += ` AND TRIM(D.IMSRP2) IN (${placeholders})`;
+            srp2s.forEach((v, i) => { binds[`srp2_${i}`] = v; });
+        }
+
+        if (prodLines.length > 0) {
+            const hasEmpty = prodLines.includes('__empty__');
+            const realLines = prodLines.filter(v => v !== '__empty__');
+
+            // Oracle trata '' como NULL, así que usamos IS NULL para detectar vacíos
+            // TRIM(C.ILMCUZ) IS NULL cubre: campo con espacios (CHAR padding) y campo NULL (LEFT JOIN sin match)
+            if (hasEmpty && realLines.length > 0) {
+                // Ambos: líneas específicas + registros sin línea
+                const placeholders = realLines.map((_, i) => `:prodLine_${i}`).join(', ');
+                sql += ` AND (TRIM(C.ILMCUZ) IN (${placeholders}) OR TRIM(C.ILMCUZ) IS NULL)`;
+                realLines.forEach((v, i) => { binds[`prodLine_${i}`] = v; });
+            } else if (hasEmpty) {
+                // Solo registros sin línea
+                sql += ` AND TRIM(C.ILMCUZ) IS NULL`;
+            } else {
+                // Solo líneas específicas
+                const placeholders = realLines.map((_, i) => `:prodLine_${i}`).join(', ');
+                sql += ` AND TRIM(C.ILMCUZ) IN (${placeholders})`;
+                realLines.forEach((v, i) => { binds[`prodLine_${i}`] = v; });
+            }
         }
 
         // Paginación
