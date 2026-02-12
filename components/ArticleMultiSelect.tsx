@@ -14,6 +14,7 @@ interface ArticleMultiSelectProps {
     selected: string[]
     onChange: (selected: string[]) => void
     label?: string
+    showId?: boolean // Si false, solo muestra la descripción en el listado
 }
 
 export function ArticleMultiSelect({
@@ -21,6 +22,7 @@ export function ArticleMultiSelect({
     selected,
     onChange,
     label = "Artículos",
+    showId = true,
 }: ArticleMultiSelectProps) {
     const [open, setOpen] = React.useState(false)
     const [query, setQuery] = React.useState("")
@@ -122,8 +124,8 @@ export function ArticleMultiSelect({
                                             {isSelected && <Check className="h-3 w-3" />}
                                         </div>
                                         <div className="flex flex-col">
-                                            <span className="font-medium text-xs">{article.id}</span>
-                                            <span className="text-[10px] text-slate-500 truncate max-w-[220px]">{article.description}</span>
+                                            {showId && <span className="font-medium text-xs">{article.id}</span>}
+                                            <span className={showId ? "text-[10px] text-slate-500 truncate max-w-[220px]" : "font-medium text-xs truncate max-w-[220px]"}>{article.description}</span>
                                         </div>
                                     </div>
                                 )

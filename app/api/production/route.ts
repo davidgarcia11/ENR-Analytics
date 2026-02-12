@@ -14,30 +14,43 @@ export async function GET(req: NextRequest) {
     const startDateStr = searchParams.get('startDate'); // Fecha inicio (YYYY-MM-DD)
     const endDateStr = searchParams.get('endDate'); // Fecha fin
     const articles = searchParams.getAll('article'); // Filtro por uno o varios artículos
+    const prp6s = searchParams.getAll('prp6'); // Filtro por Tipo Proceso OF (IMPRP6)
+    const prodLines = searchParams.getAll('prodLine'); // Filtro por Línea de producción (F4111.ILMCUZ)
+    const srp3s = searchParams.getAll('srp3'); // Filtro por Formato (IMPRP6 con DRRT='S3')
+    const srp5s = searchParams.getAll('srp5'); // Filtro por Sabor (IMSRP5 con DRRT='S5')
+    const srp2s = searchParams.getAll('srp2'); // Filtro por Familia (IMSRP2 con DRRT='S2')
+    const srp1s = searchParams.getAll('srp1'); // Filtro por Categoría (IMSRP1 con DRRT='S1')
+    const srp4s = searchParams.getAll('srp4'); // Filtro por Marca (IMSRP4 con DRRT='S4')
 
     let conn; // Declaramos la variable para la conexión fuera del try para poder cerrarla en el finally
     try {
         // Intentamos abrir la conexión a la base de datos
         conn = await getDbConnection();
 
+        // JOIN condicional a F4101 solo cuando se filtra por categoría (evita JOIN innecesario)
+        const extraJoins = (prp6s.length > 0 || srp3s.length > 0 || srp5s.length > 0 || srp2s.length > 0 || srp1s.length > 0 || srp4s.length > 0)
+            ? `INNER JOIN F4101 D ON D.IMITM = A.WAITM`
+            : '';
+
         // Construimos la consulta SQL.
         // F55TAR12 (Tareas) JOIN F4801 (Orden) JOIN F4111 (Item Ledger)
         // Agrupamos por Orden, Día y UNIDAD para luego convertir y sumar
         let sql = `
-          SELECT 
-            A.WADOCO, 
-            B.TO55TAREA, 
-            A.WADL01, 
-            SUM(C.ILTRQT) as WASOQS, 
-            A.WAMCU, 
-            A.WAAITM, 
+          SELECT
+            A.WADOCO,
+            B.TO55TAREA,
+            A.WADL01,
+            SUM(C.ILTRQT) as WASOQS,
+            A.WAMCU,
+            A.WAAITM,
             A.WAITM,
             C.ILTRUM as ILTRUM
           FROM F55TAR12 B
           INNER JOIN F4801 A ON A.WADOCO = B.TODOCO
-          LEFT JOIN F4111 C ON C.ILDOC = A.WADOCO 
-            AND C.ILDCT = 'IC' 
+          LEFT JOIN F4111 C ON C.ILDOC = A.WADOCO
+            AND C.ILDCT = 'IC'
             AND MOD(C.ILTRDJ, 100000) = MOD(B.TO55TAREA, 100000)
+          ${extraJoins}
           WHERE 1=1
         `;
 
@@ -49,11 +62,35 @@ export async function GET(req: NextRequest) {
         }
 
         if (subLine && subLine !== 'all') {
-            const min = parseInt(subLine) * 100000;
-            const max = (parseInt(subLine) + 1) * 100000;
-            sql += ` AND B.TO55TAREA >= :subLineStart AND B.TO55TAREA < :subLineEnd`;
-            binds.subLineStart = min;
-            binds.subLineEnd = max;
+            const subLineNum = parseInt(subLine);
+
+            // Registros antiguos: TODAS las plantas usaban subcode '1'
+            // Mapa de subcode antiguo por planta para incluir ambos rangos (histórico + actual)
+            // Corella: actual '2', antiguo '1'
+            // Funes 1: actual '3', antiguo '1' | Funes 2: actual '4', antiguo '2'
+            const oldSubCodeMap: Record<string, Record<number, number>> = {
+                '10200': { 2: 1 },       // Corella: subcode 2 → antiguo 1
+                '10300': { 3: 1, 4: 2 }, // Funes: subcode 3→1, 4→2
+            };
+
+            const oldSubCode = plant ? oldSubCodeMap[plant]?.[subLineNum] : undefined;
+
+            if (oldSubCode !== undefined && oldSubCode !== null) {
+                sql += ` AND (
+                    (B.TO55TAREA >= :subLineStart AND B.TO55TAREA < :subLineEnd)
+                    OR (B.TO55TAREA >= :subLineOldStart AND B.TO55TAREA < :subLineOldEnd)
+                )`;
+                binds.subLineStart = subLineNum * 100000;
+                binds.subLineEnd = (subLineNum + 1) * 100000;
+                binds.subLineOldStart = oldSubCode * 100000;
+                binds.subLineOldEnd = (oldSubCode + 1) * 100000;
+            } else {
+                const min = subLineNum * 100000;
+                const max = (subLineNum + 1) * 100000;
+                sql += ` AND B.TO55TAREA >= :subLineStart AND B.TO55TAREA < :subLineEnd`;
+                binds.subLineStart = min;
+                binds.subLineEnd = max;
+            }
         }
 
         if (startDateStr && endDateStr) {
@@ -87,6 +124,64 @@ export async function GET(req: NextRequest) {
             const placeholders = articles.map((_, i) => `:article${i}`).join(', ');
             sql += ` AND TRIM(A.WAAITM) IN (${placeholders})`;
             articles.forEach((a, i) => { binds[`article${i}`] = a; });
+        }
+
+        if (prp6s.length > 0) {
+            const placeholders = prp6s.map((_, i) => `:prp6_${i}`).join(', ');
+            sql += ` AND TRIM(D.IMPRP6) IN (${placeholders})`;
+            prp6s.forEach((v, i) => { binds[`prp6_${i}`] = v; });
+        }
+
+        if (srp3s.length > 0) {
+            const placeholders = srp3s.map((_, i) => `:srp3_${i}`).join(', ');
+            sql += ` AND TRIM(D.IMPRP6) IN (${placeholders})`;
+            srp3s.forEach((v, i) => { binds[`srp3_${i}`] = v; });
+        }
+
+        if (srp5s.length > 0) {
+            const placeholders = srp5s.map((_, i) => `:srp5_${i}`).join(', ');
+            sql += ` AND TRIM(D.IMSRP5) IN (${placeholders})`;
+            srp5s.forEach((v, i) => { binds[`srp5_${i}`] = v; });
+        }
+
+        if (srp2s.length > 0) {
+            const placeholders = srp2s.map((_, i) => `:srp2_${i}`).join(', ');
+            sql += ` AND TRIM(D.IMSRP2) IN (${placeholders})`;
+            srp2s.forEach((v, i) => { binds[`srp2_${i}`] = v; });
+        }
+
+        if (srp1s.length > 0) {
+            const placeholders = srp1s.map((_, i) => `:srp1_${i}`).join(', ');
+            sql += ` AND TRIM(D.IMSRP1) IN (${placeholders})`;
+            srp1s.forEach((v, i) => { binds[`srp1_${i}`] = v; });
+        }
+
+        if (srp4s.length > 0) {
+            const placeholders = srp4s.map((_, i) => `:srp4_${i}`).join(', ');
+            sql += ` AND TRIM(D.IMSRP4) IN (${placeholders})`;
+            srp4s.forEach((v, i) => { binds[`srp4_${i}`] = v; });
+        }
+
+        if (prodLines.length > 0) {
+            const hasEmpty = prodLines.includes('__empty__');
+            const realLines = prodLines.filter(v => v !== '__empty__');
+
+            // Oracle trata '' como NULL, así que usamos IS NULL para detectar vacíos
+            // TRIM(C.ILMCUZ) IS NULL cubre: campo con espacios (CHAR padding) y campo NULL (LEFT JOIN sin match)
+            if (hasEmpty && realLines.length > 0) {
+                // Ambos: líneas específicas + registros sin línea
+                const placeholders = realLines.map((_, i) => `:prodLine_${i}`).join(', ');
+                sql += ` AND (TRIM(C.ILMCUZ) IN (${placeholders}) OR TRIM(C.ILMCUZ) IS NULL)`;
+                realLines.forEach((v, i) => { binds[`prodLine_${i}`] = v; });
+            } else if (hasEmpty) {
+                // Solo registros sin línea
+                sql += ` AND TRIM(C.ILMCUZ) IS NULL`;
+            } else {
+                // Solo líneas específicas
+                const placeholders = realLines.map((_, i) => `:prodLine_${i}`).join(', ');
+                sql += ` AND TRIM(C.ILMCUZ) IN (${placeholders})`;
+                realLines.forEach((v, i) => { binds[`prodLine_${i}`] = v; });
+            }
         }
 
         // Paginación
@@ -259,7 +354,9 @@ export async function GET(req: NextRequest) {
         // Convertimos el Map a array
         const data = Array.from(processedGroups.values());
 
-        return NextResponse.json(data);
+        // Devolvemos los datos junto con el conteo de filas SQL originales
+        // para que el frontend pueda determinar correctamente si hay más páginas
+        return NextResponse.json({ data, sqlRowCount: rows.length });
 
     } catch (err: any) {
         // Si ocurre cualquier error en el bloque try, lo capturamos aquí

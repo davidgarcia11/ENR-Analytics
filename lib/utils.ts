@@ -56,10 +56,10 @@ export function parseJdeDate(jdeDate: number | string, wamcu?: string): JdeDateR
     } else if (plantCode === "10300") {
         // Lógica específica para Funes (Planta 10300) basada en el primer dígito (subBlockCode)
         switch (subBlockCode) {
-            case '3': subBlockName = "Funes 1"; break;
-            case '4': subBlockName = "Funes 2"; break;
+            case '1': case '3': subBlockName = "Funes 1"; break; // '1' = codificación antigua, '3' = actual
+            case '2': case '4': subBlockName = "Funes 2"; break; // '2' = codificación antigua, '4' = actual
             case '5': subBlockName = "Funes Pasteurizado"; break;
-            default: subBlockName = `Funes (Línea ${subBlockCode})`; break; // Por si viene otro número
+            default: subBlockName = `Funes (Línea ${subBlockCode})`; break;
         }
     } else {
         // Si no sabemos la planta, intentamos adivinar por el código estándar
