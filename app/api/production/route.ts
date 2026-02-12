@@ -35,6 +35,9 @@ export async function GET(req: NextRequest) {
         // Construimos la consulta SQL.
         // F55TAR12 (Tareas) JOIN F4801 (Orden) JOIN F4111 (Item Ledger)
         // Agrupamos por Orden, Día y UNIDAD para luego convertir y sumar
+        // Deduplicamos F55TAR12 por orden+fecha (sin subcode) usando subquery,
+        // porque registros antiguos (subcode 1) y nuevos (subcode 3/4) pueden coexistir
+        // para la misma orden+fecha, lo que duplicaría cantidades al hacer JOIN con F4111.
         let sql = `
           SELECT
             A.WADOCO,
@@ -45,7 +48,11 @@ export async function GET(req: NextRequest) {
             A.WAAITM,
             A.WAITM,
             C.ILTRUM as ILTRUM
-          FROM F55TAR12 B
+          FROM (
+            SELECT TODOCO, MAX(TO55TAREA) as TO55TAREA
+            FROM F55TAR12
+            GROUP BY TODOCO, MOD(TO55TAREA, 100000)
+          ) B
           INNER JOIN F4801 A ON A.WADOCO = B.TODOCO
           LEFT JOIN F4111 C ON C.ILDOC = A.WADOCO
             AND C.ILDCT = 'IC'
