@@ -130,7 +130,7 @@ export default function Dashboard() {
   const applyFilters = () => {
     setPage(1); // Reseteamos a la página 1
     setData([]); // Limpiamos los datos actuales
-    fetchData(1, true); // Llamamos a la API indicando que es una nueva búsqueda
+    fetchData(1, true, true); // Llamamos a la API sin paginación (todos los registros)
   }
 
   // Maneja el cambio en el desplegable de Plantas
