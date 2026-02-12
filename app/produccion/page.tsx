@@ -60,6 +60,14 @@ export default function Dashboard() {
   const [selectedSrp2, setSelectedSrp2] = useState<string[]>([])
   const [availableSrp2, setAvailableSrp2] = useState<{ id: string; description: string }[]>([])
 
+  // Estado para el filtro de Categoría (IMSRP1 con DRRT='S1')
+  const [selectedSrp1, setSelectedSrp1] = useState<string[]>([])
+  const [availableSrp1, setAvailableSrp1] = useState<{ id: string; description: string }[]>([])
+
+  // Estado para el filtro de Marca (IMSRP4 con DRRT='S4')
+  const [selectedSrp4, setSelectedSrp4] = useState<string[]>([])
+  const [availableSrp4, setAvailableSrp4] = useState<{ id: string; description: string }[]>([])
+
   // Estado para el filtro de Líneas de producción (F30006/F0006 → F4111.ILMCUZ)
   const [selectedProdLines, setSelectedProdLines] = useState<string[]>([])
   const [availableProdLines, setAvailableProdLines] = useState<{ id: string; description: string }[]>([])
@@ -95,6 +103,16 @@ export default function Dashboard() {
     fetch('/api/categories?field=srp2')
       .then(r => r.json())
       .then(data => { if (Array.isArray(data)) setAvailableSrp2(data); })
+      .catch(console.error);
+
+    fetch('/api/categories?field=srp1')
+      .then(r => r.json())
+      .then(data => { if (Array.isArray(data)) setAvailableSrp1(data); })
+      .catch(console.error);
+
+    fetch('/api/categories?field=srp4')
+      .then(r => r.json())
+      .then(data => { if (Array.isArray(data)) setAvailableSrp4(data); })
       .catch(console.error);
 
     fetch('/api/production-lines')
@@ -161,6 +179,8 @@ export default function Dashboard() {
       selectedSrp3.forEach(v => params.append('srp3', v))
       selectedSrp5.forEach(v => params.append('srp5', v))
       selectedSrp2.forEach(v => params.append('srp2', v))
+      selectedSrp1.forEach(v => params.append('srp1', v))
+      selectedSrp4.forEach(v => params.append('srp4', v))
       selectedProdLines.forEach(v => params.append('prodLine', v))
 
       params.append('page', pageNum.toString());
@@ -349,6 +369,32 @@ export default function Dashboard() {
                   selected={selectedSrp2}
                   onChange={setSelectedSrp2}
                   label="Familia"
+                />
+              </div>
+            </div>
+
+            {/* Filtro: Categoría (IMSRP1 con DRRT='S1') */}
+            <div className="grid gap-1.5">
+              <label className="text-xs font-semibold text-gray-700">Categoría</label>
+              <div className="w-[200px]">
+                <ArticleMultiSelect
+                  articles={availableSrp1}
+                  selected={selectedSrp1}
+                  onChange={setSelectedSrp1}
+                  label="Categoría"
+                />
+              </div>
+            </div>
+
+            {/* Filtro: Marca (IMSRP4 con DRRT='S4') */}
+            <div className="grid gap-1.5">
+              <label className="text-xs font-semibold text-gray-700">Marca</label>
+              <div className="w-[200px]">
+                <ArticleMultiSelect
+                  articles={availableSrp4}
+                  selected={selectedSrp4}
+                  onChange={setSelectedSrp4}
+                  label="Marca"
                 />
               </div>
             </div>

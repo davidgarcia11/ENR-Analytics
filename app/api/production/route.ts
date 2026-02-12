@@ -19,6 +19,8 @@ export async function GET(req: NextRequest) {
     const srp3s = searchParams.getAll('srp3'); // Filtro por Formato (IMPRP6 con DRRT='S3')
     const srp5s = searchParams.getAll('srp5'); // Filtro por Sabor (IMSRP5 con DRRT='S5')
     const srp2s = searchParams.getAll('srp2'); // Filtro por Familia (IMSRP2 con DRRT='S2')
+    const srp1s = searchParams.getAll('srp1'); // Filtro por Categoría (IMSRP1 con DRRT='S1')
+    const srp4s = searchParams.getAll('srp4'); // Filtro por Marca (IMSRP4 con DRRT='S4')
 
     let conn; // Declaramos la variable para la conexión fuera del try para poder cerrarla en el finally
     try {
@@ -26,7 +28,7 @@ export async function GET(req: NextRequest) {
         conn = await getDbConnection();
 
         // JOIN condicional a F4101 solo cuando se filtra por categoría (evita JOIN innecesario)
-        const extraJoins = (prp6s.length > 0 || srp3s.length > 0 || srp5s.length > 0 || srp2s.length > 0)
+        const extraJoins = (prp6s.length > 0 || srp3s.length > 0 || srp5s.length > 0 || srp2s.length > 0 || srp1s.length > 0 || srp4s.length > 0)
             ? `INNER JOIN F4101 D ON D.IMITM = A.WAITM`
             : '';
 
@@ -146,6 +148,18 @@ export async function GET(req: NextRequest) {
             const placeholders = srp2s.map((_, i) => `:srp2_${i}`).join(', ');
             sql += ` AND TRIM(D.IMSRP2) IN (${placeholders})`;
             srp2s.forEach((v, i) => { binds[`srp2_${i}`] = v; });
+        }
+
+        if (srp1s.length > 0) {
+            const placeholders = srp1s.map((_, i) => `:srp1_${i}`).join(', ');
+            sql += ` AND TRIM(D.IMSRP1) IN (${placeholders})`;
+            srp1s.forEach((v, i) => { binds[`srp1_${i}`] = v; });
+        }
+
+        if (srp4s.length > 0) {
+            const placeholders = srp4s.map((_, i) => `:srp4_${i}`).join(', ');
+            sql += ` AND TRIM(D.IMSRP4) IN (${placeholders})`;
+            srp4s.forEach((v, i) => { binds[`srp4_${i}`] = v; });
         }
 
         if (prodLines.length > 0) {
