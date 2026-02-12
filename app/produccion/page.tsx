@@ -1,6 +1,6 @@
 "use client" // Indica que este componente se ejecuta en el navegador del usuario (cliente), no en el servidor
 
-import { useState, useEffect } from "react" // Hooks de React para manejar estado y efectos secundarios
+import { useState, useEffect, useMemo } from "react" // Hooks de React para manejar estado y efectos secundarios
 // Importamos componentes de interfaz de usuario (UI) reutilizables desde nuestra carpeta local
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
@@ -14,8 +14,9 @@ import {
   TableRow,
 } from "@/components/ui/table"
 // Iconos de la librería lucide-react para dar estilo visual
-import { Search, Loader2, Factory, Calendar, Download, ChevronDown } from "lucide-react"
+import { Search, Loader2, Factory, Calendar, Download, ChevronDown, ChevronsDown } from "lucide-react"
 import * as XLSX from 'xlsx'; // Librería 'xlsx' para generar archivos Excel
+import { ArticleMultiSelect } from "@/components/ArticleMultiSelect"
 
 // Función principal del componente Dashboard
 export default function Dashboard() {
@@ -25,14 +26,51 @@ export default function Dashboard() {
   const [page, setPage] = useState(1); // Página actual para la paginación
   const [hasMore, setHasMore] = useState(true); // Indica si hay más datos para cargar
 
-  // Estado para los filtros de búsqueda
+  // Fecha de hoy en formato YYYY-MM-DD para inicializar filtros
+  const todayStr = (() => {
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  })();
+
+  // Estado para los filtros de búsqueda (inicializado con la fecha de hoy)
   const [filters, setFilters] = useState({
     plant: "all",
     subLine: "all",
-    article: "",
-    startDate: "",
-    endDate: "",
+    startDate: todayStr,
+    endDate: todayStr,
   })
+
+  // Estado para el filtro de artículos (multi-select)
+  const [selectedArticles, setSelectedArticles] = useState<string[]>([])
+  const [availableArticles, setAvailableArticles] = useState<{ id: string; description: string }[]>([])
+
+  // Estado para el filtro de Tipo Proceso OF (IMPRP6)
+  const [selectedPrp6, setSelectedPrp6] = useState<string[]>([])
+  const [availablePrp6, setAvailablePrp6] = useState<{ id: string; description: string }[]>([])
+
+  // Estado para el filtro de Formato (IMPRP6 con DRRT='S3')
+  const [selectedSrp3, setSelectedSrp3] = useState<string[]>([])
+  const [availableSrp3, setAvailableSrp3] = useState<{ id: string; description: string }[]>([])
+
+  // Estado para el filtro de Sabor (IMSRP5 con DRRT='S5')
+  const [selectedSrp5, setSelectedSrp5] = useState<string[]>([])
+  const [availableSrp5, setAvailableSrp5] = useState<{ id: string; description: string }[]>([])
+
+  // Estado para el filtro de Familia (IMSRP2 con DRRT='S2')
+  const [selectedSrp2, setSelectedSrp2] = useState<string[]>([])
+  const [availableSrp2, setAvailableSrp2] = useState<{ id: string; description: string }[]>([])
+
+  // Estado para el filtro de Categoría (IMSRP1 con DRRT='S1')
+  const [selectedSrp1, setSelectedSrp1] = useState<string[]>([])
+  const [availableSrp1, setAvailableSrp1] = useState<{ id: string; description: string }[]>([])
+
+  // Estado para el filtro de Marca (IMSRP4 con DRRT='S4')
+  const [selectedSrp4, setSelectedSrp4] = useState<string[]>([])
+  const [availableSrp4, setAvailableSrp4] = useState<{ id: string; description: string }[]>([])
+
+  // Estado para el filtro de Líneas de producción (F30006/F0006 → F4111.ILMCUZ)
+  const [selectedProdLines, setSelectedProdLines] = useState<string[]>([])
+  const [availableProdLines, setAvailableProdLines] = useState<{ id: string; description: string }[]>([])
 
   // Estado para las métricas (totales y resúmenes)
   // Nota: Actualmente se calculan sobre los datos cargados en pantalla, no sobre el total de la base de datos
@@ -45,31 +83,46 @@ export default function Dashboard() {
 
   // --- EFECTOS (Lógica que se ejecuta automáticamente) ---
 
-  // useEffect se ejecuta una vez al montar el componente (array vacío [])
-  // Aquí establecemos las fechas por defecto al día de hoy
+  // Carga inicial: filtros de categoría, líneas de producción y datos del día
   useEffect(() => {
-    const today = new Date();
+    fetch('/api/categories?field=prp6')
+      .then(r => r.json())
+      .then(data => { if (Array.isArray(data)) setAvailablePrp6(data); })
+      .catch(console.error);
 
-    // Construimos la fecha en formato YYYY-MM-DD local
-    const year = today.getFullYear();
-    const month = String(today.getMonth() + 1).padStart(2, '0'); // Meses van de 0-11, sumamos 1
-    const day = String(today.getDate()).padStart(2, '0');
-    const todayStr = `${year}-${month}-${day}`;
+    fetch('/api/categories?field=srp3')
+      .then(r => r.json())
+      .then(data => { if (Array.isArray(data)) setAvailableSrp3(data); })
+      .catch(console.error);
 
-    // Actualizamos el estado de filtros con la fecha de hoy
-    setFilters(prev => ({
-      ...prev,
-      startDate: todayStr,
-      endDate: todayStr
-    }))
-    // Nota: dependencias vacías [] significa que solo corre al inicio
+    fetch('/api/categories?field=srp5')
+      .then(r => r.json())
+      .then(data => { if (Array.isArray(data)) setAvailableSrp5(data); })
+      .catch(console.error);
+
+    fetch('/api/categories?field=srp2')
+      .then(r => r.json())
+      .then(data => { if (Array.isArray(data)) setAvailableSrp2(data); })
+      .catch(console.error);
+
+    fetch('/api/categories?field=srp1')
+      .then(r => r.json())
+      .then(data => { if (Array.isArray(data)) setAvailableSrp1(data); })
+      .catch(console.error);
+
+    fetch('/api/categories?field=srp4')
+      .then(r => r.json())
+      .then(data => { if (Array.isArray(data)) setAvailableSrp4(data); })
+      .catch(console.error);
+
+    fetch('/api/production-lines')
+      .then(r => r.json())
+      .then(data => { if (Array.isArray(data)) setAvailableProdLines(data); })
+      .catch(console.error);
+
+    // Carga inicial con la fecha de hoy (ya está en el estado)
+    fetchData(1, true);
   }, [])
-
-  // useEffect para recargar datos cuando cambian ciertos filtros
-  // En este caso, solo cuando cambia la fecha de inicio se dispara la búsqueda automática
-  useEffect(() => {
-    if (filters.startDate) fetchData(1, true); // Página 1, nueva búsqueda
-  }, [filters.startDate]) // Array de dependencias: se ejecuta cuando filters.startDate cambia
 
   // --- FUNCIONES AUXILIARES ---
 
@@ -77,7 +130,7 @@ export default function Dashboard() {
   const applyFilters = () => {
     setPage(1); // Reseteamos a la página 1
     setData([]); // Limpiamos los datos actuales
-    fetchData(1, true); // Llamamos a la API indicando que es una nueva búsqueda
+    fetchData(1, true, true); // Llamamos a la API sin paginación (todos los registros)
   }
 
   // Maneja el cambio en el desplegable de Plantas
@@ -104,8 +157,15 @@ export default function Dashboard() {
     fetchData(nextPage, false); // Llamamos a API, false indica que añada datos a los existentes (no borrar)
   };
 
+  // Función para cargar todos los resultados sin paginación
+  const loadAll = () => {
+    setPage(1);
+    setData([]);
+    fetchData(1, true, true);
+  };
+
   // Función asíncrona principal para pedir datos al servidor (API)
-  const fetchData = async (pageNum: number, isNewSearch: boolean) => {
+  const fetchData = async (pageNum: number, isNewSearch: boolean, allRecords = false) => {
     setLoading(true) // Activamos spinner de carga
     try {
       // Construimos los parámetros de la URL (?plant=X&page=Y...)
@@ -114,23 +174,56 @@ export default function Dashboard() {
       if (filters.subLine !== 'all') params.append('subLine', filters.subLine)
       if (filters.startDate) params.append('startDate', filters.startDate)
       if (filters.endDate) params.append('endDate', filters.endDate)
-      if (filters.article) params.append('article', filters.article)
+      selectedArticles.forEach(a => params.append('article', a))
+      selectedPrp6.forEach(v => params.append('prp6', v))
+      selectedSrp3.forEach(v => params.append('srp3', v))
+      selectedSrp5.forEach(v => params.append('srp5', v))
+      selectedSrp2.forEach(v => params.append('srp2', v))
+      selectedSrp1.forEach(v => params.append('srp1', v))
+      selectedSrp4.forEach(v => params.append('srp4', v))
+      selectedProdLines.forEach(v => params.append('prodLine', v))
 
       params.append('page', pageNum.toString());
-      params.append('limit', '150'); // Pedimos 150 registros por página
+      params.append('limit', allRecords ? '0' : '150');
 
       // Hacemos la petición a nuestra API interna
       const res = await fetch(`/api/production?${params.toString()}`)
       const json = await res.json() // Convertimos respuesta a JSON
 
-      if (Array.isArray(json)) {
-        // Si llegaron menos de 150 registros, asumimos que no hay más páginas
-        if (json.length < 150) setHasMore(false);
+      // La API devuelve { data: [...], sqlRowCount: N }
+      const items = json.data ?? json; // Compatibilidad: si es array directo, lo usamos tal cual
+      const sqlRowCount = json.sqlRowCount ?? (Array.isArray(json) ? json.length : items.length);
+
+      if (Array.isArray(items)) {
+        // Usamos sqlRowCount (filas SQL antes de procesar) para determinar si hay más páginas
+        // Esto evita el falso negativo cuando la agrupación reduce el conteo por debajo de 150
+        if (allRecords || sqlRowCount < 150) setHasMore(false);
         else setHasMore(true);
 
         // Si es nueva búsqueda, reemplazamos datos. Si no, añadimos al final (...data, ...json)
-        const newData = isNewSearch ? json : [...data, ...json];
+        const newData = isNewSearch ? items : [...data, ...items];
         setData(newData)
+
+        // Extraer artículos únicos de los datos para el multi-select
+        const articleMap = new Map<string, { id: string; description: string }>();
+        if (isNewSearch) {
+          // En nueva búsqueda, construimos la lista desde cero con los nuevos datos
+          newData.forEach((item: any) => {
+            if (item.article && item.description)
+              articleMap.set(String(item.article).trim(), { id: String(item.article).trim(), description: item.description });
+          });
+          setAvailableArticles(Array.from(articleMap.values()));
+        } else {
+          // En "cargar más", acumulamos los nuevos artículos a los ya existentes
+          setAvailableArticles(prev => {
+            prev.forEach(a => articleMap.set(a.id, a));
+            newData.slice(-items.length).forEach((item: any) => {
+              if (item.article && item.description)
+                articleMap.set(String(item.article).trim(), { id: String(item.article).trim(), description: item.description });
+            });
+            return Array.from(articleMap.values());
+          });
+        }
 
         // --- CÁLCULO DE MÉTRICAS (Lado del Cliente) ---
         // Recorremos los datos cargados para sumar totales
@@ -189,6 +282,19 @@ export default function Dashboard() {
     XLSX.writeFile(wb, `Produccion_${filters.startDate}_${filters.endDate}.xlsx`);
   };
 
+  // Agrupa los datos por artículo + fecha + línea + unidad para mostrar en tabla
+  const displayData = useMemo(() => {
+    const groupMap = new Map<string, any>();
+    data.forEach(item => {
+      const key = `${item.article}-${item.productionDateRaw}-${item.subLineCode}-${item.unit}`;
+      if (!groupMap.has(key)) {
+        groupMap.set(key, { ...item, quantity: 0 });
+      }
+      groupMap.get(key).quantity += item.quantity || 0;
+    });
+    return Array.from(groupMap.values());
+  }, [data]);
+
   // --- RENDERIZADO (HTML) ---
   return (
     <div className="min-h-screen bg-gray-100 p-8 font-sans text-gray-900">
@@ -203,21 +309,108 @@ export default function Dashboard() {
 
           {/* Panel de Filtros */}
           <div className="flex flex-wrap items-end gap-4 bg-white p-4 rounded-xl shadow-sm border border-gray-200">
-            {/* Filtro: Artículo */}
+            {/* Filtro: Artículo (multi-select, se popula con los resultados cargados) */}
             <div className="grid gap-1.5">
               <label className="text-xs font-semibold text-gray-700">Artículo</label>
-              <Input
-                type="text"
-                maxLength={10}
-                placeholder="Art. (10 dígitos)"
-                value={filters.article}
-                onChange={(e) => {
-                  // Reemplaza cualquier caracter que NO sea número (\D) por vacío
-                  const val = e.target.value.replace(/\D/g, '');
-                  setFilters({ ...filters, article: val })
-                }}
-                className="w-[140px] border-gray-300 focus:border-slate-500 font-medium"
-              />
+              <div className="w-[200px]">
+                <ArticleMultiSelect
+                  articles={availableArticles}
+                  selected={selectedArticles}
+                  onChange={setSelectedArticles}
+                />
+              </div>
+            </div>
+
+            {/* Filtro: Tipo Proceso OF (IMPRP6) */}
+            <div className="grid gap-1.5">
+              <label className="text-xs font-semibold text-gray-700">Tipo Proceso OF</label>
+              <div className="w-[200px]">
+                <ArticleMultiSelect
+                  articles={availablePrp6}
+                  selected={selectedPrp6}
+                  onChange={setSelectedPrp6}
+                  label="Tipo Proceso"
+                />
+              </div>
+            </div>
+
+            {/* Filtro: Formato (IMPRP6 con DRRT='S3') */}
+            <div className="grid gap-1.5">
+              <label className="text-xs font-semibold text-gray-700">Formato</label>
+              <div className="w-[200px]">
+                <ArticleMultiSelect
+                  articles={availableSrp3}
+                  selected={selectedSrp3}
+                  onChange={setSelectedSrp3}
+                  label="Formato"
+                />
+              </div>
+            </div>
+
+            {/* Filtro: Sabor (IMSRP5 con DRRT='S5') */}
+            <div className="grid gap-1.5">
+              <label className="text-xs font-semibold text-gray-700">Sabor</label>
+              <div className="w-[200px]">
+                <ArticleMultiSelect
+                  articles={availableSrp5}
+                  selected={selectedSrp5}
+                  onChange={setSelectedSrp5}
+                  label="Sabor"
+                />
+              </div>
+            </div>
+
+            {/* Filtro: Familia (IMSRP2 con DRRT='S2') */}
+            <div className="grid gap-1.5">
+              <label className="text-xs font-semibold text-gray-700">Familia</label>
+              <div className="w-[200px]">
+                <ArticleMultiSelect
+                  articles={availableSrp2}
+                  selected={selectedSrp2}
+                  onChange={setSelectedSrp2}
+                  label="Familia"
+                />
+              </div>
+            </div>
+
+            {/* Filtro: Categoría (IMSRP1 con DRRT='S1') */}
+            <div className="grid gap-1.5">
+              <label className="text-xs font-semibold text-gray-700">Categoría</label>
+              <div className="w-[200px]">
+                <ArticleMultiSelect
+                  articles={availableSrp1}
+                  selected={selectedSrp1}
+                  onChange={setSelectedSrp1}
+                  label="Categoría"
+                />
+              </div>
+            </div>
+
+            {/* Filtro: Marca (IMSRP4 con DRRT='S4') */}
+            <div className="grid gap-1.5">
+              <label className="text-xs font-semibold text-gray-700">Marca</label>
+              <div className="w-[200px]">
+                <ArticleMultiSelect
+                  articles={availableSrp4}
+                  selected={selectedSrp4}
+                  onChange={setSelectedSrp4}
+                  label="Marca"
+                />
+              </div>
+            </div>
+
+            {/* Filtro: Líneas de producción (F30006/F0006 → F4111.ILMCUZ) */}
+            <div className="grid gap-1.5">
+              <label className="text-xs font-semibold text-gray-700">Línea Producción</label>
+              <div className="w-[200px]">
+                <ArticleMultiSelect
+                  articles={availableProdLines}
+                  selected={selectedProdLines}
+                  onChange={setSelectedProdLines}
+                  label="Línea Producción"
+                  showId={false}
+                />
+              </div>
             </div>
 
             {/* Filtro: Fechas */}
@@ -353,7 +546,6 @@ export default function Dashboard() {
                 {/* Cabecera de la tabla */}
                 <TableRow className="border-gray-200 hover:bg-transparent">
                   <TableHead className="font-bold text-gray-700">Fecha</TableHead>
-                  <TableHead className="font-bold text-gray-700">Orden</TableHead>
                   <TableHead className="font-bold text-gray-700">Artículo</TableHead>
                   <TableHead className="font-bold text-gray-700">Descripción</TableHead>
                   <TableHead className="font-bold text-gray-700">Planta / Línea</TableHead>
@@ -362,13 +554,12 @@ export default function Dashboard() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {/* Mapeamos los datos para crear filas */}
-                {data.map((row, i) => (
+                {/* Mapeamos los datos agrupados por artículo para crear filas */}
+                {displayData.map((row, i) => (
                   <TableRow key={i} className="hover:bg-slate-50 border-gray-100">
                     <TableCell className="font-medium text-gray-900">
                       {row.date ? new Date(row.date).toLocaleDateString() : row.productionDateRaw}
                     </TableCell>
-                    <TableCell className="text-gray-700">{row.order}</TableCell>
                     <TableCell className="text-gray-700 font-mono text-xs bg-gray-100 px-2 py-1 rounded w-fit">{row.article}</TableCell>
                     <TableCell className="text-gray-600 uppercase text-xs font-semibold">{row.description}</TableCell>
                     <TableCell>
@@ -389,7 +580,7 @@ export default function Dashboard() {
                 {/* Spinner si está cargando */}
                 {loading && (
                   <TableRow>
-                    <TableCell colSpan={7} className="text-center py-10">
+                    <TableCell colSpan={6} className="text-center py-10">
                       <Loader2 className="h-6 w-6 animate-spin mx-auto text-slate-800" />
                     </TableCell>
                   </TableRow>
@@ -398,7 +589,7 @@ export default function Dashboard() {
                 {/* Mensaje si no hay datos */}
                 {!loading && data.length === 0 && (
                   <TableRow>
-                    <TableCell colSpan={7} className="text-center py-10 text-gray-500 font-medium">
+                    <TableCell colSpan={6} className="text-center py-10 text-gray-500 font-medium">
                       No se encontraron datos para los filtros seleccionados.
                     </TableCell>
                   </TableRow>
@@ -406,12 +597,16 @@ export default function Dashboard() {
               </TableBody>
             </Table>
 
-            {/* Botón Cargar Más */}
+            {/* Botones de Paginación */}
             {hasMore && data.length > 0 && !loading && (
-              <div className="mt-6 flex justify-center">
+              <div className="mt-6 flex justify-center gap-3">
                 <Button onClick={loadMore} variant="ghost" className="text-slate-600 hover:text-slate-900 hover:bg-slate-100">
                   <ChevronDown className="mr-2 h-4 w-4" />
-                  Cargar más resultados
+                  Cargar más (150)
+                </Button>
+                <Button onClick={loadAll} variant="outline" className="text-slate-600 hover:text-slate-900 hover:bg-slate-100 border-slate-300">
+                  <ChevronsDown className="mr-2 h-4 w-4" />
+                  Cargar todos
                 </Button>
               </div>
             )}
