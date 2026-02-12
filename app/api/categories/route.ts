@@ -6,7 +6,7 @@ import { getDbConnection } from '@/lib/db';
 //   (necesario cuando DRKY tiene padding CHAR diferente al campo de F4101)
 const FIELD_MAP: Record<string, { col: string; drsy: string; drrt: string; directF0005?: boolean }> = {
     prp6: { col: 'IMPRP6', drsy: '41', drrt: '01' },
-    srp3: { col: 'IMPRP6', drsy: '41', drrt: 'S3', directF0005: true },
+    srp3: { col: 'IMSRP3', drsy: '41', drrt: 'S3', directF0005: true },
     srp5: { col: 'IMSRP5', drsy: '41', drrt: 'S5', directF0005: true },
     srp2: { col: 'IMSRP2', drsy: '41', drrt: 'S2', directF0005: true },
     srp1: { col: 'IMSRP1', drsy: '41', drrt: 'S1', directF0005: true },

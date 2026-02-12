@@ -134,7 +134,7 @@ export async function GET(req: NextRequest) {
 
         if (srp3s.length > 0) {
             const placeholders = srp3s.map((_, i) => `:srp3_${i}`).join(', ');
-            sql += ` AND TRIM(D.IMPRP6) IN (${placeholders})`;
+            sql += ` AND TRIM(D.IMSRP3) IN (${placeholders})`;
             srp3s.forEach((v, i) => { binds[`srp3_${i}`] = v; });
         }
 
