@@ -14,7 +14,8 @@ import {
   TableRow,
 } from "@/components/ui/table"
 // Iconos de la librería lucide-react para dar estilo visual
-import { Search, Loader2, Factory, Calendar, Download, ChevronDown, ChevronsDown } from "lucide-react"
+import { Search, Loader2, Factory, Calendar, Download, ChevronDown, ChevronsDown, X } from "lucide-react"
+import Image from "next/image"
 import * as XLSX from 'xlsx'; // Librería 'xlsx' para generar archivos Excel
 import { ArticleMultiSelect } from "@/components/ArticleMultiSelect"
 
@@ -68,6 +69,10 @@ export default function Dashboard() {
   const [selectedSrp4, setSelectedSrp4] = useState<string[]>([])
   const [availableSrp4, setAvailableSrp4] = useState<{ id: string; description: string }[]>([])
 
+  // Estado para el filtro de Formato (AAZE03 de F554101 con DRRT='B3')
+  const [selectedZe03, setSelectedZe03] = useState<string[]>([])
+  const [availableZe03, setAvailableZe03] = useState<{ id: string; description: string }[]>([])
+
   // Estado para el filtro de Líneas de producción (F30006/F0006 → F4111.ILMCUZ)
   const [selectedProdLines, setSelectedProdLines] = useState<string[]>([])
   const [availableProdLines, setAvailableProdLines] = useState<{ id: string; description: string }[]>([])
@@ -78,7 +83,9 @@ export default function Dashboard() {
     totalQtyUN: 0, // Cantidad total en Unidades
     totalQtyKG: 0, // Cantidad total en Kilos
     totalOrders: 0, // Número total de órdenes
-    byPlant: {} as Record<string, number> // Desglose por planta
+    byPlant: {} as Record<string, number>, // Desglose por planta
+    totalMerma: 0, // Merma total (valor absoluto)
+    totalProduced: 0, // Producción total (para calcular % merma global)
   })
 
   // --- EFECTOS (Lógica que se ejecuta automáticamente) ---
@@ -115,6 +122,11 @@ export default function Dashboard() {
       .then(data => { if (Array.isArray(data)) setAvailableSrp4(data); })
       .catch(console.error);
 
+    fetch('/api/categories?field=ze03')
+      .then(r => r.json())
+      .then(data => { if (Array.isArray(data)) setAvailableZe03(data); })
+      .catch(console.error);
+
     fetch('/api/production-lines')
       .then(r => r.json())
       .then(data => { if (Array.isArray(data)) setAvailableProdLines(data); })
@@ -131,6 +143,22 @@ export default function Dashboard() {
     setPage(1); // Reseteamos a la página 1
     setData([]); // Limpiamos los datos actuales
     fetchData(1, true, true); // Llamamos a la API sin paginación (todos los registros)
+  }
+
+  // Limpia todos los filtros y vuelve a los valores por defecto
+  const clearFilters = () => {
+    setFilters({ plant: "all", subLine: "all", startDate: todayStr, endDate: todayStr });
+    setSelectedArticles([]);
+    setSelectedPrp6([]);
+    setSelectedSrp3([]);
+    setSelectedSrp5([]);
+    setSelectedSrp2([]);
+    setSelectedSrp1([]);
+    setSelectedSrp4([]);
+    setSelectedZe03([]);
+    setSelectedProdLines([]);
+    setPage(1);
+    setData([]);
   }
 
   // Maneja el cambio en el desplegable de Plantas
@@ -181,6 +209,7 @@ export default function Dashboard() {
       selectedSrp2.forEach(v => params.append('srp2', v))
       selectedSrp1.forEach(v => params.append('srp1', v))
       selectedSrp4.forEach(v => params.append('srp4', v))
+      selectedZe03.forEach(v => params.append('ze03', v))
       selectedProdLines.forEach(v => params.append('prodLine', v))
 
       params.append('page', pageNum.toString());
@@ -229,6 +258,8 @@ export default function Dashboard() {
         // Recorremos los datos cargados para sumar totales
         let qtyUN = 0;
         let qtyKG = 0;
+        let totalMerma = 0;
+        let totalProduced = 0;
         const plants: Record<string, number> = {};
         const orders = new Set(); // Set evita duplicados de órdenes
 
@@ -243,6 +274,10 @@ export default function Dashboard() {
           const pName = item.subLine || 'Desconocido';
           // Acumulamos cantidad por planta
           plants[pName] = (plants[pName] || 0) + (item.quantity || 0);
+
+          // Acumulamos merma y producción totales
+          totalMerma += Math.abs(item.merma || 0);
+          totalProduced += item.quantity || 0;
         });
 
         // Actualizamos estado de métricas
@@ -250,7 +285,9 @@ export default function Dashboard() {
           totalQtyUN: qtyUN,
           totalQtyKG: qtyKG,
           totalOrders: orders.size,
-          byPlant: plants
+          byPlant: plants,
+          totalMerma,
+          totalProduced,
         })
       }
     } catch (error) {
@@ -262,38 +299,90 @@ export default function Dashboard() {
 
   // Función para exportar los datos visibles a Excel
   const exportToExcel = () => {
-    // Mapeamos los datos a un formato limpio para el Excel
-    const ws = XLSX.utils.json_to_sheet(data.map(item => ({
+    // Usamos displayData (ya agrupado y con merma) ordenado por % merma descendente
+    const sorted = [...displayData].sort((a, b) => (b.mermaPercent || 0) - (a.mermaPercent || 0));
+
+    const excelRows = sorted.map(item => ({
       Fecha: item.date ? new Date(item.date).toLocaleDateString() : item.productionDateRaw,
-      Orden: item.order,
       Articulo: item.article,
       Descripcion: item.description,
       Planta: item.subLine,
-      Codigo_Planta: item.plantCode,
-      Cantidad: item.quantity,
+      Cantidad: Math.round((item.quantity || 0) * 100) / 100,
+      Merma: Math.round(Math.abs(item.merma || 0) * 100) / 100,
+      '% Merma': (item.mermaPercent || 0) / 100, // Como decimal para formato porcentaje Excel
       Unidad: item.unit
-    })));
+    }));
 
-    // Creamos libro y hoja
+    const ws = XLSX.utils.json_to_sheet(excelRows);
+
+    // Formato porcentaje en columna G (% Merma), empezando en fila 2 (fila 1 = cabecera)
+    const mermaColIdx = 6; // Columna G (0-indexed)
+    for (let r = 0; r < excelRows.length; r++) {
+      const cellRef = XLSX.utils.encode_cell({ r: r + 1, c: mermaColIdx });
+      if (ws[cellRef]) ws[cellRef].z = '0.00%';
+    }
+
+    // Formato condicional: colorear top 25% de % merma con fondo rojo
+    // xlsx no soporta formato condicional nativo, así que coloreamos directamente las celdas del top 25%
+    const mermaValues = sorted.map(r => r.mermaPercent || 0).filter(v => v > 0);
+    const p75Idx = Math.floor(mermaValues.length * 0.75);
+    const p75Threshold = mermaValues.sort((a, b) => a - b)[p75Idx] || 0;
+
+    for (let r = 0; r < sorted.length; r++) {
+      const cellRef = XLSX.utils.encode_cell({ r: r + 1, c: mermaColIdx });
+      if (ws[cellRef] && (sorted[r].mermaPercent || 0) >= p75Threshold && p75Threshold > 0) {
+        ws[cellRef].s = {
+          fill: { fgColor: { rgb: 'FFCCCC' } },
+          font: { bold: true, color: { rgb: 'CC0000' } }
+        };
+      }
+    }
+
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, "Produccion");
 
-    // Descargamos el archivo
     XLSX.writeFile(wb, `Produccion_${filters.startDate}_${filters.endDate}.xlsx`);
   };
 
   // Agrupa los datos por artículo + fecha + línea + unidad para mostrar en tabla
+  // Calcula merma y % merma por grupo, ordena de mayor a menor % merma
   const displayData = useMemo(() => {
     const groupMap = new Map<string, any>();
     data.forEach(item => {
       const key = `${item.article}-${item.productionDateRaw}-${item.subLineCode}-${item.unit}`;
       if (!groupMap.has(key)) {
-        groupMap.set(key, { ...item, quantity: 0 });
+        groupMap.set(key, { ...item, quantity: 0, merma: 0 });
       }
-      groupMap.get(key).quantity += item.quantity || 0;
+      const g = groupMap.get(key);
+      g.quantity += item.quantity || 0;
+      g.merma += item.merma || 0;
     });
-    return Array.from(groupMap.values());
+    return Array.from(groupMap.values()).map(item => {
+      const absMerma = Math.abs(item.merma);
+      const total = absMerma + item.quantity;
+      const mermaPercent = total > 0
+        ? Math.round((absMerma / total) * 10000) / 100
+        : 0;
+      return { ...item, mermaPercent };
+    }).sort((a, b) => b.mermaPercent - a.mermaPercent);
   }, [data]);
+
+  // Calcula el umbral del percentil 75 de % merma para formato condicional
+  const mermaP75 = useMemo(() => {
+    const values = displayData.map(r => r.mermaPercent).filter(v => v > 0).sort((a, b) => a - b);
+    if (values.length === 0) return 0;
+    const idx = Math.floor(values.length * 0.75);
+    return values[Math.min(idx, values.length - 1)];
+  }, [displayData]);
+
+  // Color del % merma: rojo fuerte si está en top 25%, naranja si > 2%, verde si bajo
+  const getMermaColor = (percent: number) => {
+    if (percent === 0) return 'text-gray-400';
+    if (percent >= mermaP75 && mermaP75 > 0) return 'text-red-600 bg-red-50 font-black';
+    if (percent >= 5) return 'text-red-500 font-bold';
+    if (percent >= 2) return 'text-amber-600 font-bold';
+    return 'text-green-600 font-semibold';
+  };
 
   // --- RENDERIZADO (HTML) ---
   return (
@@ -302,13 +391,13 @@ export default function Dashboard() {
 
         {/* --- CABECERA Y FILTROS --- */}
         <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
-          <div>
-            <h1 className="text-3xl font-bold tracking-tight text-gray-900">Dashboard de Producción</h1>
-            <p className="text-gray-600">Visualización de órdenes de fabricación y cantidades.</p>
+          <div className="flex flex-col items-center shrink-0">
+            <Image src="/logo.png" alt="Elaborados Naturales" width={160} height={56} priority />
+            <span className="text-xs font-medium text-gray-500 mt-1 tracking-wide uppercase" style={{ borderBottom: '2px solid #D30B15', paddingBottom: '2px' }}>Dashboard de Producción</span>
           </div>
 
           {/* Panel de Filtros */}
-          <div className="flex flex-wrap items-end gap-4 bg-white p-4 rounded-xl shadow-sm border border-gray-200">
+          <div className="flex flex-wrap items-end gap-4 bg-white p-4 rounded-xl shadow-sm border border-gray-200" style={{ borderTop: '3px solid #D30B15' }}>
             {/* Filtro: Artículo (multi-select, se popula con los resultados cargados) */}
             <div className="grid gap-1.5">
               <label className="text-xs font-semibold text-gray-700">Artículo</label>
@@ -399,6 +488,19 @@ export default function Dashboard() {
               </div>
             </div>
 
+            {/* Filtro: Gramaje (AAZE03 de F554101 con DRRT='B3') */}
+            <div className="grid gap-1.5">
+              <label className="text-xs font-semibold text-gray-700">Gramaje</label>
+              <div className="w-[200px]">
+                <ArticleMultiSelect
+                  articles={availableZe03}
+                  selected={selectedZe03}
+                  onChange={setSelectedZe03}
+                  label="Gramaje"
+                />
+              </div>
+            </div>
+
             {/* Filtro: Líneas de producción (F30006/F0006 → F4111.ILMCUZ) */}
             <div className="grid gap-1.5">
               <label className="text-xs font-semibold text-gray-700">Línea Producción</label>
@@ -471,7 +573,7 @@ export default function Dashboard() {
             )}
 
             {/* Botones de Acción */}
-            <Button onClick={applyFilters} disabled={loading} className="bg-slate-800 hover:bg-slate-700 text-white font-semibold">
+            <Button onClick={applyFilters} disabled={loading} className="text-white font-semibold" style={{ backgroundColor: '#D30B15' }} onMouseEnter={e => (e.currentTarget.style.backgroundColor = '#b00a12')} onMouseLeave={e => (e.currentTarget.style.backgroundColor = '#D30B15')}>
               {loading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Search className="mr-2 h-4 w-4" />}
               Filtrar
             </Button>
@@ -479,16 +581,20 @@ export default function Dashboard() {
               <Download className="mr-2 h-4 w-4" />
               Excel
             </Button>
+            <Button onClick={clearFilters} variant="outline" className="border-gray-400 text-gray-600 hover:bg-gray-50">
+              <X className="mr-2 h-4 w-4" />
+              Limpiar
+            </Button>
           </div>
         </div>
 
         {/* --- TARJETAS DE MÉTRICAS (KPIs) --- */}
-        <div className="grid gap-4 md:grid-cols-3">
+        <div className="grid gap-4 md:grid-cols-4">
           {/* Tarjeta 1: Cantidad Total */}
-          <Card className="border-gray-200 shadow-sm">
+          <Card className="border-gray-200 shadow-sm overflow-hidden" style={{ borderTop: '3px solid #D30B15' }}>
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
               <CardTitle className="text-sm font-bold text-gray-700">Cantidad Total</CardTitle>
-              <Factory className="h-4 w-4 text-gray-500" />
+              <Factory className="h-4 w-4" style={{ color: '#D30B15' }} />
             </CardHeader>
             <CardContent>
               <div className="flex flex-col space-y-1">
@@ -508,10 +614,10 @@ export default function Dashboard() {
           </Card>
 
           {/* Tarjeta 2: Órdenes */}
-          <Card className="border-gray-200 shadow-sm">
+          <Card className="border-gray-200 shadow-sm overflow-hidden" style={{ borderTop: '3px solid #D30B15' }}>
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
               <CardTitle className="text-sm font-bold text-gray-700">Órdenes</CardTitle>
-              <Calendar className="h-4 w-4 text-gray-500" />
+              <Calendar className="h-4 w-4" style={{ color: '#D30B15' }} />
             </CardHeader>
             <CardContent>
               <div className="text-2xl font-black text-gray-900">{metrics.totalOrders}</div>
@@ -519,11 +625,36 @@ export default function Dashboard() {
             </CardContent>
           </Card>
 
-          {/* Tarjeta 3: Planta con mayor volumen */}
-          <Card className="border-gray-200 shadow-sm">
+          {/* Tarjeta 3: Merma global */}
+          <Card className="border-gray-200 shadow-sm overflow-hidden" style={{ borderTop: '3px solid #D30B15' }}>
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+              <CardTitle className="text-sm font-bold text-gray-700">Merma</CardTitle>
+              <Factory className="h-4 w-4" style={{ color: '#D30B15' }} />
+            </CardHeader>
+            <CardContent>
+              {(() => {
+                const total = metrics.totalMerma + metrics.totalProduced;
+                const pct = total > 0 ? (metrics.totalMerma / total) * 100 : 0;
+                const color = pct >= 5 ? 'text-red-600' : pct >= 2 ? 'text-amber-600' : 'text-green-600';
+                return (
+                  <div className="flex flex-col space-y-1">
+                    <div className="flex items-baseline justify-between">
+                      <div className={`text-2xl font-black ${color}`}>{pct.toFixed(2)}%</div>
+                    </div>
+                    <div className="text-xs text-gray-500 font-medium">
+                      {metrics.totalMerma.toLocaleString('es-ES', { minimumFractionDigits: 2 })} merma / {metrics.totalProduced.toLocaleString('es-ES', { minimumFractionDigits: 2 })} producido
+                    </div>
+                  </div>
+                );
+              })()}
+            </CardContent>
+          </Card>
+
+          {/* Tarjeta 4: Planta con mayor volumen */}
+          <Card className="border-gray-200 shadow-sm overflow-hidden" style={{ borderTop: '3px solid #D30B15' }}>
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
               <CardTitle className="text-sm font-bold text-gray-700">Top Planta</CardTitle>
-              <Factory className="h-4 w-4 text-gray-500" />
+              <Factory className="h-4 w-4" style={{ color: '#D30B15' }} />
             </CardHeader>
             <CardContent>
               <div className="text-2xl font-black text-gray-900">
@@ -536,7 +667,7 @@ export default function Dashboard() {
         </div>
 
         {/* --- TABLA DE DATOS --- */}
-        <Card className="col-span-4 border-gray-200 shadow-sm">
+        <Card className="col-span-4 border-gray-200 shadow-sm overflow-hidden" style={{ borderTop: '3px solid #D30B15' }}>
           <CardHeader>
             <CardTitle className="text-lg font-bold text-gray-800">Detalle de Producción</CardTitle>
           </CardHeader>
@@ -548,9 +679,11 @@ export default function Dashboard() {
                   <TableHead className="font-bold text-gray-700">Fecha</TableHead>
                   <TableHead className="font-bold text-gray-700">Artículo</TableHead>
                   <TableHead className="font-bold text-gray-700">Descripción</TableHead>
-                  <TableHead className="font-bold text-gray-700">Planta / Línea</TableHead>
                   <TableHead className="text-right font-bold text-gray-700">Cantidad</TableHead>
+                  <TableHead className="text-right font-bold text-gray-700">Merma</TableHead>
+                  <TableHead className="text-right font-bold text-gray-700">% Merma</TableHead>
                   <TableHead className="font-bold text-gray-700 text-center">UM</TableHead>
+                  <TableHead className="font-bold text-gray-700">Planta / Línea</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -562,17 +695,23 @@ export default function Dashboard() {
                     </TableCell>
                     <TableCell className="text-gray-700 font-mono text-xs bg-gray-100 px-2 py-1 rounded w-fit">{row.article}</TableCell>
                     <TableCell className="text-gray-600 uppercase text-xs font-semibold">{row.description}</TableCell>
+                    <TableCell className="text-right font-bold text-slate-900">
+                      {row.quantity?.toLocaleString('es-ES', { minimumFractionDigits: 2 })}
+                    </TableCell>
+                    <TableCell className="text-right text-sm text-gray-700">
+                      {Math.abs(row.merma || 0).toLocaleString('es-ES', { minimumFractionDigits: 2 })}
+                    </TableCell>
+                    <TableCell className={`text-right text-sm px-3 py-1 rounded ${getMermaColor(row.mermaPercent || 0)}`}>
+                      {(row.mermaPercent || 0).toFixed(2)}%
+                    </TableCell>
+                    <TableCell className="text-center text-xs text-gray-500 font-mono">
+                      {row.unit}
+                    </TableCell>
                     <TableCell>
                       <div className="flex flex-col">
                         <span className="font-bold text-gray-800 text-xs">{row.subLine}</span>
                         <span className="text-[10px] text-gray-400 font-mono">{row.subLineCode} · {row.plantCode}</span>
                       </div>
-                    </TableCell>
-                    <TableCell className="text-right font-bold text-slate-900">
-                      {row.quantity?.toLocaleString('es-ES', { minimumFractionDigits: 2 })}
-                    </TableCell>
-                    <TableCell className="text-center text-xs text-gray-500 font-mono">
-                      {row.unit}
                     </TableCell>
                   </TableRow>
                 ))}
@@ -580,7 +719,7 @@ export default function Dashboard() {
                 {/* Spinner si está cargando */}
                 {loading && (
                   <TableRow>
-                    <TableCell colSpan={6} className="text-center py-10">
+                    <TableCell colSpan={8} className="text-center py-10">
                       <Loader2 className="h-6 w-6 animate-spin mx-auto text-slate-800" />
                     </TableCell>
                   </TableRow>
@@ -589,7 +728,7 @@ export default function Dashboard() {
                 {/* Mensaje si no hay datos */}
                 {!loading && data.length === 0 && (
                   <TableRow>
-                    <TableCell colSpan={6} className="text-center py-10 text-gray-500 font-medium">
+                    <TableCell colSpan={8} className="text-center py-10 text-gray-500 font-medium">
                       No se encontraron datos para los filtros seleccionados.
                     </TableCell>
                   </TableRow>

@@ -11,6 +11,7 @@ const FIELD_MAP: Record<string, { col: string; drsy: string; drrt: string; direc
     srp2: { col: 'IMSRP2', drsy: '41', drrt: 'S2', directF0005: true },
     srp1: { col: 'IMSRP1', drsy: '41', drrt: 'S1', directF0005: true },
     srp4: { col: 'IMSRP4', drsy: '41', drrt: 'S4', directF0005: true },
+    ze03: { col: 'AAZE03', drsy: '17', drrt: 'B3', directF0005: true },
 };
 
 export async function GET(req: NextRequest) {
