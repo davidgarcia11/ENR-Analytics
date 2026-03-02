@@ -15,6 +15,7 @@ import {
 } from "@/components/ui/table"
 // Iconos de la librería lucide-react para dar estilo visual
 import { Search, Loader2, Factory, Calendar, Download, ChevronDown, ChevronsDown } from "lucide-react"
+import Image from "next/image"
 import * as XLSX from 'xlsx'; // Librería 'xlsx' para generar archivos Excel
 import { ArticleMultiSelect } from "@/components/ArticleMultiSelect"
 
@@ -68,6 +69,10 @@ export default function Dashboard() {
   const [selectedSrp4, setSelectedSrp4] = useState<string[]>([])
   const [availableSrp4, setAvailableSrp4] = useState<{ id: string; description: string }[]>([])
 
+  // Estado para el filtro de Formato (AAZE03 de F554101 con DRRT='B3')
+  const [selectedZe03, setSelectedZe03] = useState<string[]>([])
+  const [availableZe03, setAvailableZe03] = useState<{ id: string; description: string }[]>([])
+
   // Estado para el filtro de Líneas de producción (F30006/F0006 → F4111.ILMCUZ)
   const [selectedProdLines, setSelectedProdLines] = useState<string[]>([])
   const [availableProdLines, setAvailableProdLines] = useState<{ id: string; description: string }[]>([])
@@ -115,6 +120,11 @@ export default function Dashboard() {
     fetch('/api/categories?field=srp4')
       .then(r => r.json())
       .then(data => { if (Array.isArray(data)) setAvailableSrp4(data); })
+      .catch(console.error);
+
+    fetch('/api/categories?field=ze03')
+      .then(r => r.json())
+      .then(data => { if (Array.isArray(data)) setAvailableZe03(data); })
       .catch(console.error);
 
     fetch('/api/production-lines')
@@ -183,6 +193,7 @@ export default function Dashboard() {
       selectedSrp2.forEach(v => params.append('srp2', v))
       selectedSrp1.forEach(v => params.append('srp1', v))
       selectedSrp4.forEach(v => params.append('srp4', v))
+      selectedZe03.forEach(v => params.append('ze03', v))
       selectedProdLines.forEach(v => params.append('prodLine', v))
 
       params.append('page', pageNum.toString());
@@ -364,9 +375,9 @@ export default function Dashboard() {
 
         {/* --- CABECERA Y FILTROS --- */}
         <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
-          <div>
-            <h1 className="text-3xl font-bold tracking-tight text-gray-900">Dashboard de Producción</h1>
-            <p className="text-gray-600">Visualización de órdenes de fabricación y cantidades.</p>
+          <div className="flex flex-col items-center shrink-0">
+            <Image src="/logo.png" alt="Elaborados Naturales" width={160} height={56} priority />
+            <span className="text-xs font-medium text-gray-500 mt-1 tracking-wide uppercase">Dashboard de Producción</span>
           </div>
 
           {/* Panel de Filtros */}
@@ -457,6 +468,19 @@ export default function Dashboard() {
                   selected={selectedSrp4}
                   onChange={setSelectedSrp4}
                   label="Marca"
+                />
+              </div>
+            </div>
+
+            {/* Filtro: Gramaje (AAZE03 de F554101 con DRRT='B3') */}
+            <div className="grid gap-1.5">
+              <label className="text-xs font-semibold text-gray-700">Gramaje</label>
+              <div className="w-[200px]">
+                <ArticleMultiSelect
+                  articles={availableZe03}
+                  selected={selectedZe03}
+                  onChange={setSelectedZe03}
+                  label="Gramaje"
                 />
               </div>
             </div>
