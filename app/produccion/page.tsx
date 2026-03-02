@@ -14,7 +14,7 @@ import {
   TableRow,
 } from "@/components/ui/table"
 // Iconos de la librería lucide-react para dar estilo visual
-import { Search, Loader2, Factory, Calendar, Download, ChevronDown, ChevronsDown } from "lucide-react"
+import { Search, Loader2, Factory, Calendar, Download, ChevronDown, ChevronsDown, X } from "lucide-react"
 import Image from "next/image"
 import * as XLSX from 'xlsx'; // Librería 'xlsx' para generar archivos Excel
 import { ArticleMultiSelect } from "@/components/ArticleMultiSelect"
@@ -143,6 +143,22 @@ export default function Dashboard() {
     setPage(1); // Reseteamos a la página 1
     setData([]); // Limpiamos los datos actuales
     fetchData(1, true, true); // Llamamos a la API sin paginación (todos los registros)
+  }
+
+  // Limpia todos los filtros y vuelve a los valores por defecto
+  const clearFilters = () => {
+    setFilters({ plant: "all", subLine: "all", startDate: todayStr, endDate: todayStr });
+    setSelectedArticles([]);
+    setSelectedPrp6([]);
+    setSelectedSrp3([]);
+    setSelectedSrp5([]);
+    setSelectedSrp2([]);
+    setSelectedSrp1([]);
+    setSelectedSrp4([]);
+    setSelectedZe03([]);
+    setSelectedProdLines([]);
+    setPage(1);
+    setData([]);
   }
 
   // Maneja el cambio en el desplegable de Plantas
@@ -377,11 +393,11 @@ export default function Dashboard() {
         <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
           <div className="flex flex-col items-center shrink-0">
             <Image src="/logo.png" alt="Elaborados Naturales" width={160} height={56} priority />
-            <span className="text-xs font-medium text-gray-500 mt-1 tracking-wide uppercase">Dashboard de Producción</span>
+            <span className="text-xs font-medium text-gray-500 mt-1 tracking-wide uppercase" style={{ borderBottom: '2px solid #D30B15', paddingBottom: '2px' }}>Dashboard de Producción</span>
           </div>
 
           {/* Panel de Filtros */}
-          <div className="flex flex-wrap items-end gap-4 bg-white p-4 rounded-xl shadow-sm border border-gray-200">
+          <div className="flex flex-wrap items-end gap-4 bg-white p-4 rounded-xl shadow-sm border border-gray-200" style={{ borderTop: '3px solid #D30B15' }}>
             {/* Filtro: Artículo (multi-select, se popula con los resultados cargados) */}
             <div className="grid gap-1.5">
               <label className="text-xs font-semibold text-gray-700">Artículo</label>
@@ -557,7 +573,7 @@ export default function Dashboard() {
             )}
 
             {/* Botones de Acción */}
-            <Button onClick={applyFilters} disabled={loading} className="bg-slate-800 hover:bg-slate-700 text-white font-semibold">
+            <Button onClick={applyFilters} disabled={loading} className="text-white font-semibold" style={{ backgroundColor: '#D30B15' }} onMouseEnter={e => (e.currentTarget.style.backgroundColor = '#b00a12')} onMouseLeave={e => (e.currentTarget.style.backgroundColor = '#D30B15')}>
               {loading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Search className="mr-2 h-4 w-4" />}
               Filtrar
             </Button>
@@ -565,16 +581,20 @@ export default function Dashboard() {
               <Download className="mr-2 h-4 w-4" />
               Excel
             </Button>
+            <Button onClick={clearFilters} variant="outline" className="border-gray-400 text-gray-600 hover:bg-gray-50">
+              <X className="mr-2 h-4 w-4" />
+              Limpiar
+            </Button>
           </div>
         </div>
 
         {/* --- TARJETAS DE MÉTRICAS (KPIs) --- */}
         <div className="grid gap-4 md:grid-cols-4">
           {/* Tarjeta 1: Cantidad Total */}
-          <Card className="border-gray-200 shadow-sm">
+          <Card className="border-gray-200 shadow-sm overflow-hidden" style={{ borderTop: '3px solid #D30B15' }}>
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
               <CardTitle className="text-sm font-bold text-gray-700">Cantidad Total</CardTitle>
-              <Factory className="h-4 w-4 text-gray-500" />
+              <Factory className="h-4 w-4" style={{ color: '#D30B15' }} />
             </CardHeader>
             <CardContent>
               <div className="flex flex-col space-y-1">
@@ -594,10 +614,10 @@ export default function Dashboard() {
           </Card>
 
           {/* Tarjeta 2: Órdenes */}
-          <Card className="border-gray-200 shadow-sm">
+          <Card className="border-gray-200 shadow-sm overflow-hidden" style={{ borderTop: '3px solid #D30B15' }}>
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
               <CardTitle className="text-sm font-bold text-gray-700">Órdenes</CardTitle>
-              <Calendar className="h-4 w-4 text-gray-500" />
+              <Calendar className="h-4 w-4" style={{ color: '#D30B15' }} />
             </CardHeader>
             <CardContent>
               <div className="text-2xl font-black text-gray-900">{metrics.totalOrders}</div>
@@ -606,10 +626,10 @@ export default function Dashboard() {
           </Card>
 
           {/* Tarjeta 3: Merma global */}
-          <Card className="border-gray-200 shadow-sm">
+          <Card className="border-gray-200 shadow-sm overflow-hidden" style={{ borderTop: '3px solid #D30B15' }}>
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
               <CardTitle className="text-sm font-bold text-gray-700">Merma</CardTitle>
-              <Factory className="h-4 w-4 text-gray-500" />
+              <Factory className="h-4 w-4" style={{ color: '#D30B15' }} />
             </CardHeader>
             <CardContent>
               {(() => {
@@ -631,10 +651,10 @@ export default function Dashboard() {
           </Card>
 
           {/* Tarjeta 4: Planta con mayor volumen */}
-          <Card className="border-gray-200 shadow-sm">
+          <Card className="border-gray-200 shadow-sm overflow-hidden" style={{ borderTop: '3px solid #D30B15' }}>
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
               <CardTitle className="text-sm font-bold text-gray-700">Top Planta</CardTitle>
-              <Factory className="h-4 w-4 text-gray-500" />
+              <Factory className="h-4 w-4" style={{ color: '#D30B15' }} />
             </CardHeader>
             <CardContent>
               <div className="text-2xl font-black text-gray-900">
@@ -647,7 +667,7 @@ export default function Dashboard() {
         </div>
 
         {/* --- TABLA DE DATOS --- */}
-        <Card className="col-span-4 border-gray-200 shadow-sm">
+        <Card className="col-span-4 border-gray-200 shadow-sm overflow-hidden" style={{ borderTop: '3px solid #D30B15' }}>
           <CardHeader>
             <CardTitle className="text-lg font-bold text-gray-800">Detalle de Producción</CardTitle>
           </CardHeader>
