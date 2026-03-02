@@ -38,12 +38,16 @@ export async function GET(req: NextRequest) {
         // Deduplicamos F55TAR12 por orden+fecha (sin subcode) usando subquery,
         // porque registros antiguos (subcode 1) y nuevos (subcode 3/4) pueden coexistir
         // para la misma orden+fecha, lo que duplicaría cantidades al hacer JOIN con F4111.
+        // Códigos de motivo de merma (ILRCD) que se incluyen en el cálculo
+        const MERMA_CODES = "'P01','P02','P03','P04','P05','Q01','Q02','Q03','Q04','Q05','Q06','Q07','Q08','Q09','Q10'";
+
         let sql = `
           SELECT
             A.WADOCO,
             B.TO55TAREA,
             A.WADL01,
-            SUM(C.ILTRQT) as WASOQS,
+            SUM(CASE WHEN C.ILDCT = 'IC' THEN C.ILTRQT ELSE 0 END) as WASOQS,
+            SUM(CASE WHEN C.ILDCT = 'IS' THEN C.ILTRQT ELSE 0 END) as MERMA,
             A.WAMCU,
             A.WAAITM,
             A.WAITM,
@@ -55,8 +59,11 @@ export async function GET(req: NextRequest) {
           ) B
           INNER JOIN F4801 A ON A.WADOCO = B.TODOCO
           LEFT JOIN F4111 C ON C.ILDOC = A.WADOCO
-            AND C.ILDCT = 'IC'
             AND MOD(C.ILTRDJ, 100000) = MOD(B.TO55TAREA, 100000)
+            AND (
+              C.ILDCT = 'IC'
+              OR (C.ILDCT = 'IS' AND TRIM(C.ILRCD) IN (${MERMA_CODES}))
+            )
           ${extraJoins}
           WHERE 1=1
         `;
@@ -325,6 +332,7 @@ export async function GET(req: NextRequest) {
                     productionDateRaw: productionDateRaw,
                     description: row.WADL01 != null ? String(row.WADL01).trim() : '',
                     quantity: 0, // Inicializamos en 0
+                    merma: 0, // Merma acumulada (será valor negativo)
                     unit: primUom, // La unidad final siempre será la primaria
                     plantCode: row.WAMCU != null ? String(row.WAMCU).trim() : '',
                     article: itemDisplayId, // Mantenemos el ID que el usuario ve (WAAITM)
@@ -333,33 +341,42 @@ export async function GET(req: NextRequest) {
                 });
             }
 
-            // Calcular Cantidad Convertida
+            // Calcular Cantidad Convertida (producción y merma)
             const group = processedGroups.get(groupKey);
-            const rawQty = row.WASOQS || 0; // Cantidad de F4111 (multiplicada por 100 en origen)
-            const quantityVal = rawQty / 100.0; // Quitamos los decimales de JDE
-            const fromUom = row.ILTRUM ? String(row.ILTRUM).trim() : group.unit; // Unidad de esta fila
+            const rawQty = row.WASOQS || 0; // Cantidad producción (IC) multiplicada por 100
+            const rawMerma = row.MERMA || 0; // Cantidad merma (IS) multiplicada por 100 (negativa)
+            const quantityVal = rawQty / 100.0;
+            const mermaVal = rawMerma / 100.0;
+            const fromUom = row.ILTRUM ? String(row.ILTRUM).trim() : group.unit;
 
             let finalQty = quantityVal;
+            let finalMerma = mermaVal;
 
             // Si las unidades difieren, buscamos conversión usando el ID Corto
             if (fromUom !== group.unit) {
                 const factor = getConversionFactor(itemShortId, fromUom, group.unit);
                 if (factor !== null) {
                     finalQty = quantityVal * factor;
-                } else {
-                    // Si no hay factor, dejamos la cantidad tal cual (con warning silencioso si deseamos)
-                    // console.warn(`No conversion found for item ${itemId} from ${fromUom} to ${group.unit}`);
-                    // Log conversions
-                    // console.log(`DEBUG: Conversions for ${itemId}:`, conversionsMap.get(itemId));
+                    finalMerma = mermaVal * factor;
                 }
             }
 
             // Sumamos al acumulado del grupo
             group.quantity += finalQty;
+            group.merma += finalMerma;
         });
 
-        // Convertimos el Map a array
-        const data = Array.from(processedGroups.values());
+        // Convertimos el Map a array y calculamos % merma
+        // Fórmula: (-1*merma) / (-1*merma + producido) * 100
+        // merma viene negativa de Oracle (IS resta), así que -1*merma = valor positivo
+        const data = Array.from(processedGroups.values()).map(item => {
+            const absMerma = Math.abs(item.merma);
+            const total = absMerma + item.quantity;
+            const mermaPercent = total > 0
+                ? Math.round((absMerma / total) * 10000) / 100 // Redondear a 2 decimales
+                : 0;
+            return { ...item, mermaPercent };
+        });
 
         // Devolvemos los datos junto con el conteo de filas SQL originales
         // para que el frontend pueda determinar correctamente si hay más páginas

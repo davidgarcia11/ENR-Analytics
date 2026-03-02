@@ -78,7 +78,9 @@ export default function Dashboard() {
     totalQtyUN: 0, // Cantidad total en Unidades
     totalQtyKG: 0, // Cantidad total en Kilos
     totalOrders: 0, // Número total de órdenes
-    byPlant: {} as Record<string, number> // Desglose por planta
+    byPlant: {} as Record<string, number>, // Desglose por planta
+    totalMerma: 0, // Merma total (valor absoluto)
+    totalProduced: 0, // Producción total (para calcular % merma global)
   })
 
   // --- EFECTOS (Lógica que se ejecuta automáticamente) ---
@@ -229,6 +231,8 @@ export default function Dashboard() {
         // Recorremos los datos cargados para sumar totales
         let qtyUN = 0;
         let qtyKG = 0;
+        let totalMerma = 0;
+        let totalProduced = 0;
         const plants: Record<string, number> = {};
         const orders = new Set(); // Set evita duplicados de órdenes
 
@@ -243,6 +247,10 @@ export default function Dashboard() {
           const pName = item.subLine || 'Desconocido';
           // Acumulamos cantidad por planta
           plants[pName] = (plants[pName] || 0) + (item.quantity || 0);
+
+          // Acumulamos merma y producción totales
+          totalMerma += Math.abs(item.merma || 0);
+          totalProduced += item.quantity || 0;
         });
 
         // Actualizamos estado de métricas
@@ -250,7 +258,9 @@ export default function Dashboard() {
           totalQtyUN: qtyUN,
           totalQtyKG: qtyKG,
           totalOrders: orders.size,
-          byPlant: plants
+          byPlant: plants,
+          totalMerma,
+          totalProduced,
         })
       }
     } catch (error) {
@@ -262,38 +272,90 @@ export default function Dashboard() {
 
   // Función para exportar los datos visibles a Excel
   const exportToExcel = () => {
-    // Mapeamos los datos a un formato limpio para el Excel
-    const ws = XLSX.utils.json_to_sheet(data.map(item => ({
+    // Usamos displayData (ya agrupado y con merma) ordenado por % merma descendente
+    const sorted = [...displayData].sort((a, b) => (b.mermaPercent || 0) - (a.mermaPercent || 0));
+
+    const excelRows = sorted.map(item => ({
       Fecha: item.date ? new Date(item.date).toLocaleDateString() : item.productionDateRaw,
-      Orden: item.order,
       Articulo: item.article,
       Descripcion: item.description,
       Planta: item.subLine,
-      Codigo_Planta: item.plantCode,
-      Cantidad: item.quantity,
+      Cantidad: Math.round((item.quantity || 0) * 100) / 100,
+      Merma: Math.round(Math.abs(item.merma || 0) * 100) / 100,
+      '% Merma': (item.mermaPercent || 0) / 100, // Como decimal para formato porcentaje Excel
       Unidad: item.unit
-    })));
+    }));
 
-    // Creamos libro y hoja
+    const ws = XLSX.utils.json_to_sheet(excelRows);
+
+    // Formato porcentaje en columna G (% Merma), empezando en fila 2 (fila 1 = cabecera)
+    const mermaColIdx = 6; // Columna G (0-indexed)
+    for (let r = 0; r < excelRows.length; r++) {
+      const cellRef = XLSX.utils.encode_cell({ r: r + 1, c: mermaColIdx });
+      if (ws[cellRef]) ws[cellRef].z = '0.00%';
+    }
+
+    // Formato condicional: colorear top 25% de % merma con fondo rojo
+    // xlsx no soporta formato condicional nativo, así que coloreamos directamente las celdas del top 25%
+    const mermaValues = sorted.map(r => r.mermaPercent || 0).filter(v => v > 0);
+    const p75Idx = Math.floor(mermaValues.length * 0.75);
+    const p75Threshold = mermaValues.sort((a, b) => a - b)[p75Idx] || 0;
+
+    for (let r = 0; r < sorted.length; r++) {
+      const cellRef = XLSX.utils.encode_cell({ r: r + 1, c: mermaColIdx });
+      if (ws[cellRef] && (sorted[r].mermaPercent || 0) >= p75Threshold && p75Threshold > 0) {
+        ws[cellRef].s = {
+          fill: { fgColor: { rgb: 'FFCCCC' } },
+          font: { bold: true, color: { rgb: 'CC0000' } }
+        };
+      }
+    }
+
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, "Produccion");
 
-    // Descargamos el archivo
     XLSX.writeFile(wb, `Produccion_${filters.startDate}_${filters.endDate}.xlsx`);
   };
 
   // Agrupa los datos por artículo + fecha + línea + unidad para mostrar en tabla
+  // Calcula merma y % merma por grupo, ordena de mayor a menor % merma
   const displayData = useMemo(() => {
     const groupMap = new Map<string, any>();
     data.forEach(item => {
       const key = `${item.article}-${item.productionDateRaw}-${item.subLineCode}-${item.unit}`;
       if (!groupMap.has(key)) {
-        groupMap.set(key, { ...item, quantity: 0 });
+        groupMap.set(key, { ...item, quantity: 0, merma: 0 });
       }
-      groupMap.get(key).quantity += item.quantity || 0;
+      const g = groupMap.get(key);
+      g.quantity += item.quantity || 0;
+      g.merma += item.merma || 0;
     });
-    return Array.from(groupMap.values());
+    return Array.from(groupMap.values()).map(item => {
+      const absMerma = Math.abs(item.merma);
+      const total = absMerma + item.quantity;
+      const mermaPercent = total > 0
+        ? Math.round((absMerma / total) * 10000) / 100
+        : 0;
+      return { ...item, mermaPercent };
+    }).sort((a, b) => b.mermaPercent - a.mermaPercent);
   }, [data]);
+
+  // Calcula el umbral del percentil 75 de % merma para formato condicional
+  const mermaP75 = useMemo(() => {
+    const values = displayData.map(r => r.mermaPercent).filter(v => v > 0).sort((a, b) => a - b);
+    if (values.length === 0) return 0;
+    const idx = Math.floor(values.length * 0.75);
+    return values[Math.min(idx, values.length - 1)];
+  }, [displayData]);
+
+  // Color del % merma: rojo fuerte si está en top 25%, naranja si > 2%, verde si bajo
+  const getMermaColor = (percent: number) => {
+    if (percent === 0) return 'text-gray-400';
+    if (percent >= mermaP75 && mermaP75 > 0) return 'text-red-600 bg-red-50 font-black';
+    if (percent >= 5) return 'text-red-500 font-bold';
+    if (percent >= 2) return 'text-amber-600 font-bold';
+    return 'text-green-600 font-semibold';
+  };
 
   // --- RENDERIZADO (HTML) ---
   return (
@@ -483,7 +545,7 @@ export default function Dashboard() {
         </div>
 
         {/* --- TARJETAS DE MÉTRICAS (KPIs) --- */}
-        <div className="grid gap-4 md:grid-cols-3">
+        <div className="grid gap-4 md:grid-cols-4">
           {/* Tarjeta 1: Cantidad Total */}
           <Card className="border-gray-200 shadow-sm">
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
@@ -519,7 +581,32 @@ export default function Dashboard() {
             </CardContent>
           </Card>
 
-          {/* Tarjeta 3: Planta con mayor volumen */}
+          {/* Tarjeta 3: Merma global */}
+          <Card className="border-gray-200 shadow-sm">
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+              <CardTitle className="text-sm font-bold text-gray-700">Merma</CardTitle>
+              <Factory className="h-4 w-4 text-gray-500" />
+            </CardHeader>
+            <CardContent>
+              {(() => {
+                const total = metrics.totalMerma + metrics.totalProduced;
+                const pct = total > 0 ? (metrics.totalMerma / total) * 100 : 0;
+                const color = pct >= 5 ? 'text-red-600' : pct >= 2 ? 'text-amber-600' : 'text-green-600';
+                return (
+                  <div className="flex flex-col space-y-1">
+                    <div className="flex items-baseline justify-between">
+                      <div className={`text-2xl font-black ${color}`}>{pct.toFixed(2)}%</div>
+                    </div>
+                    <div className="text-xs text-gray-500 font-medium">
+                      {metrics.totalMerma.toLocaleString('es-ES', { minimumFractionDigits: 2 })} merma / {metrics.totalProduced.toLocaleString('es-ES', { minimumFractionDigits: 2 })} producido
+                    </div>
+                  </div>
+                );
+              })()}
+            </CardContent>
+          </Card>
+
+          {/* Tarjeta 4: Planta con mayor volumen */}
           <Card className="border-gray-200 shadow-sm">
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
               <CardTitle className="text-sm font-bold text-gray-700">Top Planta</CardTitle>
@@ -548,9 +635,11 @@ export default function Dashboard() {
                   <TableHead className="font-bold text-gray-700">Fecha</TableHead>
                   <TableHead className="font-bold text-gray-700">Artículo</TableHead>
                   <TableHead className="font-bold text-gray-700">Descripción</TableHead>
-                  <TableHead className="font-bold text-gray-700">Planta / Línea</TableHead>
                   <TableHead className="text-right font-bold text-gray-700">Cantidad</TableHead>
+                  <TableHead className="text-right font-bold text-gray-700">Merma</TableHead>
+                  <TableHead className="text-right font-bold text-gray-700">% Merma</TableHead>
                   <TableHead className="font-bold text-gray-700 text-center">UM</TableHead>
+                  <TableHead className="font-bold text-gray-700">Planta / Línea</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -562,17 +651,23 @@ export default function Dashboard() {
                     </TableCell>
                     <TableCell className="text-gray-700 font-mono text-xs bg-gray-100 px-2 py-1 rounded w-fit">{row.article}</TableCell>
                     <TableCell className="text-gray-600 uppercase text-xs font-semibold">{row.description}</TableCell>
+                    <TableCell className="text-right font-bold text-slate-900">
+                      {row.quantity?.toLocaleString('es-ES', { minimumFractionDigits: 2 })}
+                    </TableCell>
+                    <TableCell className="text-right text-sm text-gray-700">
+                      {Math.abs(row.merma || 0).toLocaleString('es-ES', { minimumFractionDigits: 2 })}
+                    </TableCell>
+                    <TableCell className={`text-right text-sm px-3 py-1 rounded ${getMermaColor(row.mermaPercent || 0)}`}>
+                      {(row.mermaPercent || 0).toFixed(2)}%
+                    </TableCell>
+                    <TableCell className="text-center text-xs text-gray-500 font-mono">
+                      {row.unit}
+                    </TableCell>
                     <TableCell>
                       <div className="flex flex-col">
                         <span className="font-bold text-gray-800 text-xs">{row.subLine}</span>
                         <span className="text-[10px] text-gray-400 font-mono">{row.subLineCode} · {row.plantCode}</span>
                       </div>
-                    </TableCell>
-                    <TableCell className="text-right font-bold text-slate-900">
-                      {row.quantity?.toLocaleString('es-ES', { minimumFractionDigits: 2 })}
-                    </TableCell>
-                    <TableCell className="text-center text-xs text-gray-500 font-mono">
-                      {row.unit}
                     </TableCell>
                   </TableRow>
                 ))}
@@ -580,7 +675,7 @@ export default function Dashboard() {
                 {/* Spinner si está cargando */}
                 {loading && (
                   <TableRow>
-                    <TableCell colSpan={6} className="text-center py-10">
+                    <TableCell colSpan={8} className="text-center py-10">
                       <Loader2 className="h-6 w-6 animate-spin mx-auto text-slate-800" />
                     </TableCell>
                   </TableRow>
@@ -589,7 +684,7 @@ export default function Dashboard() {
                 {/* Mensaje si no hay datos */}
                 {!loading && data.length === 0 && (
                   <TableRow>
-                    <TableCell colSpan={6} className="text-center py-10 text-gray-500 font-medium">
+                    <TableCell colSpan={8} className="text-center py-10 text-gray-500 font-medium">
                       No se encontraron datos para los filtros seleccionados.
                     </TableCell>
                   </TableRow>
