@@ -2,9 +2,12 @@ import { NextRequest, NextResponse } from 'next/server'; // Importamos tipos nec
 import { getDbConnection } from '@/lib/db'; // Importamos nuestra función personalizada para conectar a la base de datos
 import { parseJdeDate, parseWasOqs } from '@/lib/utils'; // Importamos funciones de utilidad para parsear fechas formato JDE y cantidades
 import { getDayOfYear } from 'date-fns'; // Importamos una función de una librería externa para obtener el día del año (1-366)
+import { getDb } from '@/lib/sqlite';
+import { verifySession } from '@/lib/auth';
 
 // Esta función exportada 'GET' manejará las peticiones HTTP GET a esta ruta (/api/production)
 export async function GET(req: NextRequest) {
+    const startTime = Date.now();
     // Obtenemos los parámetros de búsqueda de la URL (ej: ?plant=Funes&subLine=1)
     const { searchParams } = new URL(req.url);
 
@@ -236,6 +239,27 @@ export async function GET(req: NextRequest) {
         const rows = result.rows as any[];
 
         if (rows.length === 0) {
+            // Registrar consulta sin resultados en logs
+            try {
+                const user = await verifySession().catch(() => null);
+                const filters = {
+                    plant, subLine, startDate: startDateStr, endDate: endDateStr,
+                    articles, prp6s, srp3s, srp5s, srp2s, srp1s, srp4s, ze03s, prodLines
+                };
+                const db = getDb();
+                db.prepare(
+                    'INSERT INTO query_logs (user_id, username, source, filters, result_count, execution_time_ms) VALUES (?, ?, ?, ?, ?, ?)'
+                ).run(
+                    user?.id ?? null,
+                    user ? user.username : 'Invitado',
+                    'produccion',
+                    JSON.stringify(filters),
+                    0,
+                    Date.now() - startTime
+                );
+            } catch (logErr) {
+                console.error('Error logging query:', logErr);
+            }
             return NextResponse.json([]);
         }
 
@@ -390,6 +414,28 @@ export async function GET(req: NextRequest) {
                 : 0;
             return { ...item, mermaPercent };
         });
+
+        // Registrar consulta en logs
+        try {
+            const user = await verifySession().catch(() => null);
+            const filters = {
+                plant, subLine, startDate: startDateStr, endDate: endDateStr,
+                articles, prp6s, srp3s, srp5s, srp2s, srp1s, srp4s, ze03s, prodLines
+            };
+            const db = getDb();
+            db.prepare(
+                'INSERT INTO query_logs (user_id, username, source, filters, result_count, execution_time_ms) VALUES (?, ?, ?, ?, ?, ?)'
+            ).run(
+                user?.id ?? null,
+                user ? user.username : 'Invitado',
+                'produccion',
+                JSON.stringify(filters),
+                data.length,
+                Date.now() - startTime
+            );
+        } catch (logErr) {
+            console.error('Error logging query:', logErr);
+        }
 
         // Devolvemos los datos junto con el conteo de filas SQL originales
         // para que el frontend pueda determinar correctamente si hay más páginas

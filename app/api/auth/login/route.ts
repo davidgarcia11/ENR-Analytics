@@ -19,6 +19,15 @@ export async function POST(req: NextRequest) {
 
     const token = await createToken({ id: user.id, username: user.username, role: user.role, name: user.name || '', surname: user.surname || '' });
 
+    // Registrar login en logs
+    try {
+      db.prepare(
+        'INSERT INTO query_logs (user_id, username, source, filters, result_count, execution_time_ms) VALUES (?, ?, ?, ?, ?, ?)'
+      ).run(user.id, user.username, 'login', JSON.stringify({ action: 'login' }), null, null);
+    } catch (logErr) {
+      console.error('Error logging login:', logErr);
+    }
+
     const res = NextResponse.json({ ok: true, username: user.username, role: user.role, mustChangePassword: !!user.must_change_password });
     res.cookies.set(COOKIE_NAME, token, cookieOptions(req));
 

@@ -6,7 +6,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
-import { Loader2, Trash2, UserPlus, ArrowLeft, KeyRound, Pencil } from "lucide-react"
+import { Loader2, Trash2, UserPlus, ArrowLeft, KeyRound, Pencil, FileText } from "lucide-react"
 import Image from "next/image"
 
 interface User {
@@ -202,10 +202,16 @@ export default function AdminPage() {
               <p className="text-sm text-gray-500">Gestión de usuarios</p>
             </div>
           </div>
-          <Button variant="outline" onClick={() => router.push("/produccion")} className="text-gray-600">
-            <ArrowLeft className="mr-2 h-4 w-4" />
-            Volver al Dashboard
-          </Button>
+          <div className="flex gap-2">
+            <Button variant="outline" onClick={() => router.push("/admin/logs")} className="text-gray-600">
+              <FileText className="mr-2 h-4 w-4" />
+              Logs
+            </Button>
+            <Button variant="outline" onClick={() => router.push("/produccion")} className="text-gray-600">
+              <ArrowLeft className="mr-2 h-4 w-4" />
+              Dashboard
+            </Button>
+          </div>
         </div>
 
         {/* Crear usuario */}
