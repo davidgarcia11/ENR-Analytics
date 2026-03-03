@@ -36,6 +36,17 @@ export function getDb(): Database.Database {
       created_at TEXT DEFAULT (datetime('now')),
       UNIQUE(user_id, name)
     );
+
+    CREATE TABLE IF NOT EXISTS query_logs (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+      username TEXT NOT NULL DEFAULT 'Invitado',
+      source TEXT NOT NULL DEFAULT 'produccion',
+      filters TEXT NOT NULL,
+      result_count INTEGER,
+      execution_time_ms INTEGER,
+      created_at TEXT DEFAULT (datetime('now'))
+    );
   `);
 
   // Migración: añadir columna must_change_password si no existe (para BDs creadas antes de esta versión)
@@ -48,6 +59,12 @@ export function getDb(): Database.Database {
   }
   if (!columns.some(c => c.name === 'surname')) {
     _db.exec("ALTER TABLE users ADD COLUMN surname TEXT NOT NULL DEFAULT ''");
+  }
+
+  // Migración: añadir columna source a query_logs si no existe
+  const logColumns = _db.prepare("PRAGMA table_info(query_logs)").all() as { name: string }[];
+  if (!logColumns.some(c => c.name === 'source')) {
+    _db.exec("ALTER TABLE query_logs ADD COLUMN source TEXT NOT NULL DEFAULT 'produccion'");
   }
 
   // Crear admin por defecto si no existe ningún usuario
