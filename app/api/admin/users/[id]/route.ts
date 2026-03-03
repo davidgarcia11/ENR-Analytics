@@ -2,6 +2,36 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getDb } from '@/lib/sqlite';
 import { verifySession, hashPassword } from '@/lib/auth';
 
+// PUT: editar datos de un usuario (solo admin)
+export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+  const user = await verifySession();
+  if (!user || user.role !== 'admin') {
+    return NextResponse.json({ error: 'No autorizado' }, { status: 403 });
+  }
+
+  const { id } = await params;
+  const userId = Number(id);
+  const { username, name, surname, role } = await req.json();
+
+  if (!username || !username.trim()) {
+    return NextResponse.json({ error: 'El usuario es obligatorio' }, { status: 400 });
+  }
+
+  const db = getDb();
+
+  // Verificar que el username no esté en uso por otro usuario
+  const existing = db.prepare('SELECT id FROM users WHERE username = ? AND id != ?').get(username.trim(), userId) as any;
+  if (existing) {
+    return NextResponse.json({ error: 'Ya existe otro usuario con ese nombre de usuario' }, { status: 409 });
+  }
+
+  const userRole = role === 'admin' ? 'admin' : 'user';
+  db.prepare('UPDATE users SET username = ?, name = ?, surname = ?, role = ? WHERE id = ?')
+    .run(username.trim(), name || '', surname || '', userRole, userId);
+
+  return NextResponse.json({ ok: true });
+}
+
 // PATCH: resetear contraseña de un usuario (solo admin)
 export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const user = await verifySession();

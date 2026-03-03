@@ -21,6 +21,8 @@ export function getDb(): Database.Database {
       password_hash TEXT NOT NULL,
       role TEXT NOT NULL DEFAULT 'user',
       must_change_password INTEGER NOT NULL DEFAULT 0,
+      name TEXT NOT NULL DEFAULT '',
+      surname TEXT NOT NULL DEFAULT '',
       created_at TEXT DEFAULT (datetime('now'))
     );
 
@@ -38,6 +40,12 @@ export function getDb(): Database.Database {
   const columns = _db.prepare("PRAGMA table_info(users)").all() as { name: string }[];
   if (!columns.some(c => c.name === 'must_change_password')) {
     _db.exec("ALTER TABLE users ADD COLUMN must_change_password INTEGER NOT NULL DEFAULT 0");
+  }
+  if (!columns.some(c => c.name === 'name')) {
+    _db.exec("ALTER TABLE users ADD COLUMN name TEXT NOT NULL DEFAULT ''");
+  }
+  if (!columns.some(c => c.name === 'surname')) {
+    _db.exec("ALTER TABLE users ADD COLUMN surname TEXT NOT NULL DEFAULT ''");
   }
 
   // Crear admin por defecto si no existe ningún usuario

@@ -9,7 +9,7 @@ export async function GET() {
   }
 
   const db = getDb();
-  const users = db.prepare('SELECT id, username, role, created_at FROM users ORDER BY id').all();
+  const users = db.prepare('SELECT id, username, role, name, surname, created_at FROM users ORDER BY id').all();
   return NextResponse.json(users);
 }
 
@@ -20,7 +20,7 @@ export async function POST(req: NextRequest) {
   }
 
   try {
-    const { username, password, role, mustChangePassword } = await req.json();
+    const { username, password, role, mustChangePassword, name, surname } = await req.json();
 
     if (!username || !password) {
       return NextResponse.json({ error: 'Usuario y contraseña requeridos' }, { status: 400 });
@@ -32,7 +32,7 @@ export async function POST(req: NextRequest) {
     const db = getDb();
 
     try {
-      db.prepare('INSERT INTO users (username, password_hash, role, must_change_password) VALUES (?, ?, ?, ?)').run(username, hash, userRole, forceChange);
+      db.prepare('INSERT INTO users (username, password_hash, role, must_change_password, name, surname) VALUES (?, ?, ?, ?, ?, ?)').run(username, hash, userRole, forceChange, name || '', surname || '');
     } catch (err: any) {
       if (err.message?.includes('UNIQUE')) {
         return NextResponse.json({ error: 'El usuario ya existe' }, { status: 409 });

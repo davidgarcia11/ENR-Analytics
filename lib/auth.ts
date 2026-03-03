@@ -15,11 +15,13 @@ export interface SessionUser {
   id: number;
   username: string;
   role: string;
+  name: string;
+  surname: string;
 }
 
 /** Crea un JWT firmado con los datos del usuario */
 export async function createToken(user: SessionUser): Promise<string> {
-  return new SignJWT({ sub: String(user.id), username: user.username, role: user.role })
+  return new SignJWT({ sub: String(user.id), username: user.username, role: user.role, name: user.name, surname: user.surname })
     .setProtectedHeader({ alg: 'HS256' })
     .setIssuedAt()
     .setExpirationTime(JWT_EXPIRY)
@@ -38,6 +40,8 @@ export async function verifySession(): Promise<SessionUser | null> {
       id: Number(payload.sub),
       username: payload.username as string,
       role: payload.role as string,
+      name: (payload.name as string) || '',
+      surname: (payload.surname as string) || '',
     };
   } catch {
     return null;

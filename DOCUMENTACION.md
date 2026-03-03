@@ -13,6 +13,8 @@ Esta aplicación es un **panel de control (dashboard) de producción** para la e
 - Porcentaje de merma (desperdicio) por artículo
 - Desglose por planta, línea de producción y fechas
 - Exportación a Excel con formato condicional
+- Sistema de autenticación con gestión de usuarios (admin crea usuarios)
+- Presets de filtros guardados por usuario
 
 ### Tech Stack
 
@@ -23,6 +25,9 @@ Esta aplicación es un **panel de control (dashboard) de producción** para la e
 | **TypeScript** | 5 | Tipado estático sobre JavaScript |
 | **Tailwind CSS** | 4 | Estilos utilitarios (clases CSS) |
 | **oracledb** | 6 | Driver para conectar con Oracle desde Node.js |
+| **better-sqlite3** | — | Base de datos local para usuarios y presets |
+| **jose** | — | Firma/verificación de JWT para sesiones |
+| **bcryptjs** | — | Hash de contraseñas |
 | **xlsx** | 0.18 | Generar archivos Excel (.xlsx) |
 | **lucide-react** | 0.563 | Iconos SVG (Search, Factory, Download...) |
 | **date-fns** | 4 | Utilidades de fecha (`getDayOfYear`) |
@@ -34,18 +39,25 @@ Esta aplicación es un **panel de control (dashboard) de producción** para la e
 
 ```
 dashboard/
-├── .env.local                    ← Credenciales Oracle (NUNCA se sube a Git)
+├── .env.local                    ← Credenciales Oracle + JWT_SECRET (NUNCA se sube a Git)
+├── .gitignore                    ← Incluye /data/ para no subir la BD de usuarios
 ├── package.json                  ← Dependencias y scripts
-├── next.config.ts                ← Configuración de Next.js (cabecera HSTS)
+├── next.config.ts                ← Configuración de Next.js (HSTS + serverExternalPackages)
+├── middleware.ts                 ← Protección de rutas /api/admin/* (verifica JWT + admin)
 ├── tsconfig.json                 ← Configuración de TypeScript
 ├── postcss.config.mjs            ← Configuración de PostCSS (Tailwind v4)
 ├── eslint.config.mjs             ← Reglas de linting
+│
+├── data/
+│   └── app.db                    ← Base de datos SQLite (usuarios + presets, NO se sube a Git)
 │
 ├── public/
 │   └── logo.png                  ← Logo de la empresa (se sirve en /logo.png)
 │
 ├── lib/                          ← Lógica reutilizable (utilidades)
 │   ├── db.ts                     ← Conexión a Oracle
+│   ├── sqlite.ts                 ← Conexión a SQLite (usuarios, presets, migraciones)
+│   ├── auth.ts                   ← JWT, bcrypt, SessionUser, cookieOptions
 │   └── utils.ts                  ← Funciones auxiliares (fechas, cantidades, clases CSS)
 │
 ├── components/                   ← Componentes React reutilizables
@@ -60,9 +72,30 @@ dashboard/
     ├── globals.css               ← Estilos globales + importación de Tailwind
     ├── layout.tsx                ← Layout raíz (envuelve todas las páginas)
     ├── page.tsx                  ← Ruta "/" → muestra un 404 simple
+    ├── login/
+    │   └── page.tsx              ← Ruta "/login" → formulario de inicio de sesión
+    ├── admin/
+    │   └── page.tsx              ← Ruta "/admin" → panel de administración de usuarios
+    ├── cambiar-contrasena/
+    │   └── page.tsx              ← Ruta "/cambiar-contrasena" → cambio forzado de contraseña
     ├── produccion/
     │   └── page.tsx              ← Ruta "/produccion" → DASHBOARD PRINCIPAL
     └── api/
+        ├── auth/
+        │   ├── login/route.ts    ← POST /api/auth/login
+        │   ├── logout/route.ts   ← POST /api/auth/logout
+        │   ├── me/route.ts       ← GET /api/auth/me
+        │   └── change-password/
+        │       └── route.ts      ← POST /api/auth/change-password
+        ├── admin/
+        │   └── users/
+        │       ├── route.ts      ← GET/POST /api/admin/users
+        │       └── [id]/
+        │           └── route.ts  ← PATCH/DELETE /api/admin/users/:id
+        ├── presets/
+        │   ├── route.ts          ← GET/POST /api/presets
+        │   └── [id]/
+        │       └── route.ts      ← DELETE /api/presets/:id
         ├── categories/
         │   └── route.ts          ← GET /api/categories?field=X
         ├── production/
@@ -75,7 +108,7 @@ dashboard/
 
 ## 3. Configuración
 
-### `.env.local` — Credenciales de base de datos
+### `.env.local` — Credenciales y secretos
 
 ```env
 ORACLE_USER=<usuario_oracle>
@@ -83,6 +116,7 @@ ORACLE_PASSWORD=<contraseña_oracle>
 ORACLE_HOST=<ip_servidor_oracle>
 ORACLE_PORT=1521
 ORACLE_SERVICE=<nombre_servicio_oracle>
+JWT_SECRET=<clave_secreta_para_firmar_jwt>
 ```
 
 > **IMPORTANTE:** Este archivo NUNCA se sube al repositorio. Está en `.gitignore`.
@@ -97,123 +131,249 @@ ORACLE_SERVICE=<nombre_servicio_oracle>
 
 ### `next.config.ts`
 
-Solo tiene una configuración: añade la cabecera HTTP `Strict-Transport-Security` a todas las respuestas para forzar HTTPS.
+- Cabecera HTTP `Strict-Transport-Security` para forzar HTTPS
+- `serverExternalPackages: ['better-sqlite3']` — necesario para que el módulo nativo de SQLite funcione en producción con `npm start`
+
+### `middleware.ts` — Protección de rutas admin
+
+Intercepta todas las peticiones a `/api/admin/*`. Verifica:
+1. Que existe un JWT válido en la cookie `session`
+2. Que el usuario tiene `role === 'admin'`
+
+Si no cumple, devuelve 403.
 
 ### `tsconfig.json` — Alias `@/`
-
-La línea más importante para el día a día:
 
 ```json
 "paths": { "@/*": ["./*"] }
 ```
 
-Esto permite importar así:
-
-```ts
-import { getDbConnection } from '@/lib/db'   // En vez de '../../lib/db'
-```
-
-El `@` apunta a la raíz del proyecto (`dashboard/`).
+Permite importar así: `import { getDbConnection } from '@/lib/db'`
 
 ---
 
-## 4. Carpeta `lib/` — Utilidades Base
+## 4. Sistema de Autenticación
+
+### Arquitectura
+
+- **Base de datos:** SQLite local (`data/app.db`) — cero dependencias externas
+- **Sesiones:** JWT firmado con HS256, almacenado en cookie httpOnly
+- **Contraseñas:** Hash con bcryptjs (10 salt rounds)
+- **Dashboard público:** No se requiere login para ver datos. Los presets son un "plus" opcional.
+
+### `lib/sqlite.ts` — Inicialización y migraciones
+
+**Tablas:**
+
+```sql
+-- Usuarios
+CREATE TABLE users (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  username TEXT UNIQUE NOT NULL,
+  password_hash TEXT NOT NULL,
+  role TEXT NOT NULL DEFAULT 'user',        -- 'admin' | 'user'
+  must_change_password INTEGER DEFAULT 0,   -- 1 = forzar cambio en próximo login
+  name TEXT NOT NULL DEFAULT '',             -- Nombre del usuario
+  surname TEXT NOT NULL DEFAULT '',          -- Apellido del usuario
+  created_at TEXT DEFAULT (datetime('now'))
+);
+
+-- Presets de filtros
+CREATE TABLE presets (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  name TEXT NOT NULL,
+  filters TEXT NOT NULL,   -- JSON con los 13 filtros
+  created_at TEXT DEFAULT (datetime('now')),
+  UNIQUE(user_id, name)
+);
+```
+
+**Migraciones automáticas:** Al arrancar, comprueba si faltan columnas (`must_change_password`, `name`, `surname`) y las añade con `ALTER TABLE`. Esto permite actualizar DBs creadas antes de estas funcionalidades.
+
+**Usuario admin por defecto:** Si la tabla `users` está vacía, crea `admin` / `admin123` con role `admin`.
+
+### `lib/auth.ts` — Utilidades de autenticación
+
+| Función | Descripción |
+|---|---|
+| `createToken(user)` | Crea JWT con `{ sub, username, role, name, surname }`, expira en 7 días |
+| `verifySession()` | Lee cookie, verifica JWT, devuelve `SessionUser` o `null` |
+| `hashPassword(password)` | Hash bcrypt con 10 rounds |
+| `verifyPassword(password, hash)` | Compara contraseña contra hash |
+| `cookieOptions(req?)` | Genera opciones de cookie. `secure` depende de si la request es HTTPS |
+
+**Interfaz SessionUser:**
+```ts
+interface SessionUser {
+  id: number;
+  username: string;
+  role: string;
+  name: string;
+  surname: string;
+}
+```
+
+### Flujo de autenticación
+
+```
+LOGIN:
+  /login → POST /api/auth/login → JWT en cookie
+    ├── mustChangePassword=true → /cambiar-contrasena
+    └── mustChangePassword=false → /produccion
+
+CAMBIO DE CONTRASEÑA FORZADO:
+  /cambiar-contrasena → POST /api/auth/change-password
+    → Actualiza hash + must_change_password=0 → /produccion
+
+SESIÓN EN DASHBOARD:
+  /produccion → GET /api/auth/me (silencioso)
+    ├── Si logueado: muestra nombre + botón Presets + Salir
+    └── Si no: muestra enlace "Iniciar sesión"
+```
+
+### Cookie `secure` en LAN
+
+Las cookies con `secure: true` no funcionan sobre HTTP (solo HTTPS). Cuando el dashboard se sirve por LAN sin SSL, `cookieOptions(req)` detecta el protocolo real de la request (`req.url.startsWith('https')`) en vez de confiar en `NODE_ENV`.
+
+---
+
+## 5. Panel de Administración (`/admin`)
+
+### Acceso
+Solo usuarios con `role === 'admin'`. Si no eres admin, te redirige a `/produccion`.
+
+### Funcionalidades
+
+1. **Crear usuario:** Formulario con campos Nombre, Apellido, Usuario (login), Contraseña, Rol (user/admin), checkbox "Forzar cambio de contraseña"
+2. **Listar usuarios:** Tabla con ID, Nombre completo, Usuario, Rol (badge rojo/gris), Fecha creación
+3. **Resetear contraseña:** Botón por usuario → input inline → nueva contraseña + fuerza cambio en próximo login
+4. **Eliminar usuario:** Con confirmación. No puedes eliminarte a ti mismo.
+
+### APIs de administración
+
+| Método | Ruta | Descripción |
+|---|---|---|
+| GET | `/api/admin/users` | Lista todos los usuarios |
+| POST | `/api/admin/users` | Crea usuario (acepta name, surname, username, password, role, mustChangePassword) |
+| PATCH | `/api/admin/users/:id` | Resetea contraseña (fuerza cambio) |
+| DELETE | `/api/admin/users/:id` | Elimina usuario |
+
+---
+
+## 6. Presets de Filtros
+
+Los usuarios logueados pueden guardar combinaciones de filtros con nombre para reutilizarlos.
+
+### Qué se guarda en un preset (JSON)
+
+```json
+{
+  "plant": "10300",
+  "subLine": "all",
+  "startDate": "2026-01-01",
+  "endDate": "2026-03-02",
+  "selectedArticles": [],
+  "selectedPrp6": [],
+  "selectedSrp3": [],
+  "selectedSrp5": [],
+  "selectedSrp2": [],
+  "selectedSrp1": [],
+  "selectedSrp4": [],
+  "selectedZe03": [],
+  "selectedProdLines": []
+}
+```
+
+### UI de presets
+
+Dos formas de interactuar:
+
+1. **Panel expandible (botón "Presets"):** Lista completa de presets con opción de guardar y eliminar
+2. **Acceso rápido en la barra de acciones:** Dropdown "Cargar preset" + botón "Guardar" (pide nombre con prompt)
+
+### APIs de presets
+
+| Método | Ruta | Descripción |
+|---|---|---|
+| GET | `/api/presets` | Lista presets del usuario autenticado |
+| POST | `/api/presets` | Guarda nuevo preset |
+| DELETE | `/api/presets/:id` | Elimina preset propio |
+
+---
+
+## 7. Carpeta `lib/` — Utilidades Base
 
 ### `lib/db.ts` — Conexión a Oracle
 
 **Qué hace:** Exporta una función `getDbConnection()` que devuelve una conexión activa a Oracle.
 
 **Configuración global:**
-- `oracledb.outFormat = oracledb.OUT_FORMAT_OBJECT` → Las filas de los queries vienen como objetos `{ COLUMNA: valor }` en vez de arrays. Las columnas siempre son en **MAYÚSCULAS**.
+- `oracledb.outFormat = oracledb.OUT_FORMAT_OBJECT` → Las filas vienen como objetos `{ COLUMNA: valor }`. Columnas siempre en **MAYÚSCULAS**.
 
-**Cómo se usa en cada API route:**
+**Regla de oro:** Siempre usar `try/finally` para cerrar la conexión.
+
 ```ts
 let conn;
 try {
     conn = await getDbConnection();
     const result = await conn.execute(sql);
-    // usar result.rows
 } finally {
-    if (conn) await conn.close();  // SIEMPRE cerrar la conexión
+    if (conn) await conn.close();
 }
 ```
-
-> **Regla de oro:** Siempre usar `try/finally` para cerrar la conexión. Si no la cierras, el pool de Oracle se agota y el servidor se cuelga.
-
----
 
 ### `lib/utils.ts` — Funciones auxiliares
 
 #### `cn(...inputs)` — Combinar clases CSS
 
-Mezcla de `clsx` (lógica condicional) y `tailwind-merge` (resuelve conflictos de Tailwind).
-
-```ts
-cn('p-4', isError && 'bg-red-500')
-// → 'p-4 bg-red-500'  (si isError es true)
-// → 'p-4'             (si isError es false)
-```
-
-Se usa en todos los componentes UI para permitir sobreescribir clases.
+Mezcla de `clsx` + `tailwind-merge`.
 
 #### `parseJdeDate(jdeDate, wamcu?)` — Convertir fecha JDE
 
-JDE guarda las fechas como números de 6 dígitos en formato **CYYDDD**:
-- **C** = Código de sub-línea (1=Aguilar, 2=Corella, 3=Funes 1, 4=Funes 2, 5=Funes Past.)
-- **YY** = Año (24 = 2024, 26 = 2026)
-- **DDD** = Día del año (1-366)
+JDE guarda fechas como **CYYDDD**: C=sub-línea, YY=año, DDD=día del año.
 
-Ejemplo: `126061` → sub-línea `1`, año `26` (2026), día `61` (2 de marzo) → `{ date: 2026-03-02, subBlock: '1', subBlockName: 'Aguilar' }`
+Ejemplo: `126061` → sub-línea `1`, año `26` (2026), día `61` → `{ date: 2026-03-02, subBlock: '1', subBlockName: 'Aguilar' }`
 
-El parámetro `wamcu` (código de planta) personaliza los nombres:
-- `10100` → siempre "Aguilar"
-- `10200` → siempre "Corella"
-- `10300` → usa el código C: `1`/`3`=Funes 1, `2`/`4`=Funes 2, `5`=Funes Pasteurizado
+El parámetro `wamcu` personaliza los nombres de sub-línea según planta (10100=Aguilar, 10200=Corella, 10300=Funes 1/2/Past).
 
 #### `parseWasOqs(val)` — Convertir cantidad JDE
 
-JDE almacena cantidades multiplicadas por 100. Esta función divide entre 100.
-
-```ts
-parseWasOqs(150000)  // → 1500.00
-```
+Divide entre 100 (JDE almacena cantidades ×100).
 
 ---
 
-## 5. Tablas de Oracle JDE
-
-Estas son las tablas de la base de datos con las que trabaja el proyecto:
+## 8. Tablas de Oracle JDE
 
 ### Tablas principales
 
 | Tabla | Descripción | Campos clave |
 |---|---|---|
-| **F4801** | **Órdenes de fabricación** (Work Orders) | `WADOCO` (nº orden), `WADL01` (descripción), `WAMCU` (planta), `WAAITM` (artículo display), `WAITM` (artículo corto/numérico) |
-| **F4111** | **Movimientos de inventario** (Item Ledger) | `ILDOC` (nº orden), `ILTRDJ` (fecha JDE), `ILDCT` (tipo: IC=producción, IS=merma), `ILTRQT` (cantidad), `ILRCD` (código razón), `ILTRUM` (unidad medida), `ILMCUZ` (línea producción) |
-| **F4101** | **Maestro de artículos** (Item Master) | `IMITM` (ID corto), `IMUOM1` (UM primaria), `IMPRP6` (tipo proceso), `IMSRP1..5` (categorías) |
-| **F554101** | **Extensión del maestro** de artículos | `AAITM` (ID corto), `AAZE03` (gramaje) |
+| **F4801** | **Órdenes de fabricación** | `WADOCO` (nº orden), `WADL01` (descripción), `WAMCU` (planta), `WAAITM` (artículo display), `WAITM` (artículo corto) |
+| **F4111** | **Movimientos de inventario** | `ILDOC` (nº orden), `ILTRDJ` (fecha JDE), `ILDCT` (tipo: IC=producción, IS=merma), `ILTRQT` (cantidad), `ILRCD` (código razón), `ILTRUM` (UM), `ILMCUZ` (línea producción) |
+| **F4101** | **Maestro de artículos** | `IMITM` (ID corto), `IMUOM1` (UM primaria), `IMPRP6` (tipo proceso), `IMSRP1..5` (categorías) |
+| **F554101** | **Extensión del maestro** | `AAITM` (ID corto), `AAZE03` (gramaje) |
 | **F55TAR12** | **Tareas de producción** (custom) | `TODOCO` (nº orden), `TO55TAREA` (código fecha+sublínea) |
 
 ### Tablas auxiliares
 
-| Tabla | Descripción | Campos clave |
-|---|---|---|
-| **prodctl.f0005** | **Códigos definidos por usuario** (UDC) — es la tabla de "catálogos" | `DRSY` (sistema), `DRRT` (tipo), `DRKY` (código), `DRDL01` (descripción) |
-| **F41002** | **Conversiones de unidad de medida** | `UMITM` (artículo), `UMUM` (UM origen), `UMRUM` (UM destino), `UMCONV` (factor ×10.000.000) |
-| **F30006** | **Centros de trabajo** (Work Centers) | `IWMCU` (código centro) |
-| **F0006** | **Unidades de negocio** (Business Units) | `MCMCU` (código), `MCDL01` (descripción) |
+| Tabla | Descripción |
+|---|---|
+| **prodctl.f0005** | Códigos definidos por usuario (UDC) — catálogos |
+| **F41002** | Conversiones de unidad de medida |
+| **F30006** | Centros de trabajo (líneas producción) |
+| **F0006** | Unidades de negocio (Business Units) |
 
-### Relaciones entre tablas
+### Relaciones
 
 ```
 F55TAR12 (tareas)
     │ TODOCO
     ▼
-F4801 (órdenes) ──WAITM──► F4101 (maestro artículos)
-    │ WADOCO                      │ IMITM
-    ▼                             ▼
-F4111 (movimientos)          F554101 (extensión)
-    │                             │
+F4801 (órdenes) ──WAITM──► F4101 (maestro artículos) ──► F554101 (extensión)
+    │ WADOCO
+    ▼
+F4111 (movimientos)
     └── ILTRUM ──► F41002 (conversiones UM)
 
 F4101.IMPRP6/IMSRP1..5 ──► prodctl.f0005 (catálogos UDC)
@@ -222,21 +382,15 @@ F4111.ILMCUZ ──► F30006 + F0006 (líneas producción)
 
 ---
 
-## 6. API Routes (Endpoints del Servidor)
-
-Las API routes se ejecutan en el **servidor** (nunca en el navegador). El navegador las llama mediante `fetch()`.
-
----
+## 9. API Routes — Datos de producción
 
 ### `GET /api/categories?field=X`
 
 **Archivo:** `app/api/categories/route.ts`
 
-**Qué hace:** Devuelve las opciones `[{ id, description }]` para un desplegable de filtro.
+Devuelve las opciones `[{ id, description }]` para un desplegable de filtro.
 
-**Parámetro `field`:** Define qué categoría consultar.
-
-| field | Columna F4101 | DRSY | DRRT | Nombre en UI |
+| field | Columna | DRSY | DRRT | UI |
 |---|---|---|---|---|
 | `prp6` | IMPRP6 | 41 | 01 | Tipo Proceso OF |
 | `srp3` | IMSRP3 | 41 | S3 | Formato |
@@ -246,450 +400,174 @@ Las API routes se ejecutan en el **servidor** (nunca en el navegador). El navega
 | `srp4` | IMSRP4 | 41 | S4 | Marca |
 | `ze03` | AAZE03 (F554101) | 17 | B3 | Gramaje |
 
-**Dos estrategias SQL:**
-
-1. **`directF0005: true`** (la mayoría) → Consulta directamente la tabla `prodctl.f0005` filtrando por DRSY/DRRT. Devuelve todos los códigos existentes.
-
-2. **`directF0005: false`** (solo `prp6`) → Hace JOIN entre `F4101` y `f0005`. Así solo aparecen códigos que realmente se usan en artículos existentes.
-
-**Respuesta:**
-```json
-[
-  { "id": "ML", "description": "MERMELADAS Y CONFITURAS" },
-  { "id": "ZU", "description": "ZUMOS Y GAZPACHOS" }
-]
-```
-
----
-
 ### `GET /api/production?...filtros...`
 
 **Archivo:** `app/api/production/route.ts`
 
-**Qué hace:** Devuelve los datos de producción filtrados. Es el endpoint más complejo del proyecto.
+El endpoint más complejo. Devuelve datos de producción filtrados.
 
-**Parámetros de consulta:**
+**Parámetros:** `plant`, `subLine`, `startDate`, `endDate`, `article[]`, `prp6[]`, `srp3[]`, `srp5[]`, `srp2[]`, `srp1[]`, `srp4[]`, `ze03[]`, `prodLine[]`, `page`, `limit`
 
-| Parámetro | Tipo | Ejemplo | Descripción |
-|---|---|---|---|
-| `plant` | string | `10300` | Código de planta |
-| `subLine` | string | `3` | Sub-línea (1-5) |
-| `startDate` | string | `2026-03-01` | Fecha inicio (YYYY-MM-DD) |
-| `endDate` | string | `2026-03-02` | Fecha fin (YYYY-MM-DD) |
-| `article` | string[] | `0000012345` | Códigos de artículo (10 dígitos) |
-| `prp6` | string[] | `ML` | Filtro Tipo Proceso |
-| `srp3` | string[] | `01` | Filtro Formato |
-| `srp5` | string[] | `FR` | Filtro Sabor |
-| `srp2` | string[] | `AB` | Filtro Familia |
-| `srp1` | string[] | `CD` | Filtro Categoría |
-| `srp4` | string[] | `EF` | Filtro Marca |
-| `ze03` | string[] | `500` | Filtro Gramaje |
-| `prodLine` | string[] | `WC001` | Línea de producción (`__empty__` = sin línea) |
-| `page` | number | `1` | Página (paginación) |
-| `limit` | number | `150` | Registros por página (0 = todos) |
+**Lógica:**
+1. Construye SQL dinámico (JOINs condicionales según filtros activos)
+2. Ejecuta contra Oracle
+3. Obtiene UM primarias y factores de conversión
+4. Procesa filas: parsea fechas JDE, convierte UM (BFS), agrupa, calcula merma
+5. Devuelve `{ data: [...], sqlRowCount: N }`
 
-**Lógica paso a paso:**
+**Deduplicación F55TAR12:** `MOD(TO55TAREA, 100000)` extrae la fecha sin sub-código, `MAX` se queda con el registro más reciente (evita duplicados por migración de sub-códigos).
 
-1. **Parsear parámetros** — extrae todos los filtros de la URL
-2. **Construir SQL dinámicamente:**
-   - Base: JOIN entre `F55TAR12` (deduplicado) → `F4801` → `F4111`
-   - Si hay filtros de categoría → añade `INNER JOIN F4101`
-   - Si hay filtro de gramaje → añade `INNER JOIN F554101`
-   - Cada filtro activo añade una cláusula `WHERE`
-3. **Ejecutar SQL** contra Oracle
-4. **Consultas secundarias:**
-   - Obtener la UM primaria de cada artículo (de F4101)
-   - Obtener factores de conversión de UM (de F41002)
-5. **Procesar cada fila:**
-   - Parsear fecha JDE → fecha JavaScript
-   - Convertir cantidad a UM primaria (usando BFS en el grafo de conversiones)
-   - Agrupar por orden+fecha, sumar cantidades y merma
-   - Calcular `mermaPercent`
-6. **Devolver respuesta**
+**Merma:** Movimientos `IS` con código razón `P01-P05`, `Q01-Q10`. Viene como número negativo. Fórmula: `|merma| / (|merma| + producido) × 100`.
 
-**El truco de F55TAR12 (deduplicación):**
-
-```sql
-SELECT TODOCO, MAX(TO55TAREA) as TO55TAREA
-FROM F55TAR12
-GROUP BY TODOCO, MOD(TO55TAREA, 100000)
-```
-
-Antes de agosto, todos los registros usaban sub-código `1`. Después, Funes pasó a usar `3`, `4`, `5`. Para un mismo día y orden, pueden existir ambos registros (el viejo con `1` y el nuevo con `3`). Sin esta deduplicación, las cantidades se duplicarían porque ambos hacen JOIN al mismo registro de F4111.
-
-`MOD(TO55TAREA, 100000)` extrae solo la parte de fecha (sin el sub-código), y `MAX` se queda con el registro más reciente.
-
-**Merma (desperdicio):**
-
-Los movimientos de tipo `IS` (Issue Scrap) en F4111 son merma, pero solo si el código de razón (`ILRCD`) es uno de: `P01-P05`, `Q01-Q10`.
-
-```sql
-SUM(CASE WHEN C.ILDCT = 'IC' THEN C.ILTRQT ELSE 0 END) as WASOQS   -- producción
-SUM(CASE WHEN C.ILDCT = 'IS' THEN C.ILTRQT ELSE 0 END) as MERMA    -- merma (negativo)
-```
-
-La merma viene como número **negativo** de Oracle.
-
-**Fórmula del % merma:**
-```
-mermaPercent = |merma| / (|merma| + producido) × 100
-```
-
-**Conversión de unidades de medida (BFS):**
-
-JDE puede tener la misma cantidad en distintas UM. El sistema usa un algoritmo BFS (Breadth-First Search) de hasta 3 niveles para encontrar un camino de conversión:
-
-```
-UN → CJ → KG  (si no hay conversión directa UN→KG, busca un camino intermedio)
-```
-
-El factor de conversión en F41002 se almacena multiplicado por **10.000.000**, así que hay que dividir.
-
-**Respuesta:**
-```json
-{
-  "data": [
-    {
-      "order": "12345",
-      "date": "2026-03-02T00:00:00.000Z",
-      "productionDateRaw": 126061,
-      "description": "MERMELADA FRESA 350G",
-      "quantity": 150.5,
-      "merma": -2.3,
-      "mermaPercent": 1.5,
-      "unit": "UN",
-      "plantCode": "10300",
-      "article": "0000012345",
-      "subLine": "Funes 1",
-      "subLineCode": "3"
-    }
-  ],
-  "sqlRowCount": 148
-}
-```
-
-`sqlRowCount` es el número de filas que devolvió Oracle (antes de agrupar en JS). Se usa para saber si hay más páginas.
-
----
+**Conversión UM:** BFS de hasta 3 niveles en F41002. Factor ×10.000.000.
 
 ### `GET /api/production-lines`
 
 **Archivo:** `app/api/production-lines/route.ts`
 
-**Qué hace:** Devuelve las líneas de producción disponibles para el filtro.
-
-**SQL:** Consulta `F30006` (centros de trabajo) con JOIN a `F0006` (descripciones). Filtra centros activos (`IWAPSC >= '1'`).
-
-Añade al principio de la lista: `{ id: '__empty__', description: 'Sin línea' }` para permitir filtrar registros sin línea asignada.
-
-**Respuesta:**
-```json
-[
-  { "id": "__empty__", "description": "Sin línea" },
-  { "id": "WC001", "description": "LÍNEA 1 ENVASADO" },
-  { "id": "WC002", "description": "LÍNEA 2 PROCESADO" }
-]
-```
+Devuelve líneas de producción activas de F30006+F0006. Incluye `{ id: '__empty__', description: 'Sin línea' }` al principio.
 
 ---
 
-## 7. Página Principal — `app/produccion/page.tsx`
+## 10. Página Principal — `app/produccion/page.tsx`
 
-Esta es la página más grande del proyecto (~760 líneas). Es un **Client Component** (`"use client"`) porque usa hooks de React.
+Client Component (~850 líneas). Es el dashboard principal.
 
-### Estados (variables reactivas)
+### Estados principales
 
 | Estado | Tipo | Para qué |
 |---|---|---|
-| `data` | `any[]` | Registros de producción cargados |
-| `loading` | `boolean` | True mientras se cargan datos (muestra spinner) |
-| `page` | `number` | Página actual para paginación |
-| `hasMore` | `boolean` | ¿Hay más datos por cargar? |
+| `data` | `any[]` | Registros de producción |
+| `loading` | `boolean` | Spinner mientras carga |
+| `page` / `hasMore` | `number` / `boolean` | Paginación |
 | `filters` | `object` | `{ plant, subLine, startDate, endDate }` |
-| `selectedArticles` | `string[]` | Artículos seleccionados en el filtro |
-| `availableArticles` | `{id, description}[]` | Opciones del desplegable de artículos |
-| `selectedPrp6..Ze03` | `string[]` | Valores seleccionados en cada filtro de categoría |
-| `availablePrp6..Ze03` | `{id, description}[]` | Opciones de cada desplegable de categoría |
-| `selectedProdLines` | `string[]` | Líneas de producción seleccionadas |
-| `metrics` | `object` | Totales calculados (cantidad UN/KG, órdenes, merma, por planta) |
+| `selectedArticles`, `selectedPrp6`...`selectedZe03`, `selectedProdLines` | `string[]` | Multi-selects |
+| `sessionUser` | `SessionUser \| null` | Usuario autenticado |
+| `presets` | `Preset[]` | Presets del usuario |
+| `metrics` | `object` | KPIs calculados |
 
 ### Funciones principales
 
-#### `fetchData(pageNum, isNewSearch, allRecords?)`
+| Función | Descripción |
+|---|---|
+| `fetchData(page, isNew, all?)` | Fetch a `/api/production`, procesa respuesta, calcula métricas |
+| `applyFilters()` | Reset + fetchData con limit=0 (todos) |
+| `clearFilters()` | Resetea todos los filtros (no borra datos de la tabla) |
+| `exportToExcel()` | Genera .xlsx con coloreado condicional (top 25% merma en rojo) |
+| `checkSession()` | GET `/api/auth/me`, redirige si mustChangePassword |
+| `savePreset(name?)` | POST `/api/presets` con filtros actuales |
+| `loadPreset(preset)` | Restaura los 13 filtros desde el JSON del preset |
+| `displayData` (useMemo) | Agrupa, suma, ordena por %merma descendente |
 
-La función central. Construye la URL con todos los filtros activos, llama a `/api/production`, y procesa la respuesta:
-
-1. Construye `URLSearchParams` con todos los filtros
-2. Hace `fetch()` al servidor
-3. Con la respuesta:
-   - Determina si hay más páginas (`sqlRowCount >= limit`)
-   - Reemplaza o añade datos según `isNewSearch`
-   - Reconstruye la lista de artículos disponibles
-   - Recalcula métricas (totales UN, KG, órdenes, merma, por planta)
-
-#### `applyFilters()`
-
-Se ejecuta al pulsar "Filtrar". Resetea la página a 1, limpia datos, y llama a `fetchData(1, true, true)` para traer todos los registros que coinciden.
-
-#### `clearFilters()`
-
-Se ejecuta al pulsar "Limpiar". Resetea todos los filtros a sus valores por defecto (fechas = hoy, planta = "all", todos los multi-select vacíos).
-
-#### `handlePlantChange(plantValue)`
-
-Cuando el usuario cambia la planta, auto-configura la sub-línea:
-- Aguilar (10100) → sub-línea `1`
-- Corella (10200) → sub-línea `2`
-- Funes (10300) → sub-línea `all` (el usuario elige)
-- Todas → sub-línea `all`
-
-#### `exportToExcel()`
-
-Genera un archivo `.xlsx` con los datos actuales:
-
-1. Ordena por `% merma` de mayor a menor
-2. Mapea columnas: Fecha, Artículo, Descripción, Cantidad, Merma, % Merma, UM, Planta/Línea
-3. Aplica formato porcentaje a la columna % Merma
-4. Colorea en rojo las filas del top 25% de merma (percentil 75)
-5. Descarga el archivo con nombre `Produccion_[fechaInicio]_[fechaFin].xlsx`
-
-#### `displayData` (useMemo)
-
-Dato procesado y agrupado que alimenta la tabla. Se recalcula cuando `data` cambia:
-
-1. Agrupa por `artículo + fecha + sub-línea + unidad`
-2. Suma `quantity` y `merma` dentro de cada grupo
-3. Calcula `mermaPercent = |merma| / (|merma| + cantidad) × 100`
-4. Ordena por `mermaPercent` descendente (más desperdicio primero)
-
-#### `mermaP75` (useMemo)
-
-Calcula el percentil 75 de los valores de `mermaPercent`. Se usa como umbral para el coloreado "crítico".
-
-#### `getMermaColor(percent)`
-
-Devuelve clases CSS según el nivel de merma:
-
-| Condición | Color | Significado |
-|---|---|---|
-| `= 0%` | Gris | Sin merma |
-| `≥ mermaP75` (top 25%) | Rojo oscuro + negrita | Crítico |
-| `≥ 5%` | Rojo | Alto |
-| `≥ 2%` | Ámbar | Medio |
-| `< 2%` | Verde | Bajo |
-
-### Estructura visual (UI)
+### Estructura visual
 
 ```
 ┌─────────────────────────────────────────────────────────┐
-│  [LOGO]                                                 │
-│  DASHBOARD DE PRODUCCIÓN                                │
+│ [LOGO]                          [Usuario ▪ Admin ▪ Salir]│
 │                                                         │
-│  ┌─ Filtros ──────────────────────────────────────────┐ │
-│  │ Artículo │ Tipo Proceso │ Formato │ Sabor │ ...    │ │
-│  │ Fecha Inicio │ Fecha Fin │ Planta │ Sub-línea      │ │
-│  │ [Filtrar] [Excel] [Limpiar]                        │ │
-│  └────────────────────────────────────────────────────┘ │
+│ ┌─ Filtros ──────────────────────────────────────────┐  │
+│ │ ── Categorías ──                                   │  │
+│ │ Artículo│Tipo Proc│Formato│Sabor│Familia│...       │  │
+│ │ ─────────────────────────────────────────          │  │
+│ │ ── Fechas y Planta ──                              │  │
+│ │ F.Inicio│F.Fin│Planta│Sub-planta                   │  │
+│ │ ─────────────────────────────────────────          │  │
+│ │             [Filtrar][Excel][Limpiar][Preset▼][+]  │  │
+│ └────────────────────────────────────────────────────┘  │
 │                                                         │
-│  ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐  │
-│  │ Cantidad │ │ Órdenes  │ │  Merma   │ │Top Planta│  │
-│  │ Total    │ │          │ │  2.34%   │ │ Funes 1  │  │
-│  └──────────┘ └──────────┘ └──────────┘ └──────────┘  │
+│ ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐   │
+│ │ Cantidad │ │ Órdenes  │ │  Merma   │ │Top Planta│   │
+│ │ Total    │ │          │ │  2.34%   │ │ Funes 1  │   │
+│ └──────────┘ └──────────┘ └──────────┘ └──────────┘   │
 │                                                         │
-│  ┌─ Detalle de Producción ────────────────────────────┐ │
-│  │ Fecha │ Artículo │ Desc. │ Cant. │ Merma │ %M │UM │ │
-│  │ 02/03 │ 00001234 │ MERM..│ 1500  │ -23   │2.3%│UN │ │
-│  │ ...   │ ...      │ ...   │ ...   │ ...   │... │.. │ │
-│  │         [Cargar más] [Cargar todos]                │ │
-│  └────────────────────────────────────────────────────┘ │
+│ ┌─ Detalle de Producción ────────────────────────────┐  │
+│ │ Fecha │ Artículo │ Desc. │ Cant. │ Merma │ %M │UM │  │
+│ │ 02/03 │ 00001234 │ MERM..│ 1500  │ -23   │2.3%│UN │  │
+│ │         [Cargar más] [Cargar todos]                │  │
+│ └────────────────────────────────────────────────────┘  │
 └─────────────────────────────────────────────────────────┘
 ```
 
----
+**Panel de filtros organizado en 3 secciones:**
+1. **Categorías:** 9 multi-selects (Artículo, Tipo Proceso, Formato, Sabor, Familia, Categoría, Marca, Gramaje, Línea Producción)
+2. **Fechas y Planta:** Fecha Inicio, Fecha Fin, Planta, Sub-planta (condicional)
+3. **Acciones:** Filtrar (rojo), Excel (verde), Limpiar (gris), Cargar preset (dropdown), Guardar preset (azul)
 
-## 8. Componentes Reutilizables
-
-### `ArticleMultiSelect.tsx` — Desplegable multi-selección
-
-**Props:**
-
-| Prop | Tipo | Default | Descripción |
-|---|---|---|---|
-| `articles` | `{id, description}[]` | — | Opciones disponibles |
-| `selected` | `string[]` | — | IDs seleccionados |
-| `onChange` | `(string[]) => void` | — | Callback al cambiar selección |
-| `label` | `string` | `"Artículos"` | Texto del placeholder |
-| `showId` | `boolean` | `true` | Mostrar ID junto a descripción |
-
-**Comportamiento:**
-- Botón muestra "Filtrar por [label]..." o badge "N seleccionados"
-- Al abrir: panel flotante con buscador (auto-focus) + lista de checkboxes
-- Busca por ID o descripción (insensible a mayúsculas)
-- "Sel. todos" selecciona los filtrados visibles; "Ninguno" deselecciona todo
-- Click fuera cierra el desplegable
-
-Se usa para los **9 filtros**: Artículo, Tipo Proceso, Formato, Sabor, Familia, Categoría, Marca, Gramaje, Línea de Producción.
-
-### `ui/button.tsx` — Botón con variantes
-
-Usa `class-variance-authority` para gestionar variantes:
-
-| Variante | Aspecto | Uso en el proyecto |
-|---|---|---|
-| `default` | Fondo oscuro | — |
-| `outline` | Borde, fondo blanco | Excel, Limpiar |
-| `ghost` | Transparente | Cargar más |
-| `destructive` | Rojo | — |
-| `secondary` | Gris claro | — |
-| `link` | Parece enlace | — |
-
-El botón "Filtrar" usa `style` inline con el color corporativo `#D30B15`.
-
-### `ui/card.tsx` — Tarjeta
-
-Cuatro componentes: `Card`, `CardHeader`, `CardTitle`, `CardContent`. Componen el layout de las tarjetas KPI y la tabla.
-
-### `ui/input.tsx` — Campo de texto
-
-Input estilizado con Tailwind. Se usa para los campos de fecha.
-
-### `ui/table.tsx` — Tabla
-
-Seis componentes: `Table`, `TableHeader`, `TableBody`, `TableRow`, `TableHead`, `TableCell`. El `Table` envuelve en un div con `overflow-auto` para scroll horizontal.
+Cada sección separada por divisores sutiles (`border-t border-gray-100`).
 
 ---
 
-## 9. Flujo Completo: Click en "Filtrar"
+## 11. Componentes Reutilizables
 
-```
-1. USUARIO pulsa "Filtrar"
-   └─► applyFilters()
-       ├─► setPage(1)
-       ├─► setData([])
-       └─► fetchData(1, true, true)
+### `ArticleMultiSelect.tsx`
 
-2. fetchData() construye URL:
-   /api/production?plant=10300&startDate=2026-03-01&endDate=2026-03-02&limit=0
+Desplegable multi-selección con búsqueda. Se usa para los 9 filtros de categoría.
 
-3. NAVEGADOR → GET /api/production?... → SERVIDOR
+**Props:** `articles`, `selected`, `onChange`, `label`, `showId`
 
-4. production/route.ts (en el servidor):
-   a. Parsea parámetros
-   b. Abre conexión Oracle (getDbConnection)
-   c. Construye SQL dinámico:
-      - F55TAR12 (deduplicado) → JOIN F4801 → JOIN F4111
-      - + JOIN F4101 (si hay filtros de categoría)
-      - + JOIN F554101 (si hay filtro de gramaje)
-      - + WHERE para cada filtro activo
-   d. Ejecuta SQL → Oracle devuelve filas
-   e. Consultas secundarias: UM primarias + factores conversión
-   f. Procesa cada fila:
-      - Parsea fecha JDE
-      - Convierte UM (BFS)
-      - Agrupa por orden+fecha
-      - Calcula mermaPercent
-   g. Cierra conexión
-   h. Devuelve JSON: { data: [...], sqlRowCount: N }
+**Comportamiento:** Botón con badge de seleccionados → panel flotante con buscador + checkboxes + "Sel. todos" / "Ninguno".
 
-5. SERVIDOR → JSON → NAVEGADOR
+### Componentes UI (`components/ui/`)
 
-6. fetchData() recibe respuesta:
-   a. Actualiza estado `data`
-   b. Recalcula métricas
-   c. Determina `hasMore`
-
-7. displayData (useMemo) se recalcula:
-   - Agrupa por artículo+fecha+sublínea+unidad
-   - Suma cantidades y merma
-   - Ordena por % merma descendente
-
-8. React re-renderiza:
-   - 4 tarjetas KPI se actualizan
-   - Tabla muestra filas con colores condicionales
-   - Botones de paginación se muestran/ocultan
-```
+| Componente | Descripción |
+|---|---|
+| `button.tsx` | Botón con variantes (default, outline, ghost, destructive, secondary, link) |
+| `card.tsx` | Card, CardHeader, CardTitle, CardContent |
+| `input.tsx` | Input estilizado |
+| `table.tsx` | Table, TableHeader, TableBody, TableRow, TableHead, TableCell |
 
 ---
 
-## 10. Gotchas y Patrones Importantes
+## 12. Gotchas y Patrones Importantes
 
 ### Oracle CHAR vs VARCHAR2
 
-**El problema:** Oracle tiene dos tipos de texto: `CHAR` (longitud fija, relleno con espacios) y `VARCHAR2` (longitud variable). El driver `oracledb` envía los bind variables como VARCHAR2. Cuando comparas un VARCHAR2 con un CHAR, **no coinciden** aunque el valor sea el mismo.
+El driver `oracledb` envía bind variables como VARCHAR2. Los campos CHAR tienen padding de espacios y no coinciden.
 
-**La solución en este proyecto:**
-- Valores **hardcodeados** (como `DRSY='41'`): se embeben directamente en el SQL
-- Valores **del usuario** (como artículos): se usa `TRIM()` en la columna Oracle + bind variables
-
-```ts
-// ✅ BIEN — valor hardcodeado, seguro embeber
-WHERE TRIM(F.DRSY) = '41'
-
-// ✅ BIEN — valor del usuario, usar bind variable con TRIM
-WHERE TRIM(D.IMPRP6) IN (:prp6_0, :prp6_1)
-
-// ❌ MAL — bind variable contra CHAR sin TRIM, no funciona
-WHERE F.DRSY = :drsy
-```
+- Valores **hardcodeados**: embeber en SQL directamente
+- Valores **del usuario**: usar `TRIM()` en la columna + bind variables
 
 ### Fechas JDE (CYYDDD)
 
-Nunca intentes interpretar fechas JDE manualmente. Usa `parseJdeDate()` de `lib/utils.ts`.
+Usar `parseJdeDate()`. Para convertir a JDE: `(year - 2000) * 1000 + getDayOfYear(date)`.
 
-Para convertir una fecha JavaScript a formato JDE (para filtros SQL):
-```ts
-const jdeDate = (year - 2000) * 1000 + getDayOfYear(date);
-// 2026-03-02 → 26 * 1000 + 61 = 26061
-```
+### Cantidades JDE (×100) y Conversiones UM (×10.000.000)
 
-### Cantidades JDE (×100)
-
-Todas las cantidades en F4111/F4801 están **multiplicadas por 100**. Siempre dividir entre 100 al mostrar.
-
-### Factores de conversión UM (×10.000.000)
-
-Los factores de conversión en F41002 están multiplicados por **10.000.000**. Dividir al aplicar.
+Siempre dividir. Las cantidades vienen ×100. Los factores de conversión ×10.000.000.
 
 ### `"use client"` vs Server Components
 
-- **`"use client"`** al principio del archivo → se ejecuta en el **navegador**. Puede usar `useState`, `useEffect`, eventos de click, etc.
-- **Sin directiva** → se ejecuta en el **servidor**. No puede usar hooks ni eventos del navegador.
-- Las API routes (`app/api/...`) siempre son servidor, no necesitan directiva.
+- `"use client"` → navegador (hooks, eventos)
+- Sin directiva → servidor
+- API routes → siempre servidor
 
-### Siempre cerrar conexiones Oracle
+### Conexiones Oracle — siempre cerrar
 
-```ts
-// ✅ SIEMPRE usar try/finally
-let conn;
-try {
-    conn = await getDbConnection();
-    // ... hacer queries
-} finally {
-    if (conn) await conn.close();
-}
-```
-
-Si olvidas cerrar una conexión, el pool de Oracle se agota y la aplicación deja de funcionar.
+Si no cierras con `try/finally`, el pool se agota y la app se cuelga.
 
 ### Prevención de SQL Injection
 
-- Valores del usuario → **bind variables** (`:param`)
-- Artículos → validados con regex `/^\d{10}$/` antes de usarse
-- Valores del `FIELD_MAP` → embebidos directamente (son constantes del código, no del usuario)
+- Valores del usuario → bind variables (`:param`)
+- Artículos → validados con regex `/^\d{10}$/`
+- Valores del FIELD_MAP → embebidos (constantes del código)
 
-### Color corporativo
+### Color corporativo `#D30B15`
 
-El color principal de la marca es `#D30B15` (rojo). Se usa en:
-- Borde superior de tarjetas KPI y paneles
-- Botón "Filtrar"
-- Iconos de las tarjetas KPI
-- Línea bajo el subtítulo del dashboard
+Se usa en: borde superior de tarjetas KPI/filtros/tabla, botón Filtrar, iconos KPI.
+
+### Cookie `secure` en LAN
+
+No usar `secure: process.env.NODE_ENV === 'production'`. En su lugar, `cookieOptions(req)` detecta HTTPS desde la URL real de la request.
+
+### `serverExternalPackages` en next.config.ts
+
+`better-sqlite3` es un módulo nativo. Sin `serverExternalPackages: ['better-sqlite3']`, el build de producción falla.
 
 ---
 
-## 11. Cómo Añadir un Nuevo Filtro de Categoría
+## 13. Cómo Añadir un Nuevo Filtro de Categoría
 
-Si necesitas añadir un nuevo filtro (ejemplo: "Subcategoría" con campo `IMSRP6`, DRSY=`41`, DRRT=`S6`):
+Si necesitas un nuevo filtro (ejemplo: "Subcategoría" con campo `IMSRP6`, DRSY=`41`, DRRT=`S6`):
 
 ### Paso 1: `app/api/categories/route.ts`
 
@@ -700,68 +578,21 @@ srp6: { col: 'IMSRP6', drsy: '41', drrt: 'S6', directF0005: true },
 
 ### Paso 2: `app/api/production/route.ts`
 
-1. Leer el parámetro:
-```ts
-const srp6s = searchParams.getAll('srp6');
-```
-
-2. Añadir la columna a la condición de `extraJoins` (si usa F4101):
-```ts
-const extraJoins = (prp6s.length > 0 || srp3s.length > 0 || ... || srp6s.length > 0)
-    ? `INNER JOIN F4101 D ON D.IMITM = A.WAITM` : '';
-```
-
-3. Añadir cláusula WHERE:
-```ts
-if (srp6s.length > 0) {
-    const placeholders = srp6s.map((_, i) => `:srp6_${i}`).join(',');
-    sql += ` AND TRIM(D.IMSRP6) IN (${placeholders})`;
-    srp6s.forEach((v, i) => { binds[`srp6_${i}`] = v; });
-}
-```
+1. Leer parámetro: `const srp6s = searchParams.getAll('srp6');`
+2. Añadir a condición de `extraJoins` (JOIN F4101)
+3. Añadir cláusula WHERE con TRIM y bind variables
 
 ### Paso 3: `app/produccion/page.tsx`
 
-1. Añadir estados:
-```ts
-const [selectedSrp6, setSelectedSrp6] = useState<string[]>([])
-const [availableSrp6, setAvailableSrp6] = useState<{ id: string; description: string }[]>([])
-```
-
-2. En el `useEffect`, añadir fetch:
-```ts
-fetch('/api/categories?field=srp6').then(r => r.json()).then(setAvailableSrp6)
-```
-
-3. En `fetchData`, añadir al `URLSearchParams`:
-```ts
-selectedSrp6.forEach(v => params.append('srp6', v));
-```
-
-4. En `clearFilters`, añadir:
-```ts
-setSelectedSrp6([]);
-```
-
-5. En el JSX, añadir el desplegable:
-```tsx
-<div className="grid gap-1.5">
-  <label className="text-xs font-semibold text-gray-700">Subcategoría</label>
-  <div className="w-[200px]">
-    <ArticleMultiSelect
-      articles={availableSrp6}
-      selected={selectedSrp6}
-      onChange={setSelectedSrp6}
-      label="Subcategoría"
-      showId={false}
-    />
-  </div>
-</div>
-```
+1. Añadir estados: `selectedSrp6` + `availableSrp6`
+2. Fetch en `useEffect`: `/api/categories?field=srp6`
+3. Añadir al `URLSearchParams` en `fetchData`
+4. Añadir al `clearFilters`
+5. Añadir `<ArticleMultiSelect>` en la sección "Categorías" del panel de filtros
 
 ---
 
-## 12. Cómo Arrancar el Proyecto
+## 14. Cómo Arrancar el Proyecto
 
 ```bash
 # 1. Instalar dependencias
@@ -781,3 +612,15 @@ bun start
 ```
 
 > **Nota:** La ruta raíz `/` muestra un 404 a propósito. La app está en `/produccion`.
+
+### Primer acceso
+
+1. Ir a `/login` → usuario `admin`, contraseña `admin123`
+2. Ir a `/admin` → crear usuarios con nombre, apellido y contraseña
+3. La base de datos SQLite (`data/app.db`) se crea automáticamente al arrancar
+4. `data/` está en `.gitignore` → los usuarios y presets **no se pierden** al hacer `git pull`
+
+### Despliegue en servidor
+
+- `data/app.db` persiste entre despliegues (no se sube a Git, no se sobreescribe)
+- Si necesitas reiniciar usuarios: eliminar `data/app.db` y se recreará con el admin por defecto

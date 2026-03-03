@@ -11,13 +11,13 @@ export async function POST(req: NextRequest) {
     }
 
     const db = getDb();
-    const user = db.prepare('SELECT id, username, password_hash, role, must_change_password FROM users WHERE username = ?').get(username) as any;
+    const user = db.prepare('SELECT id, username, password_hash, role, must_change_password, name, surname FROM users WHERE username = ?').get(username) as any;
 
     if (!user || !verifyPassword(password, user.password_hash)) {
       return NextResponse.json({ error: 'Credenciales incorrectas' }, { status: 401 });
     }
 
-    const token = await createToken({ id: user.id, username: user.username, role: user.role });
+    const token = await createToken({ id: user.id, username: user.username, role: user.role, name: user.name || '', surname: user.surname || '' });
 
     const res = NextResponse.json({ ok: true, username: user.username, role: user.role, mustChangePassword: !!user.must_change_password });
     res.cookies.set(COOKIE_NAME, token, cookieOptions(req));

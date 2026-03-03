@@ -20,7 +20,7 @@ import * as XLSX from 'xlsx'; // Librería 'xlsx' para generar archivos Excel
 import { ArticleMultiSelect } from "@/components/ArticleMultiSelect"
 import { useRouter } from "next/navigation"
 
-interface SessionUser { id: number; username: string; role: string }
+interface SessionUser { id: number; username: string; role: string; name: string; surname: string }
 interface Preset { id: number; name: string; filters: string; created_at: string }
 
 // Función principal del componente Dashboard
@@ -496,12 +496,14 @@ export default function Dashboard() {
       <div className="mx-auto max-w-7xl space-y-8">
 
         {/* --- BARRA DE SESIÓN --- */}
-        <div className="flex items-center justify-end gap-3">
+        <div className="flex items-center gap-3">
+          <Image src="/logo.png" alt="Elaborados Naturales" width={120} height={42} priority />
+          <div className="flex-1" />
           {sessionUser ? (
             <>
               <span className="text-sm text-gray-600 flex items-center gap-1.5">
                 <User className="h-3.5 w-3.5" />
-                {sessionUser.username}
+                {sessionUser.name ? `${sessionUser.name} ${sessionUser.surname || ''}`.trim() : sessionUser.username}
               </span>
               {sessionUser.role === 'admin' && (
                 <button onClick={() => router.push('/admin')} className="text-xs text-gray-500 hover:text-gray-700 flex items-center gap-1">
@@ -580,234 +582,223 @@ export default function Dashboard() {
           </div>
         )}
 
-        {/* --- CABECERA Y FILTROS --- */}
-        <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
-          <div className="flex flex-col items-center shrink-0">
-            <Image src="/logo.png" alt="Elaborados Naturales" width={160} height={56} priority />
-            <span className="text-xs font-medium text-gray-500 mt-1 tracking-wide uppercase" style={{ borderBottom: '2px solid #D30B15', paddingBottom: '2px' }}>Dashboard de Producción</span>
-          </div>
+        {/* --- FILTROS --- */}
+        <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-200 space-y-4" style={{ borderTop: '3px solid #D30B15' }}>
 
-          {/* Panel de Filtros */}
-          <div className="flex flex-wrap items-end gap-4 bg-white p-4 rounded-xl shadow-sm border border-gray-200" style={{ borderTop: '3px solid #D30B15' }}>
-            {/* Filtro: Artículo (multi-select, se popula con los resultados cargados) */}
-            <div className="grid gap-1.5">
-              <label className="text-xs font-semibold text-gray-700">Artículo</label>
-              <div className="w-[200px]">
-                <ArticleMultiSelect
-                  articles={availableArticles}
-                  selected={selectedArticles}
-                  onChange={setSelectedArticles}
-                />
+            {/* Sección 1: Filtros de categoría */}
+            <div>
+              <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">Categorías</p>
+              <div className="flex flex-wrap items-end gap-3">
+                <div className="grid gap-1.5">
+                  <label className="text-xs font-semibold text-gray-700">Artículo</label>
+                  <div className="w-[170px]">
+                    <ArticleMultiSelect
+                      articles={availableArticles}
+                      selected={selectedArticles}
+                      onChange={setSelectedArticles}
+                    />
+                  </div>
+                </div>
+                <div className="grid gap-1.5">
+                  <label className="text-xs font-semibold text-gray-700">Tipo Proceso OF</label>
+                  <div className="w-[170px]">
+                    <ArticleMultiSelect
+                      articles={availablePrp6}
+                      selected={selectedPrp6}
+                      onChange={setSelectedPrp6}
+                      label="Tipo Proceso"
+                    />
+                  </div>
+                </div>
+                <div className="grid gap-1.5">
+                  <label className="text-xs font-semibold text-gray-700">Formato</label>
+                  <div className="w-[170px]">
+                    <ArticleMultiSelect
+                      articles={availableSrp3}
+                      selected={selectedSrp3}
+                      onChange={setSelectedSrp3}
+                      label="Formato"
+                    />
+                  </div>
+                </div>
+                <div className="grid gap-1.5">
+                  <label className="text-xs font-semibold text-gray-700">Sabor</label>
+                  <div className="w-[170px]">
+                    <ArticleMultiSelect
+                      articles={availableSrp5}
+                      selected={selectedSrp5}
+                      onChange={setSelectedSrp5}
+                      label="Sabor"
+                    />
+                  </div>
+                </div>
+                <div className="grid gap-1.5">
+                  <label className="text-xs font-semibold text-gray-700">Familia</label>
+                  <div className="w-[170px]">
+                    <ArticleMultiSelect
+                      articles={availableSrp2}
+                      selected={selectedSrp2}
+                      onChange={setSelectedSrp2}
+                      label="Familia"
+                    />
+                  </div>
+                </div>
+                <div className="grid gap-1.5">
+                  <label className="text-xs font-semibold text-gray-700">Categoría</label>
+                  <div className="w-[170px]">
+                    <ArticleMultiSelect
+                      articles={availableSrp1}
+                      selected={selectedSrp1}
+                      onChange={setSelectedSrp1}
+                      label="Categoría"
+                    />
+                  </div>
+                </div>
+                <div className="grid gap-1.5">
+                  <label className="text-xs font-semibold text-gray-700">Marca</label>
+                  <div className="w-[170px]">
+                    <ArticleMultiSelect
+                      articles={availableSrp4}
+                      selected={selectedSrp4}
+                      onChange={setSelectedSrp4}
+                      label="Marca"
+                    />
+                  </div>
+                </div>
+                <div className="grid gap-1.5">
+                  <label className="text-xs font-semibold text-gray-700">Gramaje</label>
+                  <div className="w-[170px]">
+                    <ArticleMultiSelect
+                      articles={availableZe03}
+                      selected={selectedZe03}
+                      onChange={setSelectedZe03}
+                      label="Gramaje"
+                    />
+                  </div>
+                </div>
+                <div className="grid gap-1.5">
+                  <label className="text-xs font-semibold text-gray-700">Línea Producción</label>
+                  <div className="w-[170px]">
+                    <ArticleMultiSelect
+                      articles={availableProdLines}
+                      selected={selectedProdLines}
+                      onChange={setSelectedProdLines}
+                      label="Línea Producción"
+                      showId={false}
+                    />
+                  </div>
+                </div>
               </div>
             </div>
 
-            {/* Filtro: Tipo Proceso OF (IMPRP6) */}
-            <div className="grid gap-1.5">
-              <label className="text-xs font-semibold text-gray-700">Tipo Proceso OF</label>
-              <div className="w-[200px]">
-                <ArticleMultiSelect
-                  articles={availablePrp6}
-                  selected={selectedPrp6}
-                  onChange={setSelectedPrp6}
-                  label="Tipo Proceso"
-                />
-              </div>
-            </div>
+            <div className="border-t border-gray-100" />
 
-            {/* Filtro: Formato (IMPRP6 con DRRT='S3') */}
-            <div className="grid gap-1.5">
-              <label className="text-xs font-semibold text-gray-700">Formato</label>
-              <div className="w-[200px]">
-                <ArticleMultiSelect
-                  articles={availableSrp3}
-                  selected={selectedSrp3}
-                  onChange={setSelectedSrp3}
-                  label="Formato"
-                />
-              </div>
-            </div>
-
-            {/* Filtro: Sabor (IMSRP5 con DRRT='S5') */}
-            <div className="grid gap-1.5">
-              <label className="text-xs font-semibold text-gray-700">Sabor</label>
-              <div className="w-[200px]">
-                <ArticleMultiSelect
-                  articles={availableSrp5}
-                  selected={selectedSrp5}
-                  onChange={setSelectedSrp5}
-                  label="Sabor"
-                />
-              </div>
-            </div>
-
-            {/* Filtro: Familia (IMSRP2 con DRRT='S2') */}
-            <div className="grid gap-1.5">
-              <label className="text-xs font-semibold text-gray-700">Familia</label>
-              <div className="w-[200px]">
-                <ArticleMultiSelect
-                  articles={availableSrp2}
-                  selected={selectedSrp2}
-                  onChange={setSelectedSrp2}
-                  label="Familia"
-                />
-              </div>
-            </div>
-
-            {/* Filtro: Categoría (IMSRP1 con DRRT='S1') */}
-            <div className="grid gap-1.5">
-              <label className="text-xs font-semibold text-gray-700">Categoría</label>
-              <div className="w-[200px]">
-                <ArticleMultiSelect
-                  articles={availableSrp1}
-                  selected={selectedSrp1}
-                  onChange={setSelectedSrp1}
-                  label="Categoría"
-                />
-              </div>
-            </div>
-
-            {/* Filtro: Marca (IMSRP4 con DRRT='S4') */}
-            <div className="grid gap-1.5">
-              <label className="text-xs font-semibold text-gray-700">Marca</label>
-              <div className="w-[200px]">
-                <ArticleMultiSelect
-                  articles={availableSrp4}
-                  selected={selectedSrp4}
-                  onChange={setSelectedSrp4}
-                  label="Marca"
-                />
-              </div>
-            </div>
-
-            {/* Filtro: Gramaje (AAZE03 de F554101 con DRRT='B3') */}
-            <div className="grid gap-1.5">
-              <label className="text-xs font-semibold text-gray-700">Gramaje</label>
-              <div className="w-[200px]">
-                <ArticleMultiSelect
-                  articles={availableZe03}
-                  selected={selectedZe03}
-                  onChange={setSelectedZe03}
-                  label="Gramaje"
-                />
-              </div>
-            </div>
-
-            {/* Filtro: Líneas de producción (F30006/F0006 → F4111.ILMCUZ) */}
-            <div className="grid gap-1.5">
-              <label className="text-xs font-semibold text-gray-700">Línea Producción</label>
-              <div className="w-[200px]">
-                <ArticleMultiSelect
-                  articles={availableProdLines}
-                  selected={selectedProdLines}
-                  onChange={setSelectedProdLines}
-                  label="Línea Producción"
-                  showId={false}
-                />
-              </div>
-            </div>
-
-            {/* Filtro: Fechas */}
-            <div className="grid gap-1.5">
-              <label className="text-xs font-semibold text-gray-700">Fecha Inicio</label>
-              <Input
-                type="date"
-                value={filters.startDate}
-                onChange={(e) => setFilters({ ...filters, startDate: e.target.value })}
-                className="w-[150px] border-gray-300 focus:border-slate-500 font-medium"
-              />
-            </div>
-            <div className="grid gap-1.5">
-              <label className="text-xs font-semibold text-gray-700">Fecha Fin</label>
-              <Input
-                type="date"
-                value={filters.endDate}
-                onChange={(e) => setFilters({ ...filters, endDate: e.target.value })}
-                className="w-[150px] border-gray-300 focus:border-slate-500 font-medium"
-              />
-            </div>
-
-            {/* Filtro: Planta */}
-            <div className="grid gap-1.5">
-              <label className="text-xs font-semibold text-gray-700">Planta</label>
-              <select
-                className="flex h-9 w-[150px] rounded-md border border-gray-300 bg-white px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus:border-slate-500 font-medium"
-                value={filters.plant}
-                onChange={(e) => handlePlantChange(e.target.value)}
-              >
-                <option value="all">Todas</option>
-                <option value="10100">Aguilar</option>
-                <option value="10200">Corella</option>
-                <option value="10300">Funes</option>
-              </select>
-            </div>
-
-            {/* Filtro: Sub-planta (Sólo visible para Funes o Todas) */}
-            {(filters.plant === '10300' || filters.plant === 'all') && (
-              <div className="grid gap-1.5 animate-in fade-in duration-300">
-                <label className="text-xs font-semibold text-gray-700">Sub-planta / Línea</label>
-                <select
-                  className="flex h-9 w-[150px] rounded-md border border-gray-300 bg-white px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus:border-slate-500 font-medium disabled:opacity-50"
-                  value={filters.subLine}
-                  onChange={(e) => setFilters({ ...filters, subLine: e.target.value })}
-                  disabled={filters.plant !== '10300' && filters.plant !== 'all'}
-                >
-                  <option value="all">Todas</option>
-                  {filters.plant === '10300' && (
-                    <>
-                      <option value="3">Funes 1</option>
-                      <option value="4">Funes 2</option>
-                      <option value="5">Funes Past.</option>
-                    </>
-                  )}
-                </select>
-              </div>
-            )}
-
-            {/* Botones de Acción */}
-            <Button onClick={applyFilters} disabled={loading} className="text-white font-semibold" style={{ backgroundColor: '#D30B15' }} onMouseEnter={e => (e.currentTarget.style.backgroundColor = '#b00a12')} onMouseLeave={e => (e.currentTarget.style.backgroundColor = '#D30B15')}>
-              {loading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Search className="mr-2 h-4 w-4" />}
-              Filtrar
-            </Button>
-            <Button onClick={exportToExcel} variant="outline" disabled={data.length === 0} className="border-green-600 text-green-700 hover:bg-green-50">
-              <Download className="mr-2 h-4 w-4" />
-              Excel
-            </Button>
-            <Button onClick={clearFilters} variant="outline" className="border-gray-400 text-gray-600 hover:bg-gray-50">
-              <X className="mr-2 h-4 w-4" />
-              Limpiar
-            </Button>
-
-            {/* Presets rápidos (solo si logueado) */}
-            {sessionUser && (
-              <>
-                {presets.length > 0 && (
-                  <div className="grid gap-1.5">
-                    <label className="text-xs font-semibold text-gray-700">Cargar preset</label>
+            {/* Sección 2: Filtros operativos */}
+            <div>
+              <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">Fechas y Planta</p>
+              <div className="flex flex-wrap items-end gap-3">
+                <div className="grid gap-1.5">
+                  <label className="text-xs font-semibold text-gray-700">Fecha Inicio</label>
+                  <Input
+                    type="date"
+                    value={filters.startDate}
+                    onChange={(e) => setFilters({ ...filters, startDate: e.target.value })}
+                    className="w-[150px] border-gray-300 focus:border-slate-500 font-medium"
+                  />
+                </div>
+                <div className="grid gap-1.5">
+                  <label className="text-xs font-semibold text-gray-700">Fecha Fin</label>
+                  <Input
+                    type="date"
+                    value={filters.endDate}
+                    onChange={(e) => setFilters({ ...filters, endDate: e.target.value })}
+                    className="w-[150px] border-gray-300 focus:border-slate-500 font-medium"
+                  />
+                </div>
+                <div className="grid gap-1.5">
+                  <label className="text-xs font-semibold text-gray-700">Planta</label>
+                  <select
+                    className="flex h-9 w-[150px] rounded-md border border-gray-300 bg-white px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus:border-slate-500 font-medium"
+                    value={filters.plant}
+                    onChange={(e) => handlePlantChange(e.target.value)}
+                  >
+                    <option value="all">Todas</option>
+                    <option value="10100">Aguilar</option>
+                    <option value="10200">Corella</option>
+                    <option value="10300">Funes</option>
+                  </select>
+                </div>
+                {(filters.plant === '10300' || filters.plant === 'all') && (
+                  <div className="grid gap-1.5 animate-in fade-in duration-300">
+                    <label className="text-xs font-semibold text-gray-700">Sub-planta / Línea</label>
                     <select
-                      onChange={e => { const p = presets.find(p => p.id === Number(e.target.value)); if (p) loadPreset(p); e.target.value = ''; }}
-                      defaultValue=""
-                      className="flex h-9 w-[160px] rounded-md border border-gray-300 bg-white px-3 py-1 text-sm shadow-sm"
+                      className="flex h-9 w-[150px] rounded-md border border-gray-300 bg-white px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus:border-slate-500 font-medium disabled:opacity-50"
+                      value={filters.subLine}
+                      onChange={(e) => setFilters({ ...filters, subLine: e.target.value })}
+                      disabled={filters.plant !== '10300' && filters.plant !== 'all'}
                     >
-                      <option value="" disabled>Seleccionar...</option>
-                      {presets.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+                      <option value="all">Todas</option>
+                      {filters.plant === '10300' && (
+                        <>
+                          <option value="3">Funes 1</option>
+                          <option value="4">Funes 2</option>
+                          <option value="5">Funes Past.</option>
+                        </>
+                      )}
                     </select>
                   </div>
                 )}
-                <Button
-                  variant="outline"
-                  className="border-blue-500 text-blue-600 hover:bg-blue-50"
-                  onClick={() => {
-                    const name = prompt('Nombre del preset:');
-                    if (name && name.trim()) savePreset(name.trim());
-                  }}
-                >
-                  <Save className="mr-2 h-4 w-4" />
-                  Guardar
-                </Button>
-              </>
-            )}
+              </div>
+            </div>
+
+            <div className="border-t border-gray-100" />
+
+            {/* Sección 3: Acciones */}
+            <div className="flex flex-wrap items-end gap-3 justify-end">
+              <Button onClick={applyFilters} disabled={loading} className="text-white font-semibold" style={{ backgroundColor: '#D30B15' }} onMouseEnter={e => (e.currentTarget.style.backgroundColor = '#b00a12')} onMouseLeave={e => (e.currentTarget.style.backgroundColor = '#D30B15')}>
+                {loading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Search className="mr-2 h-4 w-4" />}
+                Filtrar
+              </Button>
+              <Button onClick={exportToExcel} variant="outline" disabled={data.length === 0} className="border-green-600 text-green-700 hover:bg-green-50">
+                <Download className="mr-2 h-4 w-4" />
+                Excel
+              </Button>
+              <Button onClick={clearFilters} variant="outline" className="border-gray-400 text-gray-600 hover:bg-gray-50">
+                <X className="mr-2 h-4 w-4" />
+                Limpiar
+              </Button>
+
+              {/* Presets rápidos (solo si logueado) */}
+              {sessionUser && (
+                <>
+                  {presets.length > 0 && (
+                    <div className="grid gap-1.5">
+                      <label className="text-xs font-semibold text-gray-700">Cargar preset</label>
+                      <select
+                        onChange={e => { const p = presets.find(p => p.id === Number(e.target.value)); if (p) loadPreset(p); e.target.value = ''; }}
+                        defaultValue=""
+                        className="flex h-9 w-[160px] rounded-md border border-gray-300 bg-white px-3 py-1 text-sm shadow-sm"
+                      >
+                        <option value="" disabled>Seleccionar...</option>
+                        {presets.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+                      </select>
+                    </div>
+                  )}
+                  <Button
+                    variant="outline"
+                    className="border-blue-500 text-blue-600 hover:bg-blue-50"
+                    onClick={() => {
+                      const name = prompt('Nombre del preset:');
+                      if (name && name.trim()) savePreset(name.trim());
+                    }}
+                  >
+                    <Save className="mr-2 h-4 w-4" />
+                    Guardar
+                  </Button>
+                </>
+              )}
+            </div>
           </div>
-        </div>
 
         {/* --- TARJETAS DE MÉTRICAS (KPIs) --- */}
         <div className="grid gap-4 md:grid-cols-4">
