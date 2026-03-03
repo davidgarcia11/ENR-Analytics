@@ -217,7 +217,7 @@ CREATE TABLE query_logs (
 
 | Función | Descripción |
 |---|---|
-| `createToken(user)` | Crea JWT con `{ sub, username, role, name, surname }`, expira en 8 horas |
+| `createToken(user)` | Crea JWT con `{ sub, username, role, name, surname }`, expira en 7 días |
 | `verifySession()` | Lee cookie, verifica JWT, devuelve `SessionUser` o `null` |
 | `hashPassword(password)` | Hash bcrypt con 10 rounds |
 | `verifyPassword(password, hash)` | Compara contraseña contra hash |
