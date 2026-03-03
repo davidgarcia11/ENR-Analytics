@@ -247,17 +247,19 @@ Solo usuarios con `role === 'admin'`. Si no eres admin, te redirige a `/producci
 
 1. **Crear usuario:** Formulario con campos Nombre, Apellido, Usuario (login), Contraseña, Rol (user/admin), checkbox "Forzar cambio de contraseña"
 2. **Listar usuarios:** Tabla con ID, Nombre completo, Usuario, Rol (badge rojo/gris), Fecha creación
-3. **Resetear contraseña:** Botón por usuario → input inline → nueva contraseña + fuerza cambio en próximo login
-4. **Eliminar usuario:** Con confirmación. No puedes eliminarte a ti mismo.
+3. **Editar usuario:** Botón lápiz azul por usuario → la fila se convierte en inputs editables (nombre, apellido, usuario, rol) con "Guardar" y "Cancelar". Valida que el username no esté duplicado (error 409 inline)
+4. **Resetear contraseña:** Botón llave ámbar por usuario → input inline → nueva contraseña + fuerza cambio en próximo login
+5. **Eliminar usuario:** Con confirmación. No puedes eliminarte a ti mismo.
 
 ### APIs de administración
 
 | Método | Ruta | Descripción |
 |---|---|---|
-| GET | `/api/admin/users` | Lista todos los usuarios |
-| POST | `/api/admin/users` | Crea usuario (acepta name, surname, username, password, role, mustChangePassword) |
-| PATCH | `/api/admin/users/:id` | Resetea contraseña (fuerza cambio) |
-| DELETE | `/api/admin/users/:id` | Elimina usuario |
+| GET | `/api/admin/users` | Lista todos los usuarios (id, username, role, name, surname, created_at) |
+| POST | `/api/admin/users` | Crea usuario (acepta name, surname, username, password, role, mustChangePassword). Devuelve 409 si el username ya existe |
+| PUT | `/api/admin/users/:id` | Edita datos del usuario (name, surname, username, role). Valida unicidad del username contra otros usuarios (409 si duplicado) |
+| PATCH | `/api/admin/users/:id` | Resetea contraseña (fuerza cambio en próximo login) |
+| DELETE | `/api/admin/users/:id` | Elimina usuario (no permite auto-eliminación) |
 
 ---
 
