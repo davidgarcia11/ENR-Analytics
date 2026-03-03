@@ -3,7 +3,7 @@ import { compareSync, hashSync } from 'bcryptjs';
 import { cookies } from 'next/headers';
 
 const COOKIE_NAME = 'session';
-const JWT_EXPIRY = '7d';
+const JWT_EXPIRY = '8h';
 
 function getSecret() {
   const secret = process.env.JWT_SECRET;
@@ -65,7 +65,7 @@ export function cookieOptions(req?: { url?: string }) {
     httpOnly: true,
     secure: isHttps,
     sameSite: 'lax' as const,
-    maxAge: 60 * 60 * 24 * 7, // 7 días
+    maxAge: 60 * 60 * 8, // 8 horas
     path: '/',
   };
 }
