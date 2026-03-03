@@ -1,0 +1,626 @@
+# Documentación Técnica — Dashboard de Producción
+
+> **Audiencia:** Desarrolladores que se incorporan al proyecto.
+> **Última actualización:** Marzo 2026
+
+---
+
+## 1. Visión General
+
+Esta aplicación es un **panel de control (dashboard) de producción** para la empresa Elaborados Naturales. Conecta con la base de datos **Oracle JD Edwards (JDE)** y muestra en tiempo real:
+
+- Órdenes de fabricación y cantidades producidas
+- Porcentaje de merma (desperdicio) por artículo
+- Desglose por planta, línea de producción y fechas
+- Exportación a Excel con formato condicional
+- Sistema de autenticación con gestión de usuarios (admin crea usuarios)
+- Presets de filtros guardados por usuario
+
+### Tech Stack
+
+| Tecnología | Versión | Para qué se usa |
+|---|---|---|
+| **Next.js** | 16 | Framework web (App Router) |
+| **React** | 19 | Librería de interfaz de usuario |
+| **TypeScript** | 5 | Tipado estático sobre JavaScript |
+| **Tailwind CSS** | 4 | Estilos utilitarios (clases CSS) |
+| **oracledb** | 6 | Driver para conectar con Oracle desde Node.js |
+| **better-sqlite3** | — | Base de datos local para usuarios y presets |
+| **jose** | — | Firma/verificación de JWT para sesiones |
+| **bcryptjs** | — | Hash de contraseñas |
+| **xlsx** | 0.18 | Generar archivos Excel (.xlsx) |
+| **lucide-react** | 0.563 | Iconos SVG (Search, Factory, Download...) |
+| **date-fns** | 4 | Utilidades de fecha (`getDayOfYear`) |
+| **Bun** | — | Gestor de paquetes y runtime (alternativa a npm/node) |
+
+---
+
+## 2. Estructura del Proyecto
+
+```
+dashboard/
+├── .env.local                    ← Credenciales Oracle + JWT_SECRET (NUNCA se sube a Git)
+├── .gitignore                    ← Incluye /data/ para no subir la BD de usuarios
+├── package.json                  ← Dependencias y scripts
+├── next.config.ts                ← Configuración de Next.js (HSTS + serverExternalPackages)
+├── middleware.ts                 ← Protección de rutas /api/admin/* (verifica JWT + admin)
+├── tsconfig.json                 ← Configuración de TypeScript
+├── postcss.config.mjs            ← Configuración de PostCSS (Tailwind v4)
+├── eslint.config.mjs             ← Reglas de linting
+│
+├── data/
+│   └── app.db                    ← Base de datos SQLite (usuarios + presets, NO se sube a Git)
+│
+├── public/
+│   └── logo.png                  ← Logo de la empresa (se sirve en /logo.png)
+│
+├── lib/                          ← Lógica reutilizable (utilidades)
+│   ├── db.ts                     ← Conexión a Oracle
+│   ├── sqlite.ts                 ← Conexión a SQLite (usuarios, presets, migraciones)
+│   ├── auth.ts                   ← JWT, bcrypt, SessionUser, cookieOptions
+│   └── utils.ts                  ← Funciones auxiliares (fechas, cantidades, clases CSS)
+│
+├── components/                   ← Componentes React reutilizables
+│   ├── ArticleMultiSelect.tsx    ← Desplegable multi-selección con búsqueda
+│   └── ui/                       ← Componentes de interfaz base (botón, card, tabla, input)
+│       ├── button.tsx
+│       ├── card.tsx
+│       ├── input.tsx
+│       └── table.tsx
+│
+└── app/                          ← Rutas de Next.js (App Router)
+    ├── globals.css               ← Estilos globales + importación de Tailwind
+    ├── layout.tsx                ← Layout raíz (envuelve todas las páginas)
+    ├── page.tsx                  ← Ruta "/" → muestra un 404 simple
+    ├── login/
+    │   └── page.tsx              ← Ruta "/login" → formulario de inicio de sesión
+    ├── admin/
+    │   └── page.tsx              ← Ruta "/admin" → panel de administración de usuarios
+    ├── cambiar-contrasena/
+    │   └── page.tsx              ← Ruta "/cambiar-contrasena" → cambio forzado de contraseña
+    ├── produccion/
+    │   └── page.tsx              ← Ruta "/produccion" → DASHBOARD PRINCIPAL
+    └── api/
+        ├── auth/
+        │   ├── login/route.ts    ← POST /api/auth/login
+        │   ├── logout/route.ts   ← POST /api/auth/logout
+        │   ├── me/route.ts       ← GET /api/auth/me
+        │   └── change-password/
+        │       └── route.ts      ← POST /api/auth/change-password
+        ├── admin/
+        │   └── users/
+        │       ├── route.ts      ← GET/POST /api/admin/users
+        │       └── [id]/
+        │           └── route.ts  ← PATCH/DELETE /api/admin/users/:id
+        ├── presets/
+        │   ├── route.ts          ← GET/POST /api/presets
+        │   └── [id]/
+        │       └── route.ts      ← DELETE /api/presets/:id
+        ├── categories/
+        │   └── route.ts          ← GET /api/categories?field=X
+        ├── production/
+        │   └── route.ts          ← GET /api/production?...filtros...
+        └── production-lines/
+            └── route.ts          ← GET /api/production-lines
+```
+
+---
+
+## 3. Configuración
+
+### `.env.local` — Credenciales y secretos
+
+```env
+ORACLE_USER=<usuario_oracle>
+ORACLE_PASSWORD=<contraseña_oracle>
+ORACLE_HOST=<ip_servidor_oracle>
+ORACLE_PORT=1521
+ORACLE_SERVICE=<nombre_servicio_oracle>
+JWT_SECRET=<clave_secreta_para_firmar_jwt>
+```
+
+> **IMPORTANTE:** Este archivo NUNCA se sube al repositorio. Está en `.gitignore`.
+
+### `package.json` — Scripts principales
+
+| Comando | Qué hace |
+|---|---|
+| `bun dev` | Arranca el servidor en modo desarrollo (hot reload) |
+| `bun run build` | Compila la app para producción |
+| `bun start` | Sirve la app compilada (producción) |
+
+### `next.config.ts`
+
+- Cabecera HTTP `Strict-Transport-Security` para forzar HTTPS
+- `serverExternalPackages: ['better-sqlite3']` — necesario para que el módulo nativo de SQLite funcione en producción con `npm start`
+
+### `middleware.ts` — Protección de rutas admin
+
+Intercepta todas las peticiones a `/api/admin/*`. Verifica:
+1. Que existe un JWT válido en la cookie `session`
+2. Que el usuario tiene `role === 'admin'`
+
+Si no cumple, devuelve 403.
+
+### `tsconfig.json` — Alias `@/`
+
+```json
+"paths": { "@/*": ["./*"] }
+```
+
+Permite importar así: `import { getDbConnection } from '@/lib/db'`
+
+---
+
+## 4. Sistema de Autenticación
+
+### Arquitectura
+
+- **Base de datos:** SQLite local (`data/app.db`) — cero dependencias externas
+- **Sesiones:** JWT firmado con HS256, almacenado en cookie httpOnly
+- **Contraseñas:** Hash con bcryptjs (10 salt rounds)
+- **Dashboard público:** No se requiere login para ver datos. Los presets son un "plus" opcional.
+
+### `lib/sqlite.ts` — Inicialización y migraciones
+
+**Tablas:**
+
+```sql
+-- Usuarios
+CREATE TABLE users (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  username TEXT UNIQUE NOT NULL,
+  password_hash TEXT NOT NULL,
+  role TEXT NOT NULL DEFAULT 'user',        -- 'admin' | 'user'
+  must_change_password INTEGER DEFAULT 0,   -- 1 = forzar cambio en próximo login
+  name TEXT NOT NULL DEFAULT '',             -- Nombre del usuario
+  surname TEXT NOT NULL DEFAULT '',          -- Apellido del usuario
+  created_at TEXT DEFAULT (datetime('now'))
+);
+
+-- Presets de filtros
+CREATE TABLE presets (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  name TEXT NOT NULL,
+  filters TEXT NOT NULL,   -- JSON con los 13 filtros
+  created_at TEXT DEFAULT (datetime('now')),
+  UNIQUE(user_id, name)
+);
+```
+
+**Migraciones automáticas:** Al arrancar, comprueba si faltan columnas (`must_change_password`, `name`, `surname`) y las añade con `ALTER TABLE`. Esto permite actualizar DBs creadas antes de estas funcionalidades.
+
+**Usuario admin por defecto:** Si la tabla `users` está vacía, crea `admin` / `admin123` con role `admin`.
+
+### `lib/auth.ts` — Utilidades de autenticación
+
+| Función | Descripción |
+|---|---|
+| `createToken(user)` | Crea JWT con `{ sub, username, role, name, surname }`, expira en 7 días |
+| `verifySession()` | Lee cookie, verifica JWT, devuelve `SessionUser` o `null` |
+| `hashPassword(password)` | Hash bcrypt con 10 rounds |
+| `verifyPassword(password, hash)` | Compara contraseña contra hash |
+| `cookieOptions(req?)` | Genera opciones de cookie. `secure` depende de si la request es HTTPS |
+
+**Interfaz SessionUser:**
+```ts
+interface SessionUser {
+  id: number;
+  username: string;
+  role: string;
+  name: string;
+  surname: string;
+}
+```
+
+### Flujo de autenticación
+
+```
+LOGIN:
+  /login → POST /api/auth/login → JWT en cookie
+    ├── mustChangePassword=true → /cambiar-contrasena
+    └── mustChangePassword=false → /produccion
+
+CAMBIO DE CONTRASEÑA FORZADO:
+  /cambiar-contrasena → POST /api/auth/change-password
+    → Actualiza hash + must_change_password=0 → /produccion
+
+SESIÓN EN DASHBOARD:
+  /produccion → GET /api/auth/me (silencioso)
+    ├── Si logueado: muestra nombre + botón Presets + Salir
+    └── Si no: muestra enlace "Iniciar sesión"
+```
+
+### Cookie `secure` en LAN
+
+Las cookies con `secure: true` no funcionan sobre HTTP (solo HTTPS). Cuando el dashboard se sirve por LAN sin SSL, `cookieOptions(req)` detecta el protocolo real de la request (`req.url.startsWith('https')`) en vez de confiar en `NODE_ENV`.
+
+---
+
+## 5. Panel de Administración (`/admin`)
+
+### Acceso
+Solo usuarios con `role === 'admin'`. Si no eres admin, te redirige a `/produccion`.
+
+### Funcionalidades
+
+1. **Crear usuario:** Formulario con campos Nombre, Apellido, Usuario (login), Contraseña, Rol (user/admin), checkbox "Forzar cambio de contraseña"
+2. **Listar usuarios:** Tabla con ID, Nombre completo, Usuario, Rol (badge rojo/gris), Fecha creación
+3. **Resetear contraseña:** Botón por usuario → input inline → nueva contraseña + fuerza cambio en próximo login
+4. **Eliminar usuario:** Con confirmación. No puedes eliminarte a ti mismo.
+
+### APIs de administración
+
+| Método | Ruta | Descripción |
+|---|---|---|
+| GET | `/api/admin/users` | Lista todos los usuarios |
+| POST | `/api/admin/users` | Crea usuario (acepta name, surname, username, password, role, mustChangePassword) |
+| PATCH | `/api/admin/users/:id` | Resetea contraseña (fuerza cambio) |
+| DELETE | `/api/admin/users/:id` | Elimina usuario |
+
+---
+
+## 6. Presets de Filtros
+
+Los usuarios logueados pueden guardar combinaciones de filtros con nombre para reutilizarlos.
+
+### Qué se guarda en un preset (JSON)
+
+```json
+{
+  "plant": "10300",
+  "subLine": "all",
+  "startDate": "2026-01-01",
+  "endDate": "2026-03-02",
+  "selectedArticles": [],
+  "selectedPrp6": [],
+  "selectedSrp3": [],
+  "selectedSrp5": [],
+  "selectedSrp2": [],
+  "selectedSrp1": [],
+  "selectedSrp4": [],
+  "selectedZe03": [],
+  "selectedProdLines": []
+}
+```
+
+### UI de presets
+
+Dos formas de interactuar:
+
+1. **Panel expandible (botón "Presets"):** Lista completa de presets con opción de guardar y eliminar
+2. **Acceso rápido en la barra de acciones:** Dropdown "Cargar preset" + botón "Guardar" (pide nombre con prompt)
+
+### APIs de presets
+
+| Método | Ruta | Descripción |
+|---|---|---|
+| GET | `/api/presets` | Lista presets del usuario autenticado |
+| POST | `/api/presets` | Guarda nuevo preset |
+| DELETE | `/api/presets/:id` | Elimina preset propio |
+
+---
+
+## 7. Carpeta `lib/` — Utilidades Base
+
+### `lib/db.ts` — Conexión a Oracle
+
+**Qué hace:** Exporta una función `getDbConnection()` que devuelve una conexión activa a Oracle.
+
+**Configuración global:**
+- `oracledb.outFormat = oracledb.OUT_FORMAT_OBJECT` → Las filas vienen como objetos `{ COLUMNA: valor }`. Columnas siempre en **MAYÚSCULAS**.
+
+**Regla de oro:** Siempre usar `try/finally` para cerrar la conexión.
+
+```ts
+let conn;
+try {
+    conn = await getDbConnection();
+    const result = await conn.execute(sql);
+} finally {
+    if (conn) await conn.close();
+}
+```
+
+### `lib/utils.ts` — Funciones auxiliares
+
+#### `cn(...inputs)` — Combinar clases CSS
+
+Mezcla de `clsx` + `tailwind-merge`.
+
+#### `parseJdeDate(jdeDate, wamcu?)` — Convertir fecha JDE
+
+JDE guarda fechas como **CYYDDD**: C=sub-línea, YY=año, DDD=día del año.
+
+Ejemplo: `126061` → sub-línea `1`, año `26` (2026), día `61` → `{ date: 2026-03-02, subBlock: '1', subBlockName: 'Aguilar' }`
+
+El parámetro `wamcu` personaliza los nombres de sub-línea según planta (10100=Aguilar, 10200=Corella, 10300=Funes 1/2/Past).
+
+#### `parseWasOqs(val)` — Convertir cantidad JDE
+
+Divide entre 100 (JDE almacena cantidades ×100).
+
+---
+
+## 8. Tablas de Oracle JDE
+
+### Tablas principales
+
+| Tabla | Descripción | Campos clave |
+|---|---|---|
+| **F4801** | **Órdenes de fabricación** | `WADOCO` (nº orden), `WADL01` (descripción), `WAMCU` (planta), `WAAITM` (artículo display), `WAITM` (artículo corto) |
+| **F4111** | **Movimientos de inventario** | `ILDOC` (nº orden), `ILTRDJ` (fecha JDE), `ILDCT` (tipo: IC=producción, IS=merma), `ILTRQT` (cantidad), `ILRCD` (código razón), `ILTRUM` (UM), `ILMCUZ` (línea producción) |
+| **F4101** | **Maestro de artículos** | `IMITM` (ID corto), `IMUOM1` (UM primaria), `IMPRP6` (tipo proceso), `IMSRP1..5` (categorías) |
+| **F554101** | **Extensión del maestro** | `AAITM` (ID corto), `AAZE03` (gramaje) |
+| **F55TAR12** | **Tareas de producción** (custom) | `TODOCO` (nº orden), `TO55TAREA` (código fecha+sublínea) |
+
+### Tablas auxiliares
+
+| Tabla | Descripción |
+|---|---|
+| **prodctl.f0005** | Códigos definidos por usuario (UDC) — catálogos |
+| **F41002** | Conversiones de unidad de medida |
+| **F30006** | Centros de trabajo (líneas producción) |
+| **F0006** | Unidades de negocio (Business Units) |
+
+### Relaciones
+
+```
+F55TAR12 (tareas)
+    │ TODOCO
+    ▼
+F4801 (órdenes) ──WAITM──► F4101 (maestro artículos) ──► F554101 (extensión)
+    │ WADOCO
+    ▼
+F4111 (movimientos)
+    └── ILTRUM ──► F41002 (conversiones UM)
+
+F4101.IMPRP6/IMSRP1..5 ──► prodctl.f0005 (catálogos UDC)
+F4111.ILMCUZ ──► F30006 + F0006 (líneas producción)
+```
+
+---
+
+## 9. API Routes — Datos de producción
+
+### `GET /api/categories?field=X`
+
+**Archivo:** `app/api/categories/route.ts`
+
+Devuelve las opciones `[{ id, description }]` para un desplegable de filtro.
+
+| field | Columna | DRSY | DRRT | UI |
+|---|---|---|---|---|
+| `prp6` | IMPRP6 | 41 | 01 | Tipo Proceso OF |
+| `srp3` | IMSRP3 | 41 | S3 | Formato |
+| `srp5` | IMSRP5 | 41 | S5 | Sabor |
+| `srp2` | IMSRP2 | 41 | S2 | Familia |
+| `srp1` | IMSRP1 | 41 | S1 | Categoría |
+| `srp4` | IMSRP4 | 41 | S4 | Marca |
+| `ze03` | AAZE03 (F554101) | 17 | B3 | Gramaje |
+
+### `GET /api/production?...filtros...`
+
+**Archivo:** `app/api/production/route.ts`
+
+El endpoint más complejo. Devuelve datos de producción filtrados.
+
+**Parámetros:** `plant`, `subLine`, `startDate`, `endDate`, `article[]`, `prp6[]`, `srp3[]`, `srp5[]`, `srp2[]`, `srp1[]`, `srp4[]`, `ze03[]`, `prodLine[]`, `page`, `limit`
+
+**Lógica:**
+1. Construye SQL dinámico (JOINs condicionales según filtros activos)
+2. Ejecuta contra Oracle
+3. Obtiene UM primarias y factores de conversión
+4. Procesa filas: parsea fechas JDE, convierte UM (BFS), agrupa, calcula merma
+5. Devuelve `{ data: [...], sqlRowCount: N }`
+
+**Deduplicación F55TAR12:** `MOD(TO55TAREA, 100000)` extrae la fecha sin sub-código, `MAX` se queda con el registro más reciente (evita duplicados por migración de sub-códigos).
+
+**Merma:** Movimientos `IS` con código razón `P01-P05`, `Q01-Q10`. Viene como número negativo. Fórmula: `|merma| / (|merma| + producido) × 100`.
+
+**Conversión UM:** BFS de hasta 3 niveles en F41002. Factor ×10.000.000.
+
+### `GET /api/production-lines`
+
+**Archivo:** `app/api/production-lines/route.ts`
+
+Devuelve líneas de producción activas de F30006+F0006. Incluye `{ id: '__empty__', description: 'Sin línea' }` al principio.
+
+---
+
+## 10. Página Principal — `app/produccion/page.tsx`
+
+Client Component (~850 líneas). Es el dashboard principal.
+
+### Estados principales
+
+| Estado | Tipo | Para qué |
+|---|---|---|
+| `data` | `any[]` | Registros de producción |
+| `loading` | `boolean` | Spinner mientras carga |
+| `page` / `hasMore` | `number` / `boolean` | Paginación |
+| `filters` | `object` | `{ plant, subLine, startDate, endDate }` |
+| `selectedArticles`, `selectedPrp6`...`selectedZe03`, `selectedProdLines` | `string[]` | Multi-selects |
+| `sessionUser` | `SessionUser \| null` | Usuario autenticado |
+| `presets` | `Preset[]` | Presets del usuario |
+| `metrics` | `object` | KPIs calculados |
+
+### Funciones principales
+
+| Función | Descripción |
+|---|---|
+| `fetchData(page, isNew, all?)` | Fetch a `/api/production`, procesa respuesta, calcula métricas |
+| `applyFilters()` | Reset + fetchData con limit=0 (todos) |
+| `clearFilters()` | Resetea todos los filtros (no borra datos de la tabla) |
+| `exportToExcel()` | Genera .xlsx con coloreado condicional (top 25% merma en rojo) |
+| `checkSession()` | GET `/api/auth/me`, redirige si mustChangePassword |
+| `savePreset(name?)` | POST `/api/presets` con filtros actuales |
+| `loadPreset(preset)` | Restaura los 13 filtros desde el JSON del preset |
+| `displayData` (useMemo) | Agrupa, suma, ordena por %merma descendente |
+
+### Estructura visual
+
+```
+┌─────────────────────────────────────────────────────────┐
+│ [LOGO]                          [Usuario ▪ Admin ▪ Salir]│
+│                                                         │
+│ ┌─ Filtros ──────────────────────────────────────────┐  │
+│ │ ── Categorías ──                                   │  │
+│ │ Artículo│Tipo Proc│Formato│Sabor│Familia│...       │  │
+│ │ ─────────────────────────────────────────          │  │
+│ │ ── Fechas y Planta ──                              │  │
+│ │ F.Inicio│F.Fin│Planta│Sub-planta                   │  │
+│ │ ─────────────────────────────────────────          │  │
+│ │             [Filtrar][Excel][Limpiar][Preset▼][+]  │  │
+│ └────────────────────────────────────────────────────┘  │
+│                                                         │
+│ ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐   │
+│ │ Cantidad │ │ Órdenes  │ │  Merma   │ │Top Planta│   │
+│ │ Total    │ │          │ │  2.34%   │ │ Funes 1  │   │
+│ └──────────┘ └──────────┘ └──────────┘ └──────────┘   │
+│                                                         │
+│ ┌─ Detalle de Producción ────────────────────────────┐  │
+│ │ Fecha │ Artículo │ Desc. │ Cant. │ Merma │ %M │UM │  │
+│ │ 02/03 │ 00001234 │ MERM..│ 1500  │ -23   │2.3%│UN │  │
+│ │         [Cargar más] [Cargar todos]                │  │
+│ └────────────────────────────────────────────────────┘  │
+└─────────────────────────────────────────────────────────┘
+```
+
+**Panel de filtros organizado en 3 secciones:**
+1. **Categorías:** 9 multi-selects (Artículo, Tipo Proceso, Formato, Sabor, Familia, Categoría, Marca, Gramaje, Línea Producción)
+2. **Fechas y Planta:** Fecha Inicio, Fecha Fin, Planta, Sub-planta (condicional)
+3. **Acciones:** Filtrar (rojo), Excel (verde), Limpiar (gris), Cargar preset (dropdown), Guardar preset (azul)
+
+Cada sección separada por divisores sutiles (`border-t border-gray-100`).
+
+---
+
+## 11. Componentes Reutilizables
+
+### `ArticleMultiSelect.tsx`
+
+Desplegable multi-selección con búsqueda. Se usa para los 9 filtros de categoría.
+
+**Props:** `articles`, `selected`, `onChange`, `label`, `showId`
+
+**Comportamiento:** Botón con badge de seleccionados → panel flotante con buscador + checkboxes + "Sel. todos" / "Ninguno".
+
+### Componentes UI (`components/ui/`)
+
+| Componente | Descripción |
+|---|---|
+| `button.tsx` | Botón con variantes (default, outline, ghost, destructive, secondary, link) |
+| `card.tsx` | Card, CardHeader, CardTitle, CardContent |
+| `input.tsx` | Input estilizado |
+| `table.tsx` | Table, TableHeader, TableBody, TableRow, TableHead, TableCell |
+
+---
+
+## 12. Gotchas y Patrones Importantes
+
+### Oracle CHAR vs VARCHAR2
+
+El driver `oracledb` envía bind variables como VARCHAR2. Los campos CHAR tienen padding de espacios y no coinciden.
+
+- Valores **hardcodeados**: embeber en SQL directamente
+- Valores **del usuario**: usar `TRIM()` en la columna + bind variables
+
+### Fechas JDE (CYYDDD)
+
+Usar `parseJdeDate()`. Para convertir a JDE: `(year - 2000) * 1000 + getDayOfYear(date)`.
+
+### Cantidades JDE (×100) y Conversiones UM (×10.000.000)
+
+Siempre dividir. Las cantidades vienen ×100. Los factores de conversión ×10.000.000.
+
+### `"use client"` vs Server Components
+
+- `"use client"` → navegador (hooks, eventos)
+- Sin directiva → servidor
+- API routes → siempre servidor
+
+### Conexiones Oracle — siempre cerrar
+
+Si no cierras con `try/finally`, el pool se agota y la app se cuelga.
+
+### Prevención de SQL Injection
+
+- Valores del usuario → bind variables (`:param`)
+- Artículos → validados con regex `/^\d{10}$/`
+- Valores del FIELD_MAP → embebidos (constantes del código)
+
+### Color corporativo `#D30B15`
+
+Se usa en: borde superior de tarjetas KPI/filtros/tabla, botón Filtrar, iconos KPI.
+
+### Cookie `secure` en LAN
+
+No usar `secure: process.env.NODE_ENV === 'production'`. En su lugar, `cookieOptions(req)` detecta HTTPS desde la URL real de la request.
+
+### `serverExternalPackages` en next.config.ts
+
+`better-sqlite3` es un módulo nativo. Sin `serverExternalPackages: ['better-sqlite3']`, el build de producción falla.
+
+---
+
+## 13. Cómo Añadir un Nuevo Filtro de Categoría
+
+Si necesitas un nuevo filtro (ejemplo: "Subcategoría" con campo `IMSRP6`, DRSY=`41`, DRRT=`S6`):
+
+### Paso 1: `app/api/categories/route.ts`
+
+Añadir entrada al `FIELD_MAP`:
+```ts
+srp6: { col: 'IMSRP6', drsy: '41', drrt: 'S6', directF0005: true },
+```
+
+### Paso 2: `app/api/production/route.ts`
+
+1. Leer parámetro: `const srp6s = searchParams.getAll('srp6');`
+2. Añadir a condición de `extraJoins` (JOIN F4101)
+3. Añadir cláusula WHERE con TRIM y bind variables
+
+### Paso 3: `app/produccion/page.tsx`
+
+1. Añadir estados: `selectedSrp6` + `availableSrp6`
+2. Fetch en `useEffect`: `/api/categories?field=srp6`
+3. Añadir al `URLSearchParams` en `fetchData`
+4. Añadir al `clearFilters`
+5. Añadir `<ArticleMultiSelect>` en la sección "Categorías" del panel de filtros
+
+---
+
+## 14. Cómo Arrancar el Proyecto
+
+```bash
+# 1. Instalar dependencias
+cd dashboard
+bun install
+
+# 2. Configurar credenciales (copiar y editar)
+cp .env.local.example .env.local
+
+# 3. Desarrollo (hot reload)
+bun dev
+# Abrir http://localhost:3000/produccion
+
+# 4. Producción
+bun run build
+bun start
+```
+
+> **Nota:** La ruta raíz `/` muestra un 404 a propósito. La app está en `/produccion`.
+
+### Primer acceso
+
+1. Ir a `/login` → usuario `admin`, contraseña `admin123`
+2. Ir a `/admin` → crear usuarios con nombre, apellido y contraseña
+3. La base de datos SQLite (`data/app.db`) se crea automáticamente al arrancar
+4. `data/` está en `.gitignore` → los usuarios y presets **no se pierden** al hacer `git pull`
+
+### Despliegue en servidor
+
+- `data/app.db` persiste entre despliegues (no se sube a Git, no se sobreescribe)
+- Si necesitas reiniciar usuarios: eliminar `data/app.db` y se recreará con el admin por defecto
