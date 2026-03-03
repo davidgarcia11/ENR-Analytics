@@ -15,6 +15,7 @@ Esta aplicación es un **panel de control (dashboard) de producción** para la e
 - Exportación a Excel con formato condicional
 - Sistema de autenticación con gestión de usuarios (admin crea usuarios)
 - Presets de filtros guardados por usuario
+- Logs de consultas con estadísticas y gráfico de rendimiento (solo admin)
 
 ### Tech Stack
 
@@ -29,6 +30,7 @@ Esta aplicación es un **panel de control (dashboard) de producción** para la e
 | **jose** | — | Firma/verificación de JWT para sesiones |
 | **bcryptjs** | — | Hash de contraseñas |
 | **xlsx** | 0.18 | Generar archivos Excel (.xlsx) |
+| **recharts** | — | Gráficos de líneas para estadísticas de logs |
 | **lucide-react** | 0.563 | Iconos SVG (Search, Factory, Download...) |
 | **date-fns** | 4 | Utilidades de fecha (`getDayOfYear`) |
 | **Bun** | — | Gestor de paquetes y runtime (alternativa a npm/node) |
@@ -49,7 +51,7 @@ dashboard/
 ├── eslint.config.mjs             ← Reglas de linting
 │
 ├── data/
-│   └── app.db                    ← Base de datos SQLite (usuarios + presets, NO se sube a Git)
+│   └── app.db                    ← Base de datos SQLite (usuarios, presets, logs — NO se sube a Git)
 │
 ├── public/
 │   └── logo.png                  ← Logo de la empresa (se sirve en /logo.png)
@@ -75,7 +77,9 @@ dashboard/
     ├── login/
     │   └── page.tsx              ← Ruta "/login" → formulario de inicio de sesión
     ├── admin/
-    │   └── page.tsx              ← Ruta "/admin" → panel de administración de usuarios
+    │   ├── page.tsx              ← Ruta "/admin" → panel de administración de usuarios
+    │   └── logs/
+    │       └── page.tsx          ← Ruta "/admin/logs" → logs de consultas (solo admin)
     ├── cambiar-contrasena/
     │   └── page.tsx              ← Ruta "/cambiar-contrasena" → cambio forzado de contraseña
     ├── produccion/
@@ -88,6 +92,8 @@ dashboard/
         │   └── change-password/
         │       └── route.ts      ← POST /api/auth/change-password
         ├── admin/
+        │   ├── logs/
+        │   │   └── route.ts      ← GET /api/admin/logs (logs de consultas)
         │   └── users/
         │       ├── route.ts      ← GET/POST /api/admin/users
         │       └── [id]/
@@ -189,7 +195,21 @@ CREATE TABLE presets (
 );
 ```
 
-**Migraciones automáticas:** Al arrancar, comprueba si faltan columnas (`must_change_password`, `name`, `surname`) y las añade con `ALTER TABLE`. Esto permite actualizar DBs creadas antes de estas funcionalidades.
+```sql
+-- Logs de consultas
+CREATE TABLE query_logs (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  username TEXT NOT NULL DEFAULT 'Invitado',  -- se guarda aunque se borre el usuario
+  source TEXT NOT NULL DEFAULT 'produccion',  -- panel origen: 'produccion', 'login', etc.
+  filters TEXT NOT NULL,                       -- JSON con filtros usados
+  result_count INTEGER,                        -- nº filas devueltas (NULL en logins)
+  execution_time_ms INTEGER,                   -- tiempo de consulta (NULL en logins)
+  created_at TEXT DEFAULT (datetime('now'))
+);
+```
+
+**Migraciones automáticas:** Al arrancar, comprueba si faltan columnas (`must_change_password`, `name`, `surname` en users; `source` en query_logs) y las añade con `ALTER TABLE`. Esto permite actualizar DBs creadas antes de estas funcionalidades.
 
 **Usuario admin por defecto:** Si la tabla `users` está vacía, crea `admin` / `admin123` con role `admin`.
 
@@ -247,17 +267,21 @@ Solo usuarios con `role === 'admin'`. Si no eres admin, te redirige a `/producci
 
 1. **Crear usuario:** Formulario con campos Nombre, Apellido, Usuario (login), Contraseña, Rol (user/admin), checkbox "Forzar cambio de contraseña"
 2. **Listar usuarios:** Tabla con ID, Nombre completo, Usuario, Rol (badge rojo/gris), Fecha creación
-3. **Resetear contraseña:** Botón por usuario → input inline → nueva contraseña + fuerza cambio en próximo login
-4. **Eliminar usuario:** Con confirmación. No puedes eliminarte a ti mismo.
+3. **Editar usuario:** Botón lápiz azul por usuario → la fila se convierte en inputs editables (nombre, apellido, usuario, rol) con "Guardar" y "Cancelar". Valida que el username no esté duplicado (error 409 inline)
+4. **Resetear contraseña:** Botón llave ámbar por usuario → input inline → nueva contraseña + fuerza cambio en próximo login
+5. **Eliminar usuario:** Con confirmación. No puedes eliminarte a ti mismo.
+6. **Acceso a logs:** Botón "Logs" en la cabecera que lleva a `/admin/logs`
 
 ### APIs de administración
 
 | Método | Ruta | Descripción |
 |---|---|---|
-| GET | `/api/admin/users` | Lista todos los usuarios |
-| POST | `/api/admin/users` | Crea usuario (acepta name, surname, username, password, role, mustChangePassword) |
-| PATCH | `/api/admin/users/:id` | Resetea contraseña (fuerza cambio) |
-| DELETE | `/api/admin/users/:id` | Elimina usuario |
+| GET | `/api/admin/users` | Lista todos los usuarios (id, username, role, name, surname, created_at) |
+| POST | `/api/admin/users` | Crea usuario (acepta name, surname, username, password, role, mustChangePassword). Devuelve 409 si el username ya existe |
+| PUT | `/api/admin/users/:id` | Edita datos del usuario (name, surname, username, role). Valida unicidad del username contra otros usuarios (409 si duplicado) |
+| PATCH | `/api/admin/users/:id` | Resetea contraseña (fuerza cambio en próximo login) |
+| DELETE | `/api/admin/users/:id` | Elimina usuario (no permite auto-eliminación) |
+| GET | `/api/admin/logs` | Logs de consultas con paginación, filtros y estadísticas (ver sección 7) |
 
 ---
 
@@ -302,7 +326,108 @@ Dos formas de interactuar:
 
 ---
 
-## 7. Carpeta `lib/` — Utilidades Base
+## 7. Sistema de Logs de Consultas
+
+### Qué se registra
+
+Cada vez que un usuario (o invitado) consulta datos o inicia sesión, se inserta un registro en `query_logs`. Esto permite al admin ver:
+
+- **Quién** consulta (username o "Invitado" si no hay sesión)
+- **Qué** filtros usó (JSON completo)
+- **Cuántos** resultados obtuvo
+- **Cuánto** tardó la consulta (ms)
+- **Desde qué panel** (`source`: `produccion`, `login`, futuros paneles)
+
+### Dónde se registra
+
+| Archivo | Source | Qué registra |
+|---|---|---|
+| `app/api/production/route.ts` | `produccion` | Cada consulta de datos (con o sin resultados) |
+| `app/api/auth/login/route.ts` | `login` | Cada inicio de sesión exitoso |
+
+El logging nunca bloquea la respuesta: se ejecuta en un `try/catch` independiente. Si falla el INSERT, se logea el error en consola pero el usuario recibe su respuesta normalmente.
+
+### Detección de usuario
+
+```ts
+const user = await verifySession().catch(() => null);
+// user !== null → usuario logueado → se guarda user.username
+// user === null → invitado → se guarda 'Invitado'
+```
+
+### API de logs — `GET /api/admin/logs`
+
+**Archivo:** `app/api/admin/logs/route.ts`
+
+Protegido con `verifySession()` + `role === 'admin'`.
+
+**Parámetros:**
+
+| Param | Tipo | Descripción |
+|---|---|---|
+| `page` | number | Página (50 registros por página) |
+| `startDate` | string | Filtro desde fecha (YYYY-MM-DD) |
+| `endDate` | string | Filtro hasta fecha (YYYY-MM-DD) |
+| `username` | string | Filtro por usuario exacto |
+
+**Respuesta:**
+
+```json
+{
+  "logs": [...],           // registros paginados
+  "total": 150,            // total de registros
+  "page": 1,
+  "totalPages": 3,
+  "usernames": ["admin", "Invitado", "juan"],  // para dropdown de filtro
+  "stats": {               // estadísticas (excluyendo logins)
+    "totalQueries": 120,
+    "avgTime": 345,
+    "maxTime": 2100,
+    "minTime": 50,
+    "avgResults": 87
+  },
+  "dailyStats": [          // últimos 14 días (para gráfico)
+    { "day": "2026-03-01", "queries": 15, "avgTime": 300, "uniqueUsers": 3 }
+  ]
+}
+```
+
+### Página de logs — `/admin/logs`
+
+**Archivo:** `app/admin/logs/page.tsx`
+
+Solo accesible para admins. Se accede desde:
+- Botón "Logs" en el panel de administración (`/admin`)
+- Botón "Logs" en la barra de sesión del dashboard (`/produccion`, solo admins)
+
+**Componentes visuales:**
+
+1. **4 tarjetas de estadísticas:** Consultas totales, Tiempo medio, Tiempo máximo, Resultados medio
+2. **Gráfico de líneas (recharts):** Toggle con botón "Ver gráfico"/"Ocultar gráfico". Muestra consultas y tiempo medio por día (últimos 14 días) con dos ejes Y (consultas a la izquierda, tiempo a la derecha)
+3. **Filtros:** Usuario (dropdown), Fecha desde, Fecha hasta, botones Filtrar/Limpiar
+4. **Tabla de logs:** Fecha/Hora, Usuario, Panel (badge con color), Filtros (resumen), Resultados, Tiempo
+5. **Paginación:** Anterior/Siguiente con indicador de página
+
+**Detalles de implementación:**
+- Los logins se resaltan con fondo azul claro y icono LogIn
+- La columna "Panel" muestra badges con colores según el source (`SOURCE_LABELS`)
+- `summarizeFilters()` convierte el JSON de filtros en un resumen legible (ej: "Aguilar · 01/03 - 02/03 · 3 filtros")
+- Las estadísticas y gráfico excluyen entradas de login (solo consultas reales)
+
+### Persistencia
+
+Los logs se almacenan en `data/app.db` (SQLite), igual que usuarios y presets. No se pierden al hacer `git pull`, `bun install` o `bun run build`.
+
+### Extensibilidad — Nuevos paneles
+
+Al crear un nuevo panel (ej: ventas), basta con:
+1. Añadir el INSERT en la ruta API del nuevo panel con `source: 'ventas'`
+2. Añadir la etiqueta en `SOURCE_LABELS` en `admin/logs/page.tsx`
+3. Los logs aparecerán automáticamente en la página de logs con su badge identificativo
+
+---
+
+## 8. Carpeta `lib/` — Utilidades Base
 
 ### `lib/db.ts` — Conexión a Oracle
 
@@ -382,7 +507,7 @@ F4111.ILMCUZ ──► F30006 + F0006 (líneas producción)
 
 ---
 
-## 9. API Routes — Datos de producción
+## 10. API Routes — Datos de producción
 
 ### `GET /api/categories?field=X`
 
@@ -429,7 +554,7 @@ Devuelve líneas de producción activas de F30006+F0006. Incluye `{ id: '__empty
 
 ---
 
-## 10. Página Principal — `app/produccion/page.tsx`
+## 11. Página Principal — `app/produccion/page.tsx`
 
 Client Component (~850 líneas). Es el dashboard principal.
 
@@ -497,7 +622,7 @@ Cada sección separada por divisores sutiles (`border-t border-gray-100`).
 
 ---
 
-## 11. Componentes Reutilizables
+## 12. Componentes Reutilizables
 
 ### `ArticleMultiSelect.tsx`
 
@@ -518,7 +643,7 @@ Desplegable multi-selección con búsqueda. Se usa para los 9 filtros de categor
 
 ---
 
-## 12. Gotchas y Patrones Importantes
+## 13. Gotchas y Patrones Importantes
 
 ### Oracle CHAR vs VARCHAR2
 
@@ -565,7 +690,7 @@ No usar `secure: process.env.NODE_ENV === 'production'`. En su lugar, `cookieOpt
 
 ---
 
-## 13. Cómo Añadir un Nuevo Filtro de Categoría
+## 14. Cómo Añadir un Nuevo Filtro de Categoría
 
 Si necesitas un nuevo filtro (ejemplo: "Subcategoría" con campo `IMSRP6`, DRSY=`41`, DRRT=`S6`):
 
@@ -592,7 +717,7 @@ srp6: { col: 'IMSRP6', drsy: '41', drrt: 'S6', directF0005: true },
 
 ---
 
-## 14. Cómo Arrancar el Proyecto
+## 15. Cómo Arrancar el Proyecto
 
 ```bash
 # 1. Instalar dependencias
