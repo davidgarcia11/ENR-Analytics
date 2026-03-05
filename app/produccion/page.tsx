@@ -14,7 +14,7 @@ import {
   TableRow,
 } from "@/components/ui/table"
 // Iconos de la librería lucide-react para dar estilo visual
-import { Search, Loader2, Factory, Calendar, Download, ChevronDown, ChevronsDown, X, User, LogOut, Save, BookmarkCheck, Trash2, Settings, FileText } from "lucide-react"
+import { Search, Loader2, Factory, Calendar, Download, ChevronDown, ChevronsDown, X, User, LogOut, Save, BookmarkCheck, Trash2, Settings, FileText, Pencil } from "lucide-react"
 import Image from "next/image"
 import * as XLSX from 'xlsx'; // Librería 'xlsx' para generar archivos Excel
 import { ArticleMultiSelect } from "@/components/ArticleMultiSelect"
@@ -33,6 +33,8 @@ export default function Dashboard() {
   const [showPresets, setShowPresets] = useState(false)
   const [presetName, setPresetName] = useState("")
   const [savingPreset, setSavingPreset] = useState(false)
+  const [includePresetDates, setIncludePresetDates] = useState(false)
+  const [editingPresetId, setEditingPresetId] = useState<number | null>(null)
 
   // --- ESTADOS (Variables que, al cambiar, actualizan la pantalla) ---
   const [data, setData] = useState<any[]>([]) // Almacena la lista de datos de producción
@@ -210,11 +212,9 @@ export default function Dashboard() {
     if (!name.trim()) return
     setSavingPreset(true)
     try {
-      const filtersData = {
+      const filtersData: Record<string, any> = {
         plant: filters.plant,
         subLine: filters.subLine,
-        startDate: filters.startDate,
-        endDate: filters.endDate,
         selectedArticles,
         selectedPrp6,
         selectedSrp3,
@@ -225,13 +225,24 @@ export default function Dashboard() {
         selectedZe03,
         selectedProdLines,
       }
-      const res = await fetch('/api/presets', {
-        method: 'POST',
+      if (includePresetDates) {
+        filtersData.startDate = filters.startDate
+        filtersData.endDate = filters.endDate
+      }
+
+      const isEditing = editingPresetId !== null
+      const url = isEditing ? `/api/presets/${editingPresetId}` : '/api/presets'
+      const method = isEditing ? 'PUT' : 'POST'
+
+      const res = await fetch(url, {
+        method,
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ name, filters: filtersData }),
       })
       if (res.ok) {
         setPresetName('')
+        setEditingPresetId(null)
+        setIncludePresetDates(false)
         loadPresets()
       } else {
         const data = await res.json()
@@ -242,14 +253,29 @@ export default function Dashboard() {
     }
   }
 
+  const startEditPreset = (preset: Preset) => {
+    const f = JSON.parse(preset.filters)
+    setPresetName(preset.name)
+    setEditingPresetId(preset.id)
+    setIncludePresetDates(!!f.startDate && !!f.endDate)
+    loadPreset(preset)
+    setShowPresets(true)
+  }
+
+  const cancelEditPreset = () => {
+    setEditingPresetId(null)
+    setPresetName('')
+    setIncludePresetDates(false)
+  }
+
   const loadPreset = (preset: Preset) => {
     const f = JSON.parse(preset.filters)
-    setFilters({
+    setFilters(prev => ({
       plant: f.plant || 'all',
       subLine: f.subLine || 'all',
-      startDate: f.startDate || todayStr,
-      endDate: f.endDate || todayStr,
-    })
+      startDate: f.startDate || prev.startDate,
+      endDate: f.endDate || prev.endDate,
+    }))
     setSelectedArticles(f.selectedArticles || [])
     setSelectedPrp6(f.selectedPrp6 || [])
     setSelectedSrp3(f.selectedSrp3 || [])
@@ -537,52 +563,88 @@ export default function Dashboard() {
         {/* --- PANEL DE PRESETS (solo si logueado y abierto) --- */}
         {sessionUser && showPresets && (
           <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-4" style={{ borderTop: '3px solid #D30B15' }}>
-            <div className="flex items-center justify-between mb-3">
+            <div className="flex items-center justify-between mb-4">
               <h3 className="text-sm font-bold text-gray-700 flex items-center gap-2">
                 <BookmarkCheck className="h-4 w-4" style={{ color: '#D30B15' }} />
                 Mis Presets de Filtros
               </h3>
-              <button onClick={() => setShowPresets(false)} className="text-gray-400 hover:text-gray-600">
+              <button onClick={() => { setShowPresets(false); cancelEditPreset() }} className="text-gray-400 hover:text-gray-600">
                 <X className="h-4 w-4" />
               </button>
             </div>
 
-            {/* Guardar preset actual */}
-            <div className="flex items-center gap-2 mb-3">
-              <Input
-                value={presetName}
-                onChange={e => setPresetName(e.target.value)}
-                placeholder="Nombre del preset..."
-                className="h-8 text-sm max-w-[250px]"
-                onKeyDown={e => e.key === 'Enter' && savePreset()}
-              />
-              <Button
-                onClick={() => savePreset()}
-                disabled={savingPreset || !presetName.trim()}
-                size="sm"
-                className="text-white text-xs font-semibold h-8"
-                style={{ backgroundColor: '#D30B15' }}
-              >
-                <Save className="mr-1.5 h-3.5 w-3.5" />
-                Guardar
-              </Button>
+            {/* Sección: Guardar filtros actuales */}
+            <div className="bg-gray-50 rounded-lg p-3 mb-4 border border-gray-100">
+              <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">
+                {editingPresetId ? 'Editando preset' : 'Guardar filtros actuales como preset'}
+              </p>
+              <div className="flex items-center gap-2 flex-wrap">
+                <Input
+                  value={presetName}
+                  onChange={e => setPresetName(e.target.value)}
+                  placeholder="Escribe un nombre..."
+                  className="h-9 text-sm max-w-[220px] bg-white"
+                  onKeyDown={e => e.key === 'Enter' && savePreset()}
+                />
+                <label className="flex items-center gap-1.5 text-xs text-gray-600 cursor-pointer whitespace-nowrap select-none">
+                  <input
+                    type="checkbox"
+                    checked={includePresetDates}
+                    onChange={e => setIncludePresetDates(e.target.checked)}
+                    className="rounded border-gray-300"
+                  />
+                  Incluir fechas
+                </label>
+                <Button
+                  onClick={() => savePreset()}
+                  disabled={savingPreset || !presetName.trim()}
+                  size="sm"
+                  className="text-white text-xs font-semibold h-9 px-4"
+                  style={{ backgroundColor: editingPresetId ? '#2563eb' : '#D30B15' }}
+                >
+                  <Save className="mr-1.5 h-3.5 w-3.5" />
+                  {editingPresetId ? 'Actualizar' : 'Guardar'}
+                </Button>
+                {editingPresetId && (
+                  <Button
+                    onClick={cancelEditPreset}
+                    variant="outline"
+                    size="sm"
+                    className="text-xs h-9 text-gray-500"
+                  >
+                    Cancelar
+                  </Button>
+                )}
+              </div>
+              {!editingPresetId && (
+                <p className="text-[11px] text-gray-400 mt-1.5">Se guardarán los filtros de categoría, planta y sub-planta seleccionados actualmente.</p>
+              )}
             </div>
 
-            {/* Lista de presets */}
+            {/* Sección: Presets guardados */}
+            <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">Presets guardados</p>
             {presets.length === 0 ? (
               <p className="text-xs text-gray-400">No tienes presets guardados.</p>
             ) : (
               <div className="flex flex-wrap gap-2">
-                {presets.map(p => (
-                  <div key={p.id} className="flex items-center gap-1 bg-gray-50 border border-gray-200 rounded-lg px-3 py-1.5 text-sm">
-                    <button onClick={() => loadPreset(p)} className="font-medium text-gray-700 hover:text-gray-900">
+                {presets.map(p => {
+                  const pf = (() => { try { return JSON.parse(p.filters) } catch { return {} } })()
+                  const hasDates = !!pf.startDate && !!pf.endDate
+                  return (
+                  <div key={p.id} className={`flex items-center gap-1.5 border rounded-lg px-3 py-1.5 text-sm ${editingPresetId === p.id ? 'bg-blue-50 border-blue-300' : 'bg-gray-50 border-gray-200'}`}>
+                    <button onClick={() => loadPreset(p)} className="font-medium text-gray-700 hover:text-gray-900 flex items-center gap-1.5" title="Cargar preset">
                       {p.name}
+                      {hasDates && <Calendar className="h-3 w-3 text-gray-300" />}
                     </button>
-                    <button onClick={() => deletePreset(p.id)} className="text-gray-300 hover:text-red-500 ml-1">
+                    <button onClick={() => startEditPreset(p)} className="text-gray-300 hover:text-blue-500" title="Editar">
+                      <Pencil className="h-3 w-3" />
+                    </button>
+                    <button onClick={() => deletePreset(p.id)} className="text-gray-300 hover:text-red-500" title="Eliminar">
                       <Trash2 className="h-3.5 w-3.5" />
                     </button>
                   </div>
-                ))}
+                  )
+                })}
               </div>
             )}
           </div>
@@ -793,10 +855,7 @@ export default function Dashboard() {
                   <Button
                     variant="outline"
                     className="border-blue-500 text-blue-600 hover:bg-blue-50"
-                    onClick={() => {
-                      const name = prompt('Nombre del preset:');
-                      if (name && name.trim()) savePreset(name.trim());
-                    }}
+                    onClick={() => setShowPresets(true)}
                   >
                     <Save className="mr-2 h-4 w-4" />
                     Guardar

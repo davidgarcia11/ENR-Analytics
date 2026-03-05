@@ -115,6 +115,7 @@ export default function LogsPage() {
   const [filterStartDate, setFilterStartDate] = useState("")
   const [filterEndDate, setFilterEndDate] = useState("")
   const [usernames, setUsernames] = useState<string[]>([])
+  const [filterTrigger, setFilterTrigger] = useState(0)
 
   useEffect(() => {
     checkAuth()
@@ -122,7 +123,7 @@ export default function LogsPage() {
 
   useEffect(() => {
     if (authorized) loadLogs()
-  }, [page, authorized])
+  }, [page, authorized, filterTrigger])
 
   const checkAuth = async () => {
     try {
@@ -161,7 +162,7 @@ export default function LogsPage() {
 
   const applyFilters = () => {
     setPage(1)
-    loadLogs()
+    setFilterTrigger(t => t + 1)
   }
 
   const clearFilters = () => {
@@ -169,7 +170,7 @@ export default function LogsPage() {
     setFilterStartDate("")
     setFilterEndDate("")
     setPage(1)
-    setTimeout(loadLogs, 0)
+    setFilterTrigger(t => t + 1)
   }
 
   // Preparar datos del gráfico
