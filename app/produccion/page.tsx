@@ -14,7 +14,7 @@ import {
   TableRow,
 } from "@/components/ui/table"
 // Iconos de la librería lucide-react para dar estilo visual
-import { Search, Loader2, Factory, Calendar, Download, ChevronDown, ChevronsDown, X, User, LogOut, Save, BookmarkCheck, Trash2, Settings, FileText, Pencil } from "lucide-react"
+import { Search, Loader2, Factory, Calendar, Download, ChevronDown, ChevronsDown, X, User, LogOut, Save, BookmarkCheck, Trash2, Settings, FileText, Pencil, Package } from "lucide-react"
 import Image from "next/image"
 import * as XLSX from 'xlsx'; // Librería 'xlsx' para generar archivos Excel
 import { ArticleMultiSelect } from "@/components/ArticleMultiSelect"
@@ -543,6 +543,10 @@ export default function Dashboard() {
                   </button>
                 </>
               )}
+              <button onClick={() => router.push('/preparacion-pedidos')} className="text-xs font-medium text-gray-500 hover:text-gray-700 flex items-center gap-1.5 px-2.5 py-1 rounded-md border border-gray-200 hover:border-gray-300">
+                <Package className="h-3.5 w-3.5" />
+                Pedidos
+              </button>
               <button onClick={() => setShowPresets(!showPresets)} className="text-xs font-medium px-2.5 py-1 rounded-md border border-gray-300 bg-white hover:bg-gray-50 flex items-center gap-1.5">
                 <BookmarkCheck className="h-3.5 w-3.5" />
                 Presets
