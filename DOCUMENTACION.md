@@ -12,6 +12,7 @@ Esta aplicación es un **panel de control (dashboard) de producción** para la e
 - Órdenes de fabricación y cantidades producidas
 - Porcentaje de merma (desperdicio) por artículo
 - Desglose por planta, línea de producción y fechas
+- **Preparación de pedidos**: control de asignación de palets/lotes a pedidos de venta (F4211)
 - Exportación a Excel con formato condicional
 - Sistema de autenticación con gestión de usuarios (admin crea usuarios)
 - Presets de filtros guardados por usuario
@@ -84,6 +85,8 @@ dashboard/
     │   └── page.tsx              ← Ruta "/cambiar-contrasena" → cambio forzado de contraseña
     ├── produccion/
     │   └── page.tsx              ← Ruta "/produccion" → DASHBOARD PRINCIPAL
+    ├── preparacion-pedidos/
+    │   └── page.tsx              ← Ruta "/preparacion-pedidos" → CONTROL DE PEDIDOS
     └── api/
         ├── auth/
         │   ├── login/route.ts    ← POST /api/auth/login
@@ -106,8 +109,10 @@ dashboard/
         │   └── route.ts          ← GET /api/categories?field=X
         ├── production/
         │   └── route.ts          ← GET /api/production?...filtros...
-        └── production-lines/
-            └── route.ts          ← GET /api/production-lines
+        ├── production-lines/
+        │   └── route.ts          ← GET /api/production-lines
+        └── orders/
+            └── route.ts          ← GET /api/orders?...filtros... (pedidos de venta)
 ```
 
 ---
@@ -342,7 +347,8 @@ Cada vez que un usuario (o invitado) consulta datos o inicia sesión, se inserta
 
 | Archivo | Source | Qué registra |
 |---|---|---|
-| `app/api/production/route.ts` | `produccion` | Cada consulta de datos (con o sin resultados) |
+| `app/api/production/route.ts` | `produccion` | Cada consulta de datos de producción |
+| `app/api/orders/route.ts` | `pedidos` | Cada consulta de pedidos de venta |
 | `app/api/auth/login/route.ts` | `login` | Cada inicio de sesión exitoso |
 
 El logging nunca bloquea la respuesta: se ejecuta en un `try/catch` independiente. Si falla el INSERT, se logea el error en consola pero el usuario recibe su respuesta normalmente.
@@ -420,10 +426,12 @@ Los logs se almacenan en `data/app.db` (SQLite), igual que usuarios y presets. N
 
 ### Extensibilidad — Nuevos paneles
 
-Al crear un nuevo panel (ej: ventas), basta con:
-1. Añadir el INSERT en la ruta API del nuevo panel con `source: 'ventas'`
+Al crear un nuevo panel, basta con:
+1. Añadir el INSERT en la ruta API del nuevo panel con `source: 'nombre_panel'`
 2. Añadir la etiqueta en `SOURCE_LABELS` en `admin/logs/page.tsx`
 3. Los logs aparecerán automáticamente en la página de logs con su badge identificativo
+
+**Paneles actuales registrados:** `produccion` (Producción), `pedidos` (Preparación Pedidos), `login` (Login)
 
 ---
 
@@ -475,6 +483,7 @@ Divide entre 100 (JDE almacena cantidades ×100).
 | Tabla | Descripción | Campos clave |
 |---|---|---|
 | **F4801** | **Órdenes de fabricación** | `WADOCO` (nº orden), `WADL01` (descripción), `WAMCU` (planta), `WAAITM` (artículo display), `WAITM` (artículo corto) |
+| **F4211** | **Líneas de pedido de venta** | `SDDOCO` (nº pedido), `SDPDDJ` (fecha carga JDE), `SDRSDJ` (fecha entrega JDE), `SDMCU` (planta), `SDAITM` (artículo), `SDDSC1` (descripción), `SDUORG` (cant. pedida ×100), `SDLOTN` (lote/palet), `SDLNID` (nº línea), `SDUOM` (UM), `SDNXTR` (estado — 999=cerrado) |
 | **F4111** | **Movimientos de inventario** | `ILDOC` (nº orden), `ILTRDJ` (fecha JDE), `ILDCT` (tipo: IC=producción, IS=merma), `ILTRQT` (cantidad), `ILRCD` (código razón), `ILTRUM` (UM), `ILMCUZ` (línea producción) |
 | **F4101** | **Maestro de artículos** | `IMITM` (ID corto), `IMUOM1` (UM primaria), `IMPRP6` (tipo proceso), `IMSRP1..5` (categorías) |
 | **F554101** | **Extensión del maestro** | `AAITM` (ID corto), `AAZE03` (gramaje) |
@@ -690,7 +699,148 @@ No usar `secure: process.env.NODE_ENV === 'production'`. En su lugar, `cookieOpt
 
 ---
 
-## 14. Cómo Añadir un Nuevo Filtro de Categoría
+## 14. Preparación de Pedidos — `/preparacion-pedidos`
+
+### Visión general
+
+Panel para controlar el progreso de asignación de palets/lotes a pedidos de venta. Consulta la tabla **F4211** (Sales Order Detail) de Oracle JDE.
+
+**Concepto clave:** Una línea de pedido está **asignada** si tiene lote (`SDLOTN` no vacío). Si no tiene lote, está **pendiente**. El progreso se calcula como la proporción de cantidad asignada (con lote) sobre la cantidad total pedida.
+
+### Navegación
+
+- Desde `/produccion`: botón "Pedidos" en la barra de sesión
+- Desde `/preparacion-pedidos`: botón "Producción" para volver
+
+### API — `GET /api/orders`
+
+**Archivo:** `app/api/orders/route.ts`
+
+**Parámetros:**
+
+| Param | Tipo | Descripción |
+|---|---|---|
+| `plant` | string | Planta (10100, 10200, 10300) o vacío para todas |
+| `startDate` | string | Fecha carga desde (YYYY-MM-DD) → filtra `SDPDDJ` |
+| `endDate` | string | Fecha carga hasta (YYYY-MM-DD) → filtra `SDPDDJ` |
+| `deliveryStartDate` | string | Fecha entrega desde (YYYY-MM-DD) → filtra `SDRSDJ` |
+| `deliveryEndDate` | string | Fecha entrega hasta (YYYY-MM-DD) → filtra `SDRSDJ` |
+
+**Lógica:**
+1. Consulta F4211 excluyendo líneas cerradas (`SDNXTR != 999`)
+2. Agrupa por pedido (`SDDOCO`) y por artículo (`SDAITM`)
+3. Clasifica cada línea como asignada (tiene `SDLOTN`) o pendiente (sin `SDLOTN`)
+4. Suma `SDUORG/100` por artículo: `totalOrdered`, `totalAssigned` (con lote), `totalPending` (sin lote)
+5. Calcula progreso: `totalAssigned / totalOrdered × 100`
+6. Determina estado del pedido: `completado` (todos los artículos al 100%), `en_progreso` (alguno asignado), `pendiente` (ninguno asignado)
+7. Registra en logs con `source: 'pedidos'`
+
+**Respuesta:**
+```json
+{
+  "orders": [{
+    "orderNumber": 12345,
+    "loadDate": "2026-03-09T...",
+    "deliveryDate": "2026-03-12T...",
+    "plant": "10300",
+    "plantName": "Funes",
+    "articles": [{
+      "itemNumber": "0001234567",
+      "description": "PRODUCTO X",
+      "totalOrdered": 500,
+      "totalAssigned": 300,
+      "totalPending": 200,
+      "uom": "UN",
+      "progress": 60,
+      "lots": [
+        { "lineNumber": 1, "qtyOrdered": 300, "lot": "PAL001", "assigned": true },
+        { "lineNumber": 2, "qtyOrdered": 200, "lot": "", "assigned": false }
+      ]
+    }],
+    "totalArticles": 1,
+    "overallProgress": 60,
+    "status": "en_progreso"
+  }],
+  "summary": {
+    "totalOrders": 50,
+    "completados": 10,
+    "enProgreso": 25,
+    "pendientes": 15
+  }
+}
+```
+
+### Campos de F4211 utilizados
+
+| Campo | Descripción |
+|---|---|
+| `SDDOCO` | Número de pedido de venta |
+| `SDPDDJ` | Fecha de carga (formato JDE CYYDDD) |
+| `SDRSDJ` | Fecha de entrega (formato JDE CYYDDD) |
+| `SDMCU` | Planta (Business Unit) |
+| `SDAITM` | Artículo (display) |
+| `SDDSC1` | Descripción del artículo |
+| `SDUORG` | Cantidad pedida (×100) |
+| `SDLOTN` | Lote/palet asignado (vacío = pendiente) |
+| `SDLNID` | Número de línea |
+| `SDUOM` | Unidad de medida |
+| `SDNXTR` | Estado siguiente (999 = cerrado, se excluye) |
+
+### Página — `app/preparacion-pedidos/page.tsx`
+
+Client Component. Estructura visual:
+
+```
+┌─────────────────────────────────────────────────────────┐
+│ [LOGO]                      [Usuario ▪ Producción ▪ Salir]│
+│                                                         │
+│ Preparación de Pedidos                                  │
+│                                                         │
+│ ┌─ Filtros ──────────────────────────────────────────┐  │
+│ │ F.Carga Inicio│F.Carga Fin│F.Entrega Inicio│       │  │
+│ │ F.Entrega Fin│Planta                                │  │
+│ │ ─────────────────────────────────────────          │  │
+│ │ ☑ Pendientes ☑ En Progreso ☑ Completados          │  │
+│ │                    [Filtrar][Excel][Limpiar]        │  │
+│ └────────────────────────────────────────────────────┘  │
+│                                                         │
+│ ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐   │
+│ │  Total   │ │Completad.│ │En Progr. │ │Pendientes│   │
+│ │   50     │ │    10    │ │    25    │ │    15    │   │
+│ └──────────┘ └──────────┘ └──────────┘ └──────────┘   │
+│                                                         │
+│ ┌─ Pedidos (tabla expandible) ──────────────────────┐  │
+│ │ ▶ 12345 │ 09/03 │ 12/03 │ Funes │ 3 │ ██░ 60% │  │
+│ │   ▼ (expandido)                                    │  │
+│ │   Artículo │ Desc. │ Pedido │ Asig. │ Pend. │ %  │  │
+│ │   00001234 │ PROD..│  500   │  300  │  200  │60% │  │
+│ │     ▼ (expandido)                                  │  │
+│ │     Línea 1 │ 300 │ ✓ 300 │       │ PAL001       │  │
+│ │     Línea 2 │ 200 │       │ 200   │ —            │  │
+│ └────────────────────────────────────────────────────┘  │
+└─────────────────────────────────────────────────────────┘
+```
+
+**Tabla expandible a 3 niveles:**
+1. **Pedido:** Nº pedido, Fecha carga, Fecha entrega, Planta, Nº artículos, Barra progreso, Estado (badge)
+2. **Artículos (agrupados por `SDAITM`):** Artículo, Descripción, Total pedido, Total asignado (verde), Total pendiente (ámbar), Barra progreso, UM
+3. **Lotes/líneas individuales:** Nº línea, Cantidad, Asignado/Pendiente, Lote/Palet
+
+**Ordenamiento:** Pendientes primero, En Progreso segundo, Completados último.
+
+**Checkboxes de estado:** Permiten mostrar/ocultar pedidos por estado sin re-consultar la API. Filtro local instantáneo.
+
+**Filtros:**
+- Fecha Carga Inicio / Fin (`SDPDDJ`)
+- Fecha Entrega Inicio / Fin (`SDRSDJ`)
+- Planta (Aguilar, Corella, Funes, Todas)
+- Por defecto: fecha carga = hoy, fechas entrega vacías
+
+**Export Excel:** Incluye todas las líneas de los pedidos filtrados con: Pedido, Fecha Carga, Fecha Entrega, Planta, Artículo, Descripción, Línea, Cant. Pedida, Lote/Palet, Asignado (SÍ/NO), Totales por artículo, % Progreso, UM, Estado.
+
+---
+
+## 15. Cómo Añadir un Nuevo Filtro de Categoría (panel Producción)
 
 Si necesitas un nuevo filtro (ejemplo: "Subcategoría" con campo `IMSRP6`, DRSY=`41`, DRRT=`S6`):
 
@@ -717,7 +867,7 @@ srp6: { col: 'IMSRP6', drsy: '41', drrt: 'S6', directF0005: true },
 
 ---
 
-## 15. Cómo Arrancar el Proyecto
+## 16. Cómo Arrancar el Proyecto
 
 ```bash
 # 1. Instalar dependencias
