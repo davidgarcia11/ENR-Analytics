@@ -4,12 +4,6 @@ import { getDayOfYear } from 'date-fns';
 import { getDb } from '@/lib/sqlite';
 import { verifySession } from '@/lib/auth';
 
-const PLANT_NAMES: Record<string, string> = {
-  '10100': 'Aguilar',
-  '10200': 'Corella',
-  '10300': 'Funes',
-};
-
 export async function GET(req: NextRequest) {
   const startTime = Date.now();
   const { searchParams } = new URL(req.url);
@@ -23,6 +17,15 @@ export async function GET(req: NextRequest) {
   let conn;
   try {
     conn = await getDbConnection();
+
+    // Cargar nombres de planta desde Oracle
+    const plantResult = await conn.execute(
+      `SELECT TRIM(MCMCU) AS PLANT_CODE, TRIM(MCDL01) AS PLANT_NAME FROM F0006 WHERE MCSTYL = 'BP'`
+    );
+    const plantNames: Record<string, string> = {};
+    for (const r of plantResult.rows as any[]) {
+      plantNames[String(r.PLANT_CODE || '').trim()] = String(r.PLANT_NAME || '').trim();
+    }
 
     let sql = `
       SELECT SDDOCO, SDPDDJ, SDRSDJ, TRIM(SDMCU) AS SDMCU,
@@ -110,7 +113,7 @@ export async function GET(req: NextRequest) {
           loadDate: date.toISOString(),
           deliveryDate: deliveryDate.toISOString(),
           plant: plantCode,
-          plantName: PLANT_NAMES[plantCode] || plantCode,
+          plantName: plantNames[plantCode] || plantCode,
           lines: [],
           totalLines: 0,
           overallProgress: 0,

@@ -75,6 +75,9 @@ export default function PreparacionPedidos() {
   const [filters, setFilters] = useState({ plant: 'all', startDate: todayStr, endDate: todayStr, deliveryStartDate: '', deliveryEndDate: '' })
   const [showStatus, setShowStatus] = useState({ pendiente: true, en_progreso: true, completado: true })
 
+  // Plants
+  const [plants, setPlants] = useState<{ id: string; description: string }[]>([])
+
   // Expand/collapse
   const [expandedOrders, setExpandedOrders] = useState<Set<number>>(new Set())
   const [expandedArticles, setExpandedArticles] = useState<Set<string>>(new Set())
@@ -82,8 +85,16 @@ export default function PreparacionPedidos() {
   // Init
   useEffect(() => {
     checkSession()
+    fetchPlants()
     fetchData()
   }, [])
+
+  const fetchPlants = async () => {
+    try {
+      const res = await fetch('/api/plants')
+      if (res.ok) setPlants(await res.json())
+    } catch { /* Oracle no disponible */ }
+  }
 
   const checkSession = async () => {
     try {
@@ -300,9 +311,9 @@ export default function PreparacionPedidos() {
                   className="h-9 rounded-md border border-gray-300 bg-white px-3 text-sm font-medium focus:border-slate-500 focus:outline-none"
                 >
                   <option value="all">Todas</option>
-                  <option value="10100">Aguilar</option>
-                  <option value="10200">Corella</option>
-                  <option value="10300">Funes</option>
+                  {plants.map(p => (
+                    <option key={p.id} value={p.id}>{p.description}</option>
+                  ))}
                 </select>
               </div>
             </div>
