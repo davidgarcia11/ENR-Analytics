@@ -12,6 +12,7 @@ Esta aplicación es un **panel de control (dashboard) de producción** para la e
 - Órdenes de fabricación y cantidades producidas
 - Porcentaje de merma (desperdicio) por artículo
 - Desglose por planta, línea de producción y fechas
+- Palets caducados, con artículo obsoleto y/o bloqueados (por planta y ubicación)
 - Exportación a Excel con formato condicional
 - Sistema de autenticación con gestión de usuarios (admin crea usuarios)
 - Presets de filtros guardados por usuario
@@ -83,7 +84,9 @@ dashboard/
     ├── cambiar-contrasena/
     │   └── page.tsx              ← Ruta "/cambiar-contrasena" → cambio forzado de contraseña
     ├── produccion/
-    │   └── page.tsx              ← Ruta "/produccion" → DASHBOARD PRINCIPAL
+    │   └── page.tsx              ← Ruta "/produccion" → DASHBOARD PRODUCCIÓN
+    ├── caducados/
+    │   └── page.tsx              ← Ruta "/caducados" → DASHBOARD CADUCADOS/OBSOLETOS/BLOQUEADOS
     └── api/
         ├── auth/
         │   ├── login/route.ts    ← POST /api/auth/login
@@ -106,8 +109,10 @@ dashboard/
         │   └── route.ts          ← GET /api/categories?field=X
         ├── production/
         │   └── route.ts          ← GET /api/production?...filtros...
-        └── production-lines/
-            └── route.ts          ← GET /api/production-lines
+        ├── production-lines/
+        │   └── route.ts          ← GET /api/production-lines
+        └── caducados/
+            └── route.ts          ← GET /api/caducados?type=...&plant=...&location=...
 ```
 
 ---
@@ -342,7 +347,8 @@ Cada vez que un usuario (o invitado) consulta datos o inicia sesión, se inserta
 
 | Archivo | Source | Qué registra |
 |---|---|---|
-| `app/api/production/route.ts` | `produccion` | Cada consulta de datos (con o sin resultados) |
+| `app/api/production/route.ts` | `produccion` | Cada consulta de datos de producción |
+| `app/api/caducados/route.ts` | `caducados_obsoletos` | Cada consulta de caducados/obsoletos/bloqueados |
 | `app/api/auth/login/route.ts` | `login` | Cada inicio de sesión exitoso |
 
 El logging nunca bloquea la respuesta: se ejecuta en un `try/catch` independiente. Si falla el INSERT, se logea el error en consola pero el usuario recibe su respuesta normalmente.
@@ -480,6 +486,14 @@ Divide entre 100 (JDE almacena cantidades ×100).
 | **F554101** | **Extensión del maestro** | `AAITM` (ID corto), `AAZE03` (gramaje) |
 | **F55TAR12** | **Tareas de producción** (custom) | `TODOCO` (nº orden), `TO55TAREA` (código fecha+sublínea) |
 
+### Tablas del dashboard de caducados/obsoletos/bloqueados
+
+| Tabla | Descripción | Campos clave |
+|---|---|---|
+| **F41021** | **Stock por ubicación** (Item Location) | `LIITM` (artículo corto), `LIMCU` (planta), `LILOTN` (palet_lote), `LILOCN` (ubicación), `LIPQOH` (cantidad ×100) |
+| **F4108** | **Lotes/Palets** (Lot Master) | `IOITM` (artículo corto), `IOMCU` (planta), `IOLOTN` (palet_lote), `IOLOT1` (palet), `IOLOT2` (lote), `IOMMEJ` (fecha caducidad CYYDDD), `IOLOTS` (status lote: `'B'`=bloqueado), `IOLITM` (artículo largo) |
+| **F4100** | **Ubicaciones** (Location Master) | `LMLOCN` (código ubicación) — se usa para poblar el dropdown de ubicaciones |
+
 ### Tablas auxiliares
 
 | Tabla | Descripción |
@@ -487,7 +501,7 @@ Divide entre 100 (JDE almacena cantidades ×100).
 | **prodctl.f0005** | Códigos definidos por usuario (UDC) — catálogos |
 | **F41002** | Conversiones de unidad de medida |
 | **F30006** | Centros de trabajo (líneas producción) |
-| **F0006** | Unidades de negocio (Business Units) |
+| **F0006** | Unidades de negocio (Business Units) — `MCSTYL='BP'` filtra plantas, `MCMCU` código, `MCDL01` descripción |
 
 ### Relaciones
 
@@ -503,6 +517,19 @@ F4111 (movimientos)
 
 F4101.IMPRP6/IMSRP1..5 ──► prodctl.f0005 (catálogos UDC)
 F4111.ILMCUZ ──► F30006 + F0006 (líneas producción)
+
+--- Caducados/Obsoletos/Bloqueados ---
+
+F41021 (stock por ubicación)
+    │ LIITM + LILOTN + LIMCU
+    ▼
+F4108 (lotes/palets) ──► IOMMEJ (caducidad), IOLOTS (bloqueado), IOLOT1/IOLOT2 (palet/lote)
+    │ LIITM
+    ▼
+F4101 (maestro artículos) ──► IMSTKT = 'O' (obsoleto), IMDSC1 (descripción)
+
+F4100 (ubicaciones) ──► LMLOCN (dropdown de ubicaciones)
+F0006 (plantas) ──► MCSTYL = 'BP' (dropdown de plantas)
 ```
 
 ---
@@ -552,9 +579,121 @@ El endpoint más complejo. Devuelve datos de producción filtrados.
 
 Devuelve líneas de producción activas de F30006+F0006. Incluye `{ id: '__empty__', description: 'Sin línea' }` al principio.
 
+### `GET /api/caducados?type=...&plant=...&location=...`
+
+**Archivo:** `app/api/caducados/route.ts`
+
+Devuelve palets caducados, con artículo obsoleto y/o bloqueados.
+
+**Parámetros:**
+
+| Param | Tipo | Valores | Descripción |
+|---|---|---|---|
+| `type` | string | `todos`, `caducados`, `obsoletos`, `bloqueados` | Tipo de filtro (por defecto `todos`) |
+| `plant` | string | Código planta (ej. `10300`) o `all` | Filtrar por planta |
+| `location` | string | Código ubicación, `__blank__` (GENERICA) o `all` | Filtrar por ubicación |
+
+**Lógica SQL:**
+
+```
+F41021 A (stock con cantidad > 0)
+  INNER JOIN F4101 D ON D.IMITM = A.LIITM         -- descripción + status artículo
+  INNER JOIN F4108 B ON B.IOLOTN = A.LILOTN        -- palet/lote/caducidad/bloqueado
+                     AND B.IOITM = A.LIITM
+                     AND B.IOMCU = A.LIMCU
+```
+
+- **Caducados:** `B.IOMMEJ < fechaJdeHoy AND B.IOMMEJ > 0`
+- **Obsoletos:** `D.IMSTKT = 'O'`
+- **Bloqueados:** `B.IOLOTS = 'B'`
+- **Todos:** cualquiera de los tres
+
+Un palet puede tener múltiples motivos simultáneos (ej. "Caducado + Obsoleto").
+
+**JOIN triple a F4108:** Se relaciona por `IOLOTN + IOITM + IOMCU` (palet_lote + artículo + planta) para evitar duplicados cuando el mismo palet_lote existe en F4108 para distintos artículos con fechas de caducidad diferentes.
+
+**Datos adicionales:**
+- Nombres de planta desde F0006 (`MCSTYL = 'BP'`)
+- Ubicaciones únicas desde F4100 (`DISTINCT LMLOCN`)
+- Cantidades divididas entre 100 (formato JDE)
+
+**Respuesta:**
+
+```json
+{
+  "data": [
+    {
+      "articleLong": "0001234567",
+      "description": "TOMATE FRITO",
+      "plantCode": "10300",
+      "plantName": "PLANTA FUNES",
+      "paletLote": "1_240225",
+      "palet": "1",
+      "lote": "240225",
+      "location": "",
+      "quantity": 610,
+      "expiryDate": "2026-02-19",
+      "motivo": "Caducado"
+    }
+  ],
+  "locations": ["", "CONSUMO", "TRANSITO01", ...],
+  "summary": {
+    "totalPallets": 45,
+    "totalQuantity": 12500.00,
+    "caducados": 30,
+    "obsoletos": 10,
+    "bloqueados": 8,
+    "ambos": 3
+  }
+}
+```
+
+**Ubicaciones:**
+- En blanco (`""`) = GENERICA (ubicación por defecto)
+- Prefijo `T...` = Tránsito
+- `CONSUMO` = Unidades consumidas
+
 ---
 
-## 11. Página Principal — `app/produccion/page.tsx`
+## 11. Página de Caducados/Obsoletos/Bloqueados — `app/caducados/page.tsx`
+
+Dashboard para visualizar palets problemáticos: caducados, con artículo obsoleto o bloqueados.
+
+### Filtros
+
+- **Tipo:** Botones segmentados (Todos / Caducados / Obsoletos / Bloqueados)
+- **Planta:** Dropdown dinámico (extraído de los datos devueltos)
+- **Ubicación:** Dropdown con valores de F4100 + opción GENERICA (ubicación en blanco)
+
+Al entrar, carga automáticamente con tipo "Todos" sin filtros.
+
+### Tarjetas métricas (5)
+
+| Tarjeta | Descripción |
+|---|---|
+| Total Palets | Nº registros encontrados |
+| Cantidad Total | Suma de cantidades |
+| Caducados | Palets con fecha de caducidad vencida (rojo) |
+| Obsoletos | Palets cuyo artículo tiene IMSTKT='O' (ámbar) |
+| Bloqueados | Palets con IOLOTS='B' en F4108 (azul) |
+
+### Tabla
+
+Columnas: Artículo, Descripción, Planta, Ubicación, Palet, Lote, Cantidad, Fecha Cad., Motivo.
+
+El motivo se muestra como badge con color según tipo:
+- Rojo: Caducado
+- Ámbar: Obsoleto
+- Azul: Bloqueado
+- Morado/Rojo intenso: combinaciones (ej. "Caducado + Obsoleto")
+
+### Exportación Excel
+
+Incluye todos los campos visibles + Palet_Lote (dato adicional no visible en tabla).
+
+---
+
+## 12. Página Principal — `app/produccion/page.tsx`
 
 Client Component (~850 líneas). Es el dashboard principal.
 
@@ -622,7 +761,7 @@ Cada sección separada por divisores sutiles (`border-t border-gray-100`).
 
 ---
 
-## 12. Componentes Reutilizables
+## 13. Componentes Reutilizables
 
 ### `ArticleMultiSelect.tsx`
 
@@ -643,7 +782,7 @@ Desplegable multi-selección con búsqueda. Se usa para los 9 filtros de categor
 
 ---
 
-## 13. Gotchas y Patrones Importantes
+## 14. Gotchas y Patrones Importantes
 
 ### Oracle CHAR vs VARCHAR2
 
@@ -690,7 +829,7 @@ No usar `secure: process.env.NODE_ENV === 'production'`. En su lugar, `cookieOpt
 
 ---
 
-## 14. Cómo Añadir un Nuevo Filtro de Categoría
+## 15. Cómo Añadir un Nuevo Filtro de Categoría
 
 Si necesitas un nuevo filtro (ejemplo: "Subcategoría" con campo `IMSRP6`, DRSY=`41`, DRRT=`S6`):
 
@@ -717,7 +856,51 @@ srp6: { col: 'IMSRP6', drsy: '41', drrt: 'S6', directF0005: true },
 
 ---
 
-## 15. Cómo Arrancar el Proyecto
+## 16. Cómo Añadir Plantas y Sub-plantas a Producción
+
+El dashboard de producción tiene las plantas y sub-plantas **hardcodeadas** por diseño, porque la lógica de sub-plantas está ligada al campo `TO55TAREA` de F55TAR12 (primer dígito = subcódigo).
+
+### Añadir una nueva planta (sin sub-plantas)
+
+**Ejemplo:** Nueva planta "Tudela" con código `10400`.
+
+**Paso 1:** `app/produccion/page.tsx` — Añadir `<option>` en el dropdown de planta:
+```tsx
+<option value="10400">Tudela</option>
+```
+
+**Paso 2:** `lib/utils.ts` → función `parseJdeDate` — Añadir case en el switch de planta:
+```ts
+case '10400': subBlockName = 'Tudela'; break;
+```
+
+### Añadir una nueva sub-planta a una planta existente
+
+**Ejemplo:** Nueva sub-planta "Funes 3" con subcódigo `6`.
+
+**Paso 1:** `lib/utils.ts` → función `parseJdeDate` — Añadir case dentro del bloque de planta `10300`:
+```ts
+case '6': subBlockName = 'Funes 3'; break;
+```
+
+**Paso 2:** `app/produccion/page.tsx` — Añadir `<option>` en el dropdown condicional de sub-planta:
+```tsx
+<option value="6">Funes 3</option>
+```
+
+**Paso 3:** `app/api/production/route.ts` — Si la nueva sub-planta reemplaza un subcódigo antiguo, añadir al `oldSubCodeMap`:
+```ts
+'10300': { 3: 1, 4: 2, 6: X }, // donde X es el subcódigo antiguo que usaba antes
+```
+Si es completamente nueva (no hay datos históricos), no hace falta tocar el mapa.
+
+### Nota sobre el dashboard de caducados
+
+El dashboard de caducados (`/caducados`) obtiene las plantas dinámicamente desde Oracle (F0006 con `MCSTYL='BP'`), por lo que **no necesita cambios** al añadir nuevas plantas.
+
+---
+
+## 17. Cómo Arrancar el Proyecto
 
 ```bash
 # 1. Instalar dependencias
@@ -736,7 +919,7 @@ bun run build
 bun start
 ```
 
-> **Nota:** La ruta raíz `/` muestra un 404 a propósito. La app está en `/produccion`.
+> **Nota:** La ruta raíz `/` muestra un 404 a propósito. La app está en `/produccion` y `/caducados`.
 
 ### Primer acceso
 
