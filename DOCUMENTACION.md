@@ -540,6 +540,8 @@ El endpoint más complejo. Devuelve datos de producción filtrados.
 4. Procesa filas: parsea fechas JDE, convierte UM (BFS), agrupa, calcula merma
 5. Devuelve `{ data: [...], sqlRowCount: N }`
 
+**Descripción del artículo:** Viene del maestro de artículos (`F4101.IMDSC1`) mediante `INNER JOIN F4101 M ON M.IMITM = A.WAITM`, no de la orden (`F4801.WADL01`). Esto garantiza que un mismo artículo siempre tenga la misma descripción y no se duplique en la agrupación del frontend.
+
 **Deduplicación F55TAR12:** `MOD(TO55TAREA, 100000)` extrae la fecha sin sub-código, `MAX` se queda con el registro más reciente (evita duplicados por migración de sub-códigos).
 
 **Merma:** Movimientos `IS` con código razón `P01-P05`, `Q01-Q10`. Viene como número negativo. Fórmula: `|merma| / (|merma| + producido) × 100`.
