@@ -54,7 +54,7 @@ export async function GET(req: NextRequest) {
           SELECT
             A.WADOCO,
             B.TO55TAREA,
-            A.WADL01,
+            TRIM(M.IMDSC1) AS IMDSC1,
             SUM(CASE WHEN C.ILDCT = 'IC' THEN C.ILTRQT ELSE 0 END) as WASOQS,
             SUM(CASE WHEN C.ILDCT = 'IS' THEN C.ILTRQT ELSE 0 END) as MERMA,
             A.WAMCU,
@@ -67,6 +67,7 @@ export async function GET(req: NextRequest) {
             GROUP BY TODOCO, MOD(TO55TAREA, 100000)
           ) B
           INNER JOIN F4801 A ON A.WADOCO = B.TODOCO
+          INNER JOIN F4101 M ON M.IMITM = A.WAITM
           LEFT JOIN F4111 C ON C.ILDOC = A.WADOCO
             AND MOD(C.ILTRDJ, 100000) = MOD(B.TO55TAREA, 100000)
             AND (
@@ -222,14 +223,14 @@ export async function GET(req: NextRequest) {
         if (limit > 0) {
             const offset = (page - 1) * limit;
             sql += `
-              GROUP BY A.WADOCO, B.TO55TAREA, A.WADL01, A.WAMCU, A.WAAITM, A.WAITM, C.ILTRUM
+              GROUP BY A.WADOCO, B.TO55TAREA, M.IMDSC1, A.WAMCU, A.WAAITM, A.WAITM, C.ILTRUM
               ORDER BY B.TO55TAREA DESC
               OFFSET ${offset} ROWS FETCH NEXT ${limit} ROWS ONLY
             `;
         } else {
             // limit=0 significa sin paginación: traer todos los registros
             sql += `
-              GROUP BY A.WADOCO, B.TO55TAREA, A.WADL01, A.WAMCU, A.WAAITM, A.WAITM, C.ILTRUM
+              GROUP BY A.WADOCO, B.TO55TAREA, M.IMDSC1, A.WAMCU, A.WAAITM, A.WAITM, C.ILTRUM
               ORDER BY B.TO55TAREA DESC
             `;
         }
@@ -367,7 +368,7 @@ export async function GET(req: NextRequest) {
                     order: order,
                     date: jdeParsed ? jdeParsed.date : null,
                     productionDateRaw: productionDateRaw,
-                    description: row.WADL01 != null ? String(row.WADL01).trim() : '',
+                    description: row.IMDSC1 != null ? String(row.IMDSC1).trim() : '',
                     quantity: 0, // Inicializamos en 0
                     merma: 0, // Merma acumulada (será valor negativo)
                     unit: primUom, // La unidad final siempre será la primaria
