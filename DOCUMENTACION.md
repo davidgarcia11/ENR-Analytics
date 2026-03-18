@@ -22,7 +22,7 @@ Esta aplicación es un **panel de control (dashboard) de producción** para la e
 
 | Tecnología | Versión | Para qué se usa |
 |---|---|---|
-| **Next.js** | 16 | Framework web (App Router) |
+| **Next.js** | 16.1 | Framework web (App Router) |
 | **React** | 19 | Librería de interfaz de usuario |
 | **TypeScript** | 5 | Tipado estático sobre JavaScript |
 | **Tailwind CSS** | 4 | Estilos utilitarios (clases CSS) |
@@ -31,7 +31,7 @@ Esta aplicación es un **panel de control (dashboard) de producción** para la e
 | **jose** | — | Firma/verificación de JWT para sesiones |
 | **bcryptjs** | — | Hash de contraseñas |
 | **xlsx** | 0.18 | Generar archivos Excel (.xlsx) |
-| **recharts** | — | Gráficos de líneas para estadísticas de logs |
+| **recharts** | 3.7 | Gráficos de líneas para estadísticas de logs |
 | **lucide-react** | 0.563 | Iconos SVG (Search, Factory, Download...) |
 | **date-fns** | 4 | Utilidades de fecha (`getDayOfYear`) |
 | **Bun** | — | Gestor de paquetes y runtime (alternativa a npm/node) |
@@ -44,6 +44,7 @@ Esta aplicación es un **panel de control (dashboard) de producción** para la e
 dashboard/
 ├── .env.local                    ← Credenciales Oracle + JWT_SECRET (NUNCA se sube a Git)
 ├── .gitignore                    ← Incluye /data/ para no subir la BD de usuarios
+├── DEPLOY.md                     ← Guía de despliegue y migración entre servidores
 ├── package.json                  ← Dependencias y scripts
 ├── next.config.ts                ← Configuración de Next.js (HSTS + serverExternalPackages)
 ├── middleware.ts                 ← Protección de rutas /api/admin/* (verifica JWT + admin)
@@ -318,8 +319,10 @@ Los usuarios logueados pueden guardar combinaciones de filtros con nombre para r
 
 Dos formas de interactuar:
 
-1. **Panel expandible (botón "Presets"):** Lista completa de presets con opción de guardar y eliminar
-2. **Acceso rápido en la barra de acciones:** Dropdown "Cargar preset" + botón "Guardar" (pide nombre con prompt)
+1. **Panel expandible (botón "Presets"):** Lista completa de presets con opción de guardar, editar y eliminar
+2. **Acceso rápido en la barra de acciones:** Dropdown "Cargar preset" + botón "Guardar" (pide nombre con input)
+3. **Checkbox "Incluir fechas":** Al guardar un preset, el usuario decide si incluir las fechas de inicio/fin en el preset o no
+4. **Edición de presets:** Se puede editar el nombre y los filtros de un preset existente (botón lápiz en el panel). El botón cambia de rojo a azul durante la edición
 
 ### APIs de presets
 
@@ -327,6 +330,7 @@ Dos formas de interactuar:
 |---|---|---|
 | GET | `/api/presets` | Lista presets del usuario autenticado |
 | POST | `/api/presets` | Guarda nuevo preset |
+| PUT | `/api/presets/:id` | Edita nombre y filtros de un preset propio. Valida que no exista otro con el mismo nombre (409 si duplicado) |
 | DELETE | `/api/presets/:id` | Elimina preset propio |
 
 ---
@@ -695,7 +699,7 @@ Incluye todos los campos visibles + Palet_Lote (dato adicional no visible en tab
 
 ## 12. Página Principal — `app/produccion/page.tsx`
 
-Client Component (~850 líneas). Es el dashboard principal.
+Client Component (~1035 líneas). Es el dashboard principal.
 
 ### Estados principales
 

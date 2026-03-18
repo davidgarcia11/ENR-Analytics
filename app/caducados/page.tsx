@@ -32,7 +32,7 @@ export default function CaducadosPage() {
   const [plants, setPlants] = useState<Plant[]>([])
   const [locations, setLocations] = useState<string[]>([])
   const [selectedPlant, setSelectedPlant] = useState('all')
-  const [selectedLocation, setSelectedLocation] = useState('all')
+  const [selectedLocation, setSelectedLocation] = useState('__blank__')
   const [selectedType, setSelectedType] = useState<'todos' | 'caducados' | 'obsoletos' | 'bloqueados'>('todos')
 
   useEffect(() => {
