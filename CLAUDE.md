@@ -129,7 +129,32 @@ middleware.ts           # Protege /api/admin/* (JWT + role admin)
 ### Testing
 - Verificar compilación con `bun run build` después de cambios significativos
 
-### Git
+### Git — Flujo de trabajo
+```
+# 1. Crear feature desde develop
+git checkout develop
+git pull
+git checkout -b feature/nombre
+
+# 2. Trabajar y hacer commits
+git add <archivos>
+git commit -m "..."
+
+# 3. Subir a GitHub
+git push -u origin feature/nombre
+
+# 4. En GitHub: crear PR → revisar → merge a develop
+
+# 5. Volver a develop y actualizar
+git checkout develop
+git pull --prune
+
+# 6. Borrar rama feature local (ya mergeada)
+git branch -d feature/nombre
+```
+
+### Git — Reglas
 - La carpeta `data/` está en `.gitignore`
 - La carpeta `.idea/` está en el repo (IntelliJ) — no tocar
 - Documentación de features específicas en `docs/` (no en `DOCUMENTACION.md` directamente)
+- Rama principal de integración: `develop`. `main` es producción
