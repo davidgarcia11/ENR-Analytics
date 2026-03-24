@@ -439,8 +439,8 @@ export default function Dashboard() {
       Articulo: item.article,
       Descripcion: item.description,
       Planta: item.subLine,
-      Cantidad: Math.round((item.quantity || 0) * 100) / 100,
-      Merma: Math.round(Math.abs(item.merma || 0) * 100) / 100,
+      Cantidad: Math.round(item.quantity || 0),
+      Merma: Math.round(Math.abs(item.merma || 0)),
       '% Merma': (item.mermaPercent || 0) / 100, // Como decimal para formato porcentaje Excel
       Unidad: item.unit
     }));
@@ -876,12 +876,12 @@ export default function Dashboard() {
             <CardContent>
               <div className="flex flex-col space-y-1">
                 <div className="flex items-baseline justify-between">
-                  <div className="text-2xl font-black text-gray-900">{metrics.totalQtyUN.toLocaleString('es-ES', { minimumFractionDigits: 0 })}</div>
+                  <div className="text-2xl font-black text-gray-900">{metrics.totalQtyUN.toLocaleString('es-ES', { maximumFractionDigits: 0 })}</div>
                   <span className="text-xs font-bold text-gray-500">UN</span>
                 </div>
                 {metrics.totalQtyKG > 0 && (
                   <div className="flex items-baseline justify-between border-t border-gray-100 pt-1">
-                    <div className="text-lg font-bold text-gray-700">{metrics.totalQtyKG.toLocaleString('es-ES', { minimumFractionDigits: 2 })}</div>
+                    <div className="text-lg font-bold text-gray-700">{metrics.totalQtyKG.toLocaleString('es-ES', { maximumFractionDigits: 0 })}</div>
                     <span className="text-xs font-bold text-gray-500">KG</span>
                   </div>
                 )}
@@ -916,10 +916,10 @@ export default function Dashboard() {
                 return (
                   <div className="flex flex-col space-y-1">
                     <div className="flex items-baseline justify-between">
-                      <div className={`text-2xl font-black ${color}`}>{pct.toFixed(2)}%</div>
+                      <div className={`text-2xl font-black ${color}`}>{pct.toFixed(0)}%</div>
                     </div>
                     <div className="text-xs text-gray-500 font-medium">
-                      {metrics.totalMerma.toLocaleString('es-ES', { minimumFractionDigits: 2 })} merma / {metrics.totalProduced.toLocaleString('es-ES', { minimumFractionDigits: 2 })} producido
+                      {metrics.totalMerma.toLocaleString('es-ES', { maximumFractionDigits: 0 })} merma / {metrics.totalProduced.toLocaleString('es-ES', { maximumFractionDigits: 0 })} producido
                     </div>
                   </div>
                 );
@@ -973,13 +973,13 @@ export default function Dashboard() {
                     <TableCell className="text-gray-700 font-mono text-xs bg-gray-100 px-2 py-1 rounded w-fit">{row.article}</TableCell>
                     <TableCell className="text-gray-600 uppercase text-xs font-semibold">{row.description}</TableCell>
                     <TableCell className="text-right font-bold text-slate-900">
-                      {row.quantity?.toLocaleString('es-ES', { minimumFractionDigits: 2 })}
+                      {row.quantity?.toLocaleString('es-ES', { maximumFractionDigits: 0 })}
                     </TableCell>
                     <TableCell className="text-right text-sm text-gray-700">
-                      {Math.abs(row.merma || 0).toLocaleString('es-ES', { minimumFractionDigits: 2 })}
+                      {Math.abs(row.merma || 0).toLocaleString('es-ES', { maximumFractionDigits: 0 })}
                     </TableCell>
                     <TableCell className={`text-right text-sm px-3 py-1 rounded ${getMermaColor(row.mermaPercent || 0)}`}>
-                      {(row.mermaPercent || 0).toFixed(2)}%
+                      {(row.mermaPercent || 0).toFixed(0)}%
                     </TableCell>
                     <TableCell className="text-center text-xs text-gray-500 font-mono">
                       {row.unit}
