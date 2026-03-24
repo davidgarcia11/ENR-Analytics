@@ -916,7 +916,7 @@ export default function Dashboard() {
                 return (
                   <div className="flex flex-col space-y-1">
                     <div className="flex items-baseline justify-between">
-                      <div className={`text-2xl font-black ${color}`}>{pct.toFixed(0)}%</div>
+                      <div className={`text-2xl font-black ${color}`}>{pct.toFixed(2)}%</div>
                     </div>
                     <div className="text-xs text-gray-500 font-medium">
                       {metrics.totalMerma.toLocaleString('es-ES', { maximumFractionDigits: 0 })} merma / {metrics.totalProduced.toLocaleString('es-ES', { maximumFractionDigits: 0 })} producido
@@ -979,7 +979,7 @@ export default function Dashboard() {
                       {Math.abs(row.merma || 0).toLocaleString('es-ES', { maximumFractionDigits: 0 })}
                     </TableCell>
                     <TableCell className={`text-right text-sm px-3 py-1 rounded ${getMermaColor(row.mermaPercent || 0)}`}>
-                      {(row.mermaPercent || 0).toFixed(0)}%
+                      {(row.mermaPercent || 0).toFixed(2)}%
                     </TableCell>
                     <TableCell className="text-center text-xs text-gray-500 font-mono">
                       {row.unit}
