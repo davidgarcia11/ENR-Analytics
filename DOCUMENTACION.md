@@ -659,45 +659,7 @@ Un palet puede tener múltiples motivos simultáneos (ej. "Caducado + Obsoleto")
 
 ---
 
-## 11. Página de Caducados/Obsoletos/Bloqueados — `app/caducados/page.tsx`
-
-Dashboard para visualizar palets problemáticos: caducados, con artículo obsoleto o bloqueados.
-
-### Filtros
-
-- **Tipo:** Botones segmentados (Todos / Caducados / Obsoletos / Bloqueados)
-- **Planta:** Dropdown dinámico (extraído de los datos devueltos)
-- **Ubicación:** Dropdown con valores de F4100 + opción GENERICA (ubicación en blanco)
-
-Al entrar, carga automáticamente con tipo "Todos" sin filtros.
-
-### Tarjetas métricas (5)
-
-| Tarjeta | Descripción |
-|---|---|
-| Total Palets | Nº registros encontrados |
-| Cantidad Total | Suma de cantidades |
-| Caducados | Palets con fecha de caducidad vencida (rojo) |
-| Obsoletos | Palets cuyo artículo tiene IMSTKT='O' (ámbar) |
-| Bloqueados | Palets con IOLOTS='B' en F4108 (azul) |
-
-### Tabla
-
-Columnas: Artículo, Descripción, Planta, Ubicación, Palet, Lote, Cantidad, Fecha Cad., Motivo.
-
-El motivo se muestra como badge con color según tipo:
-- Rojo: Caducado
-- Ámbar: Obsoleto
-- Azul: Bloqueado
-- Morado/Rojo intenso: combinaciones (ej. "Caducado + Obsoleto")
-
-### Exportación Excel
-
-Incluye todos los campos visibles + Palet_Lote (dato adicional no visible en tabla).
-
----
-
-## 12. Página Principal — `app/produccion/page.tsx`
+## 11. Página Principal — `app/produccion/page.tsx`
 
 Client Component (~1035 líneas). Es el dashboard principal.
 
@@ -765,7 +727,7 @@ Cada sección separada por divisores sutiles (`border-t border-gray-100`).
 
 ---
 
-## 13. Componentes Reutilizables
+## 12. Componentes Reutilizables
 
 ### `ArticleMultiSelect.tsx`
 
@@ -786,7 +748,7 @@ Desplegable multi-selección con búsqueda. Se usa para los 9 filtros de categor
 
 ---
 
-## 14. Gotchas y Patrones Importantes
+## 13. Gotchas y Patrones Importantes
 
 ### Oracle CHAR vs VARCHAR2
 
@@ -833,7 +795,7 @@ No usar `secure: process.env.NODE_ENV === 'production'`. En su lugar, `cookieOpt
 
 ---
 
-## 15. Cómo Añadir un Nuevo Filtro de Categoría
+## 14. Cómo Añadir un Nuevo Filtro de Categoría
 
 Si necesitas un nuevo filtro (ejemplo: "Subcategoría" con campo `IMSRP6`, DRSY=`41`, DRRT=`S6`):
 
@@ -860,51 +822,7 @@ srp6: { col: 'IMSRP6', drsy: '41', drrt: 'S6', directF0005: true },
 
 ---
 
-## 16. Cómo Añadir Plantas y Sub-plantas a Producción
-
-El dashboard de producción tiene las plantas y sub-plantas **hardcodeadas** por diseño, porque la lógica de sub-plantas está ligada al campo `TO55TAREA` de F55TAR12 (primer dígito = subcódigo).
-
-### Añadir una nueva planta (sin sub-plantas)
-
-**Ejemplo:** Nueva planta "Tudela" con código `10400`.
-
-**Paso 1:** `app/produccion/page.tsx` — Añadir `<option>` en el dropdown de planta:
-```tsx
-<option value="10400">Tudela</option>
-```
-
-**Paso 2:** `lib/utils.ts` → función `parseJdeDate` — Añadir case en el switch de planta:
-```ts
-case '10400': subBlockName = 'Tudela'; break;
-```
-
-### Añadir una nueva sub-planta a una planta existente
-
-**Ejemplo:** Nueva sub-planta "Funes 3" con subcódigo `6`.
-
-**Paso 1:** `lib/utils.ts` → función `parseJdeDate` — Añadir case dentro del bloque de planta `10300`:
-```ts
-case '6': subBlockName = 'Funes 3'; break;
-```
-
-**Paso 2:** `app/produccion/page.tsx` — Añadir `<option>` en el dropdown condicional de sub-planta:
-```tsx
-<option value="6">Funes 3</option>
-```
-
-**Paso 3:** `app/api/production/route.ts` — Si la nueva sub-planta reemplaza un subcódigo antiguo, añadir al `oldSubCodeMap`:
-```ts
-'10300': { 3: 1, 4: 2, 6: X }, // donde X es el subcódigo antiguo que usaba antes
-```
-Si es completamente nueva (no hay datos históricos), no hace falta tocar el mapa.
-
-### Nota sobre el dashboard de caducados
-
-El dashboard de caducados (`/caducados`) obtiene las plantas dinámicamente desde Oracle (F0006 con `MCSTYL='BP'`), por lo que **no necesita cambios** al añadir nuevas plantas.
-
----
-
-## 17. Cómo Arrancar el Proyecto
+## 15. Cómo Arrancar el Proyecto
 
 ```bash
 # 1. Instalar dependencias
@@ -936,3 +854,12 @@ bun start
 
 - `data/app.db` persiste entre despliegues (no se sube a Git, no se sobreescribe)
 - Si necesitas reiniciar usuarios: eliminar `data/app.db` y se recreará con el admin por defecto
+
+
+## Documentación Adicional por Feature
+
+| Feature | Archivo |
+|---|---|
+| Caducados/Obsoletos/Bloqueados (`/caducados`) | [docs/palets-caducados.md](docs/palets-caducados.md) |
+
+---
