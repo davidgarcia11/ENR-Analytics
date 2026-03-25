@@ -14,7 +14,7 @@ import {
   TableRow,
 } from "@/components/ui/table"
 // Iconos de la librería lucide-react para dar estilo visual
-import { Search, Loader2, Factory, Calendar, Download, ChevronDown, ChevronsDown, X, User, LogOut, Save, BookmarkCheck, Trash2, Settings, FileText, Pencil } from "lucide-react"
+import { Search, Loader2, Factory, Calendar, Download, ChevronDown, ChevronsDown, X, User, LogOut, Save, BookmarkCheck, Trash2, Settings, FileText, Pencil, Layers } from "lucide-react"
 import Image from "next/image"
 import * as XLSX from 'xlsx'; // Librería 'xlsx' para generar archivos Excel
 import { ArticleMultiSelect } from "@/components/ArticleMultiSelect"
@@ -91,6 +91,9 @@ export default function Dashboard() {
   // Estado para el filtro de Líneas de producción (F30006/F0006 → F4111.ILMCUZ)
   const [selectedProdLines, setSelectedProdLines] = useState<string[]>([])
   const [availableProdLines, setAvailableProdLines] = useState<{ id: string; description: string }[]>([])
+
+  // Estado para agrupar por artículo + planta (colapsa múltiples fechas)
+  const [groupByArticle, setGroupByArticle] = useState(false)
 
   // Estado para las métricas (totales y resúmenes)
   // Nota: Actualmente se calculan sobre los datos cargados en pantalla, no sobre el total de la base de datos
@@ -441,14 +444,15 @@ export default function Dashboard() {
       Planta: item.subLine,
       Cantidad: Math.round(item.quantity || 0),
       Merma: Math.round(Math.abs(item.merma || 0)),
+      'Cantidad + Merma': Math.round(item.quantity || 0) + Math.round(Math.abs(item.merma || 0)),
       '% Merma': (item.mermaPercent || 0) / 100, // Como decimal para formato porcentaje Excel
       Unidad: item.unit
     }));
 
     const ws = XLSX.utils.json_to_sheet(excelRows);
 
-    // Formato porcentaje en columna G (% Merma), empezando en fila 2 (fila 1 = cabecera)
-    const mermaColIdx = 6; // Columna G (0-indexed)
+    // Formato porcentaje en columna H (% Merma), empezando en fila 2 (fila 1 = cabecera)
+    const mermaColIdx = 7; // Columna H (0-indexed)
     for (let r = 0; r < excelRows.length; r++) {
       const cellRef = XLSX.utils.encode_cell({ r: r + 1, c: mermaColIdx });
       if (ws[cellRef]) ws[cellRef].z = '0.00%';
@@ -476,12 +480,15 @@ export default function Dashboard() {
     XLSX.writeFile(wb, `Produccion_${filters.startDate}_${filters.endDate}.xlsx`);
   };
 
-  // Agrupa los datos por artículo + fecha + línea + unidad para mostrar en tabla
-  // Calcula merma y % merma por grupo, ordena de mayor a menor % merma
+  // Agrupa los datos para mostrar en tabla.
+  // - Normal: agrupa por artículo + fecha + línea + unidad
+  // - groupByArticle: agrupa por artículo + línea + unidad (suma todas las fechas, mantiene planta separada)
   const displayData = useMemo(() => {
     const groupMap = new Map<string, any>();
     data.forEach(item => {
-      const key = `${item.article}-${item.productionDateRaw}-${item.subLineCode}-${item.unit}`;
+      const key = groupByArticle
+        ? `${item.article}-${item.subLineCode}-${item.unit}`
+        : `${item.article}-${item.productionDateRaw}-${item.subLineCode}-${item.unit}`;
       if (!groupMap.has(key)) {
         groupMap.set(key, { ...item, quantity: 0, merma: 0 });
       }
@@ -497,7 +504,7 @@ export default function Dashboard() {
         : 0;
       return { ...item, mermaPercent };
     }).sort((a, b) => b.mermaPercent - a.mermaPercent);
-  }, [data]);
+  }, [data, groupByArticle]);
 
   // Calcula el umbral del percentil 75 de % merma para formato condicional
   const mermaP75 = useMemo(() => {
@@ -823,6 +830,14 @@ export default function Dashboard() {
 
             {/* Sección 3: Acciones */}
             <div className="flex flex-wrap items-end gap-3 justify-end">
+              <Button
+                onClick={() => setGroupByArticle(v => !v)}
+                variant="outline"
+                className={groupByArticle ? "border-slate-600 bg-slate-700 text-white hover:bg-slate-800 hover:text-white font-semibold" : "border-slate-400 text-slate-600 hover:bg-slate-50"}
+              >
+                <Layers className="mr-2 h-4 w-4" />
+                Agrupar por artículo
+              </Button>
               <Button onClick={applyFilters} disabled={loading} className="text-white font-semibold" style={{ backgroundColor: '#D30B15' }} onMouseEnter={e => (e.currentTarget.style.backgroundColor = '#b00a12')} onMouseLeave={e => (e.currentTarget.style.backgroundColor = '#D30B15')}>
                 {loading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Search className="mr-2 h-4 w-4" />}
                 Filtrar
@@ -958,6 +973,7 @@ export default function Dashboard() {
                   <TableHead className="font-bold text-gray-700">Descripción</TableHead>
                   <TableHead className="text-right font-bold text-gray-700">Cantidad</TableHead>
                   <TableHead className="text-right font-bold text-gray-700">Merma</TableHead>
+                  <TableHead className="text-right font-bold text-gray-700">Cantidad + Merma</TableHead>
                   <TableHead className="text-right font-bold text-gray-700">% Merma</TableHead>
                   <TableHead className="font-bold text-gray-700 text-center">UM</TableHead>
                   <TableHead className="font-bold text-gray-700">Planta / Línea</TableHead>
@@ -968,7 +984,7 @@ export default function Dashboard() {
                 {displayData.map((row, i) => (
                   <TableRow key={i} className="hover:bg-slate-50 border-gray-100">
                     <TableCell className="font-medium text-gray-900">
-                      {row.date ? new Date(row.date).toLocaleDateString() : row.productionDateRaw}
+                      {groupByArticle ? <span className="text-gray-400 text-xs">Varios</span> : (row.date ? new Date(row.date).toLocaleDateString() : row.productionDateRaw)}
                     </TableCell>
                     <TableCell className="text-gray-700 font-mono text-xs bg-gray-100 px-2 py-1 rounded w-fit">{row.article}</TableCell>
                     <TableCell className="text-gray-600 uppercase text-xs font-semibold">{row.description}</TableCell>
@@ -977,6 +993,9 @@ export default function Dashboard() {
                     </TableCell>
                     <TableCell className="text-right text-sm text-gray-700">
                       {Math.abs(row.merma || 0).toLocaleString('es-ES', { maximumFractionDigits: 0 })}
+                    </TableCell>
+                    <TableCell className="text-right text-sm font-semibold text-gray-800">
+                      {(Math.round(row.quantity || 0) + Math.round(Math.abs(row.merma || 0))).toLocaleString('es-ES')}
                     </TableCell>
                     <TableCell className={`text-right text-sm px-3 py-1 rounded ${getMermaColor(row.mermaPercent || 0)}`}>
                       {(row.mermaPercent || 0).toFixed(2)}%
@@ -996,7 +1015,7 @@ export default function Dashboard() {
                 {/* Spinner si está cargando */}
                 {loading && (
                   <TableRow>
-                    <TableCell colSpan={8} className="text-center py-10">
+                    <TableCell colSpan={9} className="text-center py-10">
                       <Loader2 className="h-6 w-6 animate-spin mx-auto text-slate-800" />
                     </TableCell>
                   </TableRow>
@@ -1005,7 +1024,7 @@ export default function Dashboard() {
                 {/* Mensaje si no hay datos */}
                 {!loading && data.length === 0 && (
                   <TableRow>
-                    <TableCell colSpan={8} className="text-center py-10 text-gray-500 font-medium">
+                    <TableCell colSpan={9} className="text-center py-10 text-gray-500 font-medium">
                       No se encontraron datos para los filtros seleccionados.
                     </TableCell>
                   </TableRow>
