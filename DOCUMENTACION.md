@@ -572,6 +572,7 @@ Client Component (~850 líneas). Es el dashboard principal.
 | `sessionUser` | `SessionUser \| null` | Usuario autenticado |
 | `presets` | `Preset[]` | Presets del usuario |
 | `metrics` | `object` | KPIs calculados |
+| `groupByArticle` | `boolean` | Activa agrupación por artículo + planta (colapsa fechas) |
 
 ### Funciones principales
 
@@ -584,7 +585,7 @@ Client Component (~850 líneas). Es el dashboard principal.
 | `checkSession()` | GET `/api/auth/me`, redirige si mustChangePassword |
 | `savePreset(name?)` | POST `/api/presets` con filtros actuales |
 | `loadPreset(preset)` | Restaura los 13 filtros desde el JSON del preset |
-| `displayData` (useMemo) | Agrupa, suma, ordena por %merma descendente |
+| `displayData` (useMemo) | Agrupa, suma, ordena por %merma descendente. Si `groupByArticle=true`, agrupa por `artículo + planta + UM` ignorando la fecha |
 
 ### Estructura visual
 
@@ -608,7 +609,7 @@ Client Component (~850 líneas). Es el dashboard principal.
 │ └──────────┘ └──────────┘ └──────────┘ └──────────┘   │
 │                                                         │
 │ ┌─ Detalle de Producción ────────────────────────────┐  │
-│ │ Fecha │ Artículo │ Desc. │ Cant. │ Merma │ %M │UM │  │
+│ │ Fecha │ Artículo │ Desc. │ Cant. │ Merma │Cant+M│ %M │UM │  │
 │ │ 02/03 │ 00001234 │ MERM..│ 1500  │ -23   │2.3%│UN │  │
 │ │         [Cargar más] [Cargar todos]                │  │
 │ └────────────────────────────────────────────────────┘  │
@@ -618,7 +619,7 @@ Client Component (~850 líneas). Es el dashboard principal.
 **Panel de filtros organizado en 3 secciones:**
 1. **Categorías:** 9 multi-selects (Artículo, Tipo Proceso, Formato, Sabor, Familia, Categoría, Marca, Gramaje, Línea Producción)
 2. **Fechas y Planta:** Fecha Inicio, Fecha Fin, Planta, Sub-planta (condicional)
-3. **Acciones:** Filtrar (rojo), Excel (verde), Limpiar (gris), Cargar preset (dropdown), Guardar preset (azul)
+3. **Acciones:** Agrupar por artículo (toggle slate), Filtrar (rojo), Excel (verde), Limpiar (gris), Cargar preset (dropdown), Guardar preset (azul)
 
 Cada sección separada por divisores sutiles (`border-t border-gray-100`).
 
