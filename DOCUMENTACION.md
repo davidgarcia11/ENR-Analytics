@@ -531,7 +531,9 @@ Devuelve las opciones `[{ id, description }]` para un desplegable de filtro.
 
 El endpoint más complejo. Devuelve datos de producción filtrados.
 
-**Parámetros:** `plant`, `subLine`, `startDate`, `endDate`, `article[]`, `prp6[]`, `srp3[]`, `srp5[]`, `srp2[]`, `srp1[]`, `srp4[]`, `ze03[]`, `prodLine[]`, `page`, `limit`
+**Parámetros:** `plant`, `subLine`, `startDate`, `endDate`, `startTime`, `endTime`, `article[]`, `prp6[]`, `srp3[]`, `srp5[]`, `srp2[]`, `srp1[]`, `srp4[]`, `ze03[]`, `prodLine[]`, `page`, `limit`
+
+**Filtro horario (`startTime`/`endTime`):** Se aplica en el JOIN de F4111 sobre el campo `ILTDAY` (entero HHMMSS sin ceros a la izquierda, ej: `223916` = 22:39:16). Acepta formato `HH:MM` o `HH:MM:SS`. Conversión: `HH * 10000 + MM * 100 + SS`. Para el fin de rango, si no se especifican segundos se usa `SS=59` para incluir el minuto completo; si se especifican, se usa el valor exacto. Se usa `COALESCE(C.ILTDAY, 0)` para tratar registros sin hora como medianoche y evitar que queden excluidos. Al estar en el JOIN, filtra los movimientos por hora pero no excluye la orden — solo suma la producción/merma de los movimientos dentro del rango horario. `00:00` y `00:00:00` en el frontend se tratan como vacío (no se envía al API).
 
 **Lógica:**
 1. Construye SQL dinámico (JOINs condicionales según filtros activos)
@@ -567,7 +569,9 @@ Client Component (~850 líneas). Es el dashboard principal.
 | `data` | `any[]` | Registros de producción |
 | `loading` | `boolean` | Spinner mientras carga |
 | `page` / `hasMore` | `number` / `boolean` | Paginación |
-| `filters` | `object` | `{ plant, subLine, startDate, endDate }` |
+| `filters` | `object` | `{ plant, subLine, startDate, endDate, startTime, endTime }` — horas en HH:MM, vacías o `00:00` = sin filtro |
+| `includePresetDates` | `boolean` | Si guardar fechas al salvar un preset |
+| `includePresetTimes` | `boolean` | Si guardar horas al salvar un preset |
 | `selectedArticles`, `selectedPrp6`...`selectedZe03`, `selectedProdLines` | `string[]` | Multi-selects |
 | `sessionUser` | `SessionUser \| null` | Usuario autenticado |
 | `presets` | `Preset[]` | Presets del usuario |
@@ -583,9 +587,38 @@ Client Component (~850 líneas). Es el dashboard principal.
 | `clearFilters()` | Resetea todos los filtros (no borra datos de la tabla) |
 | `exportToExcel()` | Genera .xlsx con coloreado condicional (top 25% merma en rojo) |
 | `checkSession()` | GET `/api/auth/me`, redirige si mustChangePassword |
-| `savePreset(name?)` | POST `/api/presets` con filtros actuales |
-| `loadPreset(preset)` | Restaura los 13 filtros desde el JSON del preset |
-| `displayData` (useMemo) | Agrupa, suma, ordena por %merma descendente. Si `groupByArticle=true`, agrupa por `artículo + planta + UM` ignorando la fecha |
+| `savePreset(name?)` | POST `/api/presets` con filtros actuales; incluye fechas/horas solo si los checkboxes `includePresetDates`/`includePresetTimes` están activos |
+| `loadPreset(preset)` | Restaura los 13 filtros desde el JSON del preset; si el preset no tenía horas las resetea a vacío |
+| `displayData` (useMemo) | Agrupa, suma, ordena por %merma descendente. Si `groupByArticle=true`, agrupa por `artículo + planta + UM` ignorando la fecha. Depende de `deferredData` y `deferredGroupByArticle` (ver abajo) |
+
+**Rendimiento con datasets grandes — `React.memo` + `useDeferredValue`**
+
+Cuando se carga un volumen alto de filas (ej: varios meses con "Cargar todos"), escribir en cualquier input causaba lag porque React re-ejecutaba el render del componente entero en cada tecla, incluyendo construir el JSX de miles de filas aunque el resultado fuera idéntico.
+
+La solución tiene dos partes:
+
+**1. `useDeferredValue`** — marca `data` y `groupByArticle` como valores de baja prioridad. Los cambios en los inputs (alta prioridad) se procesan primero; los cambios en `displayData` se procesan cuando el hilo está libre.
+
+```ts
+const deferredData = useDeferredValue(data)
+const deferredGroupByArticle = useDeferredValue(groupByArticle)
+const displayData = useMemo(() => { ... }, [deferredData, deferredGroupByArticle])
+```
+
+**2. `React.memo` en `ProductionTable`** — la tabla vive en un componente separado. `React.memo` hace que React solo re-renderice ese componente si sus props han cambiado. Como sus props (`displayData`, `mermaP75`) dependen de `deferredData` — no de `filters` —, al editar un filtro las props son idénticas a las anteriores y React **omite el render de la tabla por completo**.
+
+```
+Editar input de fecha
+  → setFilters() → re-render de Dashboard  ← rápido, solo los inputs
+  → ProductionTable: props sin cambios → React.memo lo cancela ← no hace nada
+  → tabla no se toca
+
+Pulsar "Filtrar"
+  → fetchData() → data cambia → deferredData cambia → displayData recalcula
+  → ProductionTable: props nuevas → re-render normal
+```
+
+`getMermaColor` vive dentro de `ProductionTable` (no en Dashboard) precisamente para que no sea una dependencia externa que force re-renders.
 
 ### Estructura visual
 
@@ -618,7 +651,7 @@ Client Component (~850 líneas). Es el dashboard principal.
 
 **Panel de filtros organizado en 3 secciones:**
 1. **Categorías:** 9 multi-selects (Artículo, Tipo Proceso, Formato, Sabor, Familia, Categoría, Marca, Gramaje, Línea Producción)
-2. **Fechas y Planta:** Fecha Inicio, Fecha Fin, Planta, Sub-planta (condicional)
+2. **Fechas y Planta:** Fecha Inicio, Fecha Fin, Hora Inicio, Hora Fin, Planta, Sub-planta (condicional). Las horas son opcionales; si se dejan vacías o a `00:00` no se aplica filtro horario.
 3. **Acciones:** Agrupar por artículo (toggle slate), Filtrar (rojo), Excel (verde), Limpiar (gris), Cargar preset (dropdown), Guardar preset (azul)
 
 Cada sección separada por divisores sutiles (`border-t border-gray-100`).
