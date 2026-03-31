@@ -336,7 +336,7 @@ export default function CaducadosPage() {
         </div>
 
         {/* --- TARJETAS METRICAS --- */}
-        <div className="grid gap-4 md:grid-cols-5">
+        <div className="grid gap-4 md:grid-cols-4">
           <Card className="border-gray-200 shadow-sm overflow-hidden" style={{ borderTop: '3px solid #D30B15' }}>
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
               <CardTitle className="text-sm font-bold text-gray-700">Total Palets</CardTitle>
@@ -345,17 +345,6 @@ export default function CaducadosPage() {
             <CardContent>
               <div className="text-2xl font-black text-gray-900">{summary.totalPallets.toLocaleString('es-ES')}</div>
               <p className="text-xs text-gray-500 font-medium">Registros encontrados</p>
-            </CardContent>
-          </Card>
-
-          <Card className="border-gray-200 shadow-sm overflow-hidden" style={{ borderTop: '3px solid #D30B15' }}>
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-bold text-gray-700">Cantidad Total</CardTitle>
-              <Archive className="h-4 w-4" style={{ color: '#D30B15' }} />
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-black text-gray-900">{summary.totalQuantity.toLocaleString('es-ES', { minimumFractionDigits: 2 })}</div>
-              <p className="text-xs text-gray-500 font-medium">Unidades en stock</p>
             </CardContent>
           </Card>
 
