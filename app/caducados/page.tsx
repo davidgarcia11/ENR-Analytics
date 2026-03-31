@@ -218,7 +218,7 @@ export default function CaducadosPage() {
   ]
 
   return (
-    <div className="min-h-screen bg-gray-100 p-8 font-sans text-gray-900">
+    <main className="min-h-screen bg-gray-100 p-8 font-sans text-gray-900">
       <div className="mx-auto max-w-7xl space-y-8">
 
         {/* --- BARRA DE SESION --- */}
@@ -226,7 +226,7 @@ export default function CaducadosPage() {
           <Image src="/logo.png" alt="Elaborados Naturales" width={120} height={42} priority />
           <div className="flex-1" />
 
-          <button onClick={() => router.push('/produccion')} className="text-xs text-gray-500 hover:text-gray-700 font-medium px-2.5 py-1 rounded-md border border-gray-200 hover:border-gray-300">
+          <button type="button" onClick={() => router.push('/produccion')} className="text-xs text-gray-500 hover:text-gray-700 font-medium px-2.5 py-1 rounded-md border border-gray-200 hover:border-gray-300">
             Produccion
           </button>
 
@@ -238,17 +238,17 @@ export default function CaducadosPage() {
               </span>
               {sessionUser.role === 'admin' && (
                 <>
-                  <button onClick={() => router.push('/admin')} className="text-xs text-gray-500 hover:text-gray-700 flex items-center gap-1">
+                  <button type="button" onClick={() => router.push('/admin')} className="text-xs text-gray-500 hover:text-gray-700 flex items-center gap-1">
                     <Settings className="h-3.5 w-3.5" />
                     Admin
                   </button>
-                  <button onClick={() => router.push('/admin/logs')} className="text-xs text-gray-500 hover:text-gray-700 flex items-center gap-1">
+                  <button type="button" onClick={() => router.push('/admin/logs')} className="text-xs text-gray-500 hover:text-gray-700 flex items-center gap-1">
                     <FileText className="h-3.5 w-3.5" />
                     Logs
                   </button>
                 </>
               )}
-              <button onClick={logout} className="text-xs text-gray-400 hover:text-gray-600 flex items-center gap-1">
+              <button type="button" onClick={logout} className="text-xs text-gray-500 hover:text-gray-700 flex items-center gap-1">
                 <LogOut className="h-3.5 w-3.5" />
                 Salir
               </button>
@@ -273,6 +273,7 @@ export default function CaducadosPage() {
                 <div className="flex rounded-md overflow-hidden border border-gray-300">
                   {typeButtons.map(btn => (
                     <button
+                      type="button"
                       key={btn.value}
                       onClick={() => setSelectedType(btn.value)}
                       className={`px-3 py-1.5 text-xs font-semibold transition-colors ${selectedType === btn.value
@@ -289,8 +290,9 @@ export default function CaducadosPage() {
 
               {/* Planta */}
               <div className="grid gap-1.5">
-                <label className="text-xs font-semibold text-gray-700">Planta</label>
+                <label htmlFor="cad-plant" className="text-xs font-semibold text-gray-700">Planta</label>
                 <select
+                  id="cad-plant"
                   className="flex h-9 w-[180px] rounded-md border border-gray-300 bg-white px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus:border-slate-500 font-medium"
                   value={selectedPlant}
                   onChange={(e) => setSelectedPlant(e.target.value)}
@@ -302,8 +304,9 @@ export default function CaducadosPage() {
 
               {/* Ubicacion */}
               <div className="grid gap-1.5">
-                <label className="text-xs font-semibold text-gray-700">Ubicacion</label>
+                <label htmlFor="cad-location" className="text-xs font-semibold text-gray-700">Ubicacion</label>
                 <select
+                  id="cad-location"
                   className="flex h-9 w-[180px] rounded-md border border-gray-300 bg-white px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus:border-slate-500 font-medium"
                   value={selectedLocation}
                   onChange={(e) => setSelectedLocation(e.target.value)}
@@ -393,6 +396,6 @@ export default function CaducadosPage() {
         </Card>
 
       </div>
-    </div>
+    </main>
   )
 }
