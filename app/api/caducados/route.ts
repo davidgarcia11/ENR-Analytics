@@ -155,7 +155,11 @@ export async function GET(req: NextRequest) {
         // Logging en SQLite
         try {
             const user = await verifySession().catch(() => null);
-            const filters = { plant, type, location };
+            const filters = {
+                plant: plant ? (plantNames[plant] || plant) : null,
+                type,
+                location
+            };
             const db = getDb();
             db.prepare(
                 'INSERT INTO query_logs (user_id, username, source, filters, result_count, execution_time_ms) VALUES (?, ?, ?, ?, ?, ?)'
