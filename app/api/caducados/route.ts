@@ -66,6 +66,7 @@ export async function GET(req: NextRequest) {
           FROM F41021 A
           INNER JOIN F4101 D ON D.IMITM = A.LIITM
           INNER JOIN F4108 B ON B.IOLOTN = A.LILOTN AND B.IOITM = A.LIITM AND B.IOMCU = A.LIMCU
+            AND (TRIM(B.IOLOT1) IS NOT NULL OR TRIM(B.IOLOT2) IS NOT NULL)
           WHERE A.LIPQOH > 0
         `;
         const binds: any = {};
