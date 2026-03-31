@@ -344,6 +344,7 @@ Cada vez que un usuario (o invitado) consulta datos o inicia sesión, se inserta
 |---|---|---|
 | `app/api/production/route.ts` | `produccion` | Cada consulta de datos (con o sin resultados) |
 | `app/api/auth/login/route.ts` | `login` | Cada inicio de sesión exitoso |
+| `app/api/caducados/route.ts` | `caducados_obsoletos` | Cada consulta de palets caducados/obsoletos/bloqueados |
 
 El logging nunca bloquea la respuesta: se ejecuta en un `try/catch` independiente. Si falla el INSERT, se logea el error en consola pero el usuario recibe su respuesta normalmente.
 
@@ -369,6 +370,8 @@ Protegido con `verifySession()` + `role === 'admin'`.
 | `startDate` | string | Filtro desde fecha (YYYY-MM-DD) |
 | `endDate` | string | Filtro hasta fecha (YYYY-MM-DD) |
 | `username` | string | Filtro por usuario exacto |
+| `source` | string | Filtro por panel (produccion, login, caducados_obsoletos…) |
+| `chartDays` | number | Días del gráfico de actividad (7, 14, 30, 90). Por defecto: 14 |
 
 **Respuesta:**
 
@@ -386,9 +389,13 @@ Protegido con `verifySession()` + `role === 'admin'`.
     "minTime": 50,
     "avgResults": 87
   },
-  "dailyStats": [          // últimos 14 días (para gráfico)
+  "dailyStats": [          // últimos N días según chartDays (para gráfico)
     { "day": "2026-03-01", "queries": 15, "avgTime": 300, "uniqueUsers": 3 }
-  ]
+  ],
+  "topUsers": [            // top 5 usuarios autenticados (excluye Invitado y logins)
+    { "username": "admin", "queries": 87 }
+  ],
+  "invitadoCount": 33      // total de consultas anónimas (sin login)
 }
 ```
 
@@ -403,16 +410,19 @@ Solo accesible para admins. Se accede desde:
 **Componentes visuales:**
 
 1. **4 tarjetas de estadísticas:** Consultas totales, Tiempo medio, Tiempo máximo, Resultados medio
-2. **Gráfico de líneas (recharts):** Toggle con botón "Ver gráfico"/"Ocultar gráfico". Muestra consultas y tiempo medio por día (últimos 14 días) con dos ejes Y (consultas a la izquierda, tiempo a la derecha)
-3. **Filtros:** Usuario (dropdown), Fecha desde, Fecha hasta, botones Filtrar/Limpiar
-4. **Tabla de logs:** Fecha/Hora, Usuario, Panel (badge con color), Filtros (resumen), Resultados, Tiempo
-5. **Paginación:** Anterior/Siguiente con indicador de página
+2. **Gráfico de líneas (recharts):** Toggle con botón "Ver gráfico"/"Ocultar gráfico". Muestra consultas y tiempo medio por día con dos ejes Y (consultas izquierda, tiempo derecha). Selector de rango: 7 / 14 / 30 / 90 días.
+3. **Ranking de usuarios:** Tarjeta con top 5 usuarios autenticados por nº de consultas + contador de consultas anónimas (Invitado)
+4. **Filtros:** Usuario (dropdown), Panel/fuente (dropdown), Fecha desde, Fecha hasta, botones Filtrar/Limpiar
+5. **Tabla de logs:** Fecha/Hora, Usuario, Panel (badge con color), Filtros (resumen), Resultados, Tiempo. Las filas con tiempo > 3 segundos se resaltan en rojo.
+6. **Exportación Excel:** Botón "Exportar Excel" descarga todos los logs filtrados actuales
+7. **Paginación:** Anterior/Siguiente con indicador de página
 
 **Detalles de implementación:**
+- `SLOW_QUERY_MS = 3000` — umbral para resaltado de consultas lentas (rojo)
 - Los logins se resaltan con fondo azul claro y icono LogIn
 - La columna "Panel" muestra badges con colores según el source (`SOURCE_LABELS`)
-- `summarizeFilters()` convierte el JSON de filtros en un resumen legible (ej: "Aguilar · 01/03 - 02/03 · 3 filtros")
-- Las estadísticas y gráfico excluyen entradas de login (solo consultas reales)
+- `summarizeFilters()` convierte el JSON de filtros en un resumen legible (ej: "Aguilar · 01/03 - 02/03 · 3 filtros"). También maneja filtros específicos de caducados (type, location).
+- Las estadísticas, gráfico y ranking excluyen entradas de login (solo consultas reales)
 
 ### Persistencia
 

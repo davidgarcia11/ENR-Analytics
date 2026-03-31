@@ -17,12 +17,19 @@ Dashboard para visualizar palets problemáticos: caducados, con artículo obsole
 
 Al entrar, carga automáticamente con tipo "Todos" sin filtros.
 
-### Tarjetas métricas (5)
+### Rendimiento — `useDeferredValue` + `React.memo`
+
+Con filtros amplios (tipo "Todos") se pueden cargar más de 4.000 registros. Para evitar lag al interactuar con los filtros, se aplica el patrón de concurrencia de React:
+
+- `useDeferredValue(data)` → diferencia la actualización de la tabla del estado de los filtros, manteniendo la UI responsiva
+- `CaducadosTable` es un componente memoizado (`React.memo`) → solo re-renderiza si cambian los datos reales
+- `getMotivoBadge` y `getLocationLabel` son funciones puras a nivel de módulo (no dentro del componente) → no se recrean en cada render
+
+### Tarjetas métricas (4)
 
 | Tarjeta | Descripción |
 |---|---|
 | Total Palets | Nº registros encontrados |
-| Cantidad Total | Suma de cantidades |
 | Caducados | Palets con fecha de caducidad vencida (rojo) |
 | Obsoletos | Palets cuyo artículo tiene IMSTKT='O' (ámbar) |
 | Bloqueados | Palets con IOLOTS='B' en F4108 (azul) |
@@ -111,3 +118,33 @@ Si es completamente nueva (no hay datos históricos), no hace falta tocar el map
 ### Nota sobre el dashboard de caducados
 
 El dashboard de caducados (`/caducados`) obtiene las plantas dinámicamente desde Oracle (F0006 con `MCSTYL='BP'`), por lo que **no necesita cambios** al añadir nuevas plantas.
+
+---
+
+## Logging de consultas
+
+Cada consulta al panel inserta un registro en `query_logs` (SQLite) con `source = 'caducados_obsoletos'`. Los filtros que se guardan son:
+
+```json
+{
+  "plant": "Nombre de la planta (o null si no se filtra)",
+  "type": "todos | caducados | obsoletos | bloqueados",
+  "location": "código de ubicación (o null)"
+}
+```
+
+> **Nota:** Se guarda el **nombre** de la planta (ej. "TUDEFRIGO"), no el código (ej. "10003"). Si el código no tiene nombre en F0006, se guarda el propio código como fallback.
+
+El logging nunca bloquea la respuesta: se ejecuta en un `try/catch` independiente.
+
+---
+
+## Filtro IOLOT1 / IOLOT2 — comportamiento Oracle
+
+El JOIN con F4108 incluye la condición:
+
+```sql
+AND (TRIM(B.IOLOT1) IS NOT NULL OR TRIM(B.IOLOT2) IS NOT NULL)
+```
+
+Esto excluye filas en las que tanto el palet como el lote están vacíos. **Importante:** en Oracle, la cadena vacía `''` equivale a `NULL`, por lo que `TRIM(col) = ''` evalúa a `UNKNOWN` (no a `FALSE`). La única forma correcta de verificar si un campo CHAR está vacío es `TRIM(col) IS NULL`.
