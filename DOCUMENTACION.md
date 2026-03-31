@@ -12,7 +12,6 @@ Esta aplicación es un **panel de control (dashboard) de producción** para la e
 - Órdenes de fabricación y cantidades producidas
 - Porcentaje de merma (desperdicio) por artículo
 - Desglose por planta, línea de producción y fechas
-- Palets caducados, con artículo obsoleto y/o bloqueados (por planta y ubicación)
 - Exportación a Excel con formato condicional
 - Sistema de autenticación con gestión de usuarios (admin crea usuarios)
 - Presets de filtros guardados por usuario
@@ -22,7 +21,7 @@ Esta aplicación es un **panel de control (dashboard) de producción** para la e
 
 | Tecnología | Versión | Para qué se usa |
 |---|---|---|
-| **Next.js** | 16.1 | Framework web (App Router) |
+| **Next.js** | 16 | Framework web (App Router) |
 | **React** | 19 | Librería de interfaz de usuario |
 | **TypeScript** | 5 | Tipado estático sobre JavaScript |
 | **Tailwind CSS** | 4 | Estilos utilitarios (clases CSS) |
@@ -31,7 +30,7 @@ Esta aplicación es un **panel de control (dashboard) de producción** para la e
 | **jose** | — | Firma/verificación de JWT para sesiones |
 | **bcryptjs** | — | Hash de contraseñas |
 | **xlsx** | 0.18 | Generar archivos Excel (.xlsx) |
-| **recharts** | 3.7 | Gráficos de líneas para estadísticas de logs |
+| **recharts** | — | Gráficos de líneas para estadísticas de logs |
 | **lucide-react** | 0.563 | Iconos SVG (Search, Factory, Download...) |
 | **date-fns** | 4 | Utilidades de fecha (`getDayOfYear`) |
 | **Bun** | — | Gestor de paquetes y runtime (alternativa a npm/node) |
@@ -44,7 +43,6 @@ Esta aplicación es un **panel de control (dashboard) de producción** para la e
 dashboard/
 ├── .env.local                    ← Credenciales Oracle + JWT_SECRET (NUNCA se sube a Git)
 ├── .gitignore                    ← Incluye /data/ para no subir la BD de usuarios
-├── DEPLOY.md                     ← Guía de despliegue y migración entre servidores
 ├── package.json                  ← Dependencias y scripts
 ├── next.config.ts                ← Configuración de Next.js (HSTS + serverExternalPackages)
 ├── middleware.ts                 ← Protección de rutas /api/admin/* (verifica JWT + admin)
@@ -85,9 +83,7 @@ dashboard/
     ├── cambiar-contrasena/
     │   └── page.tsx              ← Ruta "/cambiar-contrasena" → cambio forzado de contraseña
     ├── produccion/
-    │   └── page.tsx              ← Ruta "/produccion" → DASHBOARD PRODUCCIÓN
-    ├── caducados/
-    │   └── page.tsx              ← Ruta "/caducados" → DASHBOARD CADUCADOS/OBSOLETOS/BLOQUEADOS
+    │   └── page.tsx              ← Ruta "/produccion" → DASHBOARD PRINCIPAL
     └── api/
         ├── auth/
         │   ├── login/route.ts    ← POST /api/auth/login
@@ -110,10 +106,8 @@ dashboard/
         │   └── route.ts          ← GET /api/categories?field=X
         ├── production/
         │   └── route.ts          ← GET /api/production?...filtros...
-        ├── production-lines/
-        │   └── route.ts          ← GET /api/production-lines
-        └── caducados/
-            └── route.ts          ← GET /api/caducados?type=...&plant=...&location=...
+        └── production-lines/
+            └── route.ts          ← GET /api/production-lines
 ```
 
 ---
@@ -319,10 +313,8 @@ Los usuarios logueados pueden guardar combinaciones de filtros con nombre para r
 
 Dos formas de interactuar:
 
-1. **Panel expandible (botón "Presets"):** Lista completa de presets con opción de guardar, editar y eliminar
-2. **Acceso rápido en la barra de acciones:** Dropdown "Cargar preset" + botón "Guardar" (pide nombre con input)
-3. **Checkbox "Incluir fechas":** Al guardar un preset, el usuario decide si incluir las fechas de inicio/fin en el preset o no
-4. **Edición de presets:** Se puede editar el nombre y los filtros de un preset existente (botón lápiz en el panel). El botón cambia de rojo a azul durante la edición
+1. **Panel expandible (botón "Presets"):** Lista completa de presets con opción de guardar y eliminar
+2. **Acceso rápido en la barra de acciones:** Dropdown "Cargar preset" + botón "Guardar" (pide nombre con prompt)
 
 ### APIs de presets
 
@@ -330,7 +322,6 @@ Dos formas de interactuar:
 |---|---|---|
 | GET | `/api/presets` | Lista presets del usuario autenticado |
 | POST | `/api/presets` | Guarda nuevo preset |
-| PUT | `/api/presets/:id` | Edita nombre y filtros de un preset propio. Valida que no exista otro con el mismo nombre (409 si duplicado) |
 | DELETE | `/api/presets/:id` | Elimina preset propio |
 
 ---
@@ -351,8 +342,7 @@ Cada vez que un usuario (o invitado) consulta datos o inicia sesión, se inserta
 
 | Archivo | Source | Qué registra |
 |---|---|---|
-| `app/api/production/route.ts` | `produccion` | Cada consulta de datos de producción |
-| `app/api/caducados/route.ts` | `caducados_obsoletos` | Cada consulta de caducados/obsoletos/bloqueados |
+| `app/api/production/route.ts` | `produccion` | Cada consulta de datos (con o sin resultados) |
 | `app/api/auth/login/route.ts` | `login` | Cada inicio de sesión exitoso |
 
 El logging nunca bloquea la respuesta: se ejecuta en un `try/catch` independiente. Si falla el INSERT, se logea el error en consola pero el usuario recibe su respuesta normalmente.
@@ -478,266 +468,19 @@ Divide entre 100 (JDE almacena cantidades ×100).
 
 ---
 
-## 8. Tablas de Oracle JDE
+## 9. Paneles de la aplicación
 
-### Tablas principales
+Cada panel tiene su documentación específica en la carpeta `docs/`:
 
-| Tabla | Descripción | Campos clave |
+| Panel | Ruta | Documentación |
 |---|---|---|
-| **F4801** | **Órdenes de fabricación** | `WADOCO` (nº orden), `WADL01` (descripción), `WAMCU` (planta), `WAAITM` (artículo display), `WAITM` (artículo corto) |
-| **F4111** | **Movimientos de inventario** | `ILDOC` (nº orden), `ILTRDJ` (fecha JDE), `ILDCT` (tipo: IC=producción, IS=merma), `ILTRQT` (cantidad), `ILRCD` (código razón), `ILTRUM` (UM), `ILMCUZ` (línea producción) |
-| **F4101** | **Maestro de artículos** | `IMITM` (ID corto), `IMUOM1` (UM primaria), `IMPRP6` (tipo proceso), `IMSRP1..5` (categorías) |
-| **F554101** | **Extensión del maestro** | `AAITM` (ID corto), `AAZE03` (gramaje) |
-| **F55TAR12** | **Tareas de producción** (custom) | `TODOCO` (nº orden), `TO55TAREA` (código fecha+sublínea) |
-
-### Tablas del dashboard de caducados/obsoletos/bloqueados
-
-| Tabla | Descripción | Campos clave |
-|---|---|---|
-| **F41021** | **Stock por ubicación** (Item Location) | `LIITM` (artículo corto), `LIMCU` (planta), `LILOTN` (palet_lote), `LILOCN` (ubicación), `LIPQOH` (cantidad ×100) |
-| **F4108** | **Lotes/Palets** (Lot Master) | `IOITM` (artículo corto), `IOMCU` (planta), `IOLOTN` (palet_lote), `IOLOT1` (palet), `IOLOT2` (lote), `IOMMEJ` (fecha caducidad CYYDDD), `IOLOTS` (status lote: `'B'`=bloqueado), `IOLITM` (artículo largo) |
-| **F4100** | **Ubicaciones** (Location Master) | `LMLOCN` (código ubicación) — se usa para poblar el dropdown de ubicaciones |
-
-### Tablas auxiliares
-
-| Tabla | Descripción |
-|---|---|
-| **prodctl.f0005** | Códigos definidos por usuario (UDC) — catálogos |
-| **F41002** | Conversiones de unidad de medida |
-| **F30006** | Centros de trabajo (líneas producción) |
-| **F0006** | Unidades de negocio (Business Units) — `MCSTYL='BP'` filtra plantas, `MCMCU` código, `MCDL01` descripción |
-
-### Relaciones
-
-```
-F55TAR12 (tareas)
-    │ TODOCO
-    ▼
-F4801 (órdenes) ──WAITM──► F4101 (maestro artículos) ──► F554101 (extensión)
-    │ WADOCO
-    ▼
-F4111 (movimientos)
-    └── ILTRUM ──► F41002 (conversiones UM)
-
-F4101.IMPRP6/IMSRP1..5 ──► prodctl.f0005 (catálogos UDC)
-F4111.ILMCUZ ──► F30006 + F0006 (líneas producción)
-
---- Caducados/Obsoletos/Bloqueados ---
-
-F41021 (stock por ubicación)
-    │ LIITM + LILOTN + LIMCU
-    ▼
-F4108 (lotes/palets) ──► IOMMEJ (caducidad), IOLOTS (bloqueado), IOLOT1/IOLOT2 (palet/lote)
-    │ LIITM
-    ▼
-F4101 (maestro artículos) ──► IMSTKT = 'O' (obsoleto), IMDSC1 (descripción)
-
-F4100 (ubicaciones) ──► LMLOCN (dropdown de ubicaciones)
-F0006 (plantas) ──► MCSTYL = 'BP' (dropdown de plantas)
-```
+| Dashboard de producción | `/produccion` | [docs/produccion.md](docs/produccion.md) |
+| Control de pedidos | `/preparacion-pedidos` | [docs/control-pedidos.md](docs/control-pedidos.md) |
+| Palets caducados/obsoletos/bloqueados | `/caducados` | [docs/palets-caducados.md](docs/palets-caducados.md) |
 
 ---
 
-## 10. API Routes — Datos de producción
-
-### `GET /api/categories?field=X`
-
-**Archivo:** `app/api/categories/route.ts`
-
-Devuelve las opciones `[{ id, description }]` para un desplegable de filtro.
-
-| field | Columna | DRSY | DRRT | UI |
-|---|---|---|---|---|
-| `prp6` | IMPRP6 | 41 | 01 | Tipo Proceso OF |
-| `srp3` | IMSRP3 | 41 | S3 | Formato |
-| `srp5` | IMSRP5 | 41 | S5 | Sabor |
-| `srp2` | IMSRP2 | 41 | S2 | Familia |
-| `srp1` | IMSRP1 | 41 | S1 | Categoría |
-| `srp4` | IMSRP4 | 41 | S4 | Marca |
-| `ze03` | AAZE03 (F554101) | 17 | B3 | Gramaje |
-
-### `GET /api/production?...filtros...`
-
-**Archivo:** `app/api/production/route.ts`
-
-El endpoint más complejo. Devuelve datos de producción filtrados.
-
-**Parámetros:** `plant`, `subLine`, `startDate`, `endDate`, `article[]`, `prp6[]`, `srp3[]`, `srp5[]`, `srp2[]`, `srp1[]`, `srp4[]`, `ze03[]`, `prodLine[]`, `page`, `limit`
-
-**Lógica:**
-1. Construye SQL dinámico (JOINs condicionales según filtros activos)
-2. Ejecuta contra Oracle
-3. Obtiene UM primarias y factores de conversión
-4. Procesa filas: parsea fechas JDE, convierte UM (BFS), agrupa, calcula merma
-5. Devuelve `{ data: [...], sqlRowCount: N }`
-
-**Deduplicación F55TAR12:** `MOD(TO55TAREA, 100000)` extrae la fecha sin sub-código, `MAX` se queda con el registro más reciente (evita duplicados por migración de sub-códigos).
-
-**Merma:** Movimientos `IS` con código razón `P01-P05`, `Q01-Q10`. Viene como número negativo. Fórmula: `|merma| / (|merma| + producido) × 100`.
-
-**Conversión UM:** BFS de hasta 3 niveles en F41002. Factor ×10.000.000.
-
-### `GET /api/production-lines`
-
-**Archivo:** `app/api/production-lines/route.ts`
-
-Devuelve líneas de producción activas de F30006+F0006. Incluye `{ id: '__empty__', description: 'Sin línea' }` al principio.
-
-### `GET /api/caducados?type=...&plant=...&location=...`
-
-**Archivo:** `app/api/caducados/route.ts`
-
-Devuelve palets caducados, con artículo obsoleto y/o bloqueados.
-
-**Parámetros:**
-
-| Param | Tipo | Valores | Descripción |
-|---|---|---|---|
-| `type` | string | `todos`, `caducados`, `obsoletos`, `bloqueados` | Tipo de filtro (por defecto `todos`) |
-| `plant` | string | Código planta (ej. `10300`) o `all` | Filtrar por planta |
-| `location` | string | Código ubicación, `__blank__` (GENERICA) o `all` | Filtrar por ubicación |
-
-**Lógica SQL:**
-
-```
-F41021 A (stock con cantidad > 0)
-  INNER JOIN F4101 D ON D.IMITM = A.LIITM         -- descripción + status artículo
-  INNER JOIN F4108 B ON B.IOLOTN = A.LILOTN        -- palet/lote/caducidad/bloqueado
-                     AND B.IOITM = A.LIITM
-                     AND B.IOMCU = A.LIMCU
-```
-
-- **Caducados:** `B.IOMMEJ < fechaJdeHoy AND B.IOMMEJ > 0`
-- **Obsoletos:** `D.IMSTKT = 'O'`
-- **Bloqueados:** `B.IOLOTS = 'B'`
-- **Todos:** cualquiera de los tres
-
-Un palet puede tener múltiples motivos simultáneos (ej. "Caducado + Obsoleto").
-
-**JOIN triple a F4108:** Se relaciona por `IOLOTN + IOITM + IOMCU` (palet_lote + artículo + planta) para evitar duplicados cuando el mismo palet_lote existe en F4108 para distintos artículos con fechas de caducidad diferentes.
-
-**Datos adicionales:**
-- Nombres de planta desde F0006 (`MCSTYL = 'BP'`)
-- Ubicaciones únicas desde F4100 (`DISTINCT LMLOCN`)
-- Cantidades divididas entre 100 (formato JDE)
-
-**Respuesta:**
-
-```json
-{
-  "data": [
-    {
-      "articleLong": "0001234567",
-      "description": "TOMATE FRITO",
-      "plantCode": "10300",
-      "plantName": "PLANTA FUNES",
-      "paletLote": "1_240225",
-      "palet": "1",
-      "lote": "240225",
-      "location": "",
-      "quantity": 610,
-      "expiryDate": "2026-02-19",
-      "motivo": "Caducado"
-    }
-  ],
-  "locations": ["", "CONSUMO", "TRANSITO01", ...],
-  "summary": {
-    "totalPallets": 45,
-    "totalQuantity": 12500.00,
-    "caducados": 30,
-    "obsoletos": 10,
-    "bloqueados": 8,
-    "ambos": 3
-  }
-}
-```
-
-**Ubicaciones:**
-- En blanco (`""`) = GENERICA (ubicación por defecto)
-- Prefijo `T...` = Tránsito
-- `CONSUMO` = Unidades consumidas
-
----
-
-## 11. Página Principal — `app/produccion/page.tsx`
-
-Client Component (~1035 líneas). Es el dashboard principal.
-
-### Estados principales
-
-| Estado | Tipo | Para qué |
-|---|---|---|
-| `data` | `any[]` | Registros de producción |
-| `loading` | `boolean` | Spinner mientras carga |
-| `page` / `hasMore` | `number` / `boolean` | Paginación |
-| `filters` | `object` | `{ plant, subLine, startDate, endDate }` |
-| `selectedArticles`, `selectedPrp6`...`selectedZe03`, `selectedProdLines` | `string[]` | Multi-selects |
-| `sessionUser` | `SessionUser \| null` | Usuario autenticado |
-| `presets` | `Preset[]` | Presets del usuario |
-| `metrics` | `object` | KPIs calculados |
-
-### Funciones principales
-
-| Función | Descripción |
-|---|---|
-| `fetchData(page, isNew, all?)` | Fetch a `/api/production`, procesa respuesta, calcula métricas |
-| `applyFilters()` | Reset + fetchData con limit=0 (todos) |
-| `clearFilters()` | Resetea todos los filtros (no borra datos de la tabla) |
-| `exportToExcel()` | Genera .xlsx con coloreado condicional (top 25% merma en rojo) |
-| `checkSession()` | GET `/api/auth/me`, redirige si mustChangePassword |
-| `savePreset(name?)` | POST `/api/presets` con filtros actuales |
-| `loadPreset(preset)` | Restaura los 13 filtros desde el JSON del preset |
-| `displayData` (useMemo) | Agrupa, suma, ordena por %merma descendente |
-
-### Estructura visual
-
-```
-┌─────────────────────────────────────────────────────────┐
-│ [LOGO]                          [Usuario ▪ Admin ▪ Salir]│
-│                                                         │
-│ ┌─ Filtros ──────────────────────────────────────────┐  │
-│ │ ── Categorías ──                                   │  │
-│ │ Artículo│Tipo Proc│Formato│Sabor│Familia│...       │  │
-│ │ ─────────────────────────────────────────          │  │
-│ │ ── Fechas y Planta ──                              │  │
-│ │ F.Inicio│F.Fin│Planta│Sub-planta                   │  │
-│ │ ─────────────────────────────────────────          │  │
-│ │             [Filtrar][Excel][Limpiar][Preset▼][+]  │  │
-│ └────────────────────────────────────────────────────┘  │
-│                                                         │
-│ ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐   │
-│ │ Cantidad │ │ Órdenes  │ │  Merma   │ │Top Planta│   │
-│ │ Total    │ │          │ │  2.34%   │ │ Funes 1  │   │
-│ └──────────┘ └──────────┘ └──────────┘ └──────────┘   │
-│                                                         │
-│ ┌─ Detalle de Producción ────────────────────────────┐  │
-│ │ Fecha │ Artículo │ Desc. │ Cant. │ Merma │ %M │UM │  │
-│ │ 02/03 │ 00001234 │ MERM..│ 1500  │ -23   │2.3%│UN │  │
-│ │         [Cargar más] [Cargar todos]                │  │
-│ └────────────────────────────────────────────────────┘  │
-└─────────────────────────────────────────────────────────┘
-```
-
-**Panel de filtros organizado en 3 secciones:**
-1. **Categorías:** 9 multi-selects (Artículo, Tipo Proceso, Formato, Sabor, Familia, Categoría, Marca, Gramaje, Línea Producción)
-2. **Fechas y Planta:** Fecha Inicio, Fecha Fin, Planta, Sub-planta (condicional)
-3. **Acciones:** Filtrar (rojo), Excel (verde), Limpiar (gris), Cargar preset (dropdown), Guardar preset (azul)
-
-Cada sección separada por divisores sutiles (`border-t border-gray-100`).
-
----
-
-## 12. Componentes Reutilizables
-
-### `ArticleMultiSelect.tsx`
-
-Desplegable multi-selección con búsqueda. Se usa para los 9 filtros de categoría.
-
-**Props:** `articles`, `selected`, `onChange`, `label`, `showId`
-
-**Comportamiento:** Botón con badge de seleccionados → panel flotante con buscador + checkboxes + "Sel. todos" / "Ninguno".
-
-### Componentes UI (`components/ui/`)
+## 10. Componentes UI base (`components/ui/`)
 
 | Componente | Descripción |
 |---|---|
@@ -748,7 +491,7 @@ Desplegable multi-selección con búsqueda. Se usa para los 9 filtros de categor
 
 ---
 
-## 13. Gotchas y Patrones Importantes
+## 11. Gotchas y Patrones Importantes
 
 ### Oracle CHAR vs VARCHAR2
 
@@ -795,34 +538,7 @@ No usar `secure: process.env.NODE_ENV === 'production'`. En su lugar, `cookieOpt
 
 ---
 
-## 14. Cómo Añadir un Nuevo Filtro de Categoría
-
-Si necesitas un nuevo filtro (ejemplo: "Subcategoría" con campo `IMSRP6`, DRSY=`41`, DRRT=`S6`):
-
-### Paso 1: `app/api/categories/route.ts`
-
-Añadir entrada al `FIELD_MAP`:
-```ts
-srp6: { col: 'IMSRP6', drsy: '41', drrt: 'S6', directF0005: true },
-```
-
-### Paso 2: `app/api/production/route.ts`
-
-1. Leer parámetro: `const srp6s = searchParams.getAll('srp6');`
-2. Añadir a condición de `extraJoins` (JOIN F4101)
-3. Añadir cláusula WHERE con TRIM y bind variables
-
-### Paso 3: `app/produccion/page.tsx`
-
-1. Añadir estados: `selectedSrp6` + `availableSrp6`
-2. Fetch en `useEffect`: `/api/categories?field=srp6`
-3. Añadir al `URLSearchParams` en `fetchData`
-4. Añadir al `clearFilters`
-5. Añadir `<ArticleMultiSelect>` en la sección "Categorías" del panel de filtros
-
----
-
-## 15. Cómo Arrancar el Proyecto
+## 12. Cómo Arrancar el Proyecto
 
 ```bash
 # 1. Instalar dependencias
@@ -841,7 +557,7 @@ bun run build
 bun start
 ```
 
-> **Nota:** La ruta raíz `/` muestra un 404 a propósito. La app está en `/produccion` y `/caducados`.
+> **Nota:** La ruta raíz `/` muestra un 404 a propósito. La app está en `/produccion`.
 
 ### Primer acceso
 
@@ -854,12 +570,3 @@ bun start
 
 - `data/app.db` persiste entre despliegues (no se sube a Git, no se sobreescribe)
 - Si necesitas reiniciar usuarios: eliminar `data/app.db` y se recreará con el admin por defecto
-
-
-## Documentación Adicional por Feature
-
-| Feature | Archivo |
-|---|---|
-| Caducados/Obsoletos/Bloqueados (`/caducados`) | [docs/palets-caducados.md](docs/palets-caducados.md) |
-
----

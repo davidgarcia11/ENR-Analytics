@@ -25,6 +25,8 @@ export async function GET(req: NextRequest) {
     const srp1s = searchParams.getAll('srp1'); // Filtro por Categoría (IMSRP1 con DRRT='S1')
     const srp4s = searchParams.getAll('srp4'); // Filtro por Marca (IMSRP4 con DRRT='S4')
     const ze03s = searchParams.getAll('ze03'); // Filtro por Formato (AAZE03 de F554101 con DRRT='B3')
+    const startTimeStr = searchParams.get('startTime'); // Hora inicio HH:MM (opcional)
+    const endTimeStr = searchParams.get('endTime');     // Hora fin HH:MM (opcional)
 
     let conn; // Declaramos la variable para la conexión fuera del try para poder cerrarla en el finally
     try {
@@ -47,6 +49,34 @@ export async function GET(req: NextRequest) {
         // Deduplicamos F55TAR12 por orden+fecha (sin subcode) usando subquery,
         // porque registros antiguos (subcode 1) y nuevos (subcode 3/4) pueden coexistir
         // para la misma orden+fecha, lo que duplicaría cantidades al hacer JOIN con F4111.
+        // Convierte HH:MM o HH:MM:SS a entero ILTDAY (ej: "08:30" → 83000, "08:30:45" → 83045)
+        // Si no se especifican segundos, el inicio usa 0 y el fin usa 59 para cubrir el minuto completo
+        const timeToIntStart = (hhmmss: string): number => {
+            const parts = hhmmss.split(':').map(Number);
+            const [hh, mm, ss = 0] = parts;
+            return hh * 10000 + mm * 100 + ss;
+        };
+        const timeToIntEnd = (hhmmss: string): number => {
+            const parts = hhmmss.split(':').map(Number);
+            const [hh, mm, ss] = parts;
+            // Si no se especifican segundos, incluir hasta el segundo 59 del minuto
+            return hh * 10000 + mm * 100 + (ss !== undefined ? ss : 59);
+        };
+
+        const startTimeInt = startTimeStr ? timeToIntStart(startTimeStr) : null;
+        const endTimeInt = endTimeStr ? timeToIntEnd(endTimeStr) : null;
+
+        // Usamos COALESCE(C.ILTDAY, 0) para que registros sin hora (NULL) se traten
+        // como medianoche (0) y no queden excluidos al aplicar el filtro de horas.
+        // Filtro de hora para el JOIN de F4111 (solo si se especifica al menos un límite)
+        const timeJoinCondition = (startTimeInt !== null && endTimeInt !== null)
+            ? `AND COALESCE(C.ILTDAY, 0) >= :startTime AND COALESCE(C.ILTDAY, 0) <= :endTime`
+            : startTimeInt !== null
+                ? `AND COALESCE(C.ILTDAY, 0) >= :startTime`
+                : endTimeInt !== null
+                    ? `AND COALESCE(C.ILTDAY, 0) <= :endTime`
+                    : '';
+
         // Códigos de motivo de merma (ILRCD) que se incluyen en el cálculo
         const MERMA_CODES = "'P01','P02','P03','P04','P05','Q01','Q02','Q03','Q04','Q05','Q06','Q07','Q08','Q09','Q10'";
 
@@ -54,7 +84,7 @@ export async function GET(req: NextRequest) {
           SELECT
             A.WADOCO,
             B.TO55TAREA,
-            A.WADL01,
+            TRIM(M.IMDSC1) AS IMDSC1,
             SUM(CASE WHEN C.ILDCT = 'IC' THEN C.ILTRQT ELSE 0 END) as WASOQS,
             SUM(CASE WHEN C.ILDCT = 'IS' THEN C.ILTRQT ELSE 0 END) as MERMA,
             A.WAMCU,
@@ -67,18 +97,23 @@ export async function GET(req: NextRequest) {
             GROUP BY TODOCO, MOD(TO55TAREA, 100000)
           ) B
           INNER JOIN F4801 A ON A.WADOCO = B.TODOCO
+          INNER JOIN F4101 M ON M.IMITM = A.WAITM
           LEFT JOIN F4111 C ON C.ILDOC = A.WADOCO
             AND MOD(C.ILTRDJ, 100000) = MOD(B.TO55TAREA, 100000)
             AND (
               C.ILDCT = 'IC'
               OR (C.ILDCT = 'IS' AND TRIM(C.ILRCD) IN (${MERMA_CODES}))
             )
+            ${timeJoinCondition}
           ${extraJoins}
           ${extraJoins554101}
           WHERE 1=1
         `;
 
         const binds: any = {};
+
+        if (startTimeInt !== null) binds.startTime = startTimeInt;
+        if (endTimeInt !== null) binds.endTime = endTimeInt;
 
         if (plant && plant !== 'all') {
             sql += ` AND TRIM(A.WAMCU) = :plant`;
@@ -222,14 +257,14 @@ export async function GET(req: NextRequest) {
         if (limit > 0) {
             const offset = (page - 1) * limit;
             sql += `
-              GROUP BY A.WADOCO, B.TO55TAREA, A.WADL01, A.WAMCU, A.WAAITM, A.WAITM, C.ILTRUM
+              GROUP BY A.WADOCO, B.TO55TAREA, M.IMDSC1, A.WAMCU, A.WAAITM, A.WAITM, C.ILTRUM
               ORDER BY B.TO55TAREA DESC
               OFFSET ${offset} ROWS FETCH NEXT ${limit} ROWS ONLY
             `;
         } else {
             // limit=0 significa sin paginación: traer todos los registros
             sql += `
-              GROUP BY A.WADOCO, B.TO55TAREA, A.WADL01, A.WAMCU, A.WAAITM, A.WAITM, C.ILTRUM
+              GROUP BY A.WADOCO, B.TO55TAREA, M.IMDSC1, A.WAMCU, A.WAAITM, A.WAITM, C.ILTRUM
               ORDER BY B.TO55TAREA DESC
             `;
         }
@@ -367,7 +402,7 @@ export async function GET(req: NextRequest) {
                     order: order,
                     date: jdeParsed ? jdeParsed.date : null,
                     productionDateRaw: productionDateRaw,
-                    description: row.WADL01 != null ? String(row.WADL01).trim() : '',
+                    description: row.IMDSC1 != null ? String(row.IMDSC1).trim() : '',
                     quantity: 0, // Inicializamos en 0
                     merma: 0, // Merma acumulada (será valor negativo)
                     unit: primUom, // La unidad final siempre será la primaria
