@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useDeferredValue, memo } from "react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import {
@@ -22,6 +22,86 @@ interface Summary {
   totalPallets: number; totalQuantity: number; caducados: number; obsoletos: number; bloqueados: number; ambos: number;
 }
 
+// Funciones puras fuera del componente para evitar re-renders
+function getMotivoBadge(motivo: string) {
+  if (motivo.includes('Caducado') && motivo.includes('+')) return 'bg-red-100 text-red-800 border border-red-300 font-bold'
+  if (motivo === 'Caducado') return 'bg-red-50 text-red-700 border border-red-200 font-semibold'
+  if (motivo === 'Bloqueado') return 'bg-blue-50 text-blue-700 border border-blue-200 font-semibold'
+  if (motivo === 'Obsoleto') return 'bg-amber-50 text-amber-700 border border-amber-200 font-semibold'
+  if (motivo.includes('+')) return 'bg-purple-50 text-purple-700 border border-purple-200 font-bold'
+  return 'bg-gray-50 text-gray-700 border border-gray-200 font-semibold'
+}
+
+function getLocationLabel(loc: string) {
+  if (!loc) return 'GENERICA'
+  return loc
+}
+
+// Tabla en componente separado con React.memo para evitar re-renders al cambiar filtros
+const CaducadosTable = memo(function CaducadosTable({ data, loading }: { data: PaletRow[]; loading: boolean }) {
+  return (
+    <Table>
+      <TableHeader>
+        <TableRow className="border-gray-200 hover:bg-transparent">
+          <TableHead className="font-bold text-gray-700">Articulo</TableHead>
+          <TableHead className="font-bold text-gray-700">Descripcion</TableHead>
+          <TableHead className="font-bold text-gray-700">Planta</TableHead>
+          <TableHead className="font-bold text-gray-700">Ubicacion</TableHead>
+          <TableHead className="font-bold text-gray-700">Palet</TableHead>
+          <TableHead className="font-bold text-gray-700">Lote</TableHead>
+          <TableHead className="text-right font-bold text-gray-700">Cantidad</TableHead>
+          <TableHead className="font-bold text-gray-700">Fecha Cad.</TableHead>
+          <TableHead className="font-bold text-gray-700 text-center whitespace-nowrap">Motivo</TableHead>
+        </TableRow>
+      </TableHeader>
+      <TableBody>
+        {data.map((row, i) => (
+          <TableRow key={i} className="hover:bg-slate-50 border-gray-100">
+            <TableCell className="text-gray-700 font-mono text-xs bg-gray-100 px-2 py-1 rounded w-fit">{row.articleLong}</TableCell>
+            <TableCell className="text-gray-600 uppercase text-xs font-semibold">{row.description}</TableCell>
+            <TableCell className="text-gray-700 text-sm">{row.plantName}</TableCell>
+            <TableCell className="text-gray-600 text-xs">
+              <span className="flex items-center gap-1">
+                <MapPin className="h-3 w-3 text-gray-400" />
+                {row.location || 'GENERICA'}
+              </span>
+            </TableCell>
+            <TableCell className="text-gray-600 font-mono text-xs">{row.palet}</TableCell>
+            <TableCell className="text-gray-600 font-mono text-xs">{row.lote}</TableCell>
+            <TableCell className="text-right font-bold text-slate-900">
+              {row.quantity.toLocaleString('es-ES', { minimumFractionDigits: 2 })}
+            </TableCell>
+            <TableCell className="text-gray-700 text-sm">
+              {row.expiryDate ? new Date(row.expiryDate).toLocaleDateString('es-ES') : '-'}
+            </TableCell>
+            <TableCell className="text-center whitespace-nowrap">
+              <span className={`inline-block px-2 py-0.5 rounded-full text-xs whitespace-nowrap ${getMotivoBadge(row.motivo)}`}>
+                {row.motivo}
+              </span>
+            </TableCell>
+          </TableRow>
+        ))}
+
+        {loading && (
+          <TableRow>
+            <TableCell colSpan={9} className="text-center py-10">
+              <Loader2 className="h-6 w-6 animate-spin mx-auto text-slate-800" />
+            </TableCell>
+          </TableRow>
+        )}
+
+        {!loading && data.length === 0 && (
+          <TableRow>
+            <TableCell colSpan={9} className="text-center py-10 text-gray-500 font-medium">
+              Pulsa &quot;Filtrar&quot; para buscar palets caducados u obsoletos.
+            </TableCell>
+          </TableRow>
+        )}
+      </TableBody>
+    </Table>
+  )
+})
+
 export default function CaducadosPage() {
   const router = useRouter()
 
@@ -34,6 +114,9 @@ export default function CaducadosPage() {
   const [selectedPlant, setSelectedPlant] = useState('all')
   const [selectedLocation, setSelectedLocation] = useState('__blank__')
   const [selectedType, setSelectedType] = useState<'todos' | 'caducados' | 'obsoletos' | 'bloqueados'>('todos')
+
+  // useDeferredValue: los cambios en filtros (alta prioridad) no bloquean el render de la tabla
+  const deferredData = useDeferredValue(data)
 
   useEffect(() => {
     checkSession()
@@ -125,20 +208,6 @@ export default function CaducadosPage() {
     const wb = XLSX.utils.book_new()
     XLSX.utils.book_append_sheet(wb, ws, "Caducados_Obsoletos")
     XLSX.writeFile(wb, `Caducados_Obsoletos_${new Date().toISOString().split('T')[0]}.xlsx`)
-  }
-
-  const getMotivoBadge = (motivo: string) => {
-    if (motivo.includes('Caducado') && motivo.includes('+')) return 'bg-red-100 text-red-800 border border-red-300 font-bold'
-    if (motivo === 'Caducado') return 'bg-red-50 text-red-700 border border-red-200 font-semibold'
-    if (motivo === 'Bloqueado') return 'bg-blue-50 text-blue-700 border border-blue-200 font-semibold'
-    if (motivo === 'Obsoleto') return 'bg-amber-50 text-amber-700 border border-amber-200 font-semibold'
-    if (motivo.includes('+')) return 'bg-purple-50 text-purple-700 border border-purple-200 font-bold'
-    return 'bg-gray-50 text-gray-700 border border-gray-200 font-semibold'
-  }
-
-  const getLocationLabel = (loc: string) => {
-    if (!loc) return 'GENERICA'
-    return loc
   }
 
   const typeButtons: { value: 'todos' | 'caducados' | 'obsoletos' | 'bloqueados'; label: string }[] = [
@@ -330,65 +399,7 @@ export default function CaducadosPage() {
             <CardTitle className="text-lg font-bold text-gray-800">Palets Caducados y Obsoletos</CardTitle>
           </CardHeader>
           <CardContent>
-            <Table>
-              <TableHeader>
-                <TableRow className="border-gray-200 hover:bg-transparent">
-                  <TableHead className="font-bold text-gray-700">Articulo</TableHead>
-                  <TableHead className="font-bold text-gray-700">Descripcion</TableHead>
-                  <TableHead className="font-bold text-gray-700">Planta</TableHead>
-                  <TableHead className="font-bold text-gray-700">Ubicacion</TableHead>
-                  <TableHead className="font-bold text-gray-700">Palet</TableHead>
-                  <TableHead className="font-bold text-gray-700">Lote</TableHead>
-                  <TableHead className="text-right font-bold text-gray-700">Cantidad</TableHead>
-                  <TableHead className="font-bold text-gray-700">Fecha Cad.</TableHead>
-                  <TableHead className="font-bold text-gray-700 text-center whitespace-nowrap">Motivo</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {data.map((row, i) => (
-                  <TableRow key={i} className="hover:bg-slate-50 border-gray-100">
-                    <TableCell className="text-gray-700 font-mono text-xs bg-gray-100 px-2 py-1 rounded w-fit">{row.articleLong}</TableCell>
-                    <TableCell className="text-gray-600 uppercase text-xs font-semibold">{row.description}</TableCell>
-                    <TableCell className="text-gray-700 text-sm">{row.plantName}</TableCell>
-                    <TableCell className="text-gray-600 text-xs">
-                      <span className="flex items-center gap-1">
-                        <MapPin className="h-3 w-3 text-gray-400" />
-                        {row.location || 'GENERICA'}
-                      </span>
-                    </TableCell>
-                    <TableCell className="text-gray-600 font-mono text-xs">{row.palet}</TableCell>
-                    <TableCell className="text-gray-600 font-mono text-xs">{row.lote}</TableCell>
-                    <TableCell className="text-right font-bold text-slate-900">
-                      {row.quantity.toLocaleString('es-ES', { minimumFractionDigits: 2 })}
-                    </TableCell>
-                    <TableCell className="text-gray-700 text-sm">
-                      {row.expiryDate ? new Date(row.expiryDate).toLocaleDateString('es-ES') : '-'}
-                    </TableCell>
-                    <TableCell className="text-center whitespace-nowrap">
-                      <span className={`inline-block px-2 py-0.5 rounded-full text-xs whitespace-nowrap ${getMotivoBadge(row.motivo)}`}>
-                        {row.motivo}
-                      </span>
-                    </TableCell>
-                  </TableRow>
-                ))}
-
-                {loading && (
-                  <TableRow>
-                    <TableCell colSpan={9} className="text-center py-10">
-                      <Loader2 className="h-6 w-6 animate-spin mx-auto text-slate-800" />
-                    </TableCell>
-                  </TableRow>
-                )}
-
-                {!loading && data.length === 0 && (
-                  <TableRow>
-                    <TableCell colSpan={9} className="text-center py-10 text-gray-500 font-medium">
-                      Pulsa &quot;Filtrar&quot; para buscar palets caducados u obsoletos.
-                    </TableCell>
-                  </TableRow>
-                )}
-              </TableBody>
-            </Table>
+            <CaducadosTable data={deferredData} loading={loading} />
           </CardContent>
         </Card>
 
