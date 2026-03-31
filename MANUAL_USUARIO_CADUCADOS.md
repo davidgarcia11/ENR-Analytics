@@ -1,5 +1,7 @@
 # Manual de Usuario — Panel de Palets Caducados y Obsoletos
 
+> Ver también: [MANUAL_USUARIO_PRODUCCION.md](MANUAL_USUARIO_PRODUCCION.md) — Manual del Dashboard de Producción.
+
 ## 1. Acceso al Panel
 
 Desde el **Dashboard de Producción**: pulsa el botón **"Caducados"** en la barra superior derecha.
