@@ -57,6 +57,7 @@ export function ArticleMultiSelect({
                 variant="outline"
                 role="combobox"
                 aria-expanded={open}
+                aria-label={`Filtrar por ${label}`}
                 onClick={() => setOpen(!open)}
                 className="h-9 w-full justify-between border-slate-300 bg-white"
             >
@@ -83,12 +84,15 @@ export function ArticleMultiSelect({
                         <input
                             className="flex h-9 w-full rounded-md border border-slate-300 bg-transparent px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus:border-slate-500 disabled:cursor-not-allowed disabled:opacity-50"
                             placeholder={`Buscar ${label}...`}
+                            aria-label={`Buscar ${label}`}
                             value={query}
                             onChange={(e) => setQuery(e.target.value)}
                             autoFocus
                         />
                         <div className="flex gap-1 mt-1.5">
                             <button
+                                type="button"
+                                aria-label="Seleccionar todos"
                                 onClick={() => onChange(Array.from(new Set([...selected, ...filteredArticles.map(a => a.id)])))}
                                 className="flex-1 text-xs text-slate-600 hover:text-slate-900 py-1 rounded hover:bg-slate-100 font-medium"
                             >
@@ -96,6 +100,8 @@ export function ArticleMultiSelect({
                             </button>
                             {selected.length > 0 && (
                                 <button
+                                    type="button"
+                                    aria-label="Deseleccionar todos"
                                     onClick={() => onChange([])}
                                     className="flex-1 text-xs text-slate-500 hover:text-red-600 py-1 rounded hover:bg-red-50 font-medium"
                                 >
