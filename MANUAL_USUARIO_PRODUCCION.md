@@ -1,5 +1,7 @@
 # Manual de Usuario — Dashboard de Producción
 
+> Ver también: [MANUAL_USUARIO_CADUCADOS.md](MANUAL_USUARIO_CADUCADOS.md) — Manual del panel de palets caducados, obsoletos y bloqueados.
+
 ## 1. Acceso al Dashboard
 
 Desde JDE: pestaña **"Planta"** → **"Prod_Diaria_Agrupada"**.
@@ -190,13 +192,20 @@ Los presets que tienen fechas guardadas muestran un icono de calendario junto a 
 
 ---
 
-## 8. Cerrar Sesión
+## 8. Navegar a Otros Paneles
+
+Desde la barra superior, junto a tu nombre de usuario, encontrarás accesos directos:
+
+- **Caducados** — Abre el panel de palets caducados, obsoletos y bloqueados
+- **Logs** *(solo administradores)* — Registro de consultas realizadas en el sistema
+
+## 9. Cerrar Sesión
 
 Pulsa el botón **"Salir"** en la esquina superior derecha para cerrar tu sesión.
 
 ---
 
-## 9. Resumen Rápido
+## 10. Resumen Rápido
 
 | Acción | Cómo hacerlo |
 |--------|-------------|
@@ -210,3 +219,4 @@ Pulsa el botón **"Salir"** en la esquina superior derecha para cerrar tu sesió
 | Editar un preset | Abre **"Presets"** → Icono de lápiz → Modifica → **"Actualizar"** |
 | Eliminar filtros guardados | Abre **"Presets"** → Icono de papelera |
 | Sin sesión | Puedes consultar y exportar, pero **no guardar filtros** |
+| Ir a Caducados | Pulsa **"Caducados"** en la barra superior |
