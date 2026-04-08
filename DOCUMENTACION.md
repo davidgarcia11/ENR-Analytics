@@ -63,7 +63,7 @@ dashboard/
 │   └── utils.ts                  ← Funciones auxiliares (fechas, cantidades, clases CSS)
 │
 ├── components/                   ← Componentes React reutilizables
-│   ├── ArticleMultiSelect.tsx    ← Desplegable multi-selección con búsqueda
+│   ├── ArticleMultiSelect.tsx    ← Desplegable multi-selección con búsqueda (aria-label en botón combobox, input búsqueda y acciones)
 │   └── ui/                       ← Componentes de interfaz base (botón, card, tabla, input)
 │       ├── button.tsx
 │       ├── card.tsx
@@ -533,6 +533,14 @@ Si no cierras con `try/finally`, el pool se agota y la app se cuelga.
 - Valores del usuario → bind variables (`:param`)
 - Artículos → validados con regex `/^\d{10}$/`
 - Valores del FIELD_MAP → embebidos (constantes del código)
+
+### Accesibilidad (WCAG / Lighthouse)
+
+Los componentes compartidos y páginas siguen estas convenciones para pasar la auditoría de accesibilidad:
+
+- **`ArticleMultiSelect`:** el `<Button>` combobox lleva `aria-label="Filtrar por {label}"`. El input de búsqueda lleva `aria-label="Buscar {label}"`. Los botones de acción ("Sel. todos", "Ninguno") llevan `type="button"` y `aria-label` explícito.
+- **`FilterPanel`:** todos los `<Input>` y `<select>` llevan `id` con prefijo `filter-` y el `<label>` correspondiente usa `htmlFor`. Los botones icono (cerrar presets, editar/eliminar preset) llevan `aria-label` dinámico.
+- **Páginas (`/produccion`, `/caducados`):** el elemento raíz del contenido es `<main>` (no `<div>`). Todos los botones de navegación llevan `type="button"`. El botón "Salir" usa `text-gray-500` (no `text-gray-400`) para cumplir el ratio de contraste WCAG AA.
 
 ### Color corporativo `#D30B15`
 
