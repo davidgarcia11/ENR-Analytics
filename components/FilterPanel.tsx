@@ -234,7 +234,7 @@ export function FilterPanel({
               <BookmarkCheck className="h-4 w-4" style={{ color: '#D30B15' }} />
               Mis Presets de Filtros
             </h3>
-            <button onClick={() => { setShowPresets(false); cancelEditPreset() }} className="text-gray-400 hover:text-gray-600">
+            <button type="button" aria-label="Cerrar presets" onClick={() => { setShowPresets(false); cancelEditPreset() }} className="text-gray-400 hover:text-gray-600">
               <X className="h-4 w-4" />
             </button>
           </div>
@@ -292,14 +292,14 @@ export function FilterPanel({
                 const hasDates = !!pf.startDate && !!pf.endDate
                 return (
                   <div key={p.id} className={`flex items-center gap-1.5 border rounded-lg px-3 py-1.5 text-sm ${editingPresetId === p.id ? 'bg-blue-50 border-blue-300' : 'bg-gray-50 border-gray-200'}`}>
-                    <button onClick={() => loadPreset(p)} className="font-medium text-gray-700 hover:text-gray-900 flex items-center gap-1.5" title="Cargar preset">
+                    <button type="button" onClick={() => loadPreset(p)} className="font-medium text-gray-700 hover:text-gray-900 flex items-center gap-1.5" title="Cargar preset" aria-label={`Cargar preset ${p.name}`}>
                       {p.name}
                       {hasDates && <Calendar className="h-3 w-3 text-gray-300" />}
                     </button>
-                    <button onClick={() => startEditPreset(p)} className="text-gray-300 hover:text-blue-500" title="Editar">
+                    <button type="button" onClick={() => startEditPreset(p)} className="text-gray-300 hover:text-blue-500" aria-label={`Editar preset ${p.name}`}>
                       <Pencil className="h-3 w-3" />
                     </button>
-                    <button onClick={() => deletePreset(p.id)} className="text-gray-300 hover:text-red-500" title="Eliminar">
+                    <button type="button" onClick={() => deletePreset(p.id)} className="text-gray-300 hover:text-red-500" aria-label={`Eliminar preset ${p.name}`}>
                       <Trash2 className="h-3.5 w-3.5" />
                     </button>
                   </div>
@@ -381,24 +381,25 @@ export function FilterPanel({
           <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">Fechas y Planta</p>
           <div className="flex flex-wrap items-end gap-3">
             <div className="grid gap-1.5">
-              <label className="text-xs font-semibold text-gray-700">Fecha Inicio</label>
-              <Input type="date" value={filters.startDate} onChange={e => setFilters({ ...filters, startDate: e.target.value })} className="w-[150px] border-gray-300 focus:border-slate-500 font-medium" />
+              <label htmlFor="filter-start-date" className="text-xs font-semibold text-gray-700">Fecha Inicio</label>
+              <Input id="filter-start-date" type="date" value={filters.startDate} onChange={e => setFilters({ ...filters, startDate: e.target.value })} className="w-[150px] border-gray-300 focus:border-slate-500 font-medium" />
             </div>
             <div className="grid gap-1.5">
-              <label className="text-xs font-semibold text-gray-700">Fecha Fin</label>
-              <Input type="date" value={filters.endDate} onChange={e => setFilters({ ...filters, endDate: e.target.value })} className="w-[150px] border-gray-300 focus:border-slate-500 font-medium" />
+              <label htmlFor="filter-end-date" className="text-xs font-semibold text-gray-700">Fecha Fin</label>
+              <Input id="filter-end-date" type="date" value={filters.endDate} onChange={e => setFilters({ ...filters, endDate: e.target.value })} className="w-[150px] border-gray-300 focus:border-slate-500 font-medium" />
             </div>
             <div className="grid gap-1.5">
-              <label className="text-xs font-semibold text-gray-700">Hora Inicio</label>
-              <Input type="time" step="1" value={filters.startTime} onChange={e => setFilters({ ...filters, startTime: e.target.value })} className="w-[145px] border-gray-300 focus:border-slate-500 font-medium" />
+              <label htmlFor="filter-start-time" className="text-xs font-semibold text-gray-700">Hora Inicio</label>
+              <Input id="filter-start-time" type="time" step="1" value={filters.startTime} onChange={e => setFilters({ ...filters, startTime: e.target.value })} className="w-[145px] border-gray-300 focus:border-slate-500 font-medium" />
             </div>
             <div className="grid gap-1.5">
-              <label className="text-xs font-semibold text-gray-700">Hora Fin</label>
-              <Input type="time" step="1" value={filters.endTime} onChange={e => setFilters({ ...filters, endTime: e.target.value })} className="w-[145px] border-gray-300 focus:border-slate-500 font-medium" />
+              <label htmlFor="filter-end-time" className="text-xs font-semibold text-gray-700">Hora Fin</label>
+              <Input id="filter-end-time" type="time" step="1" value={filters.endTime} onChange={e => setFilters({ ...filters, endTime: e.target.value })} className="w-[145px] border-gray-300 focus:border-slate-500 font-medium" />
             </div>
             <div className="grid gap-1.5">
-              <label className="text-xs font-semibold text-gray-700">Planta</label>
+              <label htmlFor="filter-plant" className="text-xs font-semibold text-gray-700">Planta</label>
               <select
+                id="filter-plant"
                 className="flex h-9 w-[150px] rounded-md border border-gray-300 bg-white px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus:border-slate-500 font-medium"
                 value={filters.plant}
                 onChange={e => handlePlantChange(e.target.value)}
@@ -411,8 +412,9 @@ export function FilterPanel({
             </div>
             {(filters.plant === '10300' || filters.plant === 'all') && (
               <div className="grid gap-1.5 animate-in fade-in duration-300">
-                <label className="text-xs font-semibold text-gray-700">Sub-planta / Línea</label>
+                <label htmlFor="filter-subline" className="text-xs font-semibold text-gray-700">Sub-planta / Línea</label>
                 <select
+                  id="filter-subline"
                   className="flex h-9 w-[150px] rounded-md border border-gray-300 bg-white px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus:border-slate-500 font-medium disabled:opacity-50"
                   value={filters.subLine}
                   onChange={e => setFilters({ ...filters, subLine: e.target.value })}
