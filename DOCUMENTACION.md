@@ -485,7 +485,7 @@ Cada panel tiene su documentación específica en la carpeta `docs/`:
 | Panel | Ruta | Documentación |
 |---|---|---|
 | Dashboard de producción | `/produccion` | [docs/produccion.md](docs/produccion.md) |
-| Control de pedidos | `/preparacion-pedidos` | [docs/control-pedidos.md](docs/control-pedidos.md) |
+| Control de pedidos | `/preparacion-pedidos` | *(pendiente — rama `feature/control-pedidos`)* |
 | Palets caducados/obsoletos/bloqueados | `/caducados` | [docs/palets-caducados.md](docs/palets-caducados.md) |
 
 ---
