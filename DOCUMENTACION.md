@@ -514,6 +514,54 @@ El driver `oracledb` envía bind variables como VARCHAR2. Los campos CHAR tienen
 
 Usar `parseJdeDate()`. Para convertir a JDE: `(year - 2000) * 1000 + getDayOfYear(date)`.
 
+#### Conversión en TypeScript (frontend / API)
+
+```ts
+// parseJdeDate(jdeDate, wamcu?) en lib/utils.ts
+const str = jdeDate.toString().padStart(6, '0');
+const yearShort = parseInt(str.substring(1, 3), 10); // dígitos 1-2
+const dayOfYear = parseInt(str.substring(3), 10);    // dígitos 3-5
+const date = new Date(2000 + yearShort, 0, dayOfYear);
+```
+
+#### Conversión en SQL Oracle (consultas directas)
+
+Usar `YYYYDDD` con `TO_DATE` — Oracle interpreta `DDD` como día del año y gestiona bisiestos automáticamente. Proteger siempre con `CASE` para valores `NULL` o `0`:
+
+```sql
+CASE WHEN campo_fecha IS NULL OR campo_fecha = 0 THEN NULL
+     ELSE TO_CHAR(
+         TO_DATE(
+             TO_CHAR(2000 + MOD(FLOOR(campo_fecha / 1000), 100), '0000')
+             || LPAD(MOD(campo_fecha, 1000), 3, '0'),
+             'YYYYDDD'
+         ), 'DD/MM/YYYY')
+END AS fecha_legible
+```
+
+Ejemplo con `SDPDDJ` (fecha de carga) e `IOMMEJ` (fecha de caducidad):
+
+```sql
+CASE WHEN f.SDPDDJ IS NULL OR f.SDPDDJ = 0 THEN NULL
+     ELSE TO_CHAR(
+         TO_DATE(
+             TO_CHAR(2000 + MOD(FLOOR(f.SDPDDJ / 1000), 100), '0000')
+             || LPAD(MOD(f.SDPDDJ, 1000), 3, '0'),
+             'YYYYDDD'
+         ), 'DD/MM/YYYY')
+END AS FECHA_CARGA,
+CASE WHEN l.IOMMEJ IS NULL OR l.IOMMEJ = 0 THEN NULL
+     ELSE TO_CHAR(
+         TO_DATE(
+             TO_CHAR(2000 + MOD(FLOOR(l.IOMMEJ / 1000), 100), '0000')
+             || LPAD(MOD(l.IOMMEJ, 1000), 3, '0'),
+             'YYYYDDD'
+         ), 'DD/MM/YYYY')
+END AS FECHA_CADUCIDAD
+```
+
+> **Por qué `CASE WHEN = 0`:** registros sin fecha definida en JDE almacenan `0`, lo que generaría año `0000` y lanzaría `ORA-01841`.
+
 ### Cantidades JDE (×100) y Conversiones UM (×10.000.000)
 
 Siempre dividir. Las cantidades vienen ×100. Los factores de conversión ×10.000.000.
