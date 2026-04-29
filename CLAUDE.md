@@ -26,28 +26,37 @@ bun lint             # ESLint (eslint-config-next)
 
 ## Estructura clave
 ```
-app/                    # Rutas Next.js (App Router)
-  produccion/page.tsx   # Dashboard principal (client component)
-  admin/page.tsx        # Panel de administración de usuarios
-  admin/logs/page.tsx   # Logs de consultas (solo admin)
-  login/page.tsx        # Login
-  cambiar-contrasena/   # Cambio forzado de contraseña
-  api/                  # API Routes (servidor)
-    production/         # GET datos producción (endpoint más complejo)
-    categories/         # GET opciones para filtros
-    production-lines/   # GET líneas de producción
-    auth/               # login, logout, me, change-password
-    admin/              # users CRUD, logs
-    presets/            # CRUD presets de filtros
+app/                          # Rutas Next.js (App Router)
+  produccion/page.tsx         # Dashboard de producción (client component)
+  preparacion-pedidos/        # Panel control de pedidos (rama feature/control-pedidos)
+  caducados/                  # Panel palets caducados/obsoletos/bloqueados (rama feature/palets-caducados)
+  admin/page.tsx              # Panel de administración de usuarios
+  admin/logs/page.tsx         # Logs de consultas (solo admin)
+  login/page.tsx              # Login
+  cambiar-contrasena/         # Cambio forzado de contraseña
+  api/                        # API Routes (servidor)
+    production/               # GET datos producción (endpoint más complejo)
+    categories/               # GET opciones para filtros de producción
+    production-lines/         # GET líneas de producción
+    orders/                   # GET control de pedidos
+    plants/                   # GET plantas dinámicas (usado en pedidos y caducados)
+    auth/                     # login, logout, me, change-password
+    admin/                    # users CRUD, logs
+    presets/                  # CRUD presets de filtros
 lib/
-  db.ts                 # Conexión Oracle (getDbConnection)
-  sqlite.ts             # Conexión SQLite + migraciones + seed admin
-  auth.ts               # JWT, bcrypt, verifySession, cookieOptions
-  utils.ts              # parseJdeDate, parseWasOqs, cn()
+  db.ts                       # Conexión Oracle (getDbConnection)
+  sqlite.ts                   # Conexión SQLite + migraciones + seed admin
+  auth.ts                     # JWT, bcrypt, verifySession, cookieOptions
+  utils.ts                    # parseJdeDate, parseWasOqs, cn()
 components/
-  ArticleMultiSelect.tsx  # Desplegable multi-selección con búsqueda
-  ui/                     # button, card, input, table (estilo shadcn)
-middleware.ts           # Protege /api/admin/* (JWT + role admin)
+  FilterPanel.tsx             # Panel de filtros del dashboard de producción (incluye presets)
+  ArticleMultiSelect.tsx      # Desplegable multi-selección con búsqueda (usado en FilterPanel)
+  ui/                         # button, card, input, table (estilo shadcn)
+middleware.ts                 # Protege /api/admin/* (JWT + role admin)
+docs/                         # Documentación específica por panel
+  produccion.md               # Dashboard de producción — completo para juniors
+  control-pedidos.md          # Panel de pedidos (aún en rama feature)
+  palets-caducados.md         # Panel de caducados (aún en rama feature)
 ```
 
 ## Convenciones de código
@@ -92,10 +101,12 @@ middleware.ts           # Protege /api/admin/* (JWT + role admin)
 
 ## Patrones importantes
 
-### Añadir nuevo filtro de categoría
+### Añadir nuevo filtro de categoría (dashboard de producción)
 1. `api/categories/route.ts` → añadir entrada al `FIELD_MAP`
 2. `api/production/route.ts` → leer param, añadir JOIN condicional + WHERE con TRIM + bind
-3. `app/produccion/page.tsx` → estado, fetch useEffect, añadir a URLSearchParams, clearFilters, ArticleMultiSelect
+3. `components/FilterPanel.tsx` → estado, fetch useEffect, añadir a `handleApply` y `clearFilters`, añadir `<ArticleMultiSelect>`
+4. `app/produccion/page.tsx` → añadir el nuevo campo al `URLSearchParams` en `fetchData`
+5. Ver guía completa en `docs/produccion.md` sección 13
 
 ### Añadir nuevo panel/fuente de logs
 1. Añadir INSERT en la ruta API con `source: 'nombre_panel'`
@@ -123,7 +134,12 @@ middleware.ts           # Protege /api/admin/* (JWT + role admin)
 - No crear archivos nuevos sin confirmación explícita
 
 ### Después de hacer cambios
-- Actualizar `DOCUMENTACION.md` o el `docs/*.md` correspondiente si el cambio afecta a algo documentado
+- **Documentación — dónde actualizar:**
+  - Cambios en auth, admin, logs, presets, lib/, stack o estructura general → `DOCUMENTACION.md`
+  - Cambios en el panel de producción (`/produccion`, `FilterPanel`, `api/production`, `api/categories`, `api/production-lines`) → `docs/produccion.md`
+  - Cambios en el panel de pedidos → `docs/control-pedidos.md`
+  - Cambios en el panel de caducados → `docs/palets-caducados.md`
+  - Nuevo panel → crear `docs/nombre-panel.md` y añadir referencia en `DOCUMENTACION.md` sección 9
 - Sugerir commit con mensaje siguiendo el estilo del proyecto (conventional + español)
 
 ### Testing
@@ -156,5 +172,7 @@ git branch -d feature/nombre
 ### Git — Reglas
 - La carpeta `data/` está en `.gitignore`
 - La carpeta `.idea/` está en el repo (IntelliJ) — no tocar
-- Documentación de features específicas en `docs/` (no en `DOCUMENTACION.md` directamente)
+- `DOCUMENTACION.md` = documentación general del proyecto (auth, stack, lib/, patrones comunes)
+- `docs/*.md` = documentación específica por panel (uno por panel, para juniors)
+- Al crear una nueva feature de panel: crear `docs/nombre-panel.md` en la misma rama
 - Rama principal de integración: `develop`. `main` es producción

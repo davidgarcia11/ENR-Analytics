@@ -15,6 +15,8 @@ export async function GET(req: NextRequest) {
   const startDate = searchParams.get('startDate');
   const endDate = searchParams.get('endDate');
   const username = searchParams.get('username');
+  const source = searchParams.get('source'); // nuevo filtro por panel
+  const chartDays = parseInt(searchParams.get('chartDays') || '14'); // días del gráfico
 
   const db = getDb();
 
@@ -32,6 +34,10 @@ export async function GET(req: NextRequest) {
   if (username) {
     where += ' AND username = ?';
     params.push(username);
+  }
+  if (source) {
+    where += ' AND source = ?';
+    params.push(source);
   }
 
   const countRow = db.prepare(`SELECT COUNT(*) as total FROM query_logs ${where}`).get(...params) as any;
@@ -59,7 +65,7 @@ export async function GET(req: NextRequest) {
      FROM query_logs ${queryWhere}`
   ).get(...params) as any;
 
-  // Tiempos por día (últimos 14 días) para el gráfico
+  // Tiempos por día para el gráfico (días configurables)
   const dailyStats = db.prepare(
     `SELECT
        DATE(created_at) as day,
@@ -68,10 +74,26 @@ export async function GET(req: NextRequest) {
        COUNT(DISTINCT CASE WHEN user_id IS NOT NULL THEN user_id ELSE NULL END) as uniqueUsers
      FROM query_logs
      WHERE filters NOT LIKE '%"action":"login"%'
-       AND created_at >= datetime('now', '-14 days')
+       AND created_at >= datetime('now', '-' || ? || ' days')
      GROUP BY DATE(created_at)
      ORDER BY day`
-  ).all() as any[];
+  ).all(chartDays) as any[];
+
+  // Ranking de usuarios autenticados (excluye Invitado y logins)
+  const topUsers = db.prepare(
+    `SELECT username, COUNT(*) as queries
+     FROM query_logs
+     WHERE username != 'Invitado'
+       AND filters NOT LIKE '%"action":"login"%'
+     GROUP BY username
+     ORDER BY queries DESC
+     LIMIT 5`
+  ).all() as { username: string; queries: number }[];
+
+  // Total de consultas anónimas
+  const invitadoRow = db.prepare(
+    `SELECT COUNT(*) as count FROM query_logs WHERE username = 'Invitado' AND filters NOT LIKE '%"action":"login"%'`
+  ).get() as any;
 
   return NextResponse.json({
     logs,
@@ -87,5 +109,7 @@ export async function GET(req: NextRequest) {
       avgResults: stats?.avgResults || 0,
     },
     dailyStats,
+    topUsers,
+    invitadoCount: invitadoRow?.count || 0,
   });
 }

@@ -12,7 +12,6 @@ Esta aplicación es un **panel de control (dashboard) de producción** para la e
 - Órdenes de fabricación y cantidades producidas
 - Porcentaje de merma (desperdicio) por artículo
 - Desglose por planta, línea de producción y fechas
-- **Preparación de pedidos**: control de asignación de palets/lotes a pedidos de venta (F4211)
 - Exportación a Excel con formato condicional
 - Sistema de autenticación con gestión de usuarios (admin crea usuarios)
 - Presets de filtros guardados por usuario
@@ -64,7 +63,7 @@ dashboard/
 │   └── utils.ts                  ← Funciones auxiliares (fechas, cantidades, clases CSS)
 │
 ├── components/                   ← Componentes React reutilizables
-│   ├── ArticleMultiSelect.tsx    ← Desplegable multi-selección con búsqueda
+│   ├── ArticleMultiSelect.tsx    ← Desplegable multi-selección con búsqueda (aria-label en botón combobox, input búsqueda y acciones)
 │   └── ui/                       ← Componentes de interfaz base (botón, card, tabla, input)
 │       ├── button.tsx
 │       ├── card.tsx
@@ -85,8 +84,6 @@ dashboard/
     │   └── page.tsx              ← Ruta "/cambiar-contrasena" → cambio forzado de contraseña
     ├── produccion/
     │   └── page.tsx              ← Ruta "/produccion" → DASHBOARD PRINCIPAL
-    ├── preparacion-pedidos/
-    │   └── page.tsx              ← Ruta "/preparacion-pedidos" → CONTROL DE PEDIDOS
     └── api/
         ├── auth/
         │   ├── login/route.ts    ← POST /api/auth/login
@@ -109,12 +106,8 @@ dashboard/
         │   └── route.ts          ← GET /api/categories?field=X
         ├── production/
         │   └── route.ts          ← GET /api/production?...filtros...
-        ├── production-lines/
-        │   └── route.ts          ← GET /api/production-lines
-        ├── plants/
-        │   └── route.ts          ← GET /api/plants (plantas desde Oracle F0006)
-        └── orders/
-            └── route.ts          ← GET /api/orders?...filtros... (pedidos de venta)
+        └── production-lines/
+            └── route.ts          ← GET /api/production-lines
 ```
 
 ---
@@ -349,9 +342,9 @@ Cada vez que un usuario (o invitado) consulta datos o inicia sesión, se inserta
 
 | Archivo | Source | Qué registra |
 |---|---|---|
-| `app/api/production/route.ts` | `produccion` | Cada consulta de datos de producción |
-| `app/api/orders/route.ts` | `pedidos` | Cada consulta de pedidos de venta |
+| `app/api/production/route.ts` | `produccion` | Cada consulta de datos (con o sin resultados) |
 | `app/api/auth/login/route.ts` | `login` | Cada inicio de sesión exitoso |
+| `app/api/caducados/route.ts` | `caducados_obsoletos` | Cada consulta de palets caducados/obsoletos/bloqueados |
 
 El logging nunca bloquea la respuesta: se ejecuta en un `try/catch` independiente. Si falla el INSERT, se logea el error en consola pero el usuario recibe su respuesta normalmente.
 
@@ -377,6 +370,8 @@ Protegido con `verifySession()` + `role === 'admin'`.
 | `startDate` | string | Filtro desde fecha (YYYY-MM-DD) |
 | `endDate` | string | Filtro hasta fecha (YYYY-MM-DD) |
 | `username` | string | Filtro por usuario exacto |
+| `source` | string | Filtro por panel (produccion, login, caducados_obsoletos…) |
+| `chartDays` | number | Días del gráfico de actividad (7, 14, 30, 90). Por defecto: 14 |
 
 **Respuesta:**
 
@@ -394,9 +389,13 @@ Protegido con `verifySession()` + `role === 'admin'`.
     "minTime": 50,
     "avgResults": 87
   },
-  "dailyStats": [          // últimos 14 días (para gráfico)
+  "dailyStats": [          // últimos N días según chartDays (para gráfico)
     { "day": "2026-03-01", "queries": 15, "avgTime": 300, "uniqueUsers": 3 }
-  ]
+  ],
+  "topUsers": [            // top 5 usuarios autenticados (excluye Invitado y logins)
+    { "username": "admin", "queries": 87 }
+  ],
+  "invitadoCount": 33      // total de consultas anónimas (sin login)
 }
 ```
 
@@ -411,16 +410,19 @@ Solo accesible para admins. Se accede desde:
 **Componentes visuales:**
 
 1. **4 tarjetas de estadísticas:** Consultas totales, Tiempo medio, Tiempo máximo, Resultados medio
-2. **Gráfico de líneas (recharts):** Toggle con botón "Ver gráfico"/"Ocultar gráfico". Muestra consultas y tiempo medio por día (últimos 14 días) con dos ejes Y (consultas a la izquierda, tiempo a la derecha)
-3. **Filtros:** Usuario (dropdown), Fecha desde, Fecha hasta, botones Filtrar/Limpiar
-4. **Tabla de logs:** Fecha/Hora, Usuario, Panel (badge con color), Filtros (resumen), Resultados, Tiempo
-5. **Paginación:** Anterior/Siguiente con indicador de página
+2. **Gráfico de líneas (recharts):** Toggle con botón "Ver gráfico"/"Ocultar gráfico". Muestra consultas y tiempo medio por día con dos ejes Y (consultas izquierda, tiempo derecha). Selector de rango: 7 / 14 / 30 / 90 días.
+3. **Ranking de usuarios:** Tarjeta con top 5 usuarios autenticados por nº de consultas + contador de consultas anónimas (Invitado)
+4. **Filtros:** Usuario (dropdown), Panel/fuente (dropdown), Fecha desde, Fecha hasta, botones Filtrar/Limpiar
+5. **Tabla de logs:** Fecha/Hora, Usuario, Panel (badge con color), Filtros (resumen), Resultados, Tiempo. Las filas con tiempo > 3 segundos se resaltan en rojo.
+6. **Exportación Excel:** Botón "Exportar Excel" descarga todos los logs filtrados actuales
+7. **Paginación:** Anterior/Siguiente con indicador de página
 
 **Detalles de implementación:**
+- `SLOW_QUERY_MS = 3000` — umbral para resaltado de consultas lentas (rojo)
 - Los logins se resaltan con fondo azul claro y icono LogIn
 - La columna "Panel" muestra badges con colores según el source (`SOURCE_LABELS`)
-- `summarizeFilters()` convierte el JSON de filtros en un resumen legible (ej: "Aguilar · 01/03 - 02/03 · 3 filtros")
-- Las estadísticas y gráfico excluyen entradas de login (solo consultas reales)
+- `summarizeFilters()` convierte el JSON de filtros en un resumen legible (ej: "Aguilar · 01/03 - 02/03 · 3 filtros"). También maneja filtros específicos de caducados (type, location).
+- Las estadísticas, gráfico y ranking excluyen entradas de login (solo consultas reales)
 
 ### Persistencia
 
@@ -428,12 +430,10 @@ Los logs se almacenan en `data/app.db` (SQLite), igual que usuarios y presets. N
 
 ### Extensibilidad — Nuevos paneles
 
-Al crear un nuevo panel, basta con:
-1. Añadir el INSERT en la ruta API del nuevo panel con `source: 'nombre_panel'`
+Al crear un nuevo panel (ej: ventas), basta con:
+1. Añadir el INSERT en la ruta API del nuevo panel con `source: 'ventas'`
 2. Añadir la etiqueta en `SOURCE_LABELS` en `admin/logs/page.tsx`
 3. Los logs aparecerán automáticamente en la página de logs con su badge identificativo
-
-**Paneles actuales registrados:** `produccion` (Producción), `pedidos` (Preparación Pedidos), `login` (Login)
 
 ---
 
@@ -478,172 +478,19 @@ Divide entre 100 (JDE almacena cantidades ×100).
 
 ---
 
-## 8. Tablas de Oracle JDE
+## 9. Paneles de la aplicación
 
-### Tablas principales
+Cada panel tiene su documentación específica en la carpeta `docs/`:
 
-| Tabla | Descripción | Campos clave |
+| Panel | Ruta | Documentación |
 |---|---|---|
-| **F4801** | **Órdenes de fabricación** | `WADOCO` (nº orden), `WADL01` (descripción), `WAMCU` (planta), `WAAITM` (artículo display), `WAITM` (artículo corto) |
-| **F4211** | **Líneas de pedido de venta** | `SDDOCO` (nº pedido), `SDPDDJ` (fecha carga JDE), `SDRSDJ` (fecha entrega JDE), `SDMCU` (planta), `SDAITM` (artículo), `SDDSC1` (descripción), `SDUORG` (cant. pedida ×100), `SDLOTN` (lote/palet), `SDLNID` (nº línea), `SDUOM` (UM), `SDNXTR` (estado — 999=cerrado) |
-| **F4111** | **Movimientos de inventario** | `ILDOC` (nº orden), `ILTRDJ` (fecha JDE), `ILDCT` (tipo: IC=producción, IS=merma), `ILTRQT` (cantidad), `ILRCD` (código razón), `ILTRUM` (UM), `ILMCUZ` (línea producción) |
-| **F4101** | **Maestro de artículos** | `IMITM` (ID corto), `IMUOM1` (UM primaria), `IMPRP6` (tipo proceso), `IMSRP1..5` (categorías) |
-| **F554101** | **Extensión del maestro** | `AAITM` (ID corto), `AAZE03` (gramaje) |
-| **F55TAR12** | **Tareas de producción** (custom) | `TODOCO` (nº orden), `TO55TAREA` (código fecha+sublínea) |
-
-### Tablas auxiliares
-
-| Tabla | Descripción |
-|---|---|
-| **prodctl.f0005** | Códigos definidos por usuario (UDC) — catálogos |
-| **F41002** | Conversiones de unidad de medida |
-| **F30006** | Centros de trabajo (líneas producción) |
-| **F0006** | Unidades de negocio (Business Units) |
-
-### Relaciones
-
-```
-F55TAR12 (tareas)
-    │ TODOCO
-    ▼
-F4801 (órdenes) ──WAITM──► F4101 (maestro artículos) ──► F554101 (extensión)
-    │ WADOCO
-    ▼
-F4111 (movimientos)
-    └── ILTRUM ──► F41002 (conversiones UM)
-
-F4101.IMPRP6/IMSRP1..5 ──► prodctl.f0005 (catálogos UDC)
-F4111.ILMCUZ ──► F30006 + F0006 (líneas producción)
-```
+| Dashboard de producción | `/produccion` | [docs/produccion.md](docs/produccion.md) |
+| Control de pedidos | `/preparacion-pedidos` | [docs/control-pedidos.md](docs/control-pedidos.md) |
+| Palets caducados/obsoletos/bloqueados | `/caducados` | [docs/palets-caducados.md](docs/palets-caducados.md) |
 
 ---
 
-## 10. API Routes — Datos de producción
-
-### `GET /api/categories?field=X`
-
-**Archivo:** `app/api/categories/route.ts`
-
-Devuelve las opciones `[{ id, description }]` para un desplegable de filtro.
-
-| field | Columna | DRSY | DRRT | UI |
-|---|---|---|---|---|
-| `prp6` | IMPRP6 | 41 | 01 | Tipo Proceso OF |
-| `srp3` | IMSRP3 | 41 | S3 | Formato |
-| `srp5` | IMSRP5 | 41 | S5 | Sabor |
-| `srp2` | IMSRP2 | 41 | S2 | Familia |
-| `srp1` | IMSRP1 | 41 | S1 | Categoría |
-| `srp4` | IMSRP4 | 41 | S4 | Marca |
-| `ze03` | AAZE03 (F554101) | 17 | B3 | Gramaje |
-
-### `GET /api/production?...filtros...`
-
-**Archivo:** `app/api/production/route.ts`
-
-El endpoint más complejo. Devuelve datos de producción filtrados.
-
-**Parámetros:** `plant`, `subLine`, `startDate`, `endDate`, `article[]`, `prp6[]`, `srp3[]`, `srp5[]`, `srp2[]`, `srp1[]`, `srp4[]`, `ze03[]`, `prodLine[]`, `page`, `limit`
-
-**Lógica:**
-1. Construye SQL dinámico (JOINs condicionales según filtros activos)
-2. Ejecuta contra Oracle
-3. Obtiene UM primarias y factores de conversión
-4. Procesa filas: parsea fechas JDE, convierte UM (BFS), agrupa, calcula merma
-5. Devuelve `{ data: [...], sqlRowCount: N }`
-
-**Deduplicación F55TAR12:** `MOD(TO55TAREA, 100000)` extrae la fecha sin sub-código, `MAX` se queda con el registro más reciente (evita duplicados por migración de sub-códigos).
-
-**Merma:** Movimientos `IS` con código razón `P01-P05`, `Q01-Q10`. Viene como número negativo. Fórmula: `|merma| / (|merma| + producido) × 100`.
-
-**Conversión UM:** BFS de hasta 3 niveles en F41002. Factor ×10.000.000.
-
-### `GET /api/production-lines`
-
-**Archivo:** `app/api/production-lines/route.ts`
-
-Devuelve líneas de producción activas de F30006+F0006. Incluye `{ id: '__empty__', description: 'Sin línea' }` al principio.
-
----
-
-## 11. Página Principal — `app/produccion/page.tsx`
-
-Client Component (~850 líneas). Es el dashboard principal.
-
-### Estados principales
-
-| Estado | Tipo | Para qué |
-|---|---|---|
-| `data` | `any[]` | Registros de producción |
-| `loading` | `boolean` | Spinner mientras carga |
-| `page` / `hasMore` | `number` / `boolean` | Paginación |
-| `filters` | `object` | `{ plant, subLine, startDate, endDate }` |
-| `selectedArticles`, `selectedPrp6`...`selectedZe03`, `selectedProdLines` | `string[]` | Multi-selects |
-| `sessionUser` | `SessionUser \| null` | Usuario autenticado |
-| `presets` | `Preset[]` | Presets del usuario |
-| `metrics` | `object` | KPIs calculados |
-
-### Funciones principales
-
-| Función | Descripción |
-|---|---|
-| `fetchData(page, isNew, all?)` | Fetch a `/api/production`, procesa respuesta, calcula métricas |
-| `applyFilters()` | Reset + fetchData con limit=0 (todos) |
-| `clearFilters()` | Resetea todos los filtros (no borra datos de la tabla) |
-| `exportToExcel()` | Genera .xlsx con coloreado condicional (top 25% merma en rojo) |
-| `checkSession()` | GET `/api/auth/me`, redirige si mustChangePassword |
-| `savePreset(name?)` | POST `/api/presets` con filtros actuales |
-| `loadPreset(preset)` | Restaura los 13 filtros desde el JSON del preset |
-| `displayData` (useMemo) | Agrupa, suma, ordena por %merma descendente |
-
-### Estructura visual
-
-```
-┌─────────────────────────────────────────────────────────┐
-│ [LOGO]                          [Usuario ▪ Admin ▪ Salir]│
-│                                                         │
-│ ┌─ Filtros ──────────────────────────────────────────┐  │
-│ │ ── Categorías ──                                   │  │
-│ │ Artículo│Tipo Proc│Formato│Sabor│Familia│...       │  │
-│ │ ─────────────────────────────────────────          │  │
-│ │ ── Fechas y Planta ──                              │  │
-│ │ F.Inicio│F.Fin│Planta│Sub-planta                   │  │
-│ │ ─────────────────────────────────────────          │  │
-│ │             [Filtrar][Excel][Limpiar][Preset▼][+]  │  │
-│ └────────────────────────────────────────────────────┘  │
-│                                                         │
-│ ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐   │
-│ │ Cantidad │ │ Órdenes  │ │  Merma   │ │Top Planta│   │
-│ │ Total    │ │          │ │  2.34%   │ │ Funes 1  │   │
-│ └──────────┘ └──────────┘ └──────────┘ └──────────┘   │
-│                                                         │
-│ ┌─ Detalle de Producción ────────────────────────────┐  │
-│ │ Fecha │ Artículo │ Desc. │ Cant. │ Merma │ %M │UM │  │
-│ │ 02/03 │ 00001234 │ MERM..│ 1500  │ -23   │2.3%│UN │  │
-│ │         [Cargar más] [Cargar todos]                │  │
-│ └────────────────────────────────────────────────────┘  │
-└─────────────────────────────────────────────────────────┘
-```
-
-**Panel de filtros organizado en 3 secciones:**
-1. **Categorías:** 9 multi-selects (Artículo, Tipo Proceso, Formato, Sabor, Familia, Categoría, Marca, Gramaje, Línea Producción)
-2. **Fechas y Planta:** Fecha Inicio, Fecha Fin, Planta, Sub-planta (condicional)
-3. **Acciones:** Filtrar (rojo), Excel (verde), Limpiar (gris), Cargar preset (dropdown), Guardar preset (azul)
-
-Cada sección separada por divisores sutiles (`border-t border-gray-100`).
-
----
-
-## 12. Componentes Reutilizables
-
-### `ArticleMultiSelect.tsx`
-
-Desplegable multi-selección con búsqueda. Se usa para los 9 filtros de categoría.
-
-**Props:** `articles`, `selected`, `onChange`, `label`, `showId`
-
-**Comportamiento:** Botón con badge de seleccionados → panel flotante con buscador + checkboxes + "Sel. todos" / "Ninguno".
-
-### Componentes UI (`components/ui/`)
+## 10. Componentes UI base (`components/ui/`)
 
 | Componente | Descripción |
 |---|---|
@@ -654,7 +501,7 @@ Desplegable multi-selección con búsqueda. Se usa para los 9 filtros de categor
 
 ---
 
-## 13. Gotchas y Patrones Importantes
+## 11. Gotchas y Patrones Importantes
 
 ### Oracle CHAR vs VARCHAR2
 
@@ -666,6 +513,54 @@ El driver `oracledb` envía bind variables como VARCHAR2. Los campos CHAR tienen
 ### Fechas JDE (CYYDDD)
 
 Usar `parseJdeDate()`. Para convertir a JDE: `(year - 2000) * 1000 + getDayOfYear(date)`.
+
+#### Conversión en TypeScript (frontend / API)
+
+```ts
+// parseJdeDate(jdeDate, wamcu?) en lib/utils.ts
+const str = jdeDate.toString().padStart(6, '0');
+const yearShort = parseInt(str.substring(1, 3), 10); // dígitos 1-2
+const dayOfYear = parseInt(str.substring(3), 10);    // dígitos 3-5
+const date = new Date(2000 + yearShort, 0, dayOfYear);
+```
+
+#### Conversión en SQL Oracle (consultas directas)
+
+Usar `YYYYDDD` con `TO_DATE` — Oracle interpreta `DDD` como día del año y gestiona bisiestos automáticamente. Proteger siempre con `CASE` para valores `NULL` o `0`:
+
+```sql
+CASE WHEN campo_fecha IS NULL OR campo_fecha = 0 THEN NULL
+     ELSE TO_CHAR(
+         TO_DATE(
+             TO_CHAR(2000 + MOD(FLOOR(campo_fecha / 1000), 100), '0000')
+             || LPAD(MOD(campo_fecha, 1000), 3, '0'),
+             'YYYYDDD'
+         ), 'DD/MM/YYYY')
+END AS fecha_legible
+```
+
+Ejemplo con `SDPDDJ` (fecha de carga) e `IOMMEJ` (fecha de caducidad):
+
+```sql
+CASE WHEN f.SDPDDJ IS NULL OR f.SDPDDJ = 0 THEN NULL
+     ELSE TO_CHAR(
+         TO_DATE(
+             TO_CHAR(2000 + MOD(FLOOR(f.SDPDDJ / 1000), 100), '0000')
+             || LPAD(MOD(f.SDPDDJ, 1000), 3, '0'),
+             'YYYYDDD'
+         ), 'DD/MM/YYYY')
+END AS FECHA_CARGA,
+CASE WHEN l.IOMMEJ IS NULL OR l.IOMMEJ = 0 THEN NULL
+     ELSE TO_CHAR(
+         TO_DATE(
+             TO_CHAR(2000 + MOD(FLOOR(l.IOMMEJ / 1000), 100), '0000')
+             || LPAD(MOD(l.IOMMEJ, 1000), 3, '0'),
+             'YYYYDDD'
+         ), 'DD/MM/YYYY')
+END AS FECHA_CADUCIDAD
+```
+
+> **Por qué `CASE WHEN = 0`:** registros sin fecha definida en JDE almacenan `0`, lo que generaría año `0000` y lanzaría `ORA-01841`.
 
 ### Cantidades JDE (×100) y Conversiones UM (×10.000.000)
 
@@ -687,6 +582,14 @@ Si no cierras con `try/finally`, el pool se agota y la app se cuelga.
 - Artículos → validados con regex `/^\d{10}$/`
 - Valores del FIELD_MAP → embebidos (constantes del código)
 
+### Accesibilidad (WCAG / Lighthouse)
+
+Los componentes compartidos y páginas siguen estas convenciones para pasar la auditoría de accesibilidad:
+
+- **`ArticleMultiSelect`:** el `<Button>` combobox lleva `aria-label="Filtrar por {label}"`. El input de búsqueda lleva `aria-label="Buscar {label}"`. Los botones de acción ("Sel. todos", "Ninguno") llevan `type="button"` y `aria-label` explícito.
+- **`FilterPanel`:** todos los `<Input>` y `<select>` llevan `id` con prefijo `filter-` y el `<label>` correspondiente usa `htmlFor`. Los botones icono (cerrar presets, editar/eliminar preset) llevan `aria-label` dinámico.
+- **Páginas (`/produccion`, `/caducados`):** el elemento raíz del contenido es `<main>` (no `<div>`). Todos los botones de navegación llevan `type="button"`. El botón "Salir" usa `text-gray-500` (no `text-gray-400`) para cumplir el ratio de contraste WCAG AA.
+
 ### Color corporativo `#D30B15`
 
 Se usa en: borde superior de tarjetas KPI/filtros/tabla, botón Filtrar, iconos KPI.
@@ -701,34 +604,7 @@ No usar `secure: process.env.NODE_ENV === 'production'`. En su lugar, `cookieOpt
 
 ---
 
-## 14. Cómo Añadir un Nuevo Filtro de Categoría (panel Producción)
-
-Si necesitas un nuevo filtro (ejemplo: "Subcategoría" con campo `IMSRP6`, DRSY=`41`, DRRT=`S6`):
-
-### Paso 1: `app/api/categories/route.ts`
-
-Añadir entrada al `FIELD_MAP`:
-```ts
-srp6: { col: 'IMSRP6', drsy: '41', drrt: 'S6', directF0005: true },
-```
-
-### Paso 2: `app/api/production/route.ts`
-
-1. Leer parámetro: `const srp6s = searchParams.getAll('srp6');`
-2. Añadir a condición de `extraJoins` (JOIN F4101)
-3. Añadir cláusula WHERE con TRIM y bind variables
-
-### Paso 3: `app/produccion/page.tsx`
-
-1. Añadir estados: `selectedSrp6` + `availableSrp6`
-2. Fetch en `useEffect`: `/api/categories?field=srp6`
-3. Añadir al `URLSearchParams` en `fetchData`
-4. Añadir al `clearFilters`
-5. Añadir `<ArticleMultiSelect>` en la sección "Categorías" del panel de filtros
-
----
-
-## 15. Cómo Arrancar el Proyecto
+## 12. Cómo Arrancar el Proyecto
 
 ```bash
 # 1. Instalar dependencias
@@ -760,14 +636,3 @@ bun start
 
 - `data/app.db` persiste entre despliegues (no se sube a Git, no se sobreescribe)
 - Si necesitas reiniciar usuarios: eliminar `data/app.db` y se recreará con el admin por defecto
-
----
-
-## Documentación Adicional por Feature
-
-| Feature | Archivo |
-|---|---|
-| Preparación de Pedidos (`/preparacion-pedidos`) | [docs/control-pedidos.md](docs/control-pedidos.md) |
-
----
-
