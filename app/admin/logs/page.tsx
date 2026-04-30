@@ -23,6 +23,7 @@ interface LogEntry {
 
 const SOURCE_LABELS: Record<string, string> = {
   'produccion': 'Producción',
+  'pedidos': 'Preparación Pedidos',
   'login': 'Login',
   'caducados_obsoletos': 'Palets Caducados',
 }

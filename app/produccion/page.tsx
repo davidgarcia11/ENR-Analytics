@@ -13,7 +13,7 @@ import {
   TableRow,
 } from "@/components/ui/table"
 // Iconos de la librería lucide-react para dar estilo visual
-import { Loader2, Factory, Calendar, ChevronDown, ChevronsDown, User, LogOut, Settings, FileText, BookmarkCheck } from "lucide-react"
+import { Loader2, Factory, Calendar, ChevronDown, ChevronsDown, User, LogOut, Settings, FileText, BookmarkCheck, Package } from "lucide-react"
 import Image from "next/image"
 import * as XLSX from 'xlsx'; // Librería 'xlsx' para generar archivos Excel
 import { useRouter } from "next/navigation"
@@ -422,6 +422,10 @@ export default function Dashboard() {
                   </button>
                 </>
               )}
+              <button type="button" onClick={() => router.push('/preparacion-pedidos')} className="text-xs font-medium text-gray-500 hover:text-gray-700 flex items-center gap-1.5 px-2.5 py-1 rounded-md border border-gray-200 hover:border-gray-300">
+                <Package className="h-3.5 w-3.5" />
+                Pedidos
+              </button>
               {/* El botón Presets incrementa presetsSignal, que FilterPanel usa para abrir su panel */}
               <button type="button" onClick={() => setPresetsSignal(s => s + 1)} className="text-xs font-medium px-2.5 py-1 rounded-md border border-gray-300 bg-white hover:bg-gray-50 flex items-center gap-1.5">
                 <BookmarkCheck className="h-3.5 w-3.5" />
