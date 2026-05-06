@@ -98,7 +98,7 @@ El `[^<]+` (al menos un carácter) hace que las celdas en blanco se salten autom
 
 ## Lógica de consulta JDE
 
-Tabla: `F47011` (pedidos EDI inbound)
+Tabla: `F47011` (EDI Inbound — registro de pedidos recibidos por intercambio electrónico de datos)
 
 ```sql
 SELECT TRIM(SYVR01) AS REFERENCIA, SYUPMJ AS FECHA_JDE
@@ -108,8 +108,25 @@ WHERE SYUPMJ >= :fechaDesde
 ORDER BY SYUPMJ DESC
 ```
 
-- `SYVR01`: referencia del pedido (campo CHAR con padding de espacios → se usa `TRIM`)
-- `SYUPMJ`: fecha de última actualización en formato JDE CYYDDD
+**Campos utilizados:**
+
+| Campo | Descripción |
+|-------|-------------|
+| `SYVR01` | Referencia del pedido (CHAR con padding de espacios → `TRIM` obligatorio) |
+| `SYUPMJ` | Fecha de última actualización en formato JDE **CYYDDD** |
+
+**Formato CYYDDD de `SYUPMJ`:**
+
+```
+Ejemplo: 126061
+│││└──┘
+│││  └── DDD = 061 → día 61 del año → 2 de marzo
+││└───── YY  = 26  → año 2026
+│└────── (parte de YY)
+└─────── C   = dígito de siglo (1 = años 2000)
+```
+
+JDE almacena las fechas como enteros CYYDDD. Aquí `C=1` indica siglo XXI (diferente a F55TAR12 donde `C` se reutiliza como código de sub-línea). La API convierte `SYUPMJ` a `YYYY-MM-DD` para mostrarlo en la tabla.
 
 ---
 
@@ -135,11 +152,52 @@ const enAmbos     = seresPedidos.filter(p => jdeRefs.has(p.referencia.toUpperCas
 
 ## Panel del Dashboard — detalles técnicos
 
+**Archivos:** `app/comparativa-seres/page.tsx` + `app/api/comparativa-seres/route.ts`
+
 **Auth:** JWT (cookie `session`). Solo usuarios autenticados pueden acceder.
 
 **Parámetro:** `?days=N` (1 a 90 días, default 7). El panel ofrece botones de selección rápida: 1 / 3 / 7 / 14 / 30 días.
 
 **Paralelismo:** el scraping de SERES y la consulta a JDE se lanzan en paralelo con `Promise.all`.
+
+### Interfaz de usuario
+
+```
+┌─ Barra superior ─────────────────────────────────────┐
+│ [LOGO]             [Produccion] [Usuario] [Admin] [Salir]│
+└──────────────────────────────────────────────────────┘
+
+┌─ Filtros ────────────────────────────────────────────┐
+│ Periodo: [1 día] [3 días] [7 días] [14 días] [30 días]│
+│                                                      │
+│ [Comparar ▶]  [Excel ↓]  [Limpiar ×]               │
+└──────────────────────────────────────────────────────┘
+
+┌─ Tarjetas métricas (5) ──────────────────────────────┐
+│ ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐ │
+│ │SERES ped.│ │JDE(F47011│ │Solo SERES│ │Solo JDE  │ │En ambos  │ │
+│ │   326    │ │   350    │ │    4 ⚠️  │ │    2 🔴  │ │  322 ✅  │ │
+│ └──────────┘ └──────────┘ └──────────┘ └──────────┘ └──────────┘ │
+│ Las 3 últimas tarjetas son clicables → activan la pestaña         │
+└──────────────────────────────────────────────────────┘
+
+┌─ Tabla con pestañas ─────────────────────────────────┐
+│ [Solo en SERES (4)] [Solo en JDE (2)] [En ambos (322)]│
+│ ─────────────────────────────────────────────────────│
+│ Aviso contextual (qué significa cada pestaña)        │
+│ ─────────────────────────────────────────────────────│
+│ Referencia  │ Fecha     │ Tipo SERES                 │
+│ 01565794    │ 06/05/26  │ Pedido                     │
+│ ...                                                  │
+└──────────────────────────────────────────────────────┘
+```
+
+**Columnas de la tabla:**
+- **Referencia** — número de pedido (fuente monospace)
+- **Fecha** — fecha del documento (SERES) o `SYUPMJ` convertida (JDE), formato `DD/MM/YY`
+- **Tipo SERES** — solo visible en pestañas "Solo en SERES" y "En ambos" (no aplica a JDE)
+
+**Exportación Excel:** tres hojas — "Solo en SERES", "Solo en JDE", "En ambos". Cada hoja con columnas Referencia, Fecha y Tipo (cuando aplica). Nombre del archivo: `Comparativa_SERES_JDE_YYYY-MM-DD.xlsx`.
 
 **Respuesta de la API:**
 ```json
