@@ -13,8 +13,8 @@ import {
   TableRow,
 } from "@/components/ui/table"
 // Iconos de la librería lucide-react para dar estilo visual
-import { Loader2, Factory, Calendar, ChevronDown, ChevronsDown, User, LogOut, Settings, FileText, BookmarkCheck, Package } from "lucide-react"
-import Image from "next/image"
+import { Loader2, Factory, Calendar, ChevronDown, ChevronsDown } from "lucide-react"
+import Navbar from "@/components/Navbar"
 import * as XLSX from 'xlsx'; // Librería 'xlsx' para generar archivos Excel
 import { useRouter } from "next/navigation"
 import { FilterPanel, AppliedFilters } from "@/components/FilterPanel"
@@ -397,52 +397,13 @@ export default function Dashboard() {
     <main className="min-h-screen bg-gray-100 p-8 font-sans text-gray-900">
       <div className="mx-auto max-w-7xl space-y-8">
 
-        {/* --- BARRA DE SESIÓN --- */}
-        <div className="flex items-center gap-3">
-          <Image src="/logo.png" alt="Elaborados Naturales" width={120} height={42} priority />
-          <div className="flex-1" />
-          <button type="button" onClick={() => router.push('/caducados')} className="text-xs text-gray-500 hover:text-gray-700 font-medium px-2.5 py-1 rounded-md border border-gray-200 hover:border-gray-300">
-            Caducados
-          </button>
-          {sessionUser ? (
-            <>
-              <span className="text-sm text-gray-600 flex items-center gap-1.5">
-                <User className="h-3.5 w-3.5" />
-                {sessionUser.name ? `${sessionUser.name} ${sessionUser.surname || ''}`.trim() : sessionUser.username}
-              </span>
-              {sessionUser.role === 'admin' && (
-                <>
-                  <button type="button" onClick={() => router.push('/admin')} className="text-xs text-gray-500 hover:text-gray-700 flex items-center gap-1">
-                    <Settings className="h-3.5 w-3.5" />
-                    Admin
-                  </button>
-                  <button type="button" onClick={() => router.push('/admin/logs')} className="text-xs text-gray-500 hover:text-gray-700 flex items-center gap-1">
-                    <FileText className="h-3.5 w-3.5" />
-                    Logs
-                  </button>
-                </>
-              )}
-              <button type="button" onClick={() => router.push('/preparacion-pedidos')} className="text-xs font-medium text-gray-500 hover:text-gray-700 flex items-center gap-1.5 px-2.5 py-1 rounded-md border border-gray-200 hover:border-gray-300">
-                <Package className="h-3.5 w-3.5" />
-                Pedidos
-              </button>
-              {/* El botón Presets incrementa presetsSignal, que FilterPanel usa para abrir su panel */}
-              <button type="button" onClick={() => setPresetsSignal(s => s + 1)} className="text-xs font-medium px-2.5 py-1 rounded-md border border-gray-300 bg-white hover:bg-gray-50 flex items-center gap-1.5">
-                <BookmarkCheck className="h-3.5 w-3.5" />
-                Presets
-              </button>
-              <button type="button" onClick={logout} className="text-xs text-gray-500 hover:text-gray-700 flex items-center gap-1">
-                <LogOut className="h-3.5 w-3.5" />
-                Salir
-              </button>
-            </>
-          ) : (
-            <a href="/login" className="text-xs font-medium text-gray-500 hover:text-gray-700 flex items-center gap-1.5 px-2.5 py-1 rounded-md border border-gray-200 hover:border-gray-300">
-              <User className="h-3.5 w-3.5" />
-              Iniciar sesión
-            </a>
-          )}
-        </div>
+        {/* --- BARRA DE NAVEGACIÓN --- */}
+        <Navbar
+          currentPanel="produccion"
+          user={sessionUser}
+          onLogout={logout}
+          onPresetsClick={() => setPresetsSignal(s => s + 1)}
+        />
 
         {/* --- PANEL DE FILTROS ---
             FilterPanel gestiona internamente su draft state (filtros, presets, categorías).

@@ -493,6 +493,8 @@ Cada panel tiene su documentación específica en la carpeta `docs/`:
 
 ### API externa — `GET /api/jde-orders`
 
+> **No confundir con `/api/orders`:** ese endpoint consulta `F4211` (pedidos de venta) y es el que usa el panel `/preparacion-pedidos` con sesión JWT. Este endpoint consulta `F47011` (pedidos EDI entrantes) y está pensado para herramientas externas.
+
 Endpoint diseñado para ser consumido desde herramientas externas (artefactos Claude, scripts) que no pueden usar cookies JWT. Devuelve pedidos recibidos vía EDI de la tabla **F47011** de JDE.
 
 **Autenticación:** Header `x-api-key` con el valor de `SERES_API_KEY` en `.env.local`.
@@ -517,7 +519,39 @@ Endpoint diseñado para ser consumido desde herramientas externas (artefactos Cl
 
 ---
 
-## 10. Componentes UI base (`components/ui/`)
+## 10. Componentes reutilizables (`components/`)
+
+### `Navbar.tsx`
+
+Barra de navegación compartida por todos los paneles. Reemplaza el top bar duplicado que había en cada página.
+
+**Props:**
+
+| Prop | Tipo | Descripción |
+|---|---|---|
+| `currentPanel` | `'produccion' \| 'pedidos' \| 'caducados' \| 'comparativa'` | Panel activo (se marca con punto rojo en el dropdown) |
+| `user` | `SessionUser \| null` | Usuario de sesión. Si es null, muestra botón "Iniciar sesión" |
+| `onLogout` | `() => void` | Callback para cerrar sesión |
+| `onPresetsClick` | `() => void` (opcional) | Si se pasa, aparece el botón "Presets" (solo en `/produccion`, solo con sesión) |
+
+**Comportamiento:**
+- Logo a la izquierda
+- Botón **"Paneles ▾"** con dropdown: Producción / Pedidos / Caducados / Comparativa SERES. El panel activo aparece en negrita con punto rojo.
+- Botón "Presets" solo visible cuando `onPresetsClick` está definido y hay sesión activa
+- Con sesión: nombre del usuario, botones Admin y Logs (solo si `role === 'admin'`), botón Salir
+- Sin sesión: enlace "Iniciar sesión"
+
+**Añadir un nuevo panel al dropdown:** añadir una entrada al array `PANELS` en `components/Navbar.tsx` y usar la nueva clave en `currentPanel`.
+
+### `FilterPanel.tsx`
+
+Panel de filtros del dashboard de producción. Ver [docs/produccion.md](docs/produccion.md).
+
+### `ArticleMultiSelect.tsx`
+
+Desplegable multi-selección con búsqueda. Ver [docs/produccion.md](docs/produccion.md).
+
+### Componentes UI base (`components/ui/`)
 
 | Componente | Descripción |
 |---|---|

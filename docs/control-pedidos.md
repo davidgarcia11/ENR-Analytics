@@ -13,10 +13,11 @@ Panel para controlar el progreso de asignación de palets/lotes a pedidos de ven
 
 **Concepto clave:** Una línea de pedido está **asignada** si tiene lote (`SDLOTN` no vacío). Si no tiene lote, está **pendiente**. El progreso se calcula como la proporción de cantidad asignada (con lote) sobre la cantidad total pedida.
 
-### Navegación
+### Acceso y navegación
 
-- Desde `/produccion`: botón "Pedidos" en la barra de sesión
-- Desde `/preparacion-pedidos`: botón "Producción" para volver
+**Acceso público** — no requiere sesión. Cualquier usuario puede consultar este panel sin estar registrado. Si hay sesión activa, se muestran los botones de Admin/Logs y el nombre del usuario.
+
+**Navegación:** dropdown "Paneles ▾" en la barra superior (componente `Navbar`). Ver todos los paneles disponibles en [DOCUMENTACION.md](../DOCUMENTACION.md) sección 10.
 
 ### API — `GET /api/plants`
 
@@ -36,6 +37,8 @@ Devuelve la lista de plantas desde Oracle (tabla F0006, filtro `MCSTYL = 'BP'`).
 > **Nota:** Este endpoint se usa **solo en Pedidos**. El panel de Producción tiene las plantas hardcodeadas porque maneja lógica de sub-plantas (ver sección "Cómo Añadir Plantas").
 
 ### API — `GET /api/orders`
+
+> **No confundir con `/api/jde-orders`:** ese endpoint consulta `F47011` (pedidos EDI entrantes) y está pensado para herramientas externas con autenticación por API key. Este endpoint consulta `F4211` (pedidos de venta) y requiere sesión JWT del dashboard.
 
 **Archivo:** `app/api/orders/route.ts`
 
