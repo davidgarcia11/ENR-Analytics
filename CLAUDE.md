@@ -28,8 +28,9 @@ bun lint             # ESLint (eslint-config-next)
 ```
 app/                          # Rutas Next.js (App Router)
   produccion/page.tsx         # Dashboard de producción (client component)
-  preparacion-pedidos/        # Panel control de pedidos (rama feature/control-pedidos)
-  caducados/                  # Panel palets caducados/obsoletos/bloqueados (rama feature/palets-caducados)
+  preparacion-pedidos/        # Panel control de pedidos
+  caducados/                  # Panel palets caducados/obsoletos/bloqueados
+  comparativa-seres/          # Panel comparativa SERES vs JDE
   admin/page.tsx              # Panel de administración de usuarios
   admin/logs/page.tsx         # Logs de consultas (solo admin)
   login/page.tsx              # Login
@@ -40,6 +41,9 @@ app/                          # Rutas Next.js (App Router)
     production-lines/         # GET líneas de producción
     orders/                   # GET control de pedidos
     plants/                   # GET plantas dinámicas (usado en pedidos y caducados)
+    caducados/                # GET palets caducados/obsoletos/bloqueados
+    jde-orders/               # GET órdenes JDE (API externa, usada por herramientas externas)
+    comparativa-seres/        # GET comparativa SERES vs JDE
     auth/                     # login, logout, me, change-password
     admin/                    # users CRUD, logs
     presets/                  # CRUD presets de filtros
@@ -55,8 +59,9 @@ components/
 middleware.ts                 # Protege /api/admin/* (JWT + role admin)
 docs/                         # Documentación específica por panel
   produccion.md               # Dashboard de producción — completo para juniors
-  control-pedidos.md          # Panel de pedidos (aún en rama feature)
-  palets-caducados.md         # Panel de caducados (aún en rama feature)
+  control-pedidos.md          # Panel de pedidos
+  palets-caducados.md         # Panel de caducados
+  seres-jde-comparativa.md    # Panel comparativa SERES vs JDE
 ```
 
 ## Convenciones de código
@@ -139,6 +144,7 @@ docs/                         # Documentación específica por panel
   - Cambios en el panel de producción (`/produccion`, `FilterPanel`, `api/production`, `api/categories`, `api/production-lines`) → `docs/produccion.md`
   - Cambios en el panel de pedidos → `docs/control-pedidos.md`
   - Cambios en el panel de caducados → `docs/palets-caducados.md`
+  - Cambios en el panel comparativa SERES vs JDE → `docs/seres-jde-comparativa.md`
   - Nuevo panel → crear `docs/nombre-panel.md` y añadir referencia en `DOCUMENTACION.md` sección 9
 - Sugerir commit con mensaje siguiendo el estilo del proyecto (conventional + español)
 
