@@ -8,9 +8,10 @@ import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from "@/components/ui/table"
 import {
-  Search, Loader2, Download, X, User, LogOut, Settings, FileText,
-  ChevronDown, ChevronRight, Package, CheckCircle2, Clock, AlertCircle, Factory
+  Search, Loader2, Download, X,
+  ChevronDown, ChevronRight, Package, CheckCircle2, Clock, AlertCircle
 } from "lucide-react"
+import Navbar from "@/components/Navbar"
 import Image from "next/image"
 import * as XLSX from 'xlsx'
 import { useRouter } from "next/navigation"
@@ -217,44 +218,8 @@ export default function PreparacionPedidos() {
     <div className="min-h-screen bg-gray-100 p-8 font-sans text-gray-900">
       <div className="mx-auto max-w-7xl space-y-8">
 
-        {/* --- BARRA DE SESIÓN --- */}
-        <div className="flex items-center gap-3">
-          <Image src="/logo.png" alt="Elaborados Naturales" width={120} height={42} priority />
-          <div className="flex-1" />
-          {sessionUser ? (
-            <>
-              <span className="text-sm text-gray-600 flex items-center gap-1.5">
-                <User className="h-3.5 w-3.5" />
-                {sessionUser.name ? `${sessionUser.name} ${sessionUser.surname || ''}`.trim() : sessionUser.username}
-              </span>
-              {sessionUser.role === 'admin' && (
-                <>
-                  <button onClick={() => router.push('/admin')} className="text-xs text-gray-500 hover:text-gray-700 flex items-center gap-1">
-                    <Settings className="h-3.5 w-3.5" />
-                    Admin
-                  </button>
-                  <button onClick={() => router.push('/admin/logs')} className="text-xs text-gray-500 hover:text-gray-700 flex items-center gap-1">
-                    <FileText className="h-3.5 w-3.5" />
-                    Logs
-                  </button>
-                </>
-              )}
-              <button onClick={() => router.push('/produccion')} className="text-xs font-medium text-gray-500 hover:text-gray-700 flex items-center gap-1.5 px-2.5 py-1 rounded-md border border-gray-200 hover:border-gray-300">
-                <Factory className="h-3.5 w-3.5" />
-                Producción
-              </button>
-              <button onClick={logout} className="text-xs text-gray-400 hover:text-gray-600 flex items-center gap-1">
-                <LogOut className="h-3.5 w-3.5" />
-                Salir
-              </button>
-            </>
-          ) : (
-            <a href="/login" className="text-xs font-medium text-gray-500 hover:text-gray-700 flex items-center gap-1.5 px-2.5 py-1 rounded-md border border-gray-200 hover:border-gray-300">
-              <User className="h-3.5 w-3.5" />
-              Iniciar sesión
-            </a>
-          )}
-        </div>
+        {/* --- BARRA DE NAVEGACIÓN --- */}
+        <Navbar currentPanel="pedidos" user={sessionUser} onLogout={logout} />
 
         {/* --- TÍTULO --- */}
         <div>

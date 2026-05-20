@@ -53,6 +53,7 @@ lib/
   auth.ts                     # JWT, bcrypt, verifySession, cookieOptions
   utils.ts                    # parseJdeDate, parseWasOqs, cn()
 components/
+  Navbar.tsx                  # Barra de navegación compartida por todos los paneles (dropdown "Paneles ▾")
   FilterPanel.tsx             # Panel de filtros del dashboard de producción (incluye presets)
   ArticleMultiSelect.tsx      # Desplegable multi-selección con búsqueda (usado en FilterPanel)
   ui/                         # button, card, input, table (estilo shadcn)

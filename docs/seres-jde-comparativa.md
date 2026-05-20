@@ -184,7 +184,7 @@ const enAmbos     = seresPedidos
 
 **Archivos:** `app/comparativa-seres/page.tsx` + `app/api/comparativa-seres/route.ts`
 
-**Auth:** JWT (cookie `session`). Solo usuarios autenticados pueden acceder.
+**Acceso público** — no requiere sesión. La API `/api/comparativa-seres` tampoco exige JWT; cualquier usuario puede ejecutar la comparativa. Si hay sesión activa, se muestra el nombre del usuario y los botones de Admin.
 
 **Parámetro:** `?days=N` (0 a 90 días, default 7). El panel ofrece botones de selección rápida: Hoy / 1 / 3 / 7 / 14 / 30 días.
 
