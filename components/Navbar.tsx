@@ -2,13 +2,14 @@
 
 import Image from "next/image"
 import { useRouter } from "next/navigation"
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import {
   User, LogOut, Settings, FileText, ChevronDown,
   Factory, Package, AlertTriangle, ArrowLeftRight, BookmarkCheck
 } from "lucide-react"
 
 interface SessionUser { id: number; username: string; role: string; name: string; surname: string }
+interface ScreenConfig { is_public: boolean; allowed_roles: string[] }
 
 const PANELS = [
   { key: 'produccion',  label: 'Producción',       href: '/produccion',          Icon: Factory },
@@ -26,9 +27,27 @@ interface NavbarProps {
   onPresetsClick?: () => void
 }
 
+function canAccessPanel(cfg: ScreenConfig | undefined, role: string | null): boolean {
+  if (!cfg) return true
+  if (cfg.is_public) return true
+  if (!role) return false
+  if (role === 'admin') return true
+  return cfg.allowed_roles.includes(role)
+}
+
 export default function Navbar({ currentPanel, user, onLogout, onPresetsClick }: NavbarProps) {
   const router = useRouter()
   const [open, setOpen] = useState(false)
+  const [screensConfig, setScreensConfig] = useState<Record<string, ScreenConfig>>({})
+
+  useEffect(() => {
+    fetch('/api/screen-permissions')
+      .then(r => r.ok ? r.json() : {})
+      .then(setScreensConfig)
+      .catch(() => {})
+  }, [])
+
+  const visiblePanels = PANELS.filter(p => canAccessPanel(screensConfig[p.key], user?.role ?? null))
 
   const displayName = user
     ? (user.name ? `${user.name} ${user.surname || ''}`.trim() : user.username)
@@ -40,6 +59,7 @@ export default function Navbar({ currentPanel, user, onLogout, onPresetsClick }:
       <div className="flex-1" />
 
       {/* Dropdown de paneles */}
+      {visiblePanels.length > 0 && (
       <div className="relative">
         <button
           type="button"
@@ -53,7 +73,7 @@ export default function Navbar({ currentPanel, user, onLogout, onPresetsClick }:
           <>
             <div className="fixed inset-0 z-10" onClick={() => setOpen(false)} />
             <div className="absolute right-0 mt-1 w-52 bg-white border border-gray-200 rounded-md shadow-lg z-20 py-1">
-              {PANELS.map(({ key, label, href, Icon }) => {
+              {visiblePanels.map(({ key, label, href, Icon }) => {
                 const active = key === currentPanel
                 return (
                   <button
@@ -72,6 +92,7 @@ export default function Navbar({ currentPanel, user, onLogout, onPresetsClick }:
           </>
         )}
       </div>
+      )}
 
       {/* Presets — solo en producción y solo con sesión activa */}
       {onPresetsClick && user && (

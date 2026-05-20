@@ -34,7 +34,33 @@ export default function LoginPage() {
         return
       }
 
-      router.push(data.mustChangePassword ? "/cambiar-contrasena" : "/produccion")
+      if (data.mustChangePassword) {
+        router.push("/cambiar-contrasena")
+        return
+      }
+
+      // Buscar el primer panel al que tiene acceso según permisos configurados
+      const PANELS = [
+        { key: 'produccion',  path: '/produccion' },
+        { key: 'pedidos',     path: '/preparacion-pedidos' },
+        { key: 'caducados',   path: '/caducados' },
+        { key: 'comparativa', path: '/comparativa-seres' },
+      ]
+      try {
+        const screensRes = await fetch('/api/screen-permissions')
+        if (screensRes.ok) {
+          const screens = await screensRes.json()
+          const first = PANELS.find(p => {
+            const cfg = screens[p.key]
+            if (!cfg) return true
+            return cfg.is_public || data.role === 'admin' || cfg.allowed_roles.includes(data.role)
+          })
+          if (first) { router.push(first.path); return }
+          setError("No tienes acceso a ningún panel. Contacta con el administrador.")
+          return
+        }
+      } catch { /* si falla la comprobación, ir a producción por defecto */ }
+      router.push("/produccion")
     } catch {
       setError("Error de conexión")
     } finally {

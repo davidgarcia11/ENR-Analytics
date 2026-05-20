@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getDbConnection } from '@/lib/db';
+import { requireScreenAccess } from '@/lib/permissions';
 
 // Mapa de campos permitidos: clave usada en la URL -> columna F4101, DRSY y DRRT de F0005
 // directF0005: si true, consulta F0005 directamente en vez de pasar por F4101
@@ -15,6 +16,8 @@ const FIELD_MAP: Record<string, { col: string; drsy: string; drrt: string; direc
 };
 
 export async function GET(req: NextRequest) {
+    const denied = await requireScreenAccess('produccion')
+    if (denied) return denied
     const { searchParams } = new URL(req.url);
     const field = searchParams.get('field');
 

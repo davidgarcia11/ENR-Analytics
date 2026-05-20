@@ -3,8 +3,11 @@ import { getDbConnection } from '@/lib/db';
 import { getDayOfYear } from 'date-fns';
 import { getDb } from '@/lib/sqlite';
 import { verifySession } from '@/lib/auth';
+import { requireScreenAccess } from '@/lib/permissions';
 
 export async function GET(req: NextRequest) {
+  const denied = await requireScreenAccess('pedidos')
+  if (denied) return denied
   const startTime = Date.now();
   const { searchParams } = new URL(req.url);
 

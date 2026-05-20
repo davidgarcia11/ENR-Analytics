@@ -126,10 +126,22 @@ export default function CaducadosPage() {
   const checkSession = async () => {
     try {
       const res = await fetch('/api/auth/me')
+      let user = null
       if (res.ok) {
-        const user = await res.json()
+        user = await res.json()
         if (user.mustChangePassword) { router.push('/cambiar-contrasena'); return }
         setSessionUser(user)
+      }
+      const screensRes = await fetch('/api/screen-permissions')
+      if (screensRes.ok) {
+        const screens = await screensRes.json()
+        const mine = screens['caducados']
+        if (mine && !mine.is_public) {
+          if (!user || (user.role !== 'admin' && !mine.allowed_roles.includes(user.role))) {
+            router.push('/login')
+            return
+          }
+        }
       }
     } catch { }
   }

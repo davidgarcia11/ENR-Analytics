@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getDbConnection } from '@/lib/db';
 import { getDb } from '@/lib/sqlite';
 import { verifySession } from '@/lib/auth';
+import { requireScreenAccess } from '@/lib/permissions';
 import { getDayOfYear } from 'date-fns';
 
 function jdeDateToISO(jdeDate: number): string | null {
@@ -16,6 +17,8 @@ function jdeDateToISO(jdeDate: number): string | null {
 }
 
 export async function GET(req: NextRequest) {
+    const denied = await requireScreenAccess('caducados')
+    if (denied) return denied
     const startTime = Date.now();
     const { searchParams } = new URL(req.url);
 

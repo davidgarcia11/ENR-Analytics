@@ -9,7 +9,7 @@
 
 Dashboard para visualizar palets problemáticos: caducados, con artículo obsoleto o bloqueados.
 
-**Acceso público** — no requiere sesión. Cualquier usuario puede consultar este panel sin estar registrado.
+**Acceso configurable** — público por defecto. Cualquier usuario puede consultar sin sesión activa. El administrador puede restringirlo a roles específicos desde `/admin` → pestaña Pantallas.
 
 **Navegación:** dropdown "Paneles ▾" en la barra superior (componente `Navbar`).
 

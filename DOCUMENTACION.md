@@ -1,7 +1,7 @@
 # Documentación Técnica — Dashboard de Producción
 
 > **Audiencia:** Desarrolladores que se incorporan al proyecto.
-> **Última actualización:** Marzo 2026
+> **Última actualización:** Mayo 2026
 
 ---
 
@@ -14,6 +14,7 @@ Esta aplicación es un **panel de control (dashboard) de producción** para la e
 - Desglose por planta, línea de producción y fechas
 - Exportación a Excel con formato condicional
 - Sistema de autenticación con gestión de usuarios (admin crea usuarios)
+- Sistema de roles dinámicos y permisos por pantalla (configurable desde admin)
 - Presets de filtros guardados por usuario
 - Logs de consultas con estadísticas y gráfico de rendimiento (solo admin)
 
@@ -50,6 +51,12 @@ dashboard/
 ├── postcss.config.mjs            ← Configuración de PostCSS (Tailwind v4)
 ├── eslint.config.mjs             ← Reglas de linting
 │
+├── __tests__/                    ← Tests de seguridad (bun test)
+│   ├── middleware.test.ts        ← JWT forgery, expiración, bypass de rol
+│   ├── sanitization.test.ts      ← SQL injection, XSS en entradas de usuario
+│   ├── permissions.test.ts       ← requireScreenAccess con DB en memoria
+│   └── admin-guards.test.ts      ← Protección del rol/pantalla admin, inyección
+│
 ├── data/
 │   └── app.db                    ← Base de datos SQLite (usuarios, presets, logs — NO se sube a Git)
 │
@@ -58,8 +65,9 @@ dashboard/
 │
 ├── lib/                          ← Lógica reutilizable (utilidades)
 │   ├── db.ts                     ← Conexión a Oracle
-│   ├── sqlite.ts                 ← Conexión a SQLite (usuarios, presets, migraciones)
+│   ├── sqlite.ts                 ← Conexión a SQLite (usuarios, presets, migraciones, roles, pantallas)
 │   ├── auth.ts                   ← JWT, bcrypt, SessionUser, cookieOptions
+│   ├── permissions.ts            ← Control de acceso por pantalla (getAllScreensConfig, requireScreenAccess)
 │   └── utils.ts                  ← Funciones auxiliares (fechas, cantidades, clases CSS)
 │
 ├── components/                   ← Componentes React reutilizables
@@ -73,7 +81,7 @@ dashboard/
 └── app/                          ← Rutas de Next.js (App Router)
     ├── globals.css               ← Estilos globales + importación de Tailwind
     ├── layout.tsx                ← Layout raíz (envuelve todas las páginas)
-    ├── page.tsx                  ← Ruta "/" → muestra un 404 simple
+    ├── page.tsx                  ← Ruta "/" → página de inicio (paneles públicos o redirect si hay sesión)
     ├── login/
     │   └── page.tsx              ← Ruta "/login" → formulario de inicio de sesión
     ├── admin/
@@ -94,10 +102,19 @@ dashboard/
         ├── admin/
         │   ├── logs/
         │   │   └── route.ts      ← GET /api/admin/logs (logs de consultas)
-        │   └── users/
-        │       ├── route.ts      ← GET/POST /api/admin/users
-        │       └── [id]/
-        │           └── route.ts  ← PATCH/DELETE /api/admin/users/:id
+        │   ├── users/
+        │   │   ├── route.ts      ← GET/POST /api/admin/users
+        │   │   └── [id]/
+        │   │       └── route.ts  ← PUT/PATCH/DELETE /api/admin/users/:id
+        │   ├── roles/
+        │   │   ├── route.ts      ← GET/POST /api/admin/roles
+        │   │   └── [id]/
+        │   │       └── route.ts  ← DELETE /api/admin/roles/:id
+        │   └── screens/
+        │       └── [key]/
+        │           └── route.ts  ← PUT /api/admin/screens/:key
+        ├── screen-permissions/
+        │   └── route.ts          ← GET /api/screen-permissions (público, sin auth)
         ├── presets/
         │   ├── route.ts          ← GET/POST /api/presets
         │   └── [id]/
@@ -137,6 +154,8 @@ SERES_API_KEY=<clave_para_endpoint_externo_jde_orders>
 | `bun dev` | Arranca el servidor en modo desarrollo (hot reload) |
 | `bun run build` | Compila la app para producción |
 | `bun start` | Sirve la app compilada (producción) |
+| `bun test` | Ejecuta los tests de seguridad |
+| `bun test --watch` | Tests en modo watch |
 
 ### `next.config.ts`
 
@@ -212,6 +231,39 @@ CREATE TABLE query_logs (
 );
 ```
 
+```sql
+-- Roles disponibles en la aplicación
+CREATE TABLE roles (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT NOT NULL UNIQUE,           -- identificador interno (ej: 'supervisor')
+  label TEXT NOT NULL,                  -- nombre visible en UI (ej: 'Supervisor')
+  created_at TEXT DEFAULT (datetime('now'))
+);
+
+-- Pantallas/paneles del dashboard
+CREATE TABLE screens (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  key TEXT NOT NULL UNIQUE,             -- clave interna (ej: 'produccion')
+  label TEXT NOT NULL,                  -- nombre visible
+  path TEXT NOT NULL,                   -- ruta Next.js (ej: '/produccion')
+  is_public INTEGER NOT NULL DEFAULT 1  -- 1 = pública (sin login), 0 = restringida
+);
+
+-- Qué roles tienen acceso a cada pantalla restringida
+CREATE TABLE screen_permissions (
+  screen_id INTEGER NOT NULL REFERENCES screens(id) ON DELETE CASCADE,
+  role_id   INTEGER NOT NULL REFERENCES roles(id)   ON DELETE CASCADE,
+  PRIMARY KEY (screen_id, role_id)
+);
+```
+
+**Seeds iniciales:**
+- Roles: `admin` (Administrador) y `user` (Usuario)
+- Pantallas: `produccion`, `pedidos`, `caducados`, `comparativa` (todas `is_public=1`), `admin` (`is_public=0`)
+- Permisos: rol `admin` → pantalla `admin`
+
+Todos los seeds usan `INSERT OR IGNORE` para no romper DBs existentes.
+
 **Migraciones automáticas:** Al arrancar, comprueba si faltan columnas (`must_change_password`, `name`, `surname` en users; `source` en query_logs) y las añade con `ALTER TABLE`. Esto permite actualizar DBs creadas antes de estas funcionalidades.
 
 **Usuario admin por defecto:** Si la tabla `users` está vacía, crea `admin` / `admin123` con role `admin`.
@@ -243,16 +295,20 @@ interface SessionUser {
 LOGIN:
   /login → POST /api/auth/login → JWT en cookie
     ├── mustChangePassword=true → /cambiar-contrasena
-    └── mustChangePassword=false → /produccion
+    └── mustChangePassword=false → primer panel accesible según permisos
+                                   (produccion → pedidos → caducados → comparativa)
+                                   si ninguno accesible → error "Contacta con el administrador"
 
 CAMBIO DE CONTRASEÑA FORZADO:
   /cambiar-contrasena → POST /api/auth/change-password
-    → Actualiza hash + must_change_password=0 → /produccion
+    → Actualiza hash + must_change_password=0 → primer panel accesible
 
 SESIÓN EN DASHBOARD:
-  /produccion → GET /api/auth/me (silencioso)
-    ├── Si logueado: muestra nombre + botón Presets + Salir
-    └── Si no: muestra enlace "Iniciar sesión"
+  Cada panel → GET /api/auth/me + GET /api/screen-permissions
+    ├── Si logueado y tiene acceso: muestra nombre + botones según rol
+    ├── Si logueado pero sin acceso: redirect /login
+    └── Si no logueado y pantalla pública: carga sin sesión
+    └── Si no logueado y pantalla privada: redirect /login
 ```
 
 ### Cookie `secure` en LAN
@@ -266,25 +322,125 @@ Las cookies con `secure: true` no funcionan sobre HTTP (solo HTTPS). Cuando el d
 ### Acceso
 Solo usuarios con `role === 'admin'`. Si no eres admin, te redirige a `/produccion`.
 
-### Funcionalidades
+### Pestañas
 
-1. **Crear usuario:** Formulario con campos Nombre, Apellido, Usuario (login), Contraseña, Rol (user/admin), checkbox "Forzar cambio de contraseña"
-2. **Listar usuarios:** Tabla con ID, Nombre completo, Usuario, Rol (badge rojo/gris), Fecha creación
-3. **Editar usuario:** Botón lápiz azul por usuario → la fila se convierte en inputs editables (nombre, apellido, usuario, rol) con "Guardar" y "Cancelar". Valida que el username no esté duplicado (error 409 inline)
-4. **Resetear contraseña:** Botón llave ámbar por usuario → input inline → nueva contraseña + fuerza cambio en próximo login
-5. **Eliminar usuario:** Con confirmación. No puedes eliminarte a ti mismo.
-6. **Acceso a logs:** Botón "Logs" en la cabecera que lleva a `/admin/logs`
+El panel tiene tres pestañas: **Usuarios**, **Roles** y **Pantallas**.
+
+#### Pestaña Usuarios
+1. **Crear usuario:** Formulario con campos Nombre, Apellido, Usuario (login), Contraseña, Rol (dropdown dinámico desde BD), checkbox "Forzar cambio de contraseña"
+2. **Listar usuarios:** Tabla con ID, Nombre completo, Usuario, Rol (badge), Fecha creación
+3. **Editar usuario:** Botón lápiz azul → fila editable (nombre, apellido, usuario, rol). Valida unicidad del username (409 inline)
+4. **Resetear contraseña:** Botón llave ámbar → input inline → nueva contraseña + fuerza cambio en próximo login
+5. **Eliminar usuario:** Con confirmación. No permite auto-eliminación.
+
+#### Pestaña Roles
+1. **Listar roles:** Tabla con ID, Nombre interno, Label, Acciones
+2. **Crear rol:** Formulario con Nombre (se normaliza a minúsculas+guiones bajos, sin caracteres especiales) + Label visible
+3. **Eliminar rol:** Botón deshabilitado para `admin`. Al borrar un rol, los usuarios que lo tenían asignado pasan automáticamente a `user`
+
+#### Pestaña Pantallas
+Para cada pantalla del dashboard:
+- Radio **Pública** / **Restringida** (`is_public`)
+- Si restringida: checkboxes de roles con acceso
+- Botón **Guardar** por pantalla → `PUT /api/admin/screens/:key`
+- La pantalla `admin` no es editable (siempre solo accesible para `admin`)
 
 ### APIs de administración
 
 | Método | Ruta | Descripción |
 |---|---|---|
-| GET | `/api/admin/users` | Lista todos los usuarios (id, username, role, name, surname, created_at) |
-| POST | `/api/admin/users` | Crea usuario (acepta name, surname, username, password, role, mustChangePassword). Devuelve 409 si el username ya existe |
-| PUT | `/api/admin/users/:id` | Edita datos del usuario (name, surname, username, role). Valida unicidad del username contra otros usuarios (409 si duplicado) |
+| GET | `/api/admin/users` | Lista todos los usuarios |
+| POST | `/api/admin/users` | Crea usuario. Rol validado contra tabla `roles`. 409 si username duplicado |
+| PUT | `/api/admin/users/:id` | Edita datos (nombre, apellido, username, rol). 409 si username duplicado |
 | PATCH | `/api/admin/users/:id` | Resetea contraseña (fuerza cambio en próximo login) |
 | DELETE | `/api/admin/users/:id` | Elimina usuario (no permite auto-eliminación) |
+| GET | `/api/admin/roles` | Lista todos los roles |
+| POST | `/api/admin/roles` | Crea rol (`name` + `label`). Nombre normalizado automáticamente |
+| DELETE | `/api/admin/roles/:id` | Elimina rol. Bloqueado para `admin`. Reasigna usuarios afectados a `user` |
+| PUT | `/api/admin/screens/:key` | Actualiza `is_public` y `allowed_roles[]` de una pantalla. Bloqueado para `admin` |
 | GET | `/api/admin/logs` | Logs de consultas con paginación, filtros y estadísticas (ver sección 7) |
+
+---
+
+## 5b. Sistema de Roles y Permisos por Pantalla
+
+### Concepto
+
+El admin puede crear roles personalizados (ej: `supervisor`, `operario`) y configurar qué roles pueden acceder a cada pantalla. Las pantallas son **públicas por defecto** — hay que habilitarlas explícitamente como restringidas.
+
+### Regla de acceso
+
+```
+canAccess = is_public || role === 'admin' || allowed_roles.includes(role)
+```
+
+El rol `admin` siempre tiene acceso a todo, hardcoded en la lógica (no solo en la BD).
+
+### `lib/permissions.ts`
+
+| Función | Descripción |
+|---|---|
+| `getAllScreensConfig()` | Devuelve `Record<string, ScreenConfig>` con `{ is_public, allowed_roles[] }` para cada pantalla |
+| `requireScreenAccess(screenKey)` | Usada en API routes: devuelve `NextResponse` 401/403 si no hay acceso, o `null` si está permitido |
+
+### `GET /api/screen-permissions`
+
+Endpoint **público** (sin autenticación) que devuelve la configuración de todas las pantallas. Lo consumen:
+- Cada página del dashboard en su `checkSession` para decidir si redirigir a `/login`
+- La `Navbar` para filtrar qué paneles mostrar en el dropdown
+- La página `/login` para redirigir al primer panel accesible tras el login
+- La página `/` (inicio) para mostrar solo los paneles públicos
+
+Ejemplo de respuesta:
+```json
+{
+  "produccion":  { "is_public": false, "allowed_roles": ["admin", "supervisor"] },
+  "pedidos":     { "is_public": true,  "allowed_roles": [] },
+  "caducados":   { "is_public": true,  "allowed_roles": [] },
+  "comparativa": { "is_public": false, "allowed_roles": ["admin"] },
+  "admin":       { "is_public": false, "allowed_roles": ["admin"] }
+}
+```
+
+### Protección en API routes
+
+Las 7 rutas de datos llevan al inicio de su `GET`:
+
+```ts
+import { requireScreenAccess } from '@/lib/permissions'
+// ...
+const denied = await requireScreenAccess('produccion') // clave correspondiente
+if (denied) return denied
+```
+
+| Ruta API | Clave |
+|---|---|
+| `api/production`, `api/categories`, `api/production-lines` | `produccion` |
+| `api/orders`, `api/plants` | `pedidos` |
+| `api/caducados` | `caducados` |
+| `api/comparativa-seres` | `comparativa` |
+
+### Protección en páginas
+
+Cada página de panel incluye en su `checkSession`:
+
+```ts
+const screensRes = await fetch('/api/screen-permissions')
+const screens = await screensRes.json()
+const mine = screens['KEY_DE_LA_PANTALLA']
+if (mine && !mine.is_public) {
+  if (!user || (user.role !== 'admin' && !mine.allowed_roles.includes(user.role))) {
+    router.push('/login')
+    return
+  }
+}
+```
+
+### Página de inicio (`/`)
+
+- Sin sesión → muestra cards de los paneles con `is_public = true` + botón "Iniciar sesión"
+- Con sesión → redirige automáticamente al primer panel accesible
+- Si no hay ningún panel público ni sesión → solo muestra el botón de login
 
 ---
 
@@ -348,6 +504,7 @@ Cada vez que un usuario (o invitado) consulta datos o inicia sesión, se inserta
 | `app/api/production/route.ts` | `produccion` | Cada consulta de datos (con o sin resultados) |
 | `app/api/auth/login/route.ts` | `login` | Cada inicio de sesión exitoso |
 | `app/api/caducados/route.ts` | `caducados_obsoletos` | Cada consulta de palets caducados/obsoletos/bloqueados |
+| `app/api/comparativa-seres/route.ts` | `comparativa_seres` | Cada comparativa SERES vs JDE ejecutada |
 
 El logging nunca bloquea la respuesta: se ejecuta en un `try/catch` independiente. Si falla el INSERT, se logea el error en consola pero el usuario recibe su respuesta normalmente.
 
@@ -545,10 +702,12 @@ Barra de navegación compartida por todos los paneles. Reemplaza el top bar dupl
 
 **Comportamiento:**
 - Logo a la izquierda
-- Botón **"Paneles ▾"** con dropdown: Producción / Pedidos / Caducados / Comparativa SERES. El panel activo aparece en negrita con punto rojo.
+- Botón **"Paneles ▾"** con dropdown filtrado según permisos: solo muestra los paneles a los que el usuario actual tiene acceso. Si no hay ninguno accesible, el botón se oculta.
 - Botón "Presets" solo visible cuando `onPresetsClick` está definido y hay sesión activa
 - Con sesión: nombre del usuario, botones Admin y Logs (solo si `role === 'admin'`), botón Salir
 - Sin sesión: enlace "Iniciar sesión"
+
+La Navbar obtiene la configuración de pantallas de `GET /api/screen-permissions` en un `useEffect` al montarse. Usa la misma función `canAccessPanel()` que las páginas para decidir qué mostrar.
 
 **Añadir un nuevo panel al dropdown:** añadir una entrada al array `PANELS` en `components/Navbar.tsx` y usar la nueva clave en `currentPanel`.
 
@@ -686,14 +845,12 @@ cp .env.local.example .env.local
 
 # 3. Desarrollo (hot reload)
 bun dev
-# Abrir http://localhost:3000/produccion
+# Abrir http://localhost:3000
 
 # 4. Producción
 bun run build
 bun start
 ```
-
-> **Nota:** La ruta raíz `/` muestra un 404 a propósito. La app está en `/produccion`.
 
 ### Primer acceso
 
@@ -706,3 +863,69 @@ bun start
 
 - `data/app.db` persiste entre despliegues (no se sube a Git, no se sobreescribe)
 - Si necesitas reiniciar usuarios: eliminar `data/app.db` y se recreará con el admin por defecto
+
+---
+
+## 13. Tests de Seguridad
+
+### Ejecutar
+
+```bash
+bun test           # ejecutar todos los tests
+bun test --watch   # modo watch (re-ejecuta al guardar)
+```
+
+### Archivos
+
+```
+__tests__/
+  middleware.test.ts     ← Seguridad JWT del middleware /api/admin/*
+  sanitization.test.ts   ← Sanitización de entradas (SQL injection, XSS)
+  permissions.test.ts    ← Sistema de permisos por pantalla (requireScreenAccess)
+  admin-guards.test.ts   ← Reglas de protección del panel de administración
+```
+
+### Qué cubre cada archivo
+
+**`middleware.test.ts`** (11 tests) — Ataques contra el JWT de `/api/admin/*`:
+- Sin cookie, token inválido, texto no JWT → 401
+- JWT firmado con secreto incorrecto → 401
+- JWT expirado aunque tenga rol `admin` → 401
+- Payload manipulado para forjar rol `admin` → 401 (la firma no coincide)
+- Algoritmo `"none"` (bypass clásico de JWT) → 401
+- Rol `user` o `supervisor` con JWT válido → 403
+- Admin con JWT válido → pasa (200)
+
+**`sanitization.test.ts`** (18 tests) — Función de limpieza de nombres de rol:
+- SQL injection clásica (`'; DROP TABLE roles; --`) → solo `[a-z0-9_]`
+- UNION SELECT, OR 1=1, comentarios `--`
+- XSS (`<script>`, `onerror=`)
+- Rutas de sistema (`../../../etc/passwd`), null bytes, unicode, emojis
+- Cadenas muy largas (10.000 chars)
+
+**`permissions.test.ts`** (22 tests) — `requireScreenAccess` y `getAllScreensConfig`:
+- Pantalla pública → `null` sin sesión
+- Clave desconocida → `null` (pasa sin restricción)
+- Pantalla privada sin sesión → 401
+- Pantalla privada con rol incorrecto → 403
+- Pantalla privada con rol correcto → `null`
+- Rol `admin` → siempre `null` (bypass garantizado)
+- Inyección SQL en la clave de pantalla → tratada como literal (no hay esa pantalla → `null`)
+- `getAllScreensConfig` devuelve estructura `{ is_public, allowed_roles[] }` correcta
+
+**`admin-guards.test.ts`** (19 tests) — Reglas de negocio en los handlers de admin:
+- Rol `admin` no se puede eliminar → 400
+- Al borrar un rol, los usuarios de ese rol pasan a `user`
+- Pantalla `admin` no se puede modificar → 400
+- Roles con SQL injection en `allowed_roles` son ignorados silenciosamente (bind variables)
+- Admin siempre mantiene acceso aunque no esté en `allowed_roles`
+- `DROP TABLE` en nombre de rol: sanitización + bind variables lo convierten en string literal
+- Nombre duplicado → 409; nombre vacío o sin label → 400
+- Usuario no puede auto-eliminarse → 400
+
+### Notas técnicas
+
+- Los tests usan `bun:sqlite` (SQLite nativo de Bun) en memoria, nunca tocan `data/app.db`
+- `permissions.test.ts` y `admin-guards.test.ts` usan `mock.module` de Bun para reemplazar `@/lib/sqlite` y `@/lib/auth` antes de importar los módulos bajo test
+- `middleware.test.ts` y `sanitization.test.ts` no necesitan mocks (funciones puras y JWT con `jose`)
+- Los tests son estables: no dependen de estado externo ni del orden de ejecución
