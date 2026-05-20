@@ -13,10 +13,11 @@ Panel para controlar el progreso de asignación de palets/lotes a pedidos de ven
 
 **Concepto clave:** Una línea de pedido está **asignada** si tiene lote (`SDLOTN` no vacío). Si no tiene lote, está **pendiente**. El progreso se calcula como la proporción de cantidad asignada (con lote) sobre la cantidad total pedida.
 
-### Navegación
+### Acceso y navegación
 
-- Desde `/produccion`: botón "Pedidos" en la barra de sesión
-- Desde `/preparacion-pedidos`: botón "Producción" para volver
+**Acceso público** — no requiere sesión. Cualquier usuario puede consultar este panel sin estar registrado. Si hay sesión activa, se muestran los botones de Admin/Logs y el nombre del usuario.
+
+**Navegación:** dropdown "Paneles ▾" en la barra superior (componente `Navbar`). Ver todos los paneles disponibles en [DOCUMENTACION.md](../DOCUMENTACION.md) sección 10.
 
 ### API — `GET /api/plants`
 

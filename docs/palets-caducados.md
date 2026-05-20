@@ -9,6 +9,10 @@
 
 Dashboard para visualizar palets problemáticos: caducados, con artículo obsoleto o bloqueados.
 
+**Acceso público** — no requiere sesión. Cualquier usuario puede consultar este panel sin estar registrado.
+
+**Navegación:** dropdown "Paneles ▾" en la barra superior (componente `Navbar`).
+
 ### Filtros
 
 - **Tipo:** Botones segmentados (Todos / Caducados / Obsoletos / Bloqueados)

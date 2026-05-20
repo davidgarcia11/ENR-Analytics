@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getDbConnection } from '@/lib/db';
 import { getDayOfYear } from 'date-fns';
-import { verifySession } from '@/lib/auth';
 import https from 'https';
 
 // --- Helpers SERES ---
@@ -249,12 +248,6 @@ async function fetchJdePedidos(days: number): Promise<PedidoJde[]> {
 // --- Handler ---
 
 export async function GET(req: NextRequest) {
-    // Requiere sesión activa
-    const session = await verifySession();
-    if (!session) {
-        return NextResponse.json({ error: 'No autorizado' }, { status: 401 });
-    }
-
     const { searchParams } = new URL(req.url);
     const days = Math.min(Math.max(parseInt(searchParams.get('days') || '7', 10), 0), 90);
 

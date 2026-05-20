@@ -1,11 +1,11 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
-import { Loader2, Search, Download, X, User, LogOut, Settings, FileText, AlertTriangle, CheckCircle2, ArrowLeftRight } from "lucide-react"
-import Image from "next/image"
+import { Loader2, Search, Download, X, AlertTriangle, CheckCircle2, ArrowLeftRight } from "lucide-react"
+import Navbar from "@/components/Navbar"
 import { useRouter } from "next/navigation"
 import * as XLSX from 'xlsx'
 
@@ -57,7 +57,7 @@ export default function ComparativaSeresPage() {
     const [activeTab, setActiveTab] = useState<Tab>('solo_seres')
 
     // Comprobar sesión al montar
-    useState(() => {
+    useEffect(() => {
         fetch('/api/auth/me')
             .then(r => r.ok ? r.json() : null)
             .then(user => {
@@ -65,12 +65,11 @@ export default function ComparativaSeresPage() {
                 setSessionUser(user)
             })
             .catch(() => { })
-    })
+    }, [])
 
     const logout = async () => {
         await fetch('/api/auth/logout', { method: 'POST' })
         setSessionUser(null)
-        router.push('/login')
     }
 
     const fetchData = async () => {
@@ -129,45 +128,8 @@ export default function ComparativaSeresPage() {
         <main className="min-h-screen bg-gray-100 p-8 font-sans text-gray-900">
             <div className="mx-auto max-w-7xl space-y-8">
 
-                {/* --- BARRA DE SESION --- */}
-                <div className="flex items-center gap-3">
-                    <Image src="/logo.png" alt="Elaborados Naturales" width={120} height={42} priority />
-                    <div className="flex-1" />
-
-                    <button type="button" onClick={() => router.push('/produccion')} className="text-xs text-gray-500 hover:text-gray-700 font-medium px-2.5 py-1 rounded-md border border-gray-200 hover:border-gray-300">
-                        Produccion
-                    </button>
-
-                    {sessionUser ? (
-                        <>
-                            <span className="text-sm text-gray-600 flex items-center gap-1.5">
-                                <User className="h-3.5 w-3.5" />
-                                {sessionUser.name ? `${sessionUser.name} ${sessionUser.surname || ''}`.trim() : sessionUser.username}
-                            </span>
-                            {sessionUser.role === 'admin' && (
-                                <>
-                                    <button type="button" onClick={() => router.push('/admin')} className="text-xs text-gray-500 hover:text-gray-700 flex items-center gap-1">
-                                        <Settings className="h-3.5 w-3.5" />
-                                        Admin
-                                    </button>
-                                    <button type="button" onClick={() => router.push('/admin/logs')} className="text-xs text-gray-500 hover:text-gray-700 flex items-center gap-1">
-                                        <FileText className="h-3.5 w-3.5" />
-                                        Logs
-                                    </button>
-                                </>
-                            )}
-                            <button type="button" onClick={logout} className="text-xs text-gray-500 hover:text-gray-700 flex items-center gap-1">
-                                <LogOut className="h-3.5 w-3.5" />
-                                Salir
-                            </button>
-                        </>
-                    ) : (
-                        <a href="/login" className="text-xs font-medium text-gray-500 hover:text-gray-700 flex items-center gap-1.5 px-2.5 py-1 rounded-md border border-gray-200 hover:border-gray-300">
-                            <User className="h-3.5 w-3.5" />
-                            Iniciar sesion
-                        </a>
-                    )}
-                </div>
+                {/* --- BARRA DE NAVEGACIÓN --- */}
+                <Navbar currentPanel="comparativa" user={sessionUser} onLogout={logout} />
 
                 {/* --- FILTROS --- */}
                 <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-200 space-y-4" style={{ borderTop: '3px solid #D30B15' }}>
