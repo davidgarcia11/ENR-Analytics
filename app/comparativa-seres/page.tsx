@@ -14,7 +14,12 @@ interface SessionUser { id: number; username: string; role: string; name: string
 interface Pedido {
     referencia: string;
     fecha: string | null;
+    hora?: string | null;
     tipo?: string;
+    shanNum?: number | null;
+    shanDesc?: string | null;
+    urabNum?: number | null;
+    urabDesc?: string | null;
 }
 
 interface Resumen {
@@ -112,6 +117,7 @@ export default function ComparativaSeresPage() {
         : { solo_seres: [], solo_jde: [], ambos: [] }
 
     const dayOptions = [
+        { value: 0, label: 'Hoy' },
         { value: 1, label: '1 día' },
         { value: 3, label: '3 días' },
         { value: 7, label: '7 días' },
@@ -225,7 +231,7 @@ export default function ComparativaSeresPage() {
                     <div className="grid gap-4 grid-cols-2 md:grid-cols-3 lg:grid-cols-5">
                         <Card className="border-gray-200 shadow-sm overflow-hidden" style={{ borderTop: '3px solid #D30B15' }}>
                             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                                <CardTitle className="text-sm font-bold text-gray-700">SERES pedidos</CardTitle>
+                                <CardTitle className="text-sm font-bold text-gray-700">SERES</CardTitle>
                                 <ArrowLeftRight className="h-4 w-4" style={{ color: '#D30B15' }} />
                             </CardHeader>
                             <CardContent>
@@ -236,7 +242,7 @@ export default function ComparativaSeresPage() {
 
                         <Card className="border-gray-200 shadow-sm overflow-hidden" style={{ borderTop: '3px solid #D30B15' }}>
                             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                                <CardTitle className="text-sm font-bold text-gray-700">JDE (F47011)</CardTitle>
+                                <CardTitle className="text-sm font-bold text-gray-700">JDE</CardTitle>
                                 <ArrowLeftRight className="h-4 w-4" style={{ color: '#D30B15' }} />
                             </CardHeader>
                             <CardContent>
@@ -323,13 +329,13 @@ export default function ComparativaSeresPage() {
                             {activeTab === 'solo_seres' && (
                                 <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-md px-3 py-2">
                                     <AlertTriangle className="inline h-3.5 w-3.5 mr-1 mb-0.5" />
-                                    Pedidos recibidos en SERES por EDI que <strong>no se han creado en JDE</strong>.
+                                    Pedidos recibidos en SERES por EDI que <strong>no se han volcado en JDE</strong>. Revisar si se han creado manualmente.
                                 </p>
                             )}
                             {activeTab === 'solo_jde' && (
                                 <p className="text-xs text-red-700 bg-red-50 border border-red-200 rounded-md px-3 py-2">
                                     <AlertTriangle className="inline h-3.5 w-3.5 mr-1 mb-0.5" />
-                                    Pedidos en JDE que <strong>no aparecen en SERES</strong>. Pueden ser pedidos introducidos manualmente.
+                                    Pedidos en JDE que <strong>no aparecen en SERES</strong>.
                                 </p>
                             )}
                             {activeTab === 'ambos' && (
@@ -347,7 +353,15 @@ export default function ComparativaSeresPage() {
                                     <TableRow className="border-gray-200 hover:bg-transparent">
                                         <TableHead className="font-bold text-gray-700">Referencia</TableHead>
                                         <TableHead className="font-bold text-gray-700">Fecha</TableHead>
-                                        {activeTab !== 'solo_jde' && (
+                                        {activeTab !== 'solo_seres' && (
+                                            <>
+                                                <TableHead className="font-bold text-gray-700">Nº Destino</TableHead>
+                                                <TableHead className="font-bold text-gray-700">Desc. Destino</TableHead>
+                                                <TableHead className="font-bold text-gray-700">Nº Comprador</TableHead>
+                                                <TableHead className="font-bold text-gray-700">Desc. Comprador</TableHead>
+                                            </>
+                                        )}
+                                        {activeTab === 'solo_seres' && (
                                             <TableHead className="font-bold text-gray-700">Tipo SERES</TableHead>
                                         )}
                                     </TableRow>
@@ -355,7 +369,7 @@ export default function ComparativaSeresPage() {
                                 <TableBody>
                                     {tabData[activeTab].length === 0 ? (
                                         <TableRow>
-                                            <TableCell colSpan={3} className="text-center py-10 text-gray-500 font-medium">
+                                            <TableCell colSpan={6} className="text-center py-10 text-gray-500 font-medium">
                                                 No hay registros en esta categoría.
                                             </TableCell>
                                         </TableRow>
@@ -363,8 +377,19 @@ export default function ComparativaSeresPage() {
                                         tabData[activeTab].map((p, i) => (
                                             <TableRow key={i} className="hover:bg-slate-50 border-gray-100">
                                                 <TableCell className="font-mono text-sm font-semibold text-gray-800">{p.referencia}</TableCell>
-                                                <TableCell className="text-gray-600 text-sm">{formatFecha(p.fecha)}</TableCell>
-                                                {activeTab !== 'solo_jde' && (
+                                                <TableCell className="text-gray-600 text-sm">
+                                                    {formatFecha(p.fecha)}
+                                                    {p.hora && <span className="ml-1.5 text-xs text-gray-400">{p.hora}</span>}
+                                                </TableCell>
+                                                {activeTab !== 'solo_seres' && (
+                                                    <>
+                                                        <TableCell className="font-mono text-sm text-gray-700">{p.shanNum ?? '-'}</TableCell>
+                                                        <TableCell className="text-sm text-gray-600">{p.shanDesc ?? '-'}</TableCell>
+                                                        <TableCell className="font-mono text-sm text-gray-700">{p.urabNum ?? '-'}</TableCell>
+                                                        <TableCell className="text-sm text-gray-600">{p.urabDesc ?? '-'}</TableCell>
+                                                    </>
+                                                )}
+                                                {activeTab === 'solo_seres' && (
                                                     <TableCell className="text-gray-500 text-xs">{p.tipo}</TableCell>
                                                 )}
                                             </TableRow>

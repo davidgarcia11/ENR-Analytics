@@ -114,6 +114,32 @@ ORDER BY SYUPMJ DESC
 |-------|-------------|
 | `SYVR01` | Referencia del pedido (CHAR con padding de espacios → `TRIM` obligatorio) |
 | `SYUPMJ` | Fecha de última actualización en formato JDE **CYYDDD** |
+| `SYSHAN` | Número de dirección de destino (Ship To) |
+| `SYURAB` | Número de dirección vendida a (Sold To) |
+
+Los campos `SYSHAN` y `SYURAB` se cruzan con `F0101.ABAN8` para obtener la descripción (`ABALPH`):
+
+```sql
+SELECT TRIM(A.SYVR01) AS REFERENCIA,
+       A.SYUPMJ      AS FECHA_JDE,
+       A.SYSHAN      AS SHAN_NUM,
+       TRIM(B.ABALPH) AS SHAN_DESC,
+       A.SYURAB      AS URAB_NUM,
+       TRIM(C.ABALPH) AS URAB_DESC
+FROM F47011 A
+LEFT JOIN F0101 B ON B.ABAN8 = A.SYSHAN
+LEFT JOIN F0101 C ON C.ABAN8 = A.SYURAB
+WHERE A.SYUPMJ >= :fechaDesde
+  AND TRIM(A.SYVR01) IS NOT NULL
+ORDER BY A.SYUPMJ DESC
+```
+
+**Tabla F0101** (Address Book Master):
+
+| Campo | Descripción |
+|-------|-------------|
+| `ABAN8` | Número de dirección (clave primaria) |
+| `ABALPH` | Nombre / descripción (Alpha Name) |
 
 **Formato CYYDDD de `SYUPMJ`:**
 
@@ -134,18 +160,22 @@ JDE almacena las fechas como enteros CYYDDD. Aquí `C=1` indica siglo XXI (difer
 
 Se comparan **solo los números de referencia** (en mayúsculas, con trim). La fecha de cada registro se muestra en la UI pero no influye en la comparación.
 
+`fetchSeresPedidos` devuelve **únicamente Pedidos** — el filtro se aplica dentro del bucle de scraping (`if (tipo !== 'Pedido') continue`), antes del set de deduplicación. Esto evita que un Albarán relacionado bloquee la referencia del Pedido original en el set `seen`.
+
 ```javascript
-// Solo Pedidos y Albaranes de SERES
-const seresPedidos = seresResult.filter(p =>
-    p.tipo === 'Pedido' || p.tipo.toLowerCase().startsWith('albar')
-);
+// fetchSeresPedidos ya filtra por tipo === 'Pedido' internamente
+const seresPedidos = seresResult;
 
 const jdeRefs  = new Set(jdeResult.map(p => p.referencia.toUpperCase()));
 const seresRefs = new Set(seresPedidos.map(p => p.referencia.toUpperCase()));
+// Mapa JDE para enriquecer "en_ambos" con campos de destino/comprador
+const jdeByRef = new Map(jdeResult.map(p => [p.referencia.toUpperCase(), p]));
 
 const soloEnSeres = seresPedidos.filter(p => !jdeRefs.has(p.referencia.toUpperCase()));
 const soloEnJde   = jdeResult.filter(p => !seresRefs.has(p.referencia.toUpperCase()));
-const enAmbos     = seresPedidos.filter(p => jdeRefs.has(p.referencia.toUpperCase()));
+const enAmbos     = seresPedidos
+    .filter(p => jdeRefs.has(p.referencia.toUpperCase()))
+    .map(p => ({ ...p, ...jdeByRef.get(p.referencia.toUpperCase()) }));
 ```
 
 ---
@@ -156,7 +186,9 @@ const enAmbos     = seresPedidos.filter(p => jdeRefs.has(p.referencia.toUpperCas
 
 **Auth:** JWT (cookie `session`). Solo usuarios autenticados pueden acceder.
 
-**Parámetro:** `?days=N` (1 a 90 días, default 7). El panel ofrece botones de selección rápida: 1 / 3 / 7 / 14 / 30 días.
+**Parámetro:** `?days=N` (0 a 90 días, default 7). El panel ofrece botones de selección rápida: Hoy / 1 / 3 / 7 / 14 / 30 días.
+
+> **`days=0` ("Hoy"):** caso especial. SERES filtra por Fecha Doc. (cuando se creó el pedido en origen), que puede ser el día anterior incluso si llegó hoy. Para evitar falsos negativos, cuando `days=0` la API pide 1 día extra de margen a SERES y luego filtra los resultados por **Fecha Estado** (la fecha real de recepción en SERES). En JDE simplemente no se aplica el `setDate` (se usa `since = hoy`). 
 
 **Paralelismo:** el scraping de SERES y la consulta a JDE se lanzan en paralelo con `Promise.all`.
 
@@ -168,14 +200,14 @@ const enAmbos     = seresPedidos.filter(p => jdeRefs.has(p.referencia.toUpperCas
 └──────────────────────────────────────────────────────┘
 
 ┌─ Filtros ────────────────────────────────────────────┐
-│ Periodo: [1 día] [3 días] [7 días] [14 días] [30 días]│
+│ Periodo: [Hoy] [1 día] [3 días] [7 días] [14 días] [30 días]     │
 │                                                      │
 │ [Comparar ▶]  [Excel ↓]  [Limpiar ×]               │
 └──────────────────────────────────────────────────────┘
 
 ┌─ Tarjetas métricas (5) ──────────────────────────────┐
 │ ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐ │
-│ │SERES ped.│ │JDE(F47011│ │Solo SERES│ │Solo JDE  │ │En ambos  │ │
+│ │  SERES   │ │   JDE    │ │Solo SERES│ │Solo JDE  │ │En ambos  │ │
 │ │   326    │ │   350    │ │    4 ⚠️  │ │    2 🔴  │ │  322 ✅  │ │
 │ └──────────┘ └──────────┘ └──────────┘ └──────────┘ └──────────┘ │
 │ Las 3 últimas tarjetas son clicables → activan la pestaña         │
@@ -194,8 +226,10 @@ const enAmbos     = seresPedidos.filter(p => jdeRefs.has(p.referencia.toUpperCas
 
 **Columnas de la tabla:**
 - **Referencia** — número de pedido (fuente monospace)
-- **Fecha** — fecha del documento (SERES) o `SYUPMJ` convertida (JDE), formato `DD/MM/YY`
-- **Tipo SERES** — solo visible en pestañas "Solo en SERES" y "En ambos" (no aplica a JDE)
+- **Fecha** — fecha del documento (SERES) o `SYUPMJ` convertida (JDE), formato `DD/MM/YY`. Los registros SERES también muestran la **hora** (`HH:MM:SS`) en gris junto a la fecha
+- **Tipo SERES** — solo visible en pestaña "Solo en SERES"
+- **Destino (SYSHAN)** — número + nombre de dirección de destino; visible en "Solo en JDE" y "En ambos"
+- **Vendido a (SYURAB)** — número + nombre del cliente comprador; visible en "Solo en JDE" y "En ambos"
 
 **Exportación Excel:** tres hojas — "Solo en SERES", "Solo en JDE", "En ambos". Cada hoja con columnas Referencia, Fecha y Tipo (cuando aplica). Nombre del archivo: `Comparativa_SERES_JDE_YYYY-MM-DD.xlsx`.
 

@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getDbConnection } from '@/lib/db';
 import { getDayOfYear } from 'date-fns';
-import { parseJdeDate } from '@/lib/utils';
 import { verifySession } from '@/lib/auth';
 import https from 'https';
 
@@ -75,12 +74,17 @@ function buildForm(pageNumber: number, dateFrom: string, dateTo: string): string
 export interface PedidoSeres {
     referencia: string;
     fecha: string;
+    hora: string;
     tipo: string;
 }
 
 export interface PedidoJde {
     referencia: string;
     fecha: string | null;
+    shanNum: number | null;
+    shanDesc: string | null;
+    urabNum: number | null;
+    urabDesc: string | null;
 }
 
 // Scraping completo de SERES con paginación
@@ -92,8 +96,12 @@ async function fetchSeresPedidos(days: number): Promise<PedidoSeres[]> {
 
     const today = new Date();
     const since = new Date(today);
-    since.setDate(today.getDate() - days);
+    // Para "Hoy" (days=0) pedimos 1 día extra de margen porque SERES filtra por Fecha Doc.
+    // y un pedido puede llegar hoy con Fecha Doc. de ayer. El filtro real se aplica abajo por Fecha Estado.
+    if (days > 0) since.setDate(today.getDate() - days);
+    else since.setDate(today.getDate() - 1);
     const dateFrom = formatDate(since);
+    const todayStr = formatDate(today); // solo para filtro de "Hoy"
     // dateTo = mañana para que SERES incluya los documentos de hoy (límite superior exclusivo)
     const tomorrow = new Date(today);
     tomorrow.setDate(today.getDate() + 1);
@@ -167,14 +175,21 @@ async function fetchSeresPedidos(days: number): Promise<PedidoSeres[]> {
         for (let i = 0; i < vals.length - 6; i++) {
             if (isDateTime(vals[i])) {
                 rowsOnPage++;
-                const ref = vals[i + 4];
                 const tipo = vals[i + 6] || '';
+                // Filtramos aquí, antes del seen, para que los Albaranes no bloqueen
+                // la referencia del Pedido relacionado en el set de deduplicación
+                if (tipo !== 'Pedido') continue;
+                // Para "Hoy" filtramos por Fecha Estado (vals[i]) en lugar de Fecha Doc.
+                if (days === 0 && vals[i].split(' ')[0] !== todayStr) continue;
+                const ref = vals[i + 4];
                 if (ref && !seen.has(ref)) {
                     seen.add(ref);
-                    const parts = vals[i].split(' ')[0].split('/');
+                    const [datePart, timePart] = vals[i].split(' ');
+                    const parts = datePart.split('/');
                     allPedidos.push({
                         referencia: ref,
                         fecha: `${parts[2]}-${parts[1]}-${parts[0]}`,
+                        hora: timePart || '',
                         tipo,
                     });
                 }
@@ -191,25 +206,39 @@ async function fetchSeresPedidos(days: number): Promise<PedidoSeres[]> {
 // Consulta JDE F47011
 async function fetchJdePedidos(days: number): Promise<PedidoJde[]> {
     const since = new Date();
-    since.setDate(since.getDate() - days);
+    if (days > 0) since.setDate(since.getDate() - days);
     const sinceJde = 100000 + (since.getFullYear() - 2000) * 1000 + getDayOfYear(since);
 
     let conn;
     try {
         conn = await getDbConnection();
         const result = await conn.execute(
-            `SELECT TRIM(SYVR01) AS REFERENCIA, SYUPMJ AS FECHA_JDE
-             FROM F47011
-             WHERE SYUPMJ >= :fechaDesde
-               AND TRIM(SYVR01) IS NOT NULL
-             ORDER BY SYUPMJ DESC`,
+            `SELECT TRIM(A.SYVR01) AS REFERENCIA,
+                    A.SYUPMJ      AS FECHA_JDE,
+                    A.SYSHAN      AS SHAN_NUM,
+                    TRIM(B.ABALPH) AS SHAN_DESC,
+                    A.SYURAB      AS URAB_NUM,
+                    TRIM(C.ABALPH) AS URAB_DESC
+             FROM F47011 A
+             LEFT JOIN F0101 B ON B.ABAN8 = A.SYSHAN
+             LEFT JOIN F0101 C ON C.ABAN8 = A.SYURAB
+             WHERE A.SYUPMJ >= :fechaDesde
+               AND TRIM(A.SYVR01) IS NOT NULL
+             ORDER BY A.SYUPMJ DESC`,
             { fechaDesde: sinceJde }
         );
         return (result.rows as any[]).map(row => {
-            const parsed = parseJdeDate(row.FECHA_JDE);
+            const dateStr = String(row.FECHA_JDE || '0').padStart(6, '0');
+            const yearShort = parseInt(dateStr.substring(1, 3), 10);
+            const dayOfYear = parseInt(dateStr.substring(3), 10);
+            const date = new Date(Date.UTC(2000 + yearShort, 0, dayOfYear));
             return {
                 referencia: String(row.REFERENCIA).trim(),
-                fecha: parsed ? parsed.date.toISOString().split('T')[0] : null,
+                fecha: dayOfYear > 0 ? date.toISOString().split('T')[0] : null,
+                shanNum: row.SHAN_NUM ?? null,
+                shanDesc: row.SHAN_DESC ? String(row.SHAN_DESC).trim() : null,
+                urabNum: row.URAB_NUM ?? null,
+                urabDesc: row.URAB_DESC ? String(row.URAB_DESC).trim() : null,
             };
         });
     } finally {
@@ -227,7 +256,7 @@ export async function GET(req: NextRequest) {
     }
 
     const { searchParams } = new URL(req.url);
-    const days = Math.min(Math.max(parseInt(searchParams.get('days') || '7', 10), 1), 90);
+    const days = Math.min(Math.max(parseInt(searchParams.get('days') || '7', 10), 0), 90);
 
     try {
         // Lanzar SERES y JDE en paralelo
@@ -236,17 +265,22 @@ export async function GET(req: NextRequest) {
             fetchJdePedidos(days),
         ]);
 
-        // Comparar tipo "Pedido" y "Albarán" de SERES contra JDE
-        const seresPedidos = seresResult.filter(p =>
-            p.tipo === 'Pedido' || p.tipo.toLowerCase().startsWith('albar')
-        );
+        // fetchSeresPedidos ya devuelve solo Pedidos (filtro aplicado en el bucle)
+        const seresPedidos = seresResult;
 
         const jdeRefs = new Set(jdeResult.map(p => p.referencia.toUpperCase()));
         const seresRefs = new Set(seresPedidos.map(p => p.referencia.toUpperCase()));
+        // Mapa JDE por referencia para enriquecer "en_ambos" con campos de destino/comprador
+        const jdeByRef = new Map(jdeResult.map(p => [p.referencia.toUpperCase(), p]));
 
         const soloEnSeres = seresPedidos.filter(p => !jdeRefs.has(p.referencia.toUpperCase()));
         const soloEnJde = jdeResult.filter(p => !seresRefs.has(p.referencia.toUpperCase()));
-        const enAmbos = seresPedidos.filter(p => jdeRefs.has(p.referencia.toUpperCase()));
+        const enAmbos = seresPedidos
+            .filter(p => jdeRefs.has(p.referencia.toUpperCase()))
+            .map(p => {
+                const jde = jdeByRef.get(p.referencia.toUpperCase());
+                return { ...p, shanNum: jde?.shanNum ?? null, shanDesc: jde?.shanDesc ?? null, urabNum: jde?.urabNum ?? null, urabDesc: jde?.urabDesc ?? null };
+            });
 
         return NextResponse.json({
             resumen: {
