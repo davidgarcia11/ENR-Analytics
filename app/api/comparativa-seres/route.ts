@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getDbConnection } from '@/lib/db';
 import { getDayOfYear } from 'date-fns';
 import https from 'https';
+import { requireScreenAccess } from '@/lib/permissions';
 
 // --- Helpers SERES ---
 
@@ -248,6 +249,8 @@ async function fetchJdePedidos(days: number): Promise<PedidoJde[]> {
 // --- Handler ---
 
 export async function GET(req: NextRequest) {
+    const denied = await requireScreenAccess('comparativa')
+    if (denied) return denied
     const { searchParams } = new URL(req.url);
     const days = Math.min(Math.max(parseInt(searchParams.get('days') || '7', 10), 0), 90);
 

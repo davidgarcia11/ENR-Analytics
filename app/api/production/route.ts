@@ -4,9 +4,12 @@ import { parseJdeDate, parseWasOqs } from '@/lib/utils'; // Importamos funciones
 import { getDayOfYear } from 'date-fns'; // Importamos una función de una librería externa para obtener el día del año (1-366)
 import { getDb } from '@/lib/sqlite';
 import { verifySession } from '@/lib/auth';
+import { requireScreenAccess } from '@/lib/permissions';
 
 // Esta función exportada 'GET' manejará las peticiones HTTP GET a esta ruta (/api/production)
 export async function GET(req: NextRequest) {
+    const denied = await requireScreenAccess('produccion')
+    if (denied) return denied
     const startTime = Date.now();
     // Obtenemos los parámetros de búsqueda de la URL (ej: ?plant=Funes&subLine=1)
     const { searchParams } = new URL(req.url);

@@ -1,7 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getDbConnection } from '@/lib/db';
+import { requireScreenAccess } from '@/lib/permissions';
 
 export async function GET(req: NextRequest) {
+  const denied = await requireScreenAccess('pedidos')
+  if (denied) return denied
   let conn;
   try {
     conn = await getDbConnection();

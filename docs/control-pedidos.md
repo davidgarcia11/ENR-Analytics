@@ -15,7 +15,7 @@ Panel para controlar el progreso de asignación de palets/lotes a pedidos de ven
 
 ### Acceso y navegación
 
-**Acceso público** — no requiere sesión. Cualquier usuario puede consultar este panel sin estar registrado. Si hay sesión activa, se muestran los botones de Admin/Logs y el nombre del usuario.
+**Acceso configurable** — público por defecto. Cualquier usuario puede consultar sin sesión activa. El administrador puede restringirlo a roles específicos desde `/admin` → pestaña Pantallas. Si hay sesión activa, se muestran los botones de Admin/Logs y el nombre del usuario.
 
 **Navegación:** dropdown "Paneles ▾" en la barra superior (componente `Navbar`). Ver todos los paneles disponibles en [DOCUMENTACION.md](../DOCUMENTACION.md) sección 10.
 
