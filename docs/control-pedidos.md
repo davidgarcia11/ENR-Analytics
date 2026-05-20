@@ -37,6 +37,8 @@ Devuelve la lista de plantas desde Oracle (tabla F0006, filtro `MCSTYL = 'BP'`).
 
 ### API — `GET /api/orders`
 
+> **No confundir con `/api/jde-orders`:** ese endpoint consulta `F47011` (pedidos EDI entrantes) y está pensado para herramientas externas con autenticación por API key. Este endpoint consulta `F4211` (pedidos de venta) y requiere sesión JWT del dashboard.
+
 **Archivo:** `app/api/orders/route.ts`
 
 **Parámetros:**

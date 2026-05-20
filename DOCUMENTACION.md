@@ -493,6 +493,8 @@ Cada panel tiene su documentación específica en la carpeta `docs/`:
 
 ### API externa — `GET /api/jde-orders`
 
+> **No confundir con `/api/orders`:** ese endpoint consulta `F4211` (pedidos de venta) y es el que usa el panel `/preparacion-pedidos` con sesión JWT. Este endpoint consulta `F47011` (pedidos EDI entrantes) y está pensado para herramientas externas.
+
 Endpoint diseñado para ser consumido desde herramientas externas (artefactos Claude, scripts) que no pueden usar cookies JWT. Devuelve pedidos recibidos vía EDI de la tabla **F47011** de JDE.
 
 **Autenticación:** Header `x-api-key` con el valor de `SERES_API_KEY` en `.env.local`.
