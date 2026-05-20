@@ -490,6 +490,15 @@ Cada panel tiene su documentación específica en la carpeta `docs/`:
 | Dashboard de producción | `/produccion` | [docs/produccion.md](docs/produccion.md) |
 | Control de pedidos | `/preparacion-pedidos` | [docs/control-pedidos.md](docs/control-pedidos.md) |
 | Palets caducados/obsoletos/bloqueados | `/caducados` | [docs/palets-caducados.md](docs/palets-caducados.md) |
+| Comparativa SERES vs JDE | `/comparativa-seres` | [docs/seres-jde-comparativa.md](docs/seres-jde-comparativa.md) |
+
+### Panel Comparativa SERES vs JDE
+
+Panel integrado en el dashboard que cruza pedidos EDI recibidos en SERES con los registrados en JDE (tabla `F47011`) para detectar discrepancias. Hace scraping de SERES y consulta Oracle directamente desde el servidor Next.js.
+
+Existe también un **workflow N8N** equivalente (`n8n-local`, ID `nhTMqtPSA8RZZMT1`) útil para automatizar ejecuciones programadas o enviar alertas.
+
+Ver documentación completa: [docs/seres-jde-comparativa.md](docs/seres-jde-comparativa.md)
 
 ### API externa — `GET /api/jde-orders`
 
