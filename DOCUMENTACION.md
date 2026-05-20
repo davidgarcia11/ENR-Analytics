@@ -106,8 +106,10 @@ dashboard/
         │   └── route.ts          ← GET /api/categories?field=X
         ├── production/
         │   └── route.ts          ← GET /api/production?...filtros...
-        └── production-lines/
-            └── route.ts          ← GET /api/production-lines
+        ├── production-lines/
+        │   └── route.ts          ← GET /api/production-lines
+        └── jde-orders/
+            └── route.ts          ← GET /api/jde-orders?days=7 (API key, CORS abierto)
 ```
 
 ---
@@ -123,6 +125,7 @@ ORACLE_HOST=<ip_servidor_oracle>
 ORACLE_PORT=1521
 ORACLE_SERVICE=<nombre_servicio_oracle>
 JWT_SECRET=<clave_secreta_para_firmar_jwt>
+SERES_API_KEY=<clave_para_endpoint_externo_jde_orders>
 ```
 
 > **IMPORTANTE:** Este archivo NUNCA se sube al repositorio. Está en `.gitignore`.
@@ -487,6 +490,30 @@ Cada panel tiene su documentación específica en la carpeta `docs/`:
 | Dashboard de producción | `/produccion` | [docs/produccion.md](docs/produccion.md) |
 | Control de pedidos | `/preparacion-pedidos` | [docs/control-pedidos.md](docs/control-pedidos.md) |
 | Palets caducados/obsoletos/bloqueados | `/caducados` | [docs/palets-caducados.md](docs/palets-caducados.md) |
+
+### API externa — `GET /api/jde-orders`
+
+Endpoint diseñado para ser consumido desde herramientas externas (artefactos Claude, scripts) que no pueden usar cookies JWT. Devuelve pedidos recibidos vía EDI de la tabla **F47011** de JDE.
+
+**Autenticación:** Header `x-api-key` con el valor de `SERES_API_KEY` en `.env.local`.
+
+**CORS:** Abierto (`Access-Control-Allow-Origin: *`) para permitir llamadas desde artefactos que corren en el navegador del usuario.
+
+**Parámetros:**
+
+| Param | Tipo | Descripción |
+|---|---|---|
+| `days` | number | Días hacia atrás a consultar (por defecto: 7, máximo: 90) |
+
+**Respuesta:**
+```json
+[
+  { "referencia": "PED-001234", "fecha": "2025-04-28" },
+  { "referencia": "PED-001235", "fecha": "2025-04-29" }
+]
+```
+
+**Campos devueltos:** `referencia` (SYVR01 trimado) y `fecha` (SYUPMJ convertido de CYYDDD a ISO).
 
 ---
 
