@@ -3,7 +3,9 @@ import { getDbConnection } from '@/lib/db';
 import { requireScreenAccess } from '@/lib/permissions';
 
 export async function GET(req: NextRequest) {
-  const denied = await requireScreenAccess('pedidos')
+  const { searchParams } = new URL(req.url);
+  const screen = searchParams.get('screen') || 'pedidos';
+  const denied = await requireScreenAccess(screen)
   if (denied) return denied
   let conn;
   try {

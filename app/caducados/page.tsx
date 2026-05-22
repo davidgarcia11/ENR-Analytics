@@ -6,38 +6,33 @@ import { Button } from "@/components/ui/button"
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from "@/components/ui/table"
-import { Search, Loader2, Download, X, AlertTriangle, Package, Archive, MapPin, Lock } from "lucide-react"
+import { Search, Loader2, Download, X, AlertTriangle, Package, MapPin, Lock } from "lucide-react"
 import Navbar from "@/components/Navbar"
+import { ArticleMultiSelect } from "@/components/ArticleMultiSelect"
 import * as XLSX from 'xlsx'
 import { useRouter } from "next/navigation"
 
 interface SessionUser { id: number; username: string; role: string; name: string; surname: string }
 interface Plant { id: string; description: string }
+interface LotState { code: string; description: string }
 interface PaletRow {
   articleLong: string; description: string; plantCode: string; plantName: string;
   paletLote: string; palet: string; lote: string; location: string; quantity: number;
-  expiryDate: string | null; motivo: string;
+  expiryDate: string | null; motivo: string; lotStatus: string | null;
 }
 interface Summary {
   totalPallets: number; totalQuantity: number; caducados: number; obsoletos: number; bloqueados: number; ambos: number;
 }
 
-// Funciones puras fuera del componente para evitar re-renders
 function getMotivoBadge(motivo: string) {
   if (motivo.includes('Caducado') && motivo.includes('+')) return 'bg-red-100 text-red-800 border border-red-300 font-bold'
   if (motivo === 'Caducado') return 'bg-red-50 text-red-700 border border-red-200 font-semibold'
-  if (motivo === 'Bloqueado') return 'bg-blue-50 text-blue-700 border border-blue-200 font-semibold'
   if (motivo === 'Obsoleto') return 'bg-amber-50 text-amber-700 border border-amber-200 font-semibold'
   if (motivo.includes('+')) return 'bg-purple-50 text-purple-700 border border-purple-200 font-bold'
+  if (motivo !== 'Desconocido') return 'bg-blue-50 text-blue-700 border border-blue-200 font-semibold'
   return 'bg-gray-50 text-gray-700 border border-gray-200 font-semibold'
 }
 
-function getLocationLabel(loc: string) {
-  if (!loc) return 'GENERICA'
-  return loc
-}
-
-// Tabla en componente separado con React.memo para evitar re-renders al cambiar filtros
 const CaducadosTable = memo(function CaducadosTable({ data, loading }: { data: PaletRow[]; loading: boolean }) {
   return (
     <Table>
@@ -111,17 +106,55 @@ export default function CaducadosPage() {
   const [loading, setLoading] = useState(false)
   const [plants, setPlants] = useState<Plant[]>([])
   const [locations, setLocations] = useState<string[]>([])
-  const [selectedPlant, setSelectedPlant] = useState('all')
-  const [selectedLocation, setSelectedLocation] = useState('__blank__')
+  const [availableLotStates, setAvailableLotStates] = useState<LotState[]>([])
+  const [availableSrp1, setAvailableSrp1] = useState<{ id: string; description: string }[]>([])
+  const [availableSrp2, setAvailableSrp2] = useState<{ id: string; description: string }[]>([])
+  const [selectedSrp1, setSelectedSrp1] = useState<string[]>([])
+  const [selectedSrp2, setSelectedSrp2] = useState<string[]>([])
+  const [selectedPlants, setSelectedPlants] = useState<string[]>([])
+  const [selectedLocations, setSelectedLocations] = useState<string[]>(['__blank__'])
   const [selectedType, setSelectedType] = useState<'todos' | 'caducados' | 'obsoletos' | 'bloqueados'>('todos')
+  const [selectedLotStates, setSelectedLotStates] = useState<string[]>([])
+  const [paletSearch, setPaletSearch] = useState('')
+  const [loteSearch, setLoteSearch] = useState('')
 
-  // useDeferredValue: los cambios en filtros (alta prioridad) no bloquean el render de la tabla
   const deferredData = useDeferredValue(data)
 
   useEffect(() => {
     checkSession()
+    fetchLotStates()
+    fetchCategories()
+    fetchPlants()
     fetchData()
   }, [])
+
+  const fetchPlants = async () => {
+    try {
+      const res = await fetch('/api/plants?screen=caducados')
+      if (res.ok) setPlants(await res.json())
+    } catch { }
+  }
+
+  const fetchCategories = async () => {
+    try {
+      const [r1, r2] = await Promise.all([
+        fetch('/api/categories?field=srp1&screen=caducados'),
+        fetch('/api/categories?field=srp2&screen=caducados'),
+      ])
+      if (r1.ok) setAvailableSrp1(await r1.json())
+      if (r2.ok) setAvailableSrp2(await r2.json())
+    } catch { }
+  }
+
+  // Carga ligera: solo consulta F0005, sin ejecutar la query principal de stock
+  const fetchLotStates = async () => {
+    try {
+      const res = await fetch('/api/caducados?onlyLotStates=1')
+      if (!res.ok) return
+      const json = await res.json()
+      if (json.lotStates?.length > 0) setAvailableLotStates(json.lotStates)
+    } catch { }
+  }
 
   const checkSession = async () => {
     try {
@@ -155,9 +188,14 @@ export default function CaducadosPage() {
     setLoading(true)
     try {
       const params = new URLSearchParams()
-      if (selectedPlant !== 'all') params.append('plant', selectedPlant)
-      if (selectedLocation !== 'all') params.append('location', selectedLocation)
+      selectedPlants.forEach(v => params.append('plant', v))
+      selectedLocations.forEach(v => params.append('location', v))
       params.append('type', selectedType)
+      selectedLotStates.forEach(v => params.append('lotStates', v))
+      selectedSrp1.forEach(v => params.append('srp1', v))
+      selectedSrp2.forEach(v => params.append('srp2', v))
+      if (paletSearch.trim()) params.append('palet', paletSearch.trim())
+      if (loteSearch.trim()) params.append('lote', loteSearch.trim())
 
       const res = await fetch(`/api/caducados?${params.toString()}`)
       if (!res.ok) throw new Error('Error fetching data')
@@ -166,22 +204,8 @@ export default function CaducadosPage() {
       setData(json.data || [])
       setSummary(json.summary || { totalPallets: 0, totalQuantity: 0, caducados: 0, obsoletos: 0, bloqueados: 0, ambos: 0 })
 
-      // Guardar ubicaciones del servidor
-      if (json.locations?.length > 0) {
-        setLocations(json.locations)
-      }
-
-      // Extraer plantas unicas de los datos para el dropdown
-      if (json.data?.length > 0) {
-        const plantMap = new Map<string, string>()
-        for (const row of json.data) {
-          if (row.plantCode && !plantMap.has(row.plantCode)) {
-            plantMap.set(row.plantCode, row.plantName || row.plantCode)
-          }
-        }
-        const newPlants = Array.from(plantMap.entries()).map(([id, description]) => ({ id, description })).sort((a, b) => a.id.localeCompare(b.id))
-        if (newPlants.length > plants.length) setPlants(newPlants)
-      }
+      if (json.locations?.length > 0) setLocations(json.locations)
+      if (json.lotStates?.length > 0) setAvailableLotStates(json.lotStates)
     } catch (err) {
       console.error('Fetch error:', err)
     } finally {
@@ -190,9 +214,14 @@ export default function CaducadosPage() {
   }
 
   const clearFilters = () => {
-    setSelectedPlant('all')
-    setSelectedLocation('all')
+    setSelectedPlants([])
+    setSelectedLocations([])
     setSelectedType('todos')
+    setSelectedLotStates([])
+    setSelectedSrp1([])
+    setSelectedSrp2([])
+    setPaletSearch('')
+    setLoteSearch('')
     setData([])
     setSummary({ totalPallets: 0, totalQuantity: 0, caducados: 0, obsoletos: 0, bloqueados: 0, ambos: 0 })
   }
@@ -232,7 +261,6 @@ export default function CaducadosPage() {
     <main className="min-h-screen bg-gray-100 p-8 font-sans text-gray-900">
       <div className="mx-auto max-w-7xl space-y-8">
 
-        {/* --- BARRA DE NAVEGACIÓN --- */}
         <Navbar currentPanel="caducados" user={sessionUser} onLogout={logout} />
 
         {/* --- FILTROS --- */}
@@ -250,10 +278,7 @@ export default function CaducadosPage() {
                       type="button"
                       key={btn.value}
                       onClick={() => setSelectedType(btn.value)}
-                      className={`px-3 py-1.5 text-xs font-semibold transition-colors ${selectedType === btn.value
-                        ? 'text-white'
-                        : 'bg-white text-gray-600 hover:bg-gray-50'
-                        }`}
+                      className={`px-3 py-1.5 text-xs font-semibold transition-colors ${selectedType === btn.value ? 'text-white' : 'bg-white text-gray-600 hover:bg-gray-50'}`}
                       style={selectedType === btn.value ? { backgroundColor: '#D30B15' } : {}}
                     >
                       {btn.label}
@@ -262,34 +287,95 @@ export default function CaducadosPage() {
                 </div>
               </div>
 
+              {/* Tipo de bloqueo */}
+              <div className="grid gap-1.5">
+                <label className="text-xs font-semibold text-gray-700">Tipo de bloqueo</label>
+                <div className="w-[200px]">
+                  <ArticleMultiSelect
+                    articles={availableLotStates.map(s => ({ id: s.code, description: s.description }))}
+                    selected={selectedLotStates}
+                    onChange={setSelectedLotStates}
+                    label="Tipo bloqueo"
+                    showId={true}
+                  />
+                </div>
+              </div>
+
+              {/* Categoría */}
+              <div className="grid gap-1.5">
+                <label className="text-xs font-semibold text-gray-700">Categoría</label>
+                <div className="w-[170px]">
+                  <ArticleMultiSelect articles={availableSrp1} selected={selectedSrp1} onChange={setSelectedSrp1} label="Categoría" />
+                </div>
+              </div>
+
+              {/* Familia */}
+              <div className="grid gap-1.5">
+                <label className="text-xs font-semibold text-gray-700">Familia</label>
+                <div className="w-[170px]">
+                  <ArticleMultiSelect articles={availableSrp2} selected={selectedSrp2} onChange={setSelectedSrp2} label="Familia" />
+                </div>
+              </div>
+
               {/* Planta */}
               <div className="grid gap-1.5">
-                <label htmlFor="cad-plant" className="text-xs font-semibold text-gray-700">Planta</label>
-                <select
-                  id="cad-plant"
-                  className="flex h-9 w-[180px] rounded-md border border-gray-300 bg-white px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus:border-slate-500 font-medium"
-                  value={selectedPlant}
-                  onChange={(e) => setSelectedPlant(e.target.value)}
-                >
-                  <option value="all">Todas</option>
-                  {plants.map(p => <option key={p.id} value={p.id}>{p.description}</option>)}
-                </select>
+                <label className="text-xs font-semibold text-gray-700">Planta</label>
+                <div className="w-[180px]">
+                  <ArticleMultiSelect
+                    articles={plants}
+                    selected={selectedPlants}
+                    onChange={setSelectedPlants}
+                    label="Planta"
+                    showId={true}
+                  />
+                </div>
               </div>
 
               {/* Ubicacion */}
               <div className="grid gap-1.5">
-                <label htmlFor="cad-location" className="text-xs font-semibold text-gray-700">Ubicacion</label>
-                <select
-                  id="cad-location"
-                  className="flex h-9 w-[180px] rounded-md border border-gray-300 bg-white px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus:border-slate-500 font-medium"
-                  value={selectedLocation}
-                  onChange={(e) => setSelectedLocation(e.target.value)}
-                >
-                  <option value="all">Todas</option>
-                  <option value="__blank__">GENERICA</option>
-                  {locations.filter(l => l !== '').map(l => <option key={l} value={l}>{getLocationLabel(l)}</option>)}
-                </select>
+                <label className="text-xs font-semibold text-gray-700">Ubicacion</label>
+                <div className="w-[180px]">
+                  <ArticleMultiSelect
+                    articles={[
+                      { id: '__blank__', description: 'GENERICA' },
+                      ...locations.filter(l => l !== '').map(l => ({ id: l, description: l })),
+                    ]}
+                    selected={selectedLocations}
+                    onChange={setSelectedLocations}
+                    label="Ubicacion"
+                    showId={false}
+                  />
+                </div>
               </div>
+
+            </div>
+          </div>
+
+          {/* Búsqueda por Palet / Lote */}
+          <div className="flex flex-wrap items-end gap-3">
+            <div className="grid gap-1.5">
+              <label htmlFor="cad-palet" className="text-xs font-semibold text-gray-700">Palet</label>
+              <input
+                id="cad-palet"
+                type="text"
+                value={paletSearch}
+                onChange={e => setPaletSearch(e.target.value)}
+                onKeyDown={e => e.key === 'Enter' && document.getElementById('cad-filtrar')?.click()}
+                placeholder="ej: *98789 ó 757585*"
+                className="flex h-9 w-[200px] rounded-md border border-slate-300 bg-white px-3 py-1 text-sm shadow-sm transition-colors focus:outline-none focus:border-slate-500 font-medium placeholder:font-normal placeholder:text-slate-400"
+              />
+            </div>
+            <div className="grid gap-1.5">
+              <label htmlFor="cad-lote" className="text-xs font-semibold text-gray-700">Lote</label>
+              <input
+                id="cad-lote"
+                type="text"
+                value={loteSearch}
+                onChange={e => setLoteSearch(e.target.value)}
+                onKeyDown={e => e.key === 'Enter' && document.getElementById('cad-filtrar')?.click()}
+                placeholder="ej: *98789 ó 757585*"
+                className="flex h-9 w-[200px] rounded-md border border-slate-300 bg-white px-3 py-1 text-sm shadow-sm transition-colors focus:outline-none focus:border-slate-500 font-medium placeholder:font-normal placeholder:text-slate-400"
+              />
             </div>
           </div>
 
@@ -297,7 +383,7 @@ export default function CaducadosPage() {
 
           {/* Acciones */}
           <div className="flex flex-wrap items-end gap-3 justify-end">
-            <Button onClick={fetchData} disabled={loading} className="text-white font-semibold" style={{ backgroundColor: '#D30B15' }} onMouseEnter={e => (e.currentTarget.style.backgroundColor = '#b00a12')} onMouseLeave={e => (e.currentTarget.style.backgroundColor = '#D30B15')}>
+            <Button id="cad-filtrar" onClick={fetchData} disabled={loading} className="text-white font-semibold" style={{ backgroundColor: '#D30B15' }} onMouseEnter={e => (e.currentTarget.style.backgroundColor = '#b00a12')} onMouseLeave={e => (e.currentTarget.style.backgroundColor = '#D30B15')}>
               {loading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Search className="mr-2 h-4 w-4" />}
               Filtrar
             </Button>
@@ -354,7 +440,7 @@ export default function CaducadosPage() {
             </CardHeader>
             <CardContent>
               <div className="text-2xl font-black text-blue-600">{summary.bloqueados.toLocaleString('es-ES')}</div>
-              <p className="text-xs text-gray-500 font-medium">Palets bloqueados</p>
+              <p className="text-xs text-gray-500 font-medium">Palets con estado de lote activo</p>
             </CardContent>
           </Card>
         </div>
