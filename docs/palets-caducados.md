@@ -47,7 +47,25 @@ Todos usan `ArticleMultiSelect` — multi-selección con buscador interno, mismo
 
 **Tipo de bloqueo** — a diferencia de los demás, este filtro aplica en **cualquier tipo** (Todos/Caducados/Obsoletos/Bloqueados), no solo en Bloqueados. Permite ver, por ejemplo, los caducados que además tienen un estado de lote activo.
 
-### 3.2 Búsqueda por Palet / Lote
+### 3.2 Filtro por Artículo (cliente)
+
+Multi-select `ArticleMultiSelect` que lista los artículos únicos presentes en los datos cargados. **No lanza una consulta adicional a Oracle** — filtra en memoria sobre los resultados ya obtenidos.
+
+| Propiedad | Detalle |
+|---|---|
+| **Fuente de opciones** | Derivado de `data` mediante `useMemo` tras cada `fetchData` |
+| **Cuándo se aplica** | Al pulsar "Filtrar" (igual que el resto de filtros) — no filtra al instante |
+| **Estado UI** | `selectedArticles` — lo que el usuario tiene marcado |
+| **Estado aplicado** | `appliedArticles` — se sincroniza con `selectedArticles` al pulsar "Filtrar" |
+| **Afecta a métricas** | Sí — `displaySummary` se recalcula desde `filteredData` |
+
+**Flujo completo:**
+1. Usuario ejecuta una consulta (ej. tipo=bloqueados) → `fetchData` → `setAppliedArticles(selectedArticles)` → `data` se actualiza
+2. `availableArticles` (memo) extrae artículos únicos de `data` — el contador `(N)` muestra cuántos hay
+3. Usuario selecciona artículos en el dropdown → `selectedArticles` cambia pero la tabla no cambia
+4. Usuario pulsa "Filtrar" → `appliedArticles` = `selectedArticles` → `filteredData` (memo) filtra `data` → tabla y métricas se actualizan sin Oracle
+
+### 3.3 Búsqueda por Palet / Lote
 
 Inputs de texto libre con soporte de **comodín `*`**:
 
@@ -77,6 +95,8 @@ Pulsar **Enter** en cualquiera de los dos inputs dispara el filtro (equivalente 
 | **Caducados** | Palets con `IOMMEJ < hoy` (fecha JDE vencida) |
 | **Obsoletos** | Palets cuyo artículo tiene `IMSTKT = 'O'` en F4101 |
 | **Bloqueados** | Palets con `TRIM(IOLOTS) IS NOT NULL` en F4108 (cualquier estado activo) |
+
+**Cuando hay filtro por artículo activo** (`appliedArticles.length > 0`), las métricas se recalculan dinámicamente desde `filteredData` mediante `displaySummary` (useMemo). Si no hay filtro por artículo, se usan directamente los valores devueltos por la API.
 
 ---
 
@@ -231,9 +251,12 @@ const quantity = (row.LIPQOH || 0) / 100;
 
 Con filtros amplios (tipo "Todos") se pueden cargar más de 5.000 registros (límite de la query). Para evitar lag al interactuar con los filtros:
 
-- `useDeferredValue(data)` → diferencia la actualización de la tabla del estado de los filtros
+- `useDeferredValue(filteredData)` → diferencia la actualización de la tabla del estado de los filtros
 - `CaducadosTable` es un componente memoizado (`React.memo`) → solo re-renderiza si cambian los datos reales
 - `getMotivoBadge` es función pura a nivel de módulo → no se recrea en cada render
+- `availableArticles` — `useMemo` sobre `data`, solo recalcula cuando cambian los datos de Oracle
+- `filteredData` — `useMemo` sobre `data` + `appliedArticles`, filtra en memoria sin tocar Oracle
+- `displaySummary` — `useMemo` sobre `filteredData`, recalcula métricas solo cuando cambia el filtro de artículo
 
 ---
 
@@ -255,7 +278,65 @@ Y una pesada con los datos reales:
 
 ---
 
-## 12. Parámetro `?screen=` en APIs compartidas
+## 12. Presets de filtros
+
+Sistema idéntico al del panel de producción. Permite guardar combinaciones de filtros para reutilizarlas.
+
+### 12.1 Comportamiento
+
+- **Solo visible para usuarios logueados** — el panel de presets y los botones Guardar/Cargar solo aparecen si `sessionUser !== null`
+- **Botón "Guardar"** (barra de acciones) → abre un panel encima de los filtros con campo de nombre
+- **Botón "Cargar preset"** → dropdown de acceso rápido
+- Al cargar un preset se restauran todos los filtros y el panel se cierra — hay que pulsar "Filtrar" para ejecutar la consulta
+
+### 12.2 Qué se guarda en un preset
+
+```json
+{
+  "type": "todos | caducados | obsoletos | bloqueados",
+  "selectedLotStates": ["B", "Q"],
+  "selectedSrp1": ["01"],
+  "selectedSrp2": ["FAM1"],
+  "selectedPlants": ["10100"],
+  "selectedLocations": ["__blank__", "ALMACEN1"],
+  "paletSearch": "*98789",
+  "loteSearch": "",
+  "selectedArticles": ["0000000001", "0000000002"]
+}
+```
+
+### 12.3 Aislamiento por panel
+
+Los presets llevan una columna `screen` en SQLite para que no mezclen entre paneles:
+
+| Panel | Valor `screen` |
+|---|---|
+| Producción | `'produccion'` |
+| Caducados | `'caducados'` |
+
+La API `/api/presets` acepta `?screen=caducados` para filtrar. El frontend siempre pasa `screen: 'caducados'` en GET y POST.
+
+**Migración automática:** al arrancar la aplicación, `lib/sqlite.ts` añade la columna `screen TEXT DEFAULT 'produccion'` si no existe — los presets anteriores de producción no se ven afectados.
+
+### 12.4 Editar y eliminar presets
+
+Desde el panel de presets (botón Guardar → se abre el panel):
+- **Editar (✏)** → carga los filtros del preset en los controles y activa el modo edición (botón pasa a "Actualizar")
+- **Eliminar (🗑)** → borra directamente llamando a `DELETE /api/presets/:id`
+- **Cancelar** → sale del modo edición sin guardar
+
+### 12.5 Rutas API de presets
+
+| Método | Ruta | Descripción |
+|---|---|---|
+| `GET` | `/api/presets?screen=caducados` | Lista presets del usuario para este panel |
+| `POST` | `/api/presets` | Crea nuevo preset (body: `{ name, filters, screen }`) |
+| `PUT` | `/api/presets/:id` | Actualiza preset existente |
+| `DELETE` | `/api/presets/:id` | Elimina preset |
+
+---
+
+## 13. Parámetro `?screen=` en APIs compartidas
 
 Las APIs `/api/categories` y `/api/plants` son compartidas entre paneles. Para que cada panel valide su propio permiso de acceso, ambas aceptan un parámetro `?screen=`:
 
@@ -268,7 +349,7 @@ Si no se pasa `screen`, usan su valor por defecto (`produccion` y `pedidos` resp
 
 ---
 
-## 13. Exportación Excel
+## 14. Exportación Excel
 
 El botón Excel exporta todos los registros actuales de la tabla. Columnas incluidas:
 
@@ -278,7 +359,7 @@ El nombre del archivo incluye la fecha: `Caducados_Obsoletos_YYYY-MM-DD.xlsx`.
 
 ---
 
-## 14. Logging de consultas
+## 15. Logging de consultas
 
 Cada consulta al panel inserta un registro en `query_logs` (SQLite) con `source = 'caducados_obsoletos'`. Filtros registrados:
 
@@ -297,7 +378,7 @@ El logging **nunca bloquea la respuesta** — se ejecuta en un `try/catch` indep
 
 ---
 
-## 15. Comportamiento Oracle — notas técnicas
+## 16. Comportamiento Oracle — notas técnicas
 
 ### CHAR padding y TRIM
 
@@ -319,7 +400,7 @@ Dentro del handler `GET`, la variable `locations` (resultado de F4100) existe en
 
 ---
 
-## 16. Cómo añadir plantas a otros paneles
+## 17. Cómo añadir plantas a otros paneles
 
 El dashboard de caducados obtiene las plantas dinámicamente desde Oracle (F0006 con `MCSTYL='BP'`), por lo que **no necesita cambios** al añadir nuevas plantas.
 
@@ -327,7 +408,7 @@ El dashboard de producción tiene las plantas **hardcodeadas**. Ver sección cor
 
 ---
 
-## 17. Añadir nuevos filtros de categoría
+## 18. Añadir nuevos filtros de categoría
 
 Para añadir más filtros de categoría al panel de caducados (por ejemplo Formato `srp3` o Marca `srp4`), seguir este patrón:
 
