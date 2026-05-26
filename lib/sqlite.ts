@@ -88,6 +88,12 @@ export function getDb(): Database.Database {
     _db.exec("ALTER TABLE query_logs ADD COLUMN source TEXT NOT NULL DEFAULT 'produccion'");
   }
 
+  // Migración: añadir columna screen a presets si no existe
+  const presetColumns = _db.prepare("PRAGMA table_info(presets)").all() as { name: string }[];
+  if (!presetColumns.some(c => c.name === 'screen')) {
+    _db.exec("ALTER TABLE presets ADD COLUMN screen TEXT NOT NULL DEFAULT 'produccion'");
+  }
+
   // Seed roles base (idempotente)
   _db.exec(`
     INSERT OR IGNORE INTO roles (name, label) VALUES ('admin', 'Administrador');
