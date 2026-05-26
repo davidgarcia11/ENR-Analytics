@@ -211,7 +211,8 @@ CREATE TABLE presets (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   name TEXT NOT NULL,
-  filters TEXT NOT NULL,   -- JSON con los 13 filtros
+  filters TEXT NOT NULL,                        -- JSON con los filtros del panel
+  screen TEXT NOT NULL DEFAULT 'produccion',    -- panel al que pertenece el preset
   created_at TEXT DEFAULT (datetime('now')),
   UNIQUE(user_id, name)
 );
@@ -264,7 +265,10 @@ CREATE TABLE screen_permissions (
 
 Todos los seeds usan `INSERT OR IGNORE` para no romper DBs existentes.
 
-**Migraciones automáticas:** Al arrancar, comprueba si faltan columnas (`must_change_password`, `name`, `surname` en users; `source` en query_logs) y las añade con `ALTER TABLE`. Esto permite actualizar DBs creadas antes de estas funcionalidades.
+**Migraciones automáticas:** Al arrancar, comprueba si faltan columnas y las añade con `ALTER TABLE`. Columnas gestionadas:
+- `must_change_password`, `name`, `surname` → tabla `users`
+- `source` → tabla `query_logs`
+- `screen` → tabla `presets` (con `DEFAULT 'produccion'` para no romper presets anteriores)
 
 **Usuario admin por defecto:** Si la tabla `users` está vacía, crea `admin` / `admin123` con role `admin`.
 
@@ -446,42 +450,61 @@ if (mine && !mine.is_public) {
 
 ## 6. Presets de Filtros
 
-Los usuarios logueados pueden guardar combinaciones de filtros con nombre para reutilizarlos.
+Los usuarios logueados pueden guardar combinaciones de filtros con nombre para reutilizarlos. El sistema es compartido entre paneles, pero **cada panel solo ve sus propios presets** gracias a la columna `screen`.
 
-### Qué se guarda en un preset (JSON)
+### Aislamiento por panel
 
+| Panel | Valor `screen` |
+|---|---|
+| Producción | `'produccion'` |
+| Caducados | `'caducados'` |
+
+### Qué se guarda en un preset
+
+El JSON varía según el panel. Ejemplos:
+
+**Producción:**
 ```json
 {
-  "plant": "10300",
-  "subLine": "all",
-  "startDate": "2026-01-01",
-  "endDate": "2026-03-02",
-  "selectedArticles": [],
-  "selectedPrp6": [],
-  "selectedSrp3": [],
-  "selectedSrp5": [],
-  "selectedSrp2": [],
-  "selectedSrp1": [],
-  "selectedSrp4": [],
-  "selectedZe03": [],
-  "selectedProdLines": []
+  "plant": "10300", "subLine": "all",
+  "startDate": "2026-01-01", "endDate": "2026-03-02",
+  "selectedArticles": [], "selectedPrp6": [], "selectedSrp3": [],
+  "selectedSrp5": [], "selectedSrp2": [], "selectedSrp1": [],
+  "selectedSrp4": [], "selectedZe03": [], "selectedProdLines": []
+}
+```
+
+**Caducados:**
+```json
+{
+  "type": "bloqueados",
+  "selectedLotStates": ["B"], "selectedSrp1": [], "selectedSrp2": [],
+  "selectedPlants": ["10100"], "selectedLocations": ["__blank__"],
+  "paletSearch": "", "loteSearch": "", "selectedArticles": []
 }
 ```
 
 ### UI de presets
 
-Dos formas de interactuar:
+Dos formas de interactuar (idénticas en todos los paneles):
 
-1. **Panel expandible (botón "Presets"):** Lista completa de presets con opción de guardar y eliminar
-2. **Acceso rápido en la barra de acciones:** Dropdown "Cargar preset" + botón "Guardar" (pide nombre con prompt)
+1. **Panel expandible (botón "Guardar"):** Lista completa de presets con opción de guardar, editar y eliminar
+2. **Acceso rápido en la barra de acciones:** Dropdown "Cargar preset" para carga inmediata
 
 ### APIs de presets
 
 | Método | Ruta | Descripción |
 |---|---|---|
-| GET | `/api/presets` | Lista presets del usuario autenticado |
-| POST | `/api/presets` | Guarda nuevo preset |
+| GET | `/api/presets?screen=<panel>` | Lista presets del usuario para ese panel (`produccion` por defecto) |
+| POST | `/api/presets` | Guarda nuevo preset (body: `{ name, filters, screen }`) |
+| PUT | `/api/presets/:id` | Actualiza nombre y filtros de un preset existente |
 | DELETE | `/api/presets/:id` | Elimina preset propio |
+
+### Añadir presets a un nuevo panel
+
+1. En el `GET` del componente: `fetch('/api/presets?screen=nuevo_panel')`
+2. En el `POST`: incluir `screen: 'nuevo_panel'` en el body
+3. Los presets del nuevo panel no interferirán con los de otros paneles
 
 ---
 
@@ -718,6 +741,10 @@ Panel de filtros del dashboard de producción. Ver [docs/produccion.md](docs/pro
 ### `ArticleMultiSelect.tsx`
 
 Desplegable multi-selección con búsqueda. Ver [docs/produccion.md](docs/produccion.md).
+
+### `SingleSelect.tsx`
+
+Variante de `ArticleMultiSelect` para selección única. Mismo estilo visual (buscador interno, layout código+descripción, mismo botón trigger) pero solo permite seleccionar una opción a la vez. Props: `options`, `value`, `onChange`, `label`, `allLabel`, `showId`. La opción especial `id: 'all'` representa "sin filtro". Usado internamente en el panel de caducados.
 
 ### Componentes UI base (`components/ui/`)
 
