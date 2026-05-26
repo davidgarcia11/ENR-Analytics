@@ -16,10 +16,11 @@ const FIELD_MAP: Record<string, { col: string; drsy: string; drrt: string; direc
 };
 
 export async function GET(req: NextRequest) {
-    const denied = await requireScreenAccess('produccion')
-    if (denied) return denied
     const { searchParams } = new URL(req.url);
     const field = searchParams.get('field');
+    const screen = searchParams.get('screen') || 'produccion';
+    const denied = await requireScreenAccess(screen)
+    if (denied) return denied
 
     if (!field || !FIELD_MAP[field]) {
         return NextResponse.json({ error: 'Campo no válido' }, { status: 400 });
