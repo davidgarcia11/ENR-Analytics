@@ -6,7 +6,9 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "test": "bun test",
+    "test:watch": "bun test --watch"
   },
   "dependencies": {
     "@radix-ui/react-slot": "^1.2.4",
@@ -20,6 +22,7 @@
     "next": "16.1.6",
     "oracledb": "^6.10.0",
     "react": "19.2.3",
+    "react-day-picker": "^10.0.1",
     "react-dom": "19.2.3",
     "recharts": "^3.7.0",
     "tailwind-merge": "^3.4.0",

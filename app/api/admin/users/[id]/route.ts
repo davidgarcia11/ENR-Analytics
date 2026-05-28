@@ -25,7 +25,8 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
     return NextResponse.json({ error: 'Ya existe otro usuario con ese nombre de usuario' }, { status: 409 });
   }
 
-  const userRole = role === 'admin' ? 'admin' : 'user';
+  const validRole = db.prepare('SELECT name FROM roles WHERE name = ?').get(role) as { name: string } | undefined;
+  const userRole = validRole ? role : 'user';
   db.prepare('UPDATE users SET username = ?, name = ?, surname = ?, role = ? WHERE id = ?')
     .run(username.trim(), name || '', surname || '', userRole, userId);
 

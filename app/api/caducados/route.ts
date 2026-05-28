@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getDbConnection } from '@/lib/db';
 import { getDb } from '@/lib/sqlite';
 import { verifySession } from '@/lib/auth';
+import { requireScreenAccess } from '@/lib/permissions';
 import { getDayOfYear } from 'date-fns';
 
 function jdeDateToISO(jdeDate: number): string | null {
@@ -16,12 +17,20 @@ function jdeDateToISO(jdeDate: number): string | null {
 }
 
 export async function GET(req: NextRequest) {
+    const denied = await requireScreenAccess('caducados')
+    if (denied) return denied
     const startTime = Date.now();
     const { searchParams } = new URL(req.url);
 
-    const plant = searchParams.get('plant');
+    const filterPlants = searchParams.getAll('plant');
     const type = searchParams.get('type') || 'todos'; // caducados | obsoletos | bloqueados | todos
-    const location = searchParams.get('location'); // filtro por ubicación
+    const filterLocations = searchParams.getAll('location');
+    const selectedLotStates = searchParams.getAll('lotStates');
+    const onlyLotStates = searchParams.get('onlyLotStates') === '1';
+    const srp1s = searchParams.getAll('srp1'); // Categoría
+    const srp2s = searchParams.getAll('srp2'); // Familia
+    const paletRaw = searchParams.get('palet') || '';
+    const loteRaw  = searchParams.get('lote')  || '';
 
     // Calcular fecha JDE de hoy: 1YYDDD
     const today = new Date();
@@ -47,6 +56,30 @@ export async function GET(req: NextRequest) {
             `SELECT DISTINCT TRIM(LMLOCN) AS LOCN FROM F4100 ORDER BY TRIM(LMLOCN)`
         );
         const locations = (locResult.rows as any[]).map(r => String(r.LOCN || '').trim());
+
+        // Obtener estados de lote desde F0005 (DRSY=41, DRRT=L) — blanco=válido
+        const lotStatesResult = await conn.execute(
+            `SELECT TRIM(F.DRKY) AS CODE, TRIM(F.DRDL01) AS DESCRIPTION
+             FROM prodctl.f0005 F
+             WHERE TRIM(F.DRSY) = '41'
+               AND TRIM(F.DRRT) = 'L'
+               AND TRIM(F.DRKY) IS NOT NULL
+             ORDER BY TRIM(F.DRKY)`
+        );
+        const lotStateMap: Record<string, string> = {};
+        const lotStates: { code: string; description: string }[] = [];
+        for (const r of lotStatesResult.rows as any[]) {
+            const code = String(r.CODE || '').trim();
+            if (!code) continue;
+            const desc = String(r.DESCRIPTION || '').trim();
+            lotStateMap[code] = desc || code;
+            lotStates.push({ code, description: desc || code });
+        }
+
+        // Modo ligero: solo devolver los estados de lote sin ejecutar la query principal
+        if (onlyLotStates) {
+            return NextResponse.json({ lotStates });
+        }
 
         // Query principal: F41021 (stock) + F4101 (artículo) + F4108 (palet/lote/caducidad/bloqueado)
         let sql = `
@@ -78,26 +111,78 @@ export async function GET(req: NextRequest) {
         } else if (type === 'obsoletos') {
             sql += ` AND D.IMSTKT = 'O'`;
         } else if (type === 'bloqueados') {
-            sql += ` AND B.IOLOTS = 'B'`;
+            // Cualquier estado de lote no vacío (blanco = válido en JDE)
+            sql += ` AND TRIM(B.IOLOTS) IS NOT NULL`;
         } else {
-            // todos: caducados OR obsoletos OR bloqueados
-            sql += ` AND ((B.IOMMEJ < :todayJde AND B.IOMMEJ > 0) OR D.IMSTKT = 'O' OR B.IOLOTS = 'B')`;
+            // todos: caducados OR obsoletos OR cualquier estado de lote no vacío
+            sql += ` AND ((B.IOMMEJ < :todayJde AND B.IOMMEJ > 0) OR D.IMSTKT = 'O' OR TRIM(B.IOLOTS) IS NOT NULL)`;
             binds.todayJde = todayJde;
         }
 
+        // Filtro por tipo de bloqueo (aplica en cualquier modo, no solo bloqueados)
+        if (selectedLotStates.length > 0) {
+            const placeholders = selectedLotStates.map((_, i) => `:ls_${i}`).join(', ');
+            sql += ` AND TRIM(B.IOLOTS) IN (${placeholders})`;
+            selectedLotStates.forEach((v, i) => { binds[`ls_${i}`] = v; });
+        }
+
+        // Filtro por Categoría (IMSRP1 de F4101)
+        if (srp1s.length > 0) {
+            const placeholders = srp1s.map((_, i) => `:srp1_${i}`).join(', ');
+            sql += ` AND TRIM(D.IMSRP1) IN (${placeholders})`;
+            srp1s.forEach((v, i) => { binds[`srp1_${i}`] = v; });
+        }
+
+        // Filtro por Familia (IMSRP2 de F4101)
+        if (srp2s.length > 0) {
+            const placeholders = srp2s.map((_, i) => `:srp2_${i}`).join(', ');
+            sql += ` AND TRIM(D.IMSRP2) IN (${placeholders})`;
+            srp2s.forEach((v, i) => { binds[`srp2_${i}`] = v; });
+        }
+
+        // Filtro por Palet (IOLOT1) y Lote (IOLOT2) con soporte de comodín * → %
+        if (paletRaw) {
+            const pattern = paletRaw.replace(/\*/g, '%');
+            if (pattern.includes('%')) {
+                sql += ` AND TRIM(B.IOLOT1) LIKE :paletPattern`;
+                binds.paletPattern = pattern;
+            } else {
+                sql += ` AND TRIM(B.IOLOT1) = :paletExact`;
+                binds.paletExact = pattern;
+            }
+        }
+        if (loteRaw) {
+            const pattern = loteRaw.replace(/\*/g, '%');
+            if (pattern.includes('%')) {
+                sql += ` AND TRIM(B.IOLOT2) LIKE :lotePattern`;
+                binds.lotePattern = pattern;
+            } else {
+                sql += ` AND TRIM(B.IOLOT2) = :loteExact`;
+                binds.loteExact = pattern;
+            }
+        }
+
         // Filtro por planta
-        if (plant && plant !== 'all') {
-            sql += ` AND TRIM(A.LIMCU) = :plant`;
-            binds.plant = plant;
+        if (filterPlants.length > 0) {
+            const ph = filterPlants.map((_, i) => `:plant_${i}`).join(', ');
+            sql += ` AND TRIM(A.LIMCU) IN (${ph})`;
+            filterPlants.forEach((v, i) => { binds[`plant_${i}`] = v; });
         }
 
         // Filtro por ubicación
-        if (location && location !== 'all') {
-            if (location === '__blank__') {
+        if (filterLocations.length > 0) {
+            const hasBlank = filterLocations.includes('__blank__');
+            const realLocs = filterLocations.filter(l => l !== '__blank__');
+            if (hasBlank && realLocs.length > 0) {
+                const ph = realLocs.map((_, i) => `:loc_${i}`).join(', ');
+                sql += ` AND (TRIM(A.LILOCN) IS NULL OR TRIM(A.LILOCN) = '' OR TRIM(A.LILOCN) IN (${ph}))`;
+                realLocs.forEach((v, i) => { binds[`loc_${i}`] = v; });
+            } else if (hasBlank) {
                 sql += ` AND (TRIM(A.LILOCN) IS NULL OR TRIM(A.LILOCN) = '')`;
             } else {
-                sql += ` AND TRIM(A.LILOCN) = :location`;
-                binds.location = location;
+                const ph = realLocs.map((_, i) => `:loc_${i}`).join(', ');
+                sql += ` AND TRIM(A.LILOCN) IN (${ph})`;
+                realLocs.forEach((v, i) => { binds[`loc_${i}`] = v; });
             }
         }
 
@@ -116,12 +201,13 @@ export async function GET(req: NextRequest) {
         const data = rows.map(row => {
             const isExpired = row.IOMMEJ > 0 && row.IOMMEJ < todayJde;
             const isObsolete = String(row.IMSTKT || '').trim() === 'O';
-            const isBlocked = String(row.IOLOTS || '').trim() === 'B';
+            const lotCode = String(row.IOLOTS || '').trim();
+            const isBlocked = lotCode !== '';
 
             const motivos: string[] = [];
             if (isExpired) motivos.push('Caducado');
             if (isObsolete) motivos.push('Obsoleto');
-            if (isBlocked) motivos.push('Bloqueado');
+            if (isBlocked) motivos.push(lotStateMap[lotCode] || lotCode);
             const motivo = motivos.join(' + ') || 'Desconocido';
 
             if (isExpired) countCaducados++;
@@ -149,6 +235,7 @@ export async function GET(req: NextRequest) {
                 expiryDateJde: row.IOMMEJ,
                 expiryDate: jdeDateToISO(row.IOMMEJ),
                 motivo,
+                lotStatus: lotCode || null,
             };
         });
 
@@ -156,9 +243,12 @@ export async function GET(req: NextRequest) {
         try {
             const user = await verifySession().catch(() => null);
             const filters = {
-                plant: plant ? (plantNames[plant] || plant) : null,
+                plant: filterPlants.length > 0 ? filterPlants.join(', ') : null,
                 type,
-                location
+                location: filterLocations.length > 0 ? filterLocations.join(', ') : null,
+                lotStates: selectedLotStates.length > 0 ? selectedLotStates : null,
+                srp1: srp1s.length > 0 ? srp1s : null,
+                srp2: srp2s.length > 0 ? srp2s : null,
             };
             const db = getDb();
             db.prepare(
@@ -178,6 +268,7 @@ export async function GET(req: NextRequest) {
         return NextResponse.json({
             data,
             locations,
+            lotStates,
             summary: {
                 totalPallets: data.length,
                 totalQuantity: Math.round(totalQuantity * 100) / 100,

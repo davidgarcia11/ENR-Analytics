@@ -26,10 +26,11 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Usuario y contraseña requeridos' }, { status: 400 });
     }
 
-    const userRole = role === 'admin' ? 'admin' : 'user';
     const hash = hashPassword(password);
     const forceChange = mustChangePassword ? 1 : 0;
     const db = getDb();
+    const validRole = db.prepare('SELECT name FROM roles WHERE name = ?').get(role) as { name: string } | undefined;
+    const userRole = validRole ? role : 'user';
 
     try {
       db.prepare('INSERT INTO users (username, password_hash, role, must_change_password, name, surname) VALUES (?, ?, ?, ?, ?, ?)').run(username, hash, userRole, forceChange, name || '', surname || '');

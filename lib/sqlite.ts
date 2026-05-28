@@ -47,6 +47,27 @@ export function getDb(): Database.Database {
       execution_time_ms INTEGER,
       created_at TEXT DEFAULT (datetime('now'))
     );
+
+    CREATE TABLE IF NOT EXISTS roles (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL UNIQUE,
+      label TEXT NOT NULL,
+      created_at TEXT DEFAULT (datetime('now'))
+    );
+
+    CREATE TABLE IF NOT EXISTS screens (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      key TEXT NOT NULL UNIQUE,
+      label TEXT NOT NULL,
+      path TEXT NOT NULL,
+      is_public INTEGER NOT NULL DEFAULT 1
+    );
+
+    CREATE TABLE IF NOT EXISTS screen_permissions (
+      screen_id INTEGER NOT NULL REFERENCES screens(id) ON DELETE CASCADE,
+      role_id   INTEGER NOT NULL REFERENCES roles(id)   ON DELETE CASCADE,
+      PRIMARY KEY (screen_id, role_id)
+    );
   `);
 
   // Migración: añadir columna must_change_password si no existe (para BDs creadas antes de esta versión)
@@ -66,6 +87,33 @@ export function getDb(): Database.Database {
   if (!logColumns.some(c => c.name === 'source')) {
     _db.exec("ALTER TABLE query_logs ADD COLUMN source TEXT NOT NULL DEFAULT 'produccion'");
   }
+
+  // Migración: añadir columna screen a presets si no existe
+  const presetColumns = _db.prepare("PRAGMA table_info(presets)").all() as { name: string }[];
+  if (!presetColumns.some(c => c.name === 'screen')) {
+    _db.exec("ALTER TABLE presets ADD COLUMN screen TEXT NOT NULL DEFAULT 'produccion'");
+  }
+
+  // Seed roles base (idempotente)
+  _db.exec(`
+    INSERT OR IGNORE INTO roles (name, label) VALUES ('admin', 'Administrador');
+    INSERT OR IGNORE INTO roles (name, label) VALUES ('user', 'Usuario');
+  `);
+
+  // Seed pantallas (idempotente)
+  _db.exec(`
+    INSERT OR IGNORE INTO screens (key, label, path, is_public) VALUES ('produccion',  'Producción',       '/produccion',          1);
+    INSERT OR IGNORE INTO screens (key, label, path, is_public) VALUES ('pedidos',     'Pedidos',          '/preparacion-pedidos', 1);
+    INSERT OR IGNORE INTO screens (key, label, path, is_public) VALUES ('caducados',   'Caducados',        '/caducados',           1);
+    INSERT OR IGNORE INTO screens (key, label, path, is_public) VALUES ('comparativa', 'Comparativa SERES','/comparativa-seres',   1);
+    INSERT OR IGNORE INTO screens (key, label, path, is_public) VALUES ('admin',       'Administración',   '/admin',               0);
+  `);
+
+  // Seed: rol admin tiene acceso a pantalla admin (idempotente)
+  _db.exec(`
+    INSERT OR IGNORE INTO screen_permissions (screen_id, role_id)
+    SELECT s.id, r.id FROM screens s, roles r WHERE s.key = 'admin' AND r.name = 'admin';
+  `);
 
   // Crear admin por defecto si no existe ningún usuario
   const count = _db.prepare('SELECT COUNT(*) as cnt FROM users').get() as { cnt: number };

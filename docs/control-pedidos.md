@@ -15,9 +15,11 @@ Panel para controlar el progreso de asignación de palets/lotes a pedidos de ven
 
 ### Acceso y navegación
 
-**Acceso público** — no requiere sesión. Cualquier usuario puede consultar este panel sin estar registrado. Si hay sesión activa, se muestran los botones de Admin/Logs y el nombre del usuario.
+**Acceso configurable** — público por defecto. Cualquier usuario puede consultar sin sesión activa. El administrador puede restringirlo a roles específicos desde `/admin` → pestaña Pantallas. Si hay sesión activa, se muestran los botones de Admin/Logs y el nombre del usuario.
 
 **Navegación:** dropdown "Paneles ▾" en la barra superior (componente `Navbar`). Ver todos los paneles disponibles en [DOCUMENTACION.md](../DOCUMENTACION.md) sección 10.
+
+---
 
 ### API — `GET /api/plants`
 
@@ -36,6 +38,8 @@ Devuelve la lista de plantas desde Oracle (tabla F0006, filtro `MCSTYL = 'BP'`).
 
 > **Nota:** Este endpoint se usa **solo en Pedidos**. El panel de Producción tiene las plantas hardcodeadas porque maneja lógica de sub-plantas (ver sección "Cómo Añadir Plantas").
 
+---
+
 ### API — `GET /api/orders`
 
 > **No confundir con `/api/jde-orders`:** ese endpoint consulta `F47011` (pedidos EDI entrantes) y está pensado para herramientas externas con autenticación por API key. Este endpoint consulta `F4211` (pedidos de venta) y requiere sesión JWT del dashboard.
@@ -46,15 +50,19 @@ Devuelve la lista de plantas desde Oracle (tabla F0006, filtro `MCSTYL = 'BP'`).
 
 | Param | Tipo | Descripción |
 |---|---|---|
-| `plant` | string | Código planta (MCMCU de F0006) o vacío para todas |
+| `plant` | string (repetible) | Código planta (MCMCU de F0006). Se puede repetir para filtrar por varias: `?plant=10100&plant=10300` |
 | `startDate` | string | Fecha carga desde (YYYY-MM-DD) → filtra `SDPDDJ` |
 | `endDate` | string | Fecha carga hasta (YYYY-MM-DD) → filtra `SDPDDJ` |
 | `deliveryStartDate` | string | Fecha entrega desde (YYYY-MM-DD) → filtra `SDRSDJ` |
 | `deliveryEndDate` | string | Fecha entrega hasta (YYYY-MM-DD) → filtra `SDRSDJ` |
 
+> **Múltiples plantas:** se leen con `searchParams.getAll('plant')` y se generan bind variables individuales `:plant0`, `:plant1`, ... para la cláusula `IN`. Oracle no soporta bind variable de tipo array en `IN`.
+
 **Lógica:**
 1. Carga nombres de planta desde F0006 (`MCSTYL = 'BP'`) para resolver `plantName` dinámicamente
 2. Consulta F4211 excluyendo líneas cerradas (`SDNXTR != 999`)
+   - JOIN con F0101 aliased `B` para resolver nombre de destino (`SDSHAN → ABALPH`)
+   - JOIN con F0101 aliased `C` para resolver nombre de comprador (`SDAN8 → ABALPH`)
 3. Agrupa por pedido (`SDDOCO`) y por artículo (`SDAITM`)
 4. Clasifica cada línea como asignada (tiene `SDLOTN`) o pendiente (sin `SDLOTN`)
 5. Suma `SDUORG/100` por artículo: `totalOrdered`, `totalAssigned` (con lote), `totalPending` (sin lote)
@@ -67,10 +75,15 @@ Devuelve la lista de plantas desde Oracle (tabla F0006, filtro `MCSTYL = 'BP'`).
 {
   "orders": [{
     "orderNumber": 12345,
+    "customerRef": "REF-2026-001",
     "loadDate": "2026-03-09T...",
     "deliveryDate": "2026-03-12T...",
     "plant": "10300",
     "plantName": "Funes",
+    "shipToNum": 1234,
+    "shipToDesc": "DISTRIBUCIONES EJEMPLO S.L.",
+    "soldToNum": 5678,
+    "soldToDesc": "CADENA SUPERMERCADOS S.A.",
     "articles": [{
       "itemNumber": "0001234567",
       "description": "PRODUCTO X",
@@ -112,58 +125,183 @@ Devuelve la lista de plantas desde Oracle (tabla F0006, filtro `MCSTYL = 'BP'`).
 | `SDLNID` | Número de línea |
 | `SDUOM` | Unidad de medida |
 | `SDNXTR` | Estado siguiente (999 = cerrado, se excluye) |
+| `SDVR01` | Referencia del cliente |
+| `SDSHAN` | Número de dirección de destino (Ship To) |
+| `SDAN8` | Número de dirección del comprador (Sold To) |
+
+### Tablas auxiliares utilizadas
+
+| Tabla | Alias | JOIN | Descripción |
+|---|---|---|---|
+| `F0006` | — | — | Nombres de plantas (carga inicial, no en SELECT principal) |
+| `F0101` | `B` | `B.ABAN8 = A.SDSHAN` | Address Book — nombre del destino (`SHAN_DESC`) |
+| `F0101` | `C` | `C.ABAN8 = A.SDAN8` | Address Book — nombre del comprador (`AN8_DESC`) |
+
+---
 
 ### Página — `app/preparacion-pedidos/page.tsx`
 
-Client Component. Estructura visual:
+Client Component. Arquitectura de estado dividida en **estado seleccionado** (UI en tiempo real) y **estado aplicado** (efectivo al pulsar Filtrar):
 
 ```
-┌─────────────────────────────────────────────────────────┐
-│ [LOGO]                      [Usuario ▪ Producción ▪ Salir]│
-│                                                         │
-│ Preparación de Pedidos                                  │
-│                                                         │
-│ ┌─ Filtros ──────────────────────────────────────────┐  │
-│ │ F.Carga Inicio│F.Carga Fin│F.Entrega Inicio│       │  │
-│ │ F.Entrega Fin│Planta                                │  │
-│ │ ─────────────────────────────────────────          │  │
-│ │ ☑ Pendientes ☑ En Progreso ☑ Completados          │  │
-│ │                    [Filtrar][Excel][Limpiar]        │  │
-│ └────────────────────────────────────────────────────┘  │
-│                                                         │
-│ ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐   │
-│ │  Total   │ │Completad.│ │En Progr. │ │Pendientes│   │
-│ │   50     │ │    10    │ │    25    │ │    15    │   │
-│ └──────────┘ └──────────┘ └──────────┘ └──────────┘   │
-│                                                         │
-│ ┌─ Pedidos (tabla expandible) ──────────────────────┐  │
-│ │ ▶ 12345 │ 09/03 │ 12/03 │ Funes │ 3 │ ██░ 60% │  │
-│ │   ▼ (expandido)                                    │  │
-│ │   Artículo │ Desc. │ Pedido │ Asig. │ Pend. │ %  │  │
-│ │   00001234 │ PROD..│  500   │  300  │  200  │60% │  │
-│ │     ▼ (expandido)                                  │  │
-│ │     Línea 1 │ 300 │ ✓ 300 │       │ PAL001       │  │
-│ │     Línea 2 │ 200 │       │ 200   │ —            │  │
-│ └────────────────────────────────────────────────────┘  │
-└─────────────────────────────────────────────────────────┘
+selectedPlants[]       → appliedPlants    (enviado a API al filtrar)
+selectedArticles[]     → appliedArticles  (filtro cliente, aplicado al filtrar)
+selectedDestinos[]     → appliedDestinos  (filtro cliente, aplicado al filtrar)
+pedidoSearch           → appliedPedidoSearch    (filtro cliente)
+refClienteSearch       → appliedRefClienteSearch (filtro cliente)
+showStatus{}           → (filtro cliente, instantáneo, no requiere Filtrar)
 ```
 
-**Tabla expandible a 3 niveles:**
-1. **Pedido:** Nº pedido, Fecha carga, Fecha entrega, Planta, Nº artículos, Barra progreso, Estado (badge)
-2. **Artículos (agrupados por `SDAITM`):** Artículo, Descripción, Total pedido, Total asignado (verde), Total pendiente (ámbar), Barra progreso, UM
-3. **Lotes/líneas individuales:** Nº línea, Cantidad, Asignado/Pendiente, Lote/Palet
+**Filtrado cliente vs servidor:**
+- Los filtros de **planta y fechas** van al servidor (parámetros en la URL de fetch)
+- Los filtros de **artículo, destino, búsqueda libre y estado** son cliente (useMemo sobre los datos ya cargados, se aplican al pulsar Filtrar)
+- El estado (`showStatus`) es instantáneo: cambia sin necesidad de pulsar Filtrar
 
-**Ordenamiento:** Pendientes primero, En Progreso segundo, Completados último.
+#### Layout visual
 
-**Checkboxes de estado:** Permiten mostrar/ocultar pedidos por estado sin re-consultar la API. Filtro local instantáneo.
+```
+┌─ Panel de Filtros ──────────────────────────────────────┐
+│                                                          │
+│  ─ Filtros ──────────────────────────────────────────   │
+│  Estado:  [● Pendiente] [● En Progreso] [● Completado]  │
+│  Planta:  [Todas ▾]                                      │
+│  Artículo: [Seleccionar ▾]   Destino: [Seleccionar ▾]   │
+│                                                          │
+│  ─ Búsqueda ────────────────────────────────────────    │
+│  Nº pedido: [ej: *12345 ó 12345*     ]                  │
+│  Ref. cliente: [ej: *REF ó REF*      ]                  │
+│                                                          │
+│  ─ Fechas ──────────────────────────────────────────    │
+│  F.Carga:   [dd/mm/aaaa] → [dd/mm/aaaa]                 │
+│  F.Entrega: [dd/mm/aaaa] → [dd/mm/aaaa]                 │
+│                                                          │
+│         [💾 Guardar] [Filtrar 🔍] [Excel ↓] [✕ Limpiar] │
+│         [Presets ▾]                                      │
+└──────────────────────────────────────────────────────────┘
 
-**Filtros:**
-- Fecha Carga Inicio / Fin (`SDPDDJ`)
-- Fecha Entrega Inicio / Fin (`SDRSDJ`)
-- Planta (dinámicas desde Oracle F0006 vía `/api/plants`, o "Todas")
-- Por defecto: fecha carga = hoy, fechas entrega vacías
+┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐
+│  Total   │ │Completad.│ │En Progr. │ │Pendientes│
+│   50     │ │    10    │ │    25    │ │    15    │
+└──────────┘ └──────────┘ └──────────┘ └──────────┘
 
-**Export Excel:** Incluye todas las líneas de los pedidos filtrados con: Pedido, Fecha Carga, Fecha Entrega, Planta, Artículo, Descripción, Línea, Cant. Pedida, Lote/Palet, Asignado (SÍ/NO), Totales por artículo, % Progreso, UM, Estado.
+┌─ Tabla de pedidos (3 niveles expandibles) ─────────────┐
+│ ▶ │ 12345         │ DIST. EJEMPLO SL │ 09/03 │ 12/03 │ Funes │ 3 │ ██░ 60% │ 🟡 En Progreso │
+│   │ REF-2026-001  │ (nº 1234)        │       │       │       │   │         │               │
+│   ▼ (expandido — artículos)                                                                 │
+│   │ ↳ 0001234567 PROD. X  │ 500 │ 300 ✓ │ 200 ⏳ │ 60% │ UN │                            │
+│      ▼ (expandido — lotes)                                                                  │
+│      │ ↳ PAL001 ✓ ASIGNADO  │ 300 │                                                        │
+│      │ ↳ —      ⏳ PENDIENTE │ 200 │                                                        │
+└────────────────────────────────────────────────────────────────────────────────────────────┘
+```
+
+#### Columnas de la tabla de pedidos (9 columnas)
+
+| # | Cabecera | Contenido |
+|---|---|---|
+| 1 | — | Chevron expand/collapse |
+| 2 | **Nº Pedido** / Ref. Cliente | Número de pedido en negrita. Ref. cliente en gris debajo (se omite si está vacía) |
+| 3 | **Destino** | Nombre del destino. Número de dirección en gris debajo |
+| 4 | **F. Carga** | Fecha de carga (`SDPDDJ`) formateada como `DD/MMM` |
+| 5 | **F. Entrega** | Fecha de entrega (`SDRSDJ`) formateada como `DD/MMM` |
+| 6 | **Planta** | Nombre de planta |
+| 7 | **Arts.** | Número de artículos distintos |
+| 8 | **Progreso** | Barra de progreso + porcentaje |
+| 9 | **Estado** | Badge: `🔴 Pendiente` / `🟡 En Progreso` / `🟢 Completado` |
+
+#### Filas de lote (nivel 3)
+
+Las filas de lote muestran el identificador de palet con el prefijo `↳` en la columna Artículo, y un badge de estado en la columna Descripción:
+
+- `✓ ASIGNADO` — fondo verde, texto blanco (lote tiene valor)
+- `⏳ PENDIENTE` — fondo ámbar, texto oscuro (sin lote)
+
+#### Filtros
+
+**Estado (toggle instantáneo, sin Filtrar):** Botones con borde rojo activo. Al desactivar todos se muestran todos los pedidos.
+
+**Planta:** `ArticleMultiSelect` con `showId={true}` (muestra código + nombre). Cargado dinámicamente desde `/api/plants`. Las plantas seleccionadas se envían al servidor como múltiples parámetros `plant`.
+
+**Artículo:** `ArticleMultiSelect` con `showId={true}`. Lista dinámica calculada a partir de los artículos presentes en los pedidos cargados (`order.articles[].itemNumber + description`).
+
+**Destino:** `ArticleMultiSelect` con `showId={true}`. Lista dinámica calculada a partir de `order.shipToNum + shipToDesc`.
+
+**Búsqueda con comodín (`*`):**
+
+```typescript
+// matchesWildcard() — definida fuera del componente
+function matchesWildcard(value: string, pattern: string): boolean {
+  if (!pattern) return true
+  if (!pattern.includes('*')) return value.toLowerCase().includes(pattern.toLowerCase())
+  const escaped = pattern.replace(/[.+^${}()|[\]\\]/g, '\\$&')
+  return new RegExp('^' + escaped.replace(/\*/g, '.*') + '$', 'i').test(value)
+}
+```
+
+| Patrón | Comportamiento |
+|---|---|
+| `12345` | Subcadena (contiene "12345") |
+| `12345*` | Empieza por "12345" |
+| `*12345` | Termina en "12345" |
+| `*123*` | Contiene "123" |
+| `12*45` | Empieza por "12" y termina en "45" |
+
+**Fechas:** Cuatro `DatePicker` (ver sección DatePicker en `DOCUMENTACION.md`).
+
+#### Filtrado cliente con useMemo
+
+```typescript
+const filteredOrders = useMemo(() => {
+  const anyStatusActive = Object.values(showStatus).some(Boolean)
+  return orders.filter(order => {
+    if (anyStatusActive && !showStatus[order.status]) return false
+    if (appliedArticles.length > 0 &&
+        !order.articles.some(a => appliedArticles.includes(a.itemNumber))) return false
+    if (appliedDestinos.length > 0 &&
+        !appliedDestinos.includes(String(order.shipToNum ?? ''))) return false
+    if (appliedPedidoSearch &&
+        !matchesWildcard(String(order.orderNumber), appliedPedidoSearch.trim())) return false
+    if (appliedRefClienteSearch &&
+        !matchesWildcard(order.customerRef, appliedRefClienteSearch.trim())) return false
+    return true
+  })
+}, [orders, showStatus, appliedArticles, appliedDestinos, appliedPedidoSearch, appliedRefClienteSearch])
+
+const deferredOrders = useDeferredValue(filteredOrders) // evita bloquear UI al filtrar listas grandes
+```
+
+Las tarjetas de resumen (`displaySummary`) se calculan también por `useMemo` a partir de `filteredOrders`, por lo que siempre reflejan los datos visibles tras el filtrado.
+
+#### Presets
+
+Sistema idéntico a producción y caducados. Usa `screen='pedidos'` para aislar los presets de este panel.
+
+**Filtros que se guardan en un preset de pedidos:**
+```json
+{
+  "filters": {
+    "startDate": "2026-05-01",
+    "endDate": "2026-05-31",
+    "deliveryStartDate": "",
+    "deliveryEndDate": ""
+  },
+  "showStatus": { "pendiente": true, "en_progreso": true, "completado": false },
+  "selectedArticles": ["0001234567"],
+  "selectedDestinos": ["1234"],
+  "pedidoSearch": "",
+  "refClienteSearch": ""
+}
+```
+
+> La planta **no se guarda** en los presets ya que las plantas disponibles son dinámicas y pueden cambiar.
+
+#### Ordenamiento
+
+Pendientes primero, En Progreso segundo, Completados último.
+
+#### Export Excel
+
+Incluye todas las líneas de los pedidos filtrados con: Pedido, Ref. Cliente, Nº Destino, Desc. Destino, Nº Comprador, Desc. Comprador, Fecha Carga, Fecha Entrega, Planta, Artículo, Descripción, Línea, Cant. Pedida, Lote/Palet, Asignado (SÍ/NO), Totales por artículo, % Progreso, UM, Estado.
 
 ---
 

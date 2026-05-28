@@ -1,9 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getDbConnection } from '@/lib/db';
+import { requireScreenAccess } from '@/lib/permissions';
 
 // Endpoint para obtener las líneas de producción disponibles
 // F30006 (Work Center) filtrado por IWAPSC >= '1' + F0006 (Business Unit) para la descripción
 export async function GET(req: NextRequest) {
+    const denied = await requireScreenAccess('produccion')
+    if (denied) return denied
     let conn;
     try {
         conn = await getDbConnection();

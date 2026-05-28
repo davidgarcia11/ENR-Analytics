@@ -2,6 +2,9 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getDbConnection } from '@/lib/db';
 import { getDayOfYear } from 'date-fns';
 import https from 'https';
+import { requireScreenAccess } from '@/lib/permissions';
+import { getDb } from '@/lib/sqlite';
+import { verifySession } from '@/lib/auth';
 
 // --- Helpers SERES ---
 
@@ -75,6 +78,8 @@ export interface PedidoSeres {
     fecha: string;
     hora: string;
     tipo: string;
+    clienteCodigo: string;
+    clienteNombre: string;
 }
 
 export interface PedidoJde {
@@ -190,6 +195,8 @@ async function fetchSeresPedidos(days: number): Promise<PedidoSeres[]> {
                         fecha: `${parts[2]}-${parts[1]}-${parts[0]}`,
                         hora: timePart || '',
                         tipo,
+                        clienteCodigo: vals[i + 2] || '',
+                        clienteNombre: vals[i + 3] || '',
                     });
                 }
             }
@@ -213,7 +220,7 @@ async function fetchJdePedidos(days: number): Promise<PedidoJde[]> {
         conn = await getDbConnection();
         const result = await conn.execute(
             `SELECT TRIM(A.SYVR01) AS REFERENCIA,
-                    A.SYUPMJ      AS FECHA_JDE,
+                    A.SYTRDJ      AS FECHA_JDE,
                     A.SYSHAN      AS SHAN_NUM,
                     TRIM(B.ABALPH) AS SHAN_DESC,
                     A.SYURAB      AS URAB_NUM,
@@ -221,9 +228,9 @@ async function fetchJdePedidos(days: number): Promise<PedidoJde[]> {
              FROM F47011 A
              LEFT JOIN F0101 B ON B.ABAN8 = A.SYSHAN
              LEFT JOIN F0101 C ON C.ABAN8 = A.SYURAB
-             WHERE A.SYUPMJ >= :fechaDesde
+             WHERE A.SYTRDJ >= :fechaDesde
                AND TRIM(A.SYVR01) IS NOT NULL
-             ORDER BY A.SYUPMJ DESC`,
+             ORDER BY A.SYTRDJ DESC`,
             { fechaDesde: sinceJde }
         );
         return (result.rows as any[]).map(row => {
@@ -248,6 +255,9 @@ async function fetchJdePedidos(days: number): Promise<PedidoJde[]> {
 // --- Handler ---
 
 export async function GET(req: NextRequest) {
+    const denied = await requireScreenAccess('comparativa')
+    if (denied) return denied
+    const startTime = Date.now();
     const { searchParams } = new URL(req.url);
     const days = Math.min(Math.max(parseInt(searchParams.get('days') || '7', 10), 0), 90);
 
@@ -274,6 +284,26 @@ export async function GET(req: NextRequest) {
                 const jde = jdeByRef.get(p.referencia.toUpperCase());
                 return { ...p, shanNum: jde?.shanNum ?? null, shanDesc: jde?.shanDesc ?? null, urabNum: jde?.urabNum ?? null, urabDesc: jde?.urabDesc ?? null };
             });
+
+        const resultCount = soloEnSeres.length + soloEnJde.length + enAmbos.length;
+
+        // Registrar consulta en logs
+        try {
+            const user = await verifySession().catch(() => null);
+            const db = getDb();
+            db.prepare(
+                'INSERT INTO query_logs (user_id, username, source, filters, result_count, execution_time_ms) VALUES (?, ?, ?, ?, ?, ?)'
+            ).run(
+                user?.id ?? null,
+                user ? user.username : 'Invitado',
+                'comparativa_seres',
+                JSON.stringify({ days }),
+                resultCount,
+                Date.now() - startTime
+            );
+        } catch (logErr) {
+            console.error('Error logging query:', logErr);
+        }
 
         return NextResponse.json({
             resumen: {

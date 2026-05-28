@@ -16,6 +16,8 @@ interface Pedido {
     fecha: string | null;
     hora?: string | null;
     tipo?: string;
+    clienteCodigo?: string | null;
+    clienteNombre?: string | null;
     shanNum?: number | null;
     shanDesc?: string | null;
     urabNum?: number | null;
@@ -53,18 +55,31 @@ export default function ComparativaSeresPage() {
     const [loading, setLoading] = useState(false)
     const [result, setResult] = useState<ComparativaResult | null>(null)
     const [error, setError] = useState<string | null>(null)
-    const [days, setDays] = useState(7)
+    const [days, setDays] = useState(0)
     const [activeTab, setActiveTab] = useState<Tab>('solo_seres')
 
     // Comprobar sesión al montar
     useEffect(() => {
-        fetch('/api/auth/me')
-            .then(r => r.ok ? r.json() : null)
-            .then(user => {
+        const checkAccess = async () => {
+            try {
+                const res = await fetch('/api/auth/me')
+                const user = res.ok ? await res.json() : null
                 if (user?.mustChangePassword) { router.push('/cambiar-contrasena'); return }
                 setSessionUser(user)
-            })
-            .catch(() => { })
+                const screensRes = await fetch('/api/screen-permissions')
+                if (screensRes.ok) {
+                    const screens = await screensRes.json()
+                    const mine = screens['comparativa']
+                    if (mine && !mine.is_public) {
+                        if (!user || (user.role !== 'admin' && !mine.allowed_roles.includes(user.role))) {
+                            router.push('/login')
+                            return
+                        }
+                    }
+                }
+            } catch { }
+        }
+        checkAccess()
     }, [])
 
     const logout = async () => {
@@ -94,7 +109,7 @@ export default function ComparativaSeresPage() {
     const clearFilters = () => {
         setResult(null)
         setError(null)
-        setDays(7)
+        setDays(0)
     }
 
     const exportToExcel = () => {
@@ -105,7 +120,14 @@ export default function ComparativaSeresPage() {
             Fecha: formatFecha(p.fecha),
             ...(p.tipo ? { Tipo: p.tipo } : {}),
         }))
-        XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(toRows(result.solo_en_seres)), 'Solo en SERES')
+        const soloSeresRows = result.solo_en_seres.map(p => ({
+            Referencia: p.referencia,
+            Fecha: formatFecha(p.fecha),
+            'Cód. Cliente': p.clienteCodigo ?? '',
+            Cliente: p.clienteNombre ?? '',
+            Tipo: p.tipo ?? '',
+        }))
+        XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(soloSeresRows), 'Solo en SERES')
         XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(toRows(result.solo_en_jde)), 'Solo en JDE')
         XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(toRows(result.en_ambos)), 'En ambos')
         XLSX.writeFile(wb, `Comparativa_SERES_JDE_${new Date().toISOString().split('T')[0]}.xlsx`)
@@ -324,7 +346,10 @@ export default function ComparativaSeresPage() {
                                             </>
                                         )}
                                         {activeTab === 'solo_seres' && (
-                                            <TableHead className="font-bold text-gray-700">Tipo SERES</TableHead>
+                                            <>
+                                                <TableHead className="font-bold text-gray-700">Cliente</TableHead>
+                                                <TableHead className="font-bold text-gray-700">Tipo</TableHead>
+                                            </>
                                         )}
                                     </TableRow>
                                 </TableHeader>
@@ -352,7 +377,15 @@ export default function ComparativaSeresPage() {
                                                     </>
                                                 )}
                                                 {activeTab === 'solo_seres' && (
-                                                    <TableCell className="text-gray-500 text-xs">{p.tipo}</TableCell>
+                                                    <>
+                                                        <TableCell className="text-sm text-gray-800">
+                                                            {p.clienteCodigo && (
+                                                                <span className="text-xs text-gray-400 font-mono mr-1.5">{p.clienteCodigo}</span>
+                                                            )}
+                                                            {p.clienteNombre || '-'}
+                                                        </TableCell>
+                                                        <TableCell className="text-gray-500 text-xs">{p.tipo}</TableCell>
+                                                    </>
                                                 )}
                                             </TableRow>
                                         ))

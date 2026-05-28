@@ -8,7 +8,7 @@ Cruza los pedidos EDI recibidos en **SERES** (`webconnect.seresnet.com`) con los
 - **Solo en JDE:** pedidos en JDE sin correspondencia en SERES
 - **En ambos:** pedidos correctamente sincronizados en las dos plataformas
 
-La comparación se hace **solo por número de referencia** (no por fecha). Los tipos de documento de SERES que se comparan son `Pedido` y `Albarán` (se descartan Comunicados, Confirmaciones de entrega, Mensajes de liquidación, etc.).
+La comparación se hace **solo por número de referencia** (no por fecha). Los tipos de documento de SERES que se comparan son únicamente `Pedido` (los Albaranes y el resto de tipos se descartan en el scraping).
 
 ---
 
@@ -101,27 +101,8 @@ El `[^<]+` (al menos un carácter) hace que las celdas en blanco se salten autom
 Tabla: `F47011` (EDI Inbound — registro de pedidos recibidos por intercambio electrónico de datos)
 
 ```sql
-SELECT TRIM(SYVR01) AS REFERENCIA, SYUPMJ AS FECHA_JDE
-FROM F47011
-WHERE SYUPMJ >= :fechaDesde
-  AND TRIM(SYVR01) IS NOT NULL
-ORDER BY SYUPMJ DESC
-```
-
-**Campos utilizados:**
-
-| Campo | Descripción |
-|-------|-------------|
-| `SYVR01` | Referencia del pedido (CHAR con padding de espacios → `TRIM` obligatorio) |
-| `SYUPMJ` | Fecha de última actualización en formato JDE **CYYDDD** |
-| `SYSHAN` | Número de dirección de destino (Ship To) |
-| `SYURAB` | Número de dirección vendida a (Sold To) |
-
-Los campos `SYSHAN` y `SYURAB` se cruzan con `F0101.ABAN8` para obtener la descripción (`ABALPH`):
-
-```sql
 SELECT TRIM(A.SYVR01) AS REFERENCIA,
-       A.SYUPMJ      AS FECHA_JDE,
+       A.SYTRDJ      AS FECHA_JDE,
        A.SYSHAN      AS SHAN_NUM,
        TRIM(B.ABALPH) AS SHAN_DESC,
        A.SYURAB      AS URAB_NUM,
@@ -129,10 +110,21 @@ SELECT TRIM(A.SYVR01) AS REFERENCIA,
 FROM F47011 A
 LEFT JOIN F0101 B ON B.ABAN8 = A.SYSHAN
 LEFT JOIN F0101 C ON C.ABAN8 = A.SYURAB
-WHERE A.SYUPMJ >= :fechaDesde
+WHERE A.SYTRDJ >= :fechaDesde
   AND TRIM(A.SYVR01) IS NOT NULL
-ORDER BY A.SYUPMJ DESC
+ORDER BY A.SYTRDJ DESC
 ```
+
+**Campos utilizados:**
+
+| Campo | Descripción |
+|-------|-------------|
+| `SYVR01` | Referencia del pedido (CHAR con padding de espacios → `TRIM` obligatorio) |
+| `SYTRDJ` | **Fecha de transacción** (cuando se recibió/procesó el EDI) en formato JDE **CYYDDD** |
+| `SYSHAN` | Número de dirección de destino (Ship To) |
+| `SYURAB` | Número de dirección vendida a (Sold To) |
+
+> **Por qué `SYTRDJ` y no `SYUPMJ`:** `SYUPMJ` es la fecha de *última modificación* del registro en JDE. Un pedido creado hace 3 meses que se modifica hoy aparecería en una búsqueda de "últimos 7 días" aunque en SERES ya no esté en ese rango, generando falsos "Solo en JDE". `SYTRDJ` es la fecha de *transacción* (cuándo se recibió el EDI), equivalente conceptualmente a la Fecha Documento de SERES, lo que hace que ambos filtros sean consistentes.
 
 **Tabla F0101** (Address Book Master):
 
@@ -141,7 +133,7 @@ ORDER BY A.SYUPMJ DESC
 | `ABAN8` | Número de dirección (clave primaria) |
 | `ABALPH` | Nombre / descripción (Alpha Name) |
 
-**Formato CYYDDD de `SYUPMJ`:**
+**Formato CYYDDD de `SYTRDJ`:**
 
 ```
 Ejemplo: 126061
@@ -152,7 +144,7 @@ Ejemplo: 126061
 └─────── C   = dígito de siglo (1 = años 2000)
 ```
 
-JDE almacena las fechas como enteros CYYDDD. Aquí `C=1` indica siglo XXI (diferente a F55TAR12 donde `C` se reutiliza como código de sub-línea). La API convierte `SYUPMJ` a `YYYY-MM-DD` para mostrarlo en la tabla.
+JDE almacena las fechas como enteros CYYDDD. Aquí `C=1` indica siglo XXI (diferente a F55TAR12 donde `C` se reutiliza como código de sub-línea). La API convierte `SYTRDJ` a `YYYY-MM-DD` para mostrarlo en la tabla.
 
 ---
 
@@ -184,9 +176,9 @@ const enAmbos     = seresPedidos
 
 **Archivos:** `app/comparativa-seres/page.tsx` + `app/api/comparativa-seres/route.ts`
 
-**Acceso público** — no requiere sesión. La API `/api/comparativa-seres` tampoco exige JWT; cualquier usuario puede ejecutar la comparativa. Si hay sesión activa, se muestra el nombre del usuario y los botones de Admin.
+**Acceso configurable** — público por defecto. Cualquier usuario puede ejecutar la comparativa sin sesión activa. La API aplica `requireScreenAccess('comparativa')`, por lo que si el administrador restringe la pantalla desde `/admin` → Pantallas, tanto la página como la API quedan protegidas. Si hay sesión activa, se muestra el nombre del usuario y los botones de Admin.
 
-**Parámetro:** `?days=N` (0 a 90 días, default 7). El panel ofrece botones de selección rápida: Hoy / 1 / 3 / 7 / 14 / 30 días.
+**Parámetro:** `?days=N` (0 a 90 días, **default 0 = Hoy**). El panel ofrece botones de selección rápida: Hoy / 1 / 3 / 7 / 14 / 30 días.
 
 > **`days=0` ("Hoy"):** caso especial. SERES filtra por Fecha Doc. (cuando se creó el pedido en origen), que puede ser el día anterior incluso si llegó hoy. Para evitar falsos negativos, cuando `days=0` la API pide 1 día extra de margen a SERES y luego filtra los resultados por **Fecha Estado** (la fecha real de recepción en SERES). En JDE simplemente no se aplica el `setDate` (se usa `since = hoy`). 
 
@@ -224,14 +216,29 @@ const enAmbos     = seresPedidos
 └──────────────────────────────────────────────────────┘
 ```
 
-**Columnas de la tabla:**
+**Columnas según pestaña activa:**
+
+| Columna | Solo en SERES | Solo en JDE | En ambos |
+|---|---|---|---|
+| Referencia | ✓ | ✓ | ✓ |
+| Fecha + Hora | ✓ | ✓ | ✓ |
+| **Cliente** (Cód. + Nombre Interlocutor SERES) | ✓ | — | — |
+| Tipo | ✓ | — | — |
+| Destino `SYSHAN` (nº + nombre) | — | ✓ | ✓ |
+| Vendido a `SYURAB` (nº + nombre) | — | ✓ | ✓ |
+
 - **Referencia** — número de pedido (fuente monospace)
-- **Fecha** — fecha del documento (SERES) o `SYUPMJ` convertida (JDE), formato `DD/MM/YY`. Los registros SERES también muestran la **hora** (`HH:MM:SS`) en gris junto a la fecha
-- **Tipo SERES** — solo visible en pestaña "Solo en SERES"
+- **Fecha** — fecha del documento (SERES) o `SYTRDJ` convertida (JDE), formato `DD/MM/YY`. Los registros SERES también muestran la **hora** (`HH:MM:SS`) en gris junto a la fecha
+- **Cliente** — solo en "Solo en SERES". Código Interlocutor (`vals[i+2]`) en gris + Nombre Interlocutor (`vals[i+3]`), extraídos del scraping SERES
+- **Tipo** — solo en "Solo en SERES" (siempre "Pedido" dado el filtro interno)
 - **Destino (SYSHAN)** — número + nombre de dirección de destino; visible en "Solo en JDE" y "En ambos"
 - **Vendido a (SYURAB)** — número + nombre del cliente comprador; visible en "Solo en JDE" y "En ambos"
 
-**Exportación Excel:** tres hojas — "Solo en SERES", "Solo en JDE", "En ambos". Cada hoja con columnas Referencia, Fecha y Tipo (cuando aplica). Nombre del archivo: `Comparativa_SERES_JDE_YYYY-MM-DD.xlsx`.
+**Exportación Excel:** tres hojas — "Solo en SERES", "Solo en JDE", "En ambos".
+- Hoja "Solo en SERES": Referencia, Fecha, Cód. Cliente, Cliente, Tipo
+- Hojas "Solo en JDE" y "En ambos": Referencia, Fecha, Tipo
+
+Nombre del archivo: `Comparativa_SERES_JDE_YYYY-MM-DD.xlsx`.
 
 **Respuesta de la API:**
 ```json
