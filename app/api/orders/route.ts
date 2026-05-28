@@ -11,7 +11,7 @@ export async function GET(req: NextRequest) {
   const startTime = Date.now();
   const { searchParams } = new URL(req.url);
 
-  const plant = searchParams.get('plant');
+  const plantParams = searchParams.getAll('plant');
   const startDateStr = searchParams.get('startDate');
   const endDateStr = searchParams.get('endDate');
   const deliveryStartStr = searchParams.get('deliveryStartDate');
@@ -31,18 +31,24 @@ export async function GET(req: NextRequest) {
     }
 
     let sql = `
-      SELECT SDDOCO, SDPDDJ, SDRSDJ, TRIM(SDMCU) AS SDMCU,
-             SDITM, TRIM(SDAITM) AS SDAITM, TRIM(SDDSC1) AS SDDSC1,
-             SDUORG, SDSOQS, SDSOBK, SDSOCN,
-             TRIM(SDUOM) AS SDUOM, TRIM(SDLOTN) AS SDLOTN, SDLNID
-      FROM F4211
-      WHERE SDNXTR != 999
+      SELECT A.SDDOCO, A.SDPDDJ, A.SDRSDJ, TRIM(A.SDMCU) AS SDMCU,
+             A.SDITM, TRIM(A.SDAITM) AS SDAITM, TRIM(A.SDDSC1) AS SDDSC1,
+             A.SDUORG, A.SDSOQS, A.SDSOBK, A.SDSOCN,
+             TRIM(A.SDUOM) AS SDUOM, TRIM(A.SDLOTN) AS SDLOTN, A.SDLNID,
+             TRIM(A.SDVR01) AS SDVR01,
+             A.SDSHAN AS SDSHAN, TRIM(B.ABALPH) AS SHAN_DESC,
+             A.SDAN8  AS SDAN8,  TRIM(C.ABALPH) AS AN8_DESC
+      FROM F4211 A
+      LEFT JOIN F0101 B ON B.ABAN8 = A.SDSHAN
+      LEFT JOIN F0101 C ON C.ABAN8 = A.SDAN8
+      WHERE A.SDNXTR != 999
     `;
     const binds: any = {};
 
-    if (plant && plant !== 'all') {
-      sql += ` AND TRIM(SDMCU) = :plant`;
-      binds.plant = plant;
+    if (plantParams.length > 0) {
+      const placeholders = plantParams.map((_, i) => `:plant${i}`).join(', ');
+      sql += ` AND TRIM(A.SDMCU) IN (${placeholders})`;
+      plantParams.forEach((p, i) => { binds[`plant${i}`] = p; });
     }
 
     if (startDateStr && endDateStr) {
@@ -58,7 +64,7 @@ export async function GET(req: NextRequest) {
         const endDDD = getDayOfYear(end);
         const endJde = (1 * 100000) + (endYY * 1000) + endDDD;
 
-        sql += ` AND SDPDDJ BETWEEN :startJde AND :endJde`;
+        sql += ` AND A.SDPDDJ BETWEEN :startJde AND :endJde`;
         binds.startJde = startJde;
         binds.endJde = endJde;
       }
@@ -77,13 +83,13 @@ export async function GET(req: NextRequest) {
         const dEndDDD = getDayOfYear(dEnd);
         const dEndJde = (1 * 100000) + (dEndYY * 1000) + dEndDDD;
 
-        sql += ` AND SDRSDJ BETWEEN :delStartJde AND :delEndJde`;
+        sql += ` AND A.SDRSDJ BETWEEN :delStartJde AND :delEndJde`;
         binds.delStartJde = dStartJde;
         binds.delEndJde = dEndJde;
       }
     }
 
-    sql += ` ORDER BY SDDOCO, SDITM`;
+    sql += ` ORDER BY A.SDDOCO, A.SDITM`;
 
     const result = await conn.execute(sql, binds);
     const rows = result.rows as any[];
@@ -113,10 +119,15 @@ export async function GET(req: NextRequest) {
 
         orderMap.set(doco, {
           orderNumber: doco,
+          customerRef: String(row.SDVR01 || '').trim(),
           loadDate: date.toISOString(),
           deliveryDate: deliveryDate.toISOString(),
           plant: plantCode,
           plantName: plantNames[plantCode] || plantCode,
+          shipToNum: row.SDSHAN || null,
+          shipToDesc: String(row.SHAN_DESC || '').trim(),
+          soldToNum: row.SDAN8 || null,
+          soldToDesc: String(row.AN8_DESC || '').trim(),
           lines: [],
           totalLines: 0,
           overallProgress: 0,
@@ -207,7 +218,7 @@ export async function GET(req: NextRequest) {
     // Registrar consulta en logs
     try {
       const user = await verifySession().catch(() => null);
-      const filters = { plant, startDate: startDateStr, endDate: endDateStr, deliveryStartDate: deliveryStartStr, deliveryEndDate: deliveryEndStr };
+      const filters = { plants: plantParams, startDate: startDateStr, endDate: endDateStr, deliveryStartDate: deliveryStartStr, deliveryEndDate: deliveryEndStr };
       const db = getDb();
       db.prepare(
         'INSERT INTO query_logs (user_id, username, source, filters, result_count, execution_time_ms) VALUES (?, ?, ?, ?, ?, ?)'

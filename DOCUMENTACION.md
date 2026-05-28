@@ -442,9 +442,41 @@ if (mine && !mine.is_public) {
 
 ### Página de inicio (`/`)
 
-- Sin sesión → muestra cards de los paneles con `is_public = true` + botón "Iniciar sesión"
-- Con sesión → redirige automáticamente al primer panel accesible
-- Si no hay ningún panel público ni sesión → solo muestra el botón de login
+**Comportamiento según sesión:**
+- Con sesión activa → redirige automáticamente al primer panel accesible según permisos del rol
+- Sin sesión → muestra la página de bienvenida (landing) con dos secciones diferenciadas
+
+**Diseño (Notion/Linear style):**
+- Estética minimalista y plana: sin gradientes, sin sombras decorativas
+- Tipografía Inter (Google Fonts) + Geist como fallback. Solo pesos 400 y 500
+- Fondo `#F7F7F6` (blanco hueso), tarjetas blancas, bordes `1px solid #E5E5E5`
+- Todos los estilos definidos con CSS-in-JSX (`<style>`) usando clases prefijadas `hp-*`
+
+**Sección "Acceso público"** (badge verde pill):
+- Muestra los paneles con `is_public = true`
+- Tarjetas con icono ámbar, nombre, descripción y flecha. Al hacer clic → acceso directo al panel
+- Grid `auto-fit, minmax(280px, 1fr)`
+
+**Sección "Requiere inicio de sesión"** (badge gris con candado):
+- Muestra los paneles con `is_public = false`
+- Tarjetas atenuadas (fondo `#F4F4F4`), icono gris, candado en esquina superior derecha
+- Al hacer clic → redirige a `/login?redirect=<href-del-panel>`
+- Grid `auto-fit, minmax(160px, 1fr)` (más compacto que el público)
+
+**Fallback sin paneles:** Si no hay ningún panel (público ni privado) → estado vacío centrado con botón de login
+
+**Estado React:**
+```ts
+const [publicPanels, setPublicPanels] = useState<typeof PANELS>([])   // is_public = true
+const [privatePanels, setPrivatePanels] = useState<typeof PANELS>([]) // is_public = false
+```
+
+**Lógica de clasificación:**
+```ts
+const pub = PANELS.filter(p => screens[p.key]?.is_public ?? true)
+const priv = PANELS.filter(p => !(screens[p.key]?.is_public ?? true))
+```
+Si la API falla (catch), todos los paneles van a `publicPanels` como fallback seguro.
 
 ---
 
@@ -458,6 +490,7 @@ Los usuarios logueados pueden guardar combinaciones de filtros con nombre para r
 |---|---|
 | Producción | `'produccion'` |
 | Caducados | `'caducados'` |
+| Pedidos | `'pedidos'` |
 
 ### Qué se guarda en un preset
 
@@ -481,6 +514,18 @@ El JSON varía según el panel. Ejemplos:
   "selectedLotStates": ["B"], "selectedSrp1": [], "selectedSrp2": [],
   "selectedPlants": ["10100"], "selectedLocations": ["__blank__"],
   "paletSearch": "", "loteSearch": "", "selectedArticles": []
+}
+```
+
+**Pedidos:**
+```json
+{
+  "filters": { "startDate": "2026-05-01", "endDate": "2026-05-31", "deliveryStartDate": "", "deliveryEndDate": "" },
+  "showStatus": { "pendiente": true, "en_progreso": true, "completado": false },
+  "selectedArticles": ["0001234567"],
+  "selectedDestinos": ["1234"],
+  "pedidoSearch": "",
+  "refClienteSearch": ""
 }
 ```
 
@@ -528,6 +573,7 @@ Cada vez que un usuario (o invitado) consulta datos o inicia sesión, se inserta
 | `app/api/auth/login/route.ts` | `login` | Cada inicio de sesión exitoso |
 | `app/api/caducados/route.ts` | `caducados_obsoletos` | Cada consulta de palets caducados/obsoletos/bloqueados |
 | `app/api/comparativa-seres/route.ts` | `comparativa_seres` | Cada comparativa SERES vs JDE ejecutada |
+| `app/api/orders/route.ts` | `pedidos` | Cada consulta del panel de preparación de pedidos |
 
 El logging nunca bloquea la respuesta: se ejecuta en un `try/catch` independiente. Si falla el INSERT, se logea el error en consola pero el usuario recibe su respuesta normalmente.
 
@@ -737,6 +783,39 @@ La Navbar obtiene la configuración de pantallas de `GET /api/screen-permissions
 ### `FilterPanel.tsx`
 
 Panel de filtros del dashboard de producción. Ver [docs/produccion.md](docs/produccion.md).
+
+### `DatePicker.tsx`
+
+Selector de fecha con calendario emergente. Reemplaza los `<input type="date">` nativos (que varían visualmente por navegador) con un calendario uniforme y en español.
+
+**Props:**
+
+| Prop | Tipo | Descripción |
+|---|---|---|
+| `value` | `string` | Fecha seleccionada en formato `YYYY-MM-DD` (vacío = sin selección) |
+| `onChange` | `(value: string) => void` | Callback al seleccionar fecha. Devuelve `YYYY-MM-DD` |
+| `placeholder` | `string` | Texto cuando no hay fecha (por defecto: `dd/mm/aaaa`) |
+| `className` | `string` | Clases CSS adicionales (ej: `w-[150px]`) |
+
+**Comportamiento:**
+- El botón muestra la fecha en formato `DD/MM/YYYY` (español) o el placeholder si está vacío
+- Abre un popover con `DayPicker` de `react-day-picker` v10 en español (`date-fns/locale/es`)
+- El día seleccionado se resalta en rojo corporativo `#D30B15`
+- El día de hoy tiene borde gris
+- La navegación entre meses usa flechas `ChevronLeft` / `ChevronRight` de lucide-react
+- Se cierra al hacer clic fuera (listener en `mousedown`)
+
+**Implementación importante (react-day-picker v10):**
+- `month` lleva `relative` para que el `nav` en `absolute` se posicione correctamente
+- `caption_label` lleva `pointer-events-none` para que los clicks pasen al `nav` detrás
+- `nav` lleva `z-10` para situarse sobre el caption
+
+**Usado en:**
+- `components/FilterPanel.tsx` — fechas inicio/fin del dashboard de producción
+- `app/preparacion-pedidos/page.tsx` — fechas carga y entrega del panel de pedidos
+- `app/admin/logs/page.tsx` — filtros de fecha en los logs de consultas
+
+**Dependencias:** `react-day-picker` v10, `date-fns` v4 (ya incluidas en el proyecto).
 
 ### `ArticleMultiSelect.tsx`
 
