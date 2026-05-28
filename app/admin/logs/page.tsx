@@ -8,6 +8,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Loader2, ArrowLeft, FileText, ChevronLeft, ChevronRight, LogIn, Clock, Search, Users, Zap, BarChart3, Download, Trophy } from "lucide-react"
 import Image from "next/image"
 import * as XLSX from 'xlsx'
+import { DatePicker } from "@/components/DatePicker"
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from "recharts"
 
 interface LogEntry {
@@ -423,13 +424,11 @@ export default function LogsPage() {
               </div>
               <div className="space-y-1.5">
                 <label className="text-xs font-semibold text-gray-700">Desde</label>
-                <input type="date" value={filterStartDate} onChange={e => setFilterStartDate(e.target.value)}
-                  className="flex h-9 w-[150px] rounded-md border border-gray-300 bg-white px-3 py-1 text-sm shadow-sm" />
+                <DatePicker value={filterStartDate} onChange={setFilterStartDate} className="w-[150px]" />
               </div>
               <div className="space-y-1.5">
                 <label className="text-xs font-semibold text-gray-700">Hasta</label>
-                <input type="date" value={filterEndDate} onChange={e => setFilterEndDate(e.target.value)}
-                  className="flex h-9 w-[150px] rounded-md border border-gray-300 bg-white px-3 py-1 text-sm shadow-sm" />
+                <DatePicker value={filterEndDate} onChange={setFilterEndDate} className="w-[150px]" />
               </div>
               <Button onClick={applyFilters} className="text-white font-semibold" style={{ backgroundColor: '#D30B15' }}>
                 Filtrar

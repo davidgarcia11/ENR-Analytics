@@ -5,6 +5,7 @@ import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 import { ArticleMultiSelect } from "@/components/ArticleMultiSelect"
 import { Search, Download, X, Save, BookmarkCheck, Trash2, Pencil, Layers, Calendar, Loader2 } from "lucide-react"
+import { DatePicker } from "@/components/DatePicker"
 
 // --- TIPOS ---
 
@@ -381,12 +382,12 @@ export function FilterPanel({
           <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">Fechas y Planta</p>
           <div className="flex flex-wrap items-end gap-3">
             <div className="grid gap-1.5">
-              <label htmlFor="filter-start-date" className="text-xs font-semibold text-gray-700">Fecha Inicio</label>
-              <Input id="filter-start-date" type="date" value={filters.startDate} onChange={e => setFilters({ ...filters, startDate: e.target.value })} className="w-[150px] border-gray-300 focus:border-slate-500 font-medium" />
+              <label className="text-xs font-semibold text-gray-700">Fecha Inicio</label>
+              <DatePicker value={filters.startDate} onChange={v => setFilters({ ...filters, startDate: v })} className="w-[150px]" />
             </div>
             <div className="grid gap-1.5">
-              <label htmlFor="filter-end-date" className="text-xs font-semibold text-gray-700">Fecha Fin</label>
-              <Input id="filter-end-date" type="date" value={filters.endDate} onChange={e => setFilters({ ...filters, endDate: e.target.value })} className="w-[150px] border-gray-300 focus:border-slate-500 font-medium" />
+              <label className="text-xs font-semibold text-gray-700">Fecha Fin</label>
+              <DatePicker value={filters.endDate} onChange={v => setFilters({ ...filters, endDate: v })} className="w-[150px]" />
             </div>
             <div className="grid gap-1.5">
               <label htmlFor="filter-start-time" className="text-xs font-semibold text-gray-700">Hora Inicio</label>
