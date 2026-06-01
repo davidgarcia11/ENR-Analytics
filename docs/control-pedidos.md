@@ -170,24 +170,24 @@ showStatus{}             → (filtro cliente, instantáneo, sin Filtrar)
 #### Layout visual
 
 ```
-┌─ Panel de Filtros ──────────────────────────────────────┐
-│                                                          │
-│  ─ Filtros ──────────────────────────────────────────   │
-│  Estado:  [● Pendiente] [● En Progreso] [● Completado]  │
-│  Planta:  [Todas ▾]                                      │
-│  Artículo: [Seleccionar ▾]   Destino: [Seleccionar ▾]   │
-│                                                          │
-│  ─ Búsqueda ────────────────────────────────────────    │
-│  Nº pedido: [ej: *12345 ó 12345*     ]                  │
-│  Ref. cliente: [ej: *REF ó REF*      ]                  │
-│                                                          │
-│  ─ Fechas ──────────────────────────────────────────    │
-│  F.Carga:   [dd/mm/aaaa] → [dd/mm/aaaa]                 │
-│  F.Entrega: [dd/mm/aaaa] → [dd/mm/aaaa]                 │
-│                                                          │
-│         [💾 Guardar] [Filtrar 🔍] [Excel ↓] [✕ Limpiar] │
-│         [Presets ▾]                                      │
-└──────────────────────────────────────────────────────────┘
+┌─ Panel de Filtros ──────────────────────────────────────────────────┐
+│                                                                      │
+│  ─ Filtros ──────────────────────────────────────────────────────   │
+│  Estado:   [● Pendiente] [● En Progreso] [● Completado]             │
+│  Planta:   [Todas ▾]                                                 │
+│  Artículo: [Seleccionar ▾]   Destino:  [Seleccionar ▾]              │
+│  Cliente:  [Seleccionar ▾]   Familia:  [Seleccionar ▾]              │
+│                                                                      │
+│  ─ Búsqueda ──────────────────────────────────────────────────────  │
+│  Nº pedido: [ej: *12345 ó 12345*]  Ref. cliente: [ej: *REF ó REF*] │
+│                                                                      │
+│  ─ Fechas ────────────────────────────────────────────────────────  │
+│  F.Carga:   [dd/mm/aaaa ×] → [dd/mm/aaaa ×]  (puede dejarse vacía) │
+│  F.Entrega: [dd/mm/aaaa ×] → [dd/mm/aaaa ×]                        │
+│                                                                      │
+│  [Filtrar 🔍] [Excel ↓] [✕ Limpiar] [Presets ▾] [💾 Guardar]       │
+│  ⚠ "Debes rellenar al menos un rango de fechas" (si ambos vacíos)   │
+└──────────────────────────────────────────────────────────────────────┘
 
 ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐
 │  Total   │ │Completad.│ │En Progr. │ │Pendientes│
