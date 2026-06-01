@@ -199,7 +199,7 @@ export default function ComparativaSeresPage() {
                             {/* Nombre Destino F0111 */}
                             <div className="grid gap-1.5">
                                 <label className="text-xs font-semibold text-gray-700">
-                                    Nombre Destino (F0111)
+                                    Nombre Destino
                                     {availableDestinoMlnm.length > 0 && (
                                         <span className="ml-1 text-slate-400 font-normal">({availableDestinoMlnm.length})</span>
                                     )}
