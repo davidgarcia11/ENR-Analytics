@@ -280,7 +280,7 @@ export default function ComparativaSeresPage() {
                                 <AlertTriangle className="h-4 w-4 text-amber-500" />
                             </CardHeader>
                             <CardContent>
-                                <div className="text-2xl font-black text-amber-600">{result.resumen.solo_en_seres.toLocaleString('es-ES')}</div>
+                                <div className="text-2xl font-black text-amber-600">{tabData.solo_seres.length.toLocaleString('es-ES')}</div>
                                 <p className="text-xs text-gray-500 font-medium">no están en JDE</p>
                             </CardContent>
                         </Card>
@@ -291,7 +291,7 @@ export default function ComparativaSeresPage() {
                                 <AlertTriangle className="h-4 w-4 text-red-500" />
                             </CardHeader>
                             <CardContent>
-                                <div className="text-2xl font-black text-red-600">{result.resumen.solo_en_jde.toLocaleString('es-ES')}</div>
+                                <div className="text-2xl font-black text-red-600">{tabData.solo_jde.length.toLocaleString('es-ES')}</div>
                                 <p className="text-xs text-gray-500 font-medium">no están en SERES</p>
                             </CardContent>
                         </Card>
@@ -302,7 +302,7 @@ export default function ComparativaSeresPage() {
                                 <CheckCircle2 className="h-4 w-4 text-green-500" />
                             </CardHeader>
                             <CardContent>
-                                <div className="text-2xl font-black text-green-600">{result.resumen.en_ambos.toLocaleString('es-ES')}</div>
+                                <div className="text-2xl font-black text-green-600">{tabData.ambos.length.toLocaleString('es-ES')}</div>
                                 <p className="text-xs text-gray-500 font-medium">sincronizados</p>
                             </CardContent>
                         </Card>
@@ -322,7 +322,7 @@ export default function ComparativaSeresPage() {
                             >
                                 Solo en SERES
                                 <span className="ml-2 bg-amber-100 text-amber-700 text-xs font-bold px-1.5 py-0.5 rounded-full">
-                                    {result.resumen.solo_en_seres}
+                                    {tabData.solo_seres.length}
                                 </span>
                             </button>
                             <button
@@ -332,7 +332,7 @@ export default function ComparativaSeresPage() {
                             >
                                 Solo en JDE
                                 <span className="ml-2 bg-red-100 text-red-700 text-xs font-bold px-1.5 py-0.5 rounded-full">
-                                    {result.resumen.solo_en_jde}
+                                    {tabData.solo_jde.length}
                                 </span>
                             </button>
                             <button
@@ -342,7 +342,7 @@ export default function ComparativaSeresPage() {
                             >
                                 En ambos
                                 <span className="ml-2 bg-green-100 text-green-700 text-xs font-bold px-1.5 py-0.5 rounded-full">
-                                    {result.resumen.en_ambos}
+                                    {tabData.ambos.length}
                                 </span>
                             </button>
                         </div>

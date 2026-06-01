@@ -101,6 +101,7 @@ export default function PreparacionPedidos() {
     startDate: todayStr, endDate: todayStr,
     deliveryStartDate: '', deliveryEndDate: '',
   })
+  const [dateError, setDateError] = useState('')
 
   // --- FILTROS CLIENTE (se aplican al pulsar "Filtrar") ---
   const [showStatus, setShowStatus] = useState({ pendiente: true, en_progreso: true, completado: true })
@@ -160,11 +161,7 @@ export default function PreparacionPedidos() {
     return Array.from(map.values()).sort((a, b) => a.description.localeCompare(b.description))
   }, [orders])
 
-  const availableFamilia = useMemo(() => {
-    const presentCodes = new Set<string>()
-    orders.forEach(o => o.articles.forEach(a => { if (a.familia) presentCodes.add(a.familia) }))
-    return allFamilias.filter(f => presentCodes.has(f.id))
-  }, [orders, allFamilias])
+  const availableFamilia = allFamilias
 
   const filteredOrders = useMemo(() => {
     const anyStatusActive = Object.values(showStatus).some(Boolean)
@@ -283,6 +280,7 @@ export default function PreparacionPedidos() {
     setRefClienteSearch('');              setAppliedRefClienteSearch('')
     setSelectedDestinoMlnm([]);           setAppliedDestinoMlnm([])
     setSelectedFamilia([]);               setAppliedFamilia([])
+    setDateError('')
     setExpandedOrders(new Set())
     setExpandedArticles(new Set())
     setOrders([])
@@ -291,6 +289,13 @@ export default function PreparacionPedidos() {
   }
 
   const applyFilters = () => {
+    const cargaOk = !!(filters.startDate && filters.endDate)
+    const entregaOk = !!(filters.deliveryStartDate && filters.deliveryEndDate)
+    if (!cargaOk && !entregaOk) {
+      setDateError('Debes rellenar al menos un rango de fechas (Carga o Entrega).')
+      return
+    }
+    setDateError('')
     setExpandedOrders(new Set())
     setExpandedArticles(new Set())
     fetchData()
@@ -703,7 +708,10 @@ export default function PreparacionPedidos() {
           <div className="border-t border-gray-100" />
 
           {/* Acciones */}
-          <div className="flex flex-wrap items-end gap-3 justify-end">
+          <div className="flex flex-wrap items-center gap-3 justify-end">
+            {dateError && (
+              <p className="text-xs text-red-600 font-medium flex-1 text-right">{dateError}</p>
+            )}
             <Button
               id="ped-filtrar"
               onClick={applyFilters}
