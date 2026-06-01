@@ -73,11 +73,17 @@ dashboard/
 │   └── utils.ts                  ← Funciones auxiliares (fechas, cantidades, clases CSS)
 │
 ├── components/                   ← Componentes React reutilizables
-│   ├── ArticleMultiSelect.tsx    ← Desplegable multi-selección con búsqueda (aria-label en botón combobox, input búsqueda y acciones)
-│   └── ui/                       ← Componentes de interfaz base (botón, card, tabla, input)
+│   ├── ArticleMultiSelect.tsx    ← Desplegable multi-selección con búsqueda
+│   ├── DatePicker.tsx            ← Selector de fecha (Popover + Calendar + botón limpiar)
+│   ├── FilterPanel.tsx           ← Panel de filtros del dashboard de producción
+│   ├── Navbar.tsx                ← Barra de navegación compartida
+│   ├── SingleSelect.tsx          ← Variante de selección única de ArticleMultiSelect
+│   └── ui/                       ← Componentes de interfaz base (estilo shadcn)
 │       ├── button.tsx
+│       ├── calendar.tsx          ← Calendar shadcn (react-day-picker v10)
 │       ├── card.tsx
 │       ├── input.tsx
+│       ├── popover.tsx           ← Popover Radix con Portal
 │       └── table.tsx
 │
 └── app/                          ← Rutas de Next.js (App Router)
@@ -526,6 +532,8 @@ El JSON varía según el panel. Ejemplos:
   "showStatus": { "pendiente": true, "en_progreso": true, "completado": false },
   "selectedArticles": ["0001234567"],
   "selectedDestinos": ["1234"],
+  "selectedDestinoMlnm": [],
+  "selectedFamilia": ["01"],
   "pedidoSearch": "",
   "refClienteSearch": ""
 }
