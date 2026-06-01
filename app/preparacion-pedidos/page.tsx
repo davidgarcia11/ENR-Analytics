@@ -383,7 +383,7 @@ export default function PreparacionPedidos() {
           'Ref. Cliente':     order.customerRef || '',
           'Nº Destino':       order.shipToNum   || '',
           'Desc. Destino':    order.shipToDesc   || '',
-          'Nombre Destino':   order.shipToMlnm   || '',
+          'Cliente':          order.shipToMlnm   || '',
           'Nº Comprador':     order.soldToNum    || '',
           'Desc. Comprador':  order.soldToDesc   || '',
           'Fecha Carga':      order.loadDate     ? new Date(order.loadDate).toLocaleDateString('es-ES')    : '',
@@ -617,10 +617,10 @@ export default function PreparacionPedidos() {
           {/* Sección 2b: Filtros desplegables adicionales */}
           <div className="flex flex-wrap items-end gap-3">
 
-            {/* Nombre Destino F0111 */}
+            {/* Cliente (F0111.WWMLNM) */}
             <div className="grid gap-1.5">
               <label className="text-xs font-semibold text-gray-700">
-                Nombre Destino
+                Cliente
                 {availableDestinoMlnm.length > 0 && (
                   <span className="ml-1 text-slate-400 font-normal">({availableDestinoMlnm.length})</span>
                 )}
@@ -630,7 +630,7 @@ export default function PreparacionPedidos() {
                   articles={availableDestinoMlnm}
                   selected={selectedDestinoMlnm}
                   onChange={setSelectedDestinoMlnm}
-                  label="Nombre Destino"
+                  label="Cliente"
                   showId={false}
                 />
               </div>
@@ -826,7 +826,12 @@ export default function PreparacionPedidos() {
                       <div className="text-[11px] font-normal text-gray-400">Ref. Cliente</div>
                     </div>
                   </TableHead>
-                  <TableHead className="font-bold text-gray-700">Destino</TableHead>
+                  <TableHead className="font-bold text-gray-700">
+                    <div className="leading-tight">
+                      <div>Destino</div>
+                      <div className="text-[11px] font-normal text-gray-400">Cliente</div>
+                    </div>
+                  </TableHead>
                   <TableHead className="font-bold text-gray-700">Fecha Carga</TableHead>
                   <TableHead className="font-bold text-gray-700">Fecha Entrega</TableHead>
                   <TableHead className="font-bold text-gray-700">Planta</TableHead>
@@ -856,14 +861,14 @@ export default function PreparacionPedidos() {
                           )}
                         </div>
                       </TableCell>
-                      <TableCell className="text-gray-700">
+                      <TableCell className="font-bold text-gray-900">
                         <div className="leading-tight">
-                          <div className="text-sm font-medium">{order.shipToDesc || '—'}</div>
-                          {order.shipToMlnm && order.shipToMlnm !== order.shipToDesc && (
-                            <div className="text-[11px] text-gray-500">{order.shipToMlnm}</div>
+                          <div>{order.shipToDesc || '—'}</div>
+                          {order.shipToMlnm && (
+                            <div className="text-[11px] font-normal text-gray-400 font-mono">{order.shipToMlnm}</div>
                           )}
                           {order.shipToNum && (
-                            <div className="text-[11px] text-gray-400 font-mono">{order.shipToNum}</div>
+                            <div className="text-[11px] font-normal text-gray-400 font-mono">{order.shipToNum}</div>
                           )}
                         </div>
                       </TableCell>

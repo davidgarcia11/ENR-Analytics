@@ -196,10 +196,10 @@ export default function ComparativaSeresPage() {
                                 </div>
                             </div>
 
-                            {/* Nombre Destino F0111 */}
+                            {/* Cliente (F0111.WWMLNM) */}
                             <div className="grid gap-1.5">
                                 <label className="text-xs font-semibold text-gray-700">
-                                    Nombre Destino
+                                    Cliente
                                     {availableDestinoMlnm.length > 0 && (
                                         <span className="ml-1 text-slate-400 font-normal">({availableDestinoMlnm.length})</span>
                                     )}
@@ -209,7 +209,7 @@ export default function ComparativaSeresPage() {
                                         articles={availableDestinoMlnm}
                                         selected={selectedDestinoMlnm}
                                         onChange={setSelectedDestinoMlnm}
-                                        label="Nombre Destino"
+                                        label="Cliente"
                                         showId={false}
                                     />
                                 </div>
@@ -380,7 +380,7 @@ export default function ComparativaSeresPage() {
                                             <>
                                                 <TableHead className="font-bold text-gray-700">Nº Destino</TableHead>
                                                 <TableHead className="font-bold text-gray-700">Desc. Destino</TableHead>
-                                                <TableHead className="font-bold text-gray-700">Nombre Destino</TableHead>
+                                                <TableHead className="font-bold text-gray-700">Cliente</TableHead>
                                                 <TableHead className="font-bold text-gray-700">Nº Comprador</TableHead>
                                                 <TableHead className="font-bold text-gray-700">Desc. Comprador</TableHead>
                                             </>
