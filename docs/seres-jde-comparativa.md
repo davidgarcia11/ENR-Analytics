@@ -102,14 +102,16 @@ Tabla: `F47011` (EDI Inbound — registro de pedidos recibidos por intercambio e
 
 ```sql
 SELECT TRIM(A.SYVR01) AS REFERENCIA,
-       A.SYTRDJ      AS FECHA_JDE,
-       A.SYSHAN      AS SHAN_NUM,
-       TRIM(B.ABALPH) AS SHAN_DESC,
-       A.SYURAB      AS URAB_NUM,
-       TRIM(C.ABALPH) AS URAB_DESC
+       A.SYTRDJ        AS FECHA_JDE,
+       A.SYSHAN        AS SHAN_NUM,
+       TRIM(B.ABALPH)  AS SHAN_DESC,
+       TRIM(D.WWMLNM)  AS SHAN_MLNM,
+       A.SYURAB        AS URAB_NUM,
+       TRIM(C.ABALPH)  AS URAB_DESC
 FROM F47011 A
 LEFT JOIN F0101 B ON B.ABAN8 = A.SYSHAN
 LEFT JOIN F0101 C ON C.ABAN8 = A.SYURAB
+LEFT JOIN (SELECT WWAN8, MIN(TRIM(WWMLNM)) AS WWMLNM FROM F0111 GROUP BY WWAN8) D ON D.WWAN8 = A.SYSHAN
 WHERE A.SYTRDJ >= :fechaDesde
   AND TRIM(A.SYVR01) IS NOT NULL
 ORDER BY A.SYTRDJ DESC
@@ -132,6 +134,15 @@ ORDER BY A.SYTRDJ DESC
 |-------|-------------|
 | `ABAN8` | Número de dirección (clave primaria) |
 | `ABALPH` | Nombre / descripción (Alpha Name) |
+
+**Tabla F0111** (Who's Who — nombres de mailing):
+
+| Campo | Descripción |
+|-------|-------------|
+| `WWAN8` | Número de dirección (FK a F0101.ABAN8) |
+| `WWMLNM` | Nombre de mailing. Puede tener múltiples filas por `WWAN8` — se agrupa con `MIN` en subconsulta para evitar duplicados en el JOIN |
+
+> `SHAN_MLNM` devuelve el nombre de mailing del destino (F0111.WWMLNM) distinto de `SHAN_DESC` (F0101.ABALPH). Ambos pueden coincidir o diferir según cómo esté configurado el address book.
 
 **Formato CYYDDD de `SYTRDJ`:**
 
@@ -180,6 +191,8 @@ const enAmbos     = seresPedidos
 
 **Parámetro:** `?days=N` (0 a 90 días, **default 0 = Hoy**). El panel ofrece botones de selección rápida: Hoy / 1 / 3 / 7 / 14 / 30 días.
 
+**Filtro Cliente:** desplegable multi-select derivado de los valores `WWMLNM` (F0111) presentes en el resultado cargado. Se aplica en cliente sobre las pestañas "Solo en JDE" y "En ambos" (la pestaña "Solo en SERES" no tiene datos JDE, no se puede filtrar por este campo). Las tarjetas KPI y los badges de las pestañas muestran los conteos **del resultado filtrado**, no del total bruto de la consulta.
+
 > **`days=0` ("Hoy"):** caso especial. SERES filtra por Fecha Doc. (cuando se creó el pedido en origen), que puede ser el día anterior incluso si llegó hoy. Para evitar falsos negativos, cuando `days=0` la API pide 1 día extra de margen a SERES y luego filtra los resultados por **Fecha Estado** (la fecha real de recepción en SERES). En JDE simplemente no se aplica el `setDate` (se usa `since = hoy`). 
 
 **Paralelismo:** el scraping de SERES y la consulta a JDE se lanzan en paralelo con `Promise.all`.
@@ -224,8 +237,11 @@ const enAmbos     = seresPedidos
 | Fecha + Hora | ✓ | ✓ | ✓ |
 | **Cliente** (Cód. + Nombre Interlocutor SERES) | ✓ | — | — |
 | Tipo | ✓ | — | — |
-| Destino `SYSHAN` (nº + nombre) | — | ✓ | ✓ |
-| Vendido a `SYURAB` (nº + nombre) | — | ✓ | ✓ |
+| Nº Destino `SYSHAN` | — | ✓ | ✓ |
+| Desc. Destino (`ABALPH` de F0101) | — | ✓ | ✓ |
+| **Cliente** (`WWMLNM` de F0111) | — | ✓ | ✓ |
+| Nº Comprador `SYURAB` | — | ✓ | ✓ |
+| Desc. Comprador (`ABALPH` de F0101) | — | ✓ | ✓ |
 
 - **Referencia** — número de pedido (fuente monospace)
 - **Fecha** — fecha del documento (SERES) o `SYTRDJ` convertida (JDE), formato `DD/MM/YY`. Los registros SERES también muestran la **hora** (`HH:MM:SS`) en gris junto a la fecha

@@ -61,8 +61,10 @@ Devuelve la lista de plantas desde Oracle (tabla F0006, filtro `MCSTYL = 'BP'`).
 **Lógica:**
 1. Carga nombres de planta desde F0006 (`MCSTYL = 'BP'`) para resolver `plantName` dinámicamente
 2. Consulta F4211 excluyendo líneas cerradas (`SDNXTR != 999`)
-   - JOIN con F0101 aliased `B` para resolver nombre de destino (`SDSHAN → ABALPH`)
-   - JOIN con F0101 aliased `C` para resolver nombre de comprador (`SDAN8 → ABALPH`)
+   - JOIN con F0101 aliased `B` → nombre del destino (`SDSHAN → ABALPH`)
+   - JOIN con F0101 aliased `C` → nombre del comprador (`SDAN8 → ABALPH`)
+   - JOIN con F0111 subconsulta `D` → nombre de mailing del destino (`SDSHAN → WWMLNM`). Subconsulta agrupada para evitar duplicados: `SELECT WWAN8, MIN(TRIM(WWMLNM)) FROM F0111 GROUP BY WWAN8`
+   - JOIN con F4101 aliased `E` → familia del artículo (`SDITM → IMSRP2`)
 3. Agrupa por pedido (`SDDOCO`) y por artículo (`SDAITM`)
 4. Clasifica cada línea como asignada (tiene `SDLOTN`) o pendiente (sin `SDLOTN`)
 5. Suma `SDUORG/100` por artículo: `totalOrdered`, `totalAssigned` (con lote), `totalPending` (sin lote)
@@ -82,11 +84,13 @@ Devuelve la lista de plantas desde Oracle (tabla F0006, filtro `MCSTYL = 'BP'`).
     "plantName": "Funes",
     "shipToNum": 1234,
     "shipToDesc": "DISTRIBUCIONES EJEMPLO S.L.",
+    "shipToMlnm": "DIST. EJEMPLO (NOMBRE MAILING)",
     "soldToNum": 5678,
     "soldToDesc": "CADENA SUPERMERCADOS S.A.",
     "articles": [{
       "itemNumber": "0001234567",
       "description": "PRODUCTO X",
+      "familia": "01",
       "totalOrdered": 500,
       "totalAssigned": 300,
       "totalPending": 200,
@@ -136,6 +140,8 @@ Devuelve la lista de plantas desde Oracle (tabla F0006, filtro `MCSTYL = 'BP'`).
 | `F0006` | — | — | Nombres de plantas (carga inicial, no en SELECT principal) |
 | `F0101` | `B` | `B.ABAN8 = A.SDSHAN` | Address Book — nombre del destino (`SHAN_DESC`) |
 | `F0101` | `C` | `C.ABAN8 = A.SDAN8` | Address Book — nombre del comprador (`AN8_DESC`) |
+| `F0111` | `D` (subconsulta) | `D.WWAN8 = A.SDSHAN` | Who's Who — nombre de mailing del destino (`SHAN_MLNM` / `WWMLNM`). Se agrupa por `WWAN8` con `MIN` para evitar duplicados |
+| `F4101` | `E` | `E.IMITM = A.SDITM` | Item Master — familia del artículo (`FAMILIA` / `IMSRP2`) |
 
 ---
 
@@ -144,18 +150,22 @@ Devuelve la lista de plantas desde Oracle (tabla F0006, filtro `MCSTYL = 'BP'`).
 Client Component. Arquitectura de estado dividida en **estado seleccionado** (UI en tiempo real) y **estado aplicado** (efectivo al pulsar Filtrar):
 
 ```
-selectedPlants[]       → appliedPlants    (enviado a API al filtrar)
-selectedArticles[]     → appliedArticles  (filtro cliente, aplicado al filtrar)
-selectedDestinos[]     → appliedDestinos  (filtro cliente, aplicado al filtrar)
-pedidoSearch           → appliedPedidoSearch    (filtro cliente)
-refClienteSearch       → appliedRefClienteSearch (filtro cliente)
-showStatus{}           → (filtro cliente, instantáneo, no requiere Filtrar)
+selectedPlants[]         → enviado a API al filtrar
+selectedArticles[]       → appliedArticles   (filtro cliente)
+selectedDestinos[]       → appliedDestinos   (filtro cliente — por nº dirección)
+selectedDestinoMlnm[]    → appliedDestinoMlnm (filtro cliente — por nombre mailing F0111)
+selectedFamilia[]        → appliedFamilia    (filtro cliente — por IMSRP2 de F4101)
+pedidoSearch             → appliedPedidoSearch    (filtro cliente, wildcard *)
+refClienteSearch         → appliedRefClienteSearch (filtro cliente, wildcard *)
+showStatus{}             → (filtro cliente, instantáneo, sin Filtrar)
 ```
 
 **Filtrado cliente vs servidor:**
 - Los filtros de **planta y fechas** van al servidor (parámetros en la URL de fetch)
-- Los filtros de **artículo, destino, búsqueda libre y estado** son cliente (useMemo sobre los datos ya cargados, se aplican al pulsar Filtrar)
+- Los filtros de **artículo, destino, cliente, familia, búsqueda libre y estado** son cliente (useMemo sobre los datos ya cargados, se aplican al pulsar Filtrar)
 - El estado (`showStatus`) es instantáneo: cambia sin necesidad de pulsar Filtrar
+
+**Validación de fechas:** si se pulsa Filtrar con ambos rangos de fecha vacíos (carga y entrega), se muestra el mensaje `"Debes rellenar al menos un rango de fechas (Carga o Entrega)"` y no se hace la consulta. La fecha de carga puede dejarse vacía individualmente siempre que la fecha de entrega esté completa, y viceversa.
 
 #### Layout visual
 
@@ -224,7 +234,11 @@ Las filas de lote muestran el identificador de palet con el prefijo `↳` en la 
 
 **Artículo:** `ArticleMultiSelect` con `showId={true}`. Lista dinámica calculada a partir de los artículos presentes en los pedidos cargados (`order.articles[].itemNumber + description`).
 
-**Destino:** `ArticleMultiSelect` con `showId={true}`. Lista dinámica calculada a partir de `order.shipToNum + shipToDesc`.
+**Destino:** `ArticleMultiSelect` con `showId={true}`. Lista dinámica calculada a partir de `order.shipToNum + shipToDesc`. La columna de la tabla muestra también el nombre de mailing (`shipToMlnm`) debajo del nombre principal, con el mismo estilo visual que Ref. Cliente en la columna Nº Pedido.
+
+**Cliente:** `ArticleMultiSelect` con `showId={false}`. Lista dinámica de valores `WWMLNM` de F0111 presentes en los pedidos cargados. Filtra por el nombre de mailing del destino.
+
+**Familia:** `ArticleMultiSelect` con `showId={true}`. Opciones cargadas desde `/api/categories?field=srp2` al montar el componente (todas las familias disponibles desde el inicio, igual que en el panel de producción). Filtra pedidos donde al menos un artículo pertenece a la familia seleccionada.
 
 **Búsqueda con comodín (`*`):**
 
@@ -263,9 +277,13 @@ const filteredOrders = useMemo(() => {
         !matchesWildcard(String(order.orderNumber), appliedPedidoSearch.trim())) return false
     if (appliedRefClienteSearch &&
         !matchesWildcard(order.customerRef, appliedRefClienteSearch.trim())) return false
+    if (appliedDestinoMlnm.length > 0 &&
+        !appliedDestinoMlnm.includes(order.shipToMlnm)) return false
+    if (appliedFamilia.length > 0 &&
+        !order.articles.some(a => appliedFamilia.includes(a.familia))) return false
     return true
   })
-}, [orders, showStatus, appliedArticles, appliedDestinos, appliedPedidoSearch, appliedRefClienteSearch])
+}, [orders, showStatus, appliedArticles, appliedDestinos, appliedPedidoSearch, appliedRefClienteSearch, appliedDestinoMlnm, appliedFamilia])
 
 const deferredOrders = useDeferredValue(filteredOrders) // evita bloquear UI al filtrar listas grandes
 ```
@@ -288,6 +306,8 @@ Sistema idéntico a producción y caducados. Usa `screen='pedidos'` para aislar 
   "showStatus": { "pendiente": true, "en_progreso": true, "completado": false },
   "selectedArticles": ["0001234567"],
   "selectedDestinos": ["1234"],
+  "selectedDestinoMlnm": [],
+  "selectedFamilia": ["01"],
   "pedidoSearch": "",
   "refClienteSearch": ""
 }
@@ -301,7 +321,7 @@ Pendientes primero, En Progreso segundo, Completados último.
 
 #### Export Excel
 
-Incluye todas las líneas de los pedidos filtrados con: Pedido, Ref. Cliente, Nº Destino, Desc. Destino, Nº Comprador, Desc. Comprador, Fecha Carga, Fecha Entrega, Planta, Artículo, Descripción, Línea, Cant. Pedida, Lote/Palet, Asignado (SÍ/NO), Totales por artículo, % Progreso, UM, Estado.
+Incluye todas las líneas de los pedidos filtrados con: Pedido, Ref. Cliente, Nº Destino, Desc. Destino, Cliente, Nº Comprador, Desc. Comprador, Fecha Carga, Fecha Entrega, Planta, Artículo, Descripción, Línea, Cant. Pedida, Lote/Palet, Asignado (SÍ/NO), Totales por artículo, % Progreso, UM, Estado.
 
 ---
 

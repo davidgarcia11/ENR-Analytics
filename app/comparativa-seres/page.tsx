@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Loader2, Search, Download, X, AlertTriangle, CheckCircle2, ArrowLeftRight } from "lucide-react"
 import Navbar from "@/components/Navbar"
+import { ArticleMultiSelect } from "@/components/ArticleMultiSelect"
 import { useRouter } from "next/navigation"
 import * as XLSX from 'xlsx'
 
@@ -20,6 +21,7 @@ interface Pedido {
     clienteNombre?: string | null;
     shanNum?: number | null;
     shanDesc?: string | null;
+    shanMlnm?: string | null;
     urabNum?: number | null;
     urabDesc?: string | null;
 }
@@ -57,6 +59,7 @@ export default function ComparativaSeresPage() {
     const [error, setError] = useState<string | null>(null)
     const [days, setDays] = useState(0)
     const [activeTab, setActiveTab] = useState<Tab>('solo_seres')
+    const [selectedDestinoMlnm, setSelectedDestinoMlnm] = useState<string[]>([])
 
     // Comprobar sesión al montar
     useEffect(() => {
@@ -110,6 +113,7 @@ export default function ComparativaSeresPage() {
         setResult(null)
         setError(null)
         setDays(0)
+        setSelectedDestinoMlnm([])
     }
 
     const exportToExcel = () => {
@@ -133,8 +137,24 @@ export default function ComparativaSeresPage() {
         XLSX.writeFile(wb, `Comparativa_SERES_JDE_${new Date().toISOString().split('T')[0]}.xlsx`)
     }
 
+    const filterByMlnm = (rows: Pedido[]) => {
+        if (selectedDestinoMlnm.length === 0) return rows
+        return rows.filter(p => selectedDestinoMlnm.includes(p.shanMlnm ?? ''))
+    }
+
+    const availableDestinoMlnm = result
+        ? Array.from(new Set([
+            ...result.solo_en_jde.map(p => p.shanMlnm ?? ''),
+            ...result.en_ambos.map(p => p.shanMlnm ?? ''),
+          ].filter(Boolean))).sort().map(v => ({ id: v, description: v }))
+        : []
+
     const tabData: Record<Tab, Pedido[]> = result
-        ? { solo_seres: result.solo_en_seres, solo_jde: result.solo_en_jde, ambos: result.en_ambos }
+        ? {
+            solo_seres: result.solo_en_seres,
+            solo_jde:   filterByMlnm(result.solo_en_jde),
+            ambos:      filterByMlnm(result.en_ambos),
+          }
         : { solo_seres: [], solo_jde: [], ambos: [] }
 
     const dayOptions = [
@@ -173,6 +193,25 @@ export default function ComparativaSeresPage() {
                                             {opt.label}
                                         </button>
                                     ))}
+                                </div>
+                            </div>
+
+                            {/* Cliente (F0111.WWMLNM) */}
+                            <div className="grid gap-1.5">
+                                <label className="text-xs font-semibold text-gray-700">
+                                    Cliente
+                                    {availableDestinoMlnm.length > 0 && (
+                                        <span className="ml-1 text-slate-400 font-normal">({availableDestinoMlnm.length})</span>
+                                    )}
+                                </label>
+                                <div className="w-[220px]">
+                                    <ArticleMultiSelect
+                                        articles={availableDestinoMlnm}
+                                        selected={selectedDestinoMlnm}
+                                        onChange={setSelectedDestinoMlnm}
+                                        label="Cliente"
+                                        showId={false}
+                                    />
                                 </div>
                             </div>
                         </div>
@@ -241,7 +280,7 @@ export default function ComparativaSeresPage() {
                                 <AlertTriangle className="h-4 w-4 text-amber-500" />
                             </CardHeader>
                             <CardContent>
-                                <div className="text-2xl font-black text-amber-600">{result.resumen.solo_en_seres.toLocaleString('es-ES')}</div>
+                                <div className="text-2xl font-black text-amber-600">{tabData.solo_seres.length.toLocaleString('es-ES')}</div>
                                 <p className="text-xs text-gray-500 font-medium">no están en JDE</p>
                             </CardContent>
                         </Card>
@@ -252,7 +291,7 @@ export default function ComparativaSeresPage() {
                                 <AlertTriangle className="h-4 w-4 text-red-500" />
                             </CardHeader>
                             <CardContent>
-                                <div className="text-2xl font-black text-red-600">{result.resumen.solo_en_jde.toLocaleString('es-ES')}</div>
+                                <div className="text-2xl font-black text-red-600">{tabData.solo_jde.length.toLocaleString('es-ES')}</div>
                                 <p className="text-xs text-gray-500 font-medium">no están en SERES</p>
                             </CardContent>
                         </Card>
@@ -263,7 +302,7 @@ export default function ComparativaSeresPage() {
                                 <CheckCircle2 className="h-4 w-4 text-green-500" />
                             </CardHeader>
                             <CardContent>
-                                <div className="text-2xl font-black text-green-600">{result.resumen.en_ambos.toLocaleString('es-ES')}</div>
+                                <div className="text-2xl font-black text-green-600">{tabData.ambos.length.toLocaleString('es-ES')}</div>
                                 <p className="text-xs text-gray-500 font-medium">sincronizados</p>
                             </CardContent>
                         </Card>
@@ -283,7 +322,7 @@ export default function ComparativaSeresPage() {
                             >
                                 Solo en SERES
                                 <span className="ml-2 bg-amber-100 text-amber-700 text-xs font-bold px-1.5 py-0.5 rounded-full">
-                                    {result.resumen.solo_en_seres}
+                                    {tabData.solo_seres.length}
                                 </span>
                             </button>
                             <button
@@ -293,7 +332,7 @@ export default function ComparativaSeresPage() {
                             >
                                 Solo en JDE
                                 <span className="ml-2 bg-red-100 text-red-700 text-xs font-bold px-1.5 py-0.5 rounded-full">
-                                    {result.resumen.solo_en_jde}
+                                    {tabData.solo_jde.length}
                                 </span>
                             </button>
                             <button
@@ -303,7 +342,7 @@ export default function ComparativaSeresPage() {
                             >
                                 En ambos
                                 <span className="ml-2 bg-green-100 text-green-700 text-xs font-bold px-1.5 py-0.5 rounded-full">
-                                    {result.resumen.en_ambos}
+                                    {tabData.ambos.length}
                                 </span>
                             </button>
                         </div>
@@ -341,6 +380,7 @@ export default function ComparativaSeresPage() {
                                             <>
                                                 <TableHead className="font-bold text-gray-700">Nº Destino</TableHead>
                                                 <TableHead className="font-bold text-gray-700">Desc. Destino</TableHead>
+                                                <TableHead className="font-bold text-gray-700">Cliente</TableHead>
                                                 <TableHead className="font-bold text-gray-700">Nº Comprador</TableHead>
                                                 <TableHead className="font-bold text-gray-700">Desc. Comprador</TableHead>
                                             </>
@@ -372,6 +412,7 @@ export default function ComparativaSeresPage() {
                                                     <>
                                                         <TableCell className="font-mono text-sm text-gray-700">{p.shanNum ?? '-'}</TableCell>
                                                         <TableCell className="text-sm text-gray-600">{p.shanDesc ?? '-'}</TableCell>
+                                                        <TableCell className="text-sm text-gray-600">{p.shanMlnm ?? '-'}</TableCell>
                                                         <TableCell className="font-mono text-sm text-gray-700">{p.urabNum ?? '-'}</TableCell>
                                                         <TableCell className="text-sm text-gray-600">{p.urabDesc ?? '-'}</TableCell>
                                                     </>

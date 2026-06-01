@@ -40,6 +40,7 @@ interface LotDetail {
 interface ArticleGroup {
   itemNumber: string
   description: string
+  familia: string
   totalOrdered: number
   totalAssigned: number
   totalPending: number
@@ -57,6 +58,7 @@ interface Order {
   plantName: string
   shipToNum: number | null
   shipToDesc: string
+  shipToMlnm: string
   soldToNum: number | null
   soldToDesc: string
   articles: ArticleGroup[]
@@ -99,6 +101,7 @@ export default function PreparacionPedidos() {
     startDate: todayStr, endDate: todayStr,
     deliveryStartDate: '', deliveryEndDate: '',
   })
+  const [dateError, setDateError] = useState('')
 
   // --- FILTROS CLIENTE (se aplican al pulsar "Filtrar") ---
   const [showStatus, setShowStatus] = useState({ pendiente: true, en_progreso: true, completado: true })
@@ -106,10 +109,15 @@ export default function PreparacionPedidos() {
   const [appliedArticles, setAppliedArticles]     = useState<string[]>([])
   const [selectedDestinos, setSelectedDestinos]   = useState<string[]>([])
   const [appliedDestinos, setAppliedDestinos]     = useState<string[]>([])
-  const [pedidoSearch, setPedidoSearch]           = useState('')
-  const [appliedPedidoSearch, setAppliedPedidoSearch]         = useState('')
-  const [refClienteSearch, setRefClienteSearch]   = useState('')
-  const [appliedRefClienteSearch, setAppliedRefClienteSearch] = useState('')
+  const [pedidoSearch, setPedidoSearch]                         = useState('')
+  const [appliedPedidoSearch, setAppliedPedidoSearch]           = useState('')
+  const [refClienteSearch, setRefClienteSearch]                 = useState('')
+  const [appliedRefClienteSearch, setAppliedRefClienteSearch]   = useState('')
+  const [selectedDestinoMlnm, setSelectedDestinoMlnm]   = useState<string[]>([])
+  const [appliedDestinoMlnm, setAppliedDestinoMlnm]     = useState<string[]>([])
+  const [selectedFamilia, setSelectedFamilia]             = useState<string[]>([])
+  const [appliedFamilia, setAppliedFamilia]               = useState<string[]>([])
+  const [allFamilias, setAllFamilias]                     = useState<{ id: string; description: string }[]>([])
 
   // --- EXPAND / COLLAPSE ---
   const [expandedOrders, setExpandedOrders]     = useState<Set<number>>(new Set())
@@ -145,6 +153,16 @@ export default function PreparacionPedidos() {
     return Array.from(map.values()).sort((a, b) => a.description.localeCompare(b.description))
   }, [orders])
 
+  const availableDestinoMlnm = useMemo(() => {
+    const map = new Map<string, { id: string; description: string }>()
+    orders.forEach(order => {
+      if (order.shipToMlnm) map.set(order.shipToMlnm, { id: order.shipToMlnm, description: order.shipToMlnm })
+    })
+    return Array.from(map.values()).sort((a, b) => a.description.localeCompare(b.description))
+  }, [orders])
+
+  const availableFamilia = allFamilias
+
   const filteredOrders = useMemo(() => {
     const anyStatusActive = Object.values(showStatus).some(Boolean)
     return orders.filter(order => {
@@ -153,9 +171,11 @@ export default function PreparacionPedidos() {
       if (appliedDestinos.length > 0 && !appliedDestinos.includes(String(order.shipToNum ?? ''))) return false
       if (appliedPedidoSearch && !matchesWildcard(String(order.orderNumber), appliedPedidoSearch.trim())) return false
       if (appliedRefClienteSearch && !matchesWildcard(order.customerRef, appliedRefClienteSearch.trim())) return false
+      if (appliedDestinoMlnm.length > 0 && !appliedDestinoMlnm.includes(order.shipToMlnm)) return false
+      if (appliedFamilia.length > 0 && !order.articles.some(a => appliedFamilia.includes(a.familia))) return false
       return true
     })
-  }, [orders, showStatus, appliedArticles, appliedDestinos, appliedPedidoSearch, appliedRefClienteSearch])
+  }, [orders, showStatus, appliedArticles, appliedDestinos, appliedPedidoSearch, appliedRefClienteSearch, appliedDestinoMlnm, appliedFamilia])
 
   const displaySummary = useMemo<Summary>(() => ({
     totalOrders: filteredOrders.length,
@@ -171,6 +191,7 @@ export default function PreparacionPedidos() {
     checkSession()
     fetchPlants()
     fetchData()
+    fetch('/api/categories?field=srp2').then(r => r.ok ? r.json() : []).then(setAllFamilias).catch(() => {})
   }, [])
 
   useEffect(() => {
@@ -220,6 +241,8 @@ export default function PreparacionPedidos() {
     setAppliedDestinos(selectedDestinos)
     setAppliedPedidoSearch(pedidoSearch)
     setAppliedRefClienteSearch(refClienteSearch)
+    setAppliedDestinoMlnm(selectedDestinoMlnm)
+    setAppliedFamilia(selectedFamilia)
     setLoading(true)
     try {
       const params = new URLSearchParams()
@@ -253,8 +276,11 @@ export default function PreparacionPedidos() {
     setShowStatus({ pendiente: true, en_progreso: true, completado: true })
     setSelectedArticles([]);  setAppliedArticles([])
     setSelectedDestinos([]);  setAppliedDestinos([])
-    setPedidoSearch('');      setAppliedPedidoSearch('')
-    setRefClienteSearch('');  setAppliedRefClienteSearch('')
+    setPedidoSearch('');                    setAppliedPedidoSearch('')
+    setRefClienteSearch('');              setAppliedRefClienteSearch('')
+    setSelectedDestinoMlnm([]);           setAppliedDestinoMlnm([])
+    setSelectedFamilia([]);               setAppliedFamilia([])
+    setDateError('')
     setExpandedOrders(new Set())
     setExpandedArticles(new Set())
     setOrders([])
@@ -263,6 +289,13 @@ export default function PreparacionPedidos() {
   }
 
   const applyFilters = () => {
+    const cargaOk = !!(filters.startDate && filters.endDate)
+    const entregaOk = !!(filters.deliveryStartDate && filters.deliveryEndDate)
+    if (!cargaOk && !entregaOk) {
+      setDateError('Debes rellenar al menos un rango de fechas (Carga o Entrega).')
+      return
+    }
+    setDateError('')
     setExpandedOrders(new Set())
     setExpandedArticles(new Set())
     fetchData()
@@ -296,7 +329,7 @@ export default function PreparacionPedidos() {
         deliveryStartDate: filters.deliveryStartDate, deliveryEndDate: filters.deliveryEndDate,
         showStatus,
         selectedArticles, selectedDestinos,
-        pedidoSearch, refClienteSearch,
+        pedidoSearch, refClienteSearch, selectedDestinoMlnm, selectedFamilia,
       }
       const isEditing = editingPresetId !== null
       const res = await fetch(isEditing ? `/api/presets/${editingPresetId}` : '/api/presets', {
@@ -321,8 +354,10 @@ export default function PreparacionPedidos() {
     setShowStatus(f.showStatus || { pendiente: true, en_progreso: true, completado: true })
     setSelectedArticles(f.selectedArticles || [])
     setSelectedDestinos(f.selectedDestinos || [])
-    setPedidoSearch(f.pedidoSearch         || '')
-    setRefClienteSearch(f.refClienteSearch || '')
+    setPedidoSearch(f.pedidoSearch             || '')
+    setRefClienteSearch(f.refClienteSearch     || '')
+    setSelectedDestinoMlnm(f.selectedDestinoMlnm || [])
+    setSelectedFamilia(f.selectedFamilia         || [])
     setShowPresets(false)
   }
 
@@ -348,6 +383,7 @@ export default function PreparacionPedidos() {
           'Ref. Cliente':     order.customerRef || '',
           'Nº Destino':       order.shipToNum   || '',
           'Desc. Destino':    order.shipToDesc   || '',
+          'Cliente':          order.shipToMlnm   || '',
           'Nº Comprador':     order.soldToNum    || '',
           'Desc. Comprador':  order.soldToDesc   || '',
           'Fecha Carga':      order.loadDate     ? new Date(order.loadDate).toLocaleDateString('es-ES')    : '',
@@ -578,6 +614,49 @@ export default function PreparacionPedidos() {
             </div>
           </div>
 
+          {/* Sección 2b: Filtros desplegables adicionales */}
+          <div className="flex flex-wrap items-end gap-3">
+
+            {/* Cliente (F0111.WWMLNM) */}
+            <div className="grid gap-1.5">
+              <label className="text-xs font-semibold text-gray-700">
+                Cliente
+                {availableDestinoMlnm.length > 0 && (
+                  <span className="ml-1 text-slate-400 font-normal">({availableDestinoMlnm.length})</span>
+                )}
+              </label>
+              <div className="w-[220px]">
+                <ArticleMultiSelect
+                  articles={availableDestinoMlnm}
+                  selected={selectedDestinoMlnm}
+                  onChange={setSelectedDestinoMlnm}
+                  label="Cliente"
+                  showId={false}
+                />
+              </div>
+            </div>
+
+            {/* Familia */}
+            <div className="grid gap-1.5">
+              <label className="text-xs font-semibold text-gray-700">
+                Familia
+                {availableFamilia.length > 0 && (
+                  <span className="ml-1 text-slate-400 font-normal">({availableFamilia.length})</span>
+                )}
+              </label>
+              <div className="w-[220px]">
+                <ArticleMultiSelect
+                  articles={availableFamilia}
+                  selected={selectedFamilia}
+                  onChange={setSelectedFamilia}
+                  label="Familia"
+                  showId={true}
+                />
+              </div>
+            </div>
+
+          </div>
+
           {/* Sección 3: Fechas */}
           <div>
             <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">Fechas</p>
@@ -629,7 +708,10 @@ export default function PreparacionPedidos() {
           <div className="border-t border-gray-100" />
 
           {/* Acciones */}
-          <div className="flex flex-wrap items-end gap-3 justify-end">
+          <div className="flex flex-wrap items-center gap-3 justify-end">
+            {dateError && (
+              <p className="text-xs text-red-600 font-medium flex-1 text-right">{dateError}</p>
+            )}
             <Button
               id="ped-filtrar"
               onClick={applyFilters}
@@ -744,7 +826,12 @@ export default function PreparacionPedidos() {
                       <div className="text-[11px] font-normal text-gray-400">Ref. Cliente</div>
                     </div>
                   </TableHead>
-                  <TableHead className="font-bold text-gray-700">Destino</TableHead>
+                  <TableHead className="font-bold text-gray-700">
+                    <div className="leading-tight">
+                      <div>Destino</div>
+                      <div className="text-[11px] font-normal text-gray-400">Cliente</div>
+                    </div>
+                  </TableHead>
                   <TableHead className="font-bold text-gray-700">Fecha Carga</TableHead>
                   <TableHead className="font-bold text-gray-700">Fecha Entrega</TableHead>
                   <TableHead className="font-bold text-gray-700">Planta</TableHead>
@@ -774,11 +861,14 @@ export default function PreparacionPedidos() {
                           )}
                         </div>
                       </TableCell>
-                      <TableCell className="text-gray-700">
+                      <TableCell className="font-bold text-gray-900">
                         <div className="leading-tight">
-                          <div className="text-sm font-medium">{order.shipToDesc || '—'}</div>
+                          <div>{order.shipToDesc || '—'}</div>
+                          {order.shipToMlnm && (
+                            <div className="text-[11px] font-normal text-gray-400 font-mono">{order.shipToMlnm}</div>
+                          )}
                           {order.shipToNum && (
-                            <div className="text-[11px] text-gray-400 font-mono">{order.shipToNum}</div>
+                            <div className="text-[11px] font-normal text-gray-400 font-mono">{order.shipToNum}</div>
                           )}
                         </div>
                       </TableCell>
