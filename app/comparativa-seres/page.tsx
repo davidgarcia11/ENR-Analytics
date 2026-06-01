@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Loader2, Search, Download, X, AlertTriangle, CheckCircle2, ArrowLeftRight } from "lucide-react"
 import Navbar from "@/components/Navbar"
+import { ArticleMultiSelect } from "@/components/ArticleMultiSelect"
 import { useRouter } from "next/navigation"
 import * as XLSX from 'xlsx'
 
@@ -58,7 +59,7 @@ export default function ComparativaSeresPage() {
     const [error, setError] = useState<string | null>(null)
     const [days, setDays] = useState(0)
     const [activeTab, setActiveTab] = useState<Tab>('solo_seres')
-    const [destinoMlnmFilter, setDestinoMlnmFilter] = useState('')
+    const [selectedDestinoMlnm, setSelectedDestinoMlnm] = useState<string[]>([])
 
     // Comprobar sesión al montar
     useEffect(() => {
@@ -112,7 +113,7 @@ export default function ComparativaSeresPage() {
         setResult(null)
         setError(null)
         setDays(0)
-        setDestinoMlnmFilter('')
+        setSelectedDestinoMlnm([])
     }
 
     const exportToExcel = () => {
@@ -137,16 +138,16 @@ export default function ComparativaSeresPage() {
     }
 
     const filterByMlnm = (rows: Pedido[]) => {
-        if (!destinoMlnmFilter.trim()) return rows
-        const pat = destinoMlnmFilter.trim().toLowerCase()
-        const isWild = pat.includes('*')
-        return rows.filter(p => {
-            const v = (p.shanMlnm ?? '').toLowerCase()
-            if (!isWild) return v.includes(pat)
-            const esc = pat.replace(/[.+^${}()|[\]\\]/g, '\\$&')
-            return new RegExp('^' + esc.replace(/\*/g, '.*') + '$').test(v)
-        })
+        if (selectedDestinoMlnm.length === 0) return rows
+        return rows.filter(p => selectedDestinoMlnm.includes(p.shanMlnm ?? ''))
     }
+
+    const availableDestinoMlnm = result
+        ? Array.from(new Set([
+            ...result.solo_en_jde.map(p => p.shanMlnm ?? ''),
+            ...result.en_ambos.map(p => p.shanMlnm ?? ''),
+          ].filter(Boolean))).sort().map(v => ({ id: v, description: v }))
+        : []
 
     const tabData: Record<Tab, Pedido[]> = result
         ? {
@@ -197,15 +198,21 @@ export default function ComparativaSeresPage() {
 
                             {/* Nombre Destino F0111 */}
                             <div className="grid gap-1.5">
-                                <label htmlFor="seres-destino-mlnm" className="text-xs font-semibold text-gray-700">Nombre Destino (F0111)</label>
-                                <input
-                                    id="seres-destino-mlnm"
-                                    type="text"
-                                    value={destinoMlnmFilter}
-                                    onChange={e => setDestinoMlnmFilter(e.target.value)}
-                                    placeholder="ej: *MERCADONA*"
-                                    className="flex h-9 w-[200px] rounded-md border border-slate-300 bg-white px-3 py-1 text-sm shadow-sm transition-colors focus:outline-none focus:border-slate-500 font-medium placeholder:font-normal placeholder:text-slate-400"
-                                />
+                                <label className="text-xs font-semibold text-gray-700">
+                                    Nombre Destino (F0111)
+                                    {availableDestinoMlnm.length > 0 && (
+                                        <span className="ml-1 text-slate-400 font-normal">({availableDestinoMlnm.length})</span>
+                                    )}
+                                </label>
+                                <div className="w-[220px]">
+                                    <ArticleMultiSelect
+                                        articles={availableDestinoMlnm}
+                                        selected={selectedDestinoMlnm}
+                                        onChange={setSelectedDestinoMlnm}
+                                        label="Nombre Destino"
+                                        showId={false}
+                                    />
+                                </div>
                             </div>
                         </div>
                     </div>

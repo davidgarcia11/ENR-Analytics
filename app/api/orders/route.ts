@@ -37,11 +37,13 @@ export async function GET(req: NextRequest) {
              TRIM(A.SDUOM) AS SDUOM, TRIM(A.SDLOTN) AS SDLOTN, A.SDLNID,
              TRIM(A.SDVR01) AS SDVR01,
              A.SDSHAN AS SDSHAN, TRIM(B.ABALPH) AS SHAN_DESC, TRIM(D.WWMLNM) AS SHAN_MLNM,
-             A.SDAN8  AS SDAN8,  TRIM(C.ABALPH) AS AN8_DESC
+             A.SDAN8  AS SDAN8,  TRIM(C.ABALPH) AS AN8_DESC,
+             TRIM(E.IMSRP2) AS FAMILIA
       FROM F4211 A
       LEFT JOIN F0101 B ON B.ABAN8 = A.SDSHAN
       LEFT JOIN F0101 C ON C.ABAN8 = A.SDAN8
       LEFT JOIN (SELECT WWAN8, MIN(TRIM(WWMLNM)) AS WWMLNM FROM F0111 GROUP BY WWAN8) D ON D.WWAN8 = A.SDSHAN
+      LEFT JOIN F4101 E ON E.IMITM = A.SDITM
       WHERE A.SDNXTR != 999
     `;
     const binds: any = {};
@@ -149,6 +151,7 @@ export async function GET(req: NextRequest) {
         order.articleMap.set(itemNumber, {
           itemNumber,
           description: String(row.SDDSC1 || '').trim(),
+          familia: String(row.FAMILIA || '').trim(),
           totalOrdered: 0,
           totalAssigned: 0,
           totalPending: 0,

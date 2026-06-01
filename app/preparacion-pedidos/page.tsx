@@ -40,6 +40,7 @@ interface LotDetail {
 interface ArticleGroup {
   itemNumber: string
   description: string
+  familia: string
   totalOrdered: number
   totalAssigned: number
   totalPending: number
@@ -111,8 +112,11 @@ export default function PreparacionPedidos() {
   const [appliedPedidoSearch, setAppliedPedidoSearch]           = useState('')
   const [refClienteSearch, setRefClienteSearch]                 = useState('')
   const [appliedRefClienteSearch, setAppliedRefClienteSearch]   = useState('')
-  const [destinoMlnmSearch, setDestinoMlnmSearch]               = useState('')
-  const [appliedDestinoMlnmSearch, setAppliedDestinoMlnmSearch] = useState('')
+  const [selectedDestinoMlnm, setSelectedDestinoMlnm]   = useState<string[]>([])
+  const [appliedDestinoMlnm, setAppliedDestinoMlnm]     = useState<string[]>([])
+  const [selectedFamilia, setSelectedFamilia]             = useState<string[]>([])
+  const [appliedFamilia, setAppliedFamilia]               = useState<string[]>([])
+  const [allFamilias, setAllFamilias]                     = useState<{ id: string; description: string }[]>([])
 
   // --- EXPAND / COLLAPSE ---
   const [expandedOrders, setExpandedOrders]     = useState<Set<number>>(new Set())
@@ -148,6 +152,20 @@ export default function PreparacionPedidos() {
     return Array.from(map.values()).sort((a, b) => a.description.localeCompare(b.description))
   }, [orders])
 
+  const availableDestinoMlnm = useMemo(() => {
+    const map = new Map<string, { id: string; description: string }>()
+    orders.forEach(order => {
+      if (order.shipToMlnm) map.set(order.shipToMlnm, { id: order.shipToMlnm, description: order.shipToMlnm })
+    })
+    return Array.from(map.values()).sort((a, b) => a.description.localeCompare(b.description))
+  }, [orders])
+
+  const availableFamilia = useMemo(() => {
+    const presentCodes = new Set<string>()
+    orders.forEach(o => o.articles.forEach(a => { if (a.familia) presentCodes.add(a.familia) }))
+    return allFamilias.filter(f => presentCodes.has(f.id))
+  }, [orders, allFamilias])
+
   const filteredOrders = useMemo(() => {
     const anyStatusActive = Object.values(showStatus).some(Boolean)
     return orders.filter(order => {
@@ -156,10 +174,11 @@ export default function PreparacionPedidos() {
       if (appliedDestinos.length > 0 && !appliedDestinos.includes(String(order.shipToNum ?? ''))) return false
       if (appliedPedidoSearch && !matchesWildcard(String(order.orderNumber), appliedPedidoSearch.trim())) return false
       if (appliedRefClienteSearch && !matchesWildcard(order.customerRef, appliedRefClienteSearch.trim())) return false
-      if (appliedDestinoMlnmSearch && !matchesWildcard(order.shipToMlnm, appliedDestinoMlnmSearch.trim())) return false
+      if (appliedDestinoMlnm.length > 0 && !appliedDestinoMlnm.includes(order.shipToMlnm)) return false
+      if (appliedFamilia.length > 0 && !order.articles.some(a => appliedFamilia.includes(a.familia))) return false
       return true
     })
-  }, [orders, showStatus, appliedArticles, appliedDestinos, appliedPedidoSearch, appliedRefClienteSearch, appliedDestinoMlnmSearch])
+  }, [orders, showStatus, appliedArticles, appliedDestinos, appliedPedidoSearch, appliedRefClienteSearch, appliedDestinoMlnm, appliedFamilia])
 
   const displaySummary = useMemo<Summary>(() => ({
     totalOrders: filteredOrders.length,
@@ -175,6 +194,7 @@ export default function PreparacionPedidos() {
     checkSession()
     fetchPlants()
     fetchData()
+    fetch('/api/categories?field=srp2').then(r => r.ok ? r.json() : []).then(setAllFamilias).catch(() => {})
   }, [])
 
   useEffect(() => {
@@ -224,7 +244,8 @@ export default function PreparacionPedidos() {
     setAppliedDestinos(selectedDestinos)
     setAppliedPedidoSearch(pedidoSearch)
     setAppliedRefClienteSearch(refClienteSearch)
-    setAppliedDestinoMlnmSearch(destinoMlnmSearch)
+    setAppliedDestinoMlnm(selectedDestinoMlnm)
+    setAppliedFamilia(selectedFamilia)
     setLoading(true)
     try {
       const params = new URLSearchParams()
@@ -258,9 +279,10 @@ export default function PreparacionPedidos() {
     setShowStatus({ pendiente: true, en_progreso: true, completado: true })
     setSelectedArticles([]);  setAppliedArticles([])
     setSelectedDestinos([]);  setAppliedDestinos([])
-    setPedidoSearch('');            setAppliedPedidoSearch('')
-    setRefClienteSearch('');        setAppliedRefClienteSearch('')
-    setDestinoMlnmSearch('');       setAppliedDestinoMlnmSearch('')
+    setPedidoSearch('');                    setAppliedPedidoSearch('')
+    setRefClienteSearch('');              setAppliedRefClienteSearch('')
+    setSelectedDestinoMlnm([]);           setAppliedDestinoMlnm([])
+    setSelectedFamilia([]);               setAppliedFamilia([])
     setExpandedOrders(new Set())
     setExpandedArticles(new Set())
     setOrders([])
@@ -302,7 +324,7 @@ export default function PreparacionPedidos() {
         deliveryStartDate: filters.deliveryStartDate, deliveryEndDate: filters.deliveryEndDate,
         showStatus,
         selectedArticles, selectedDestinos,
-        pedidoSearch, refClienteSearch, destinoMlnmSearch,
+        pedidoSearch, refClienteSearch, selectedDestinoMlnm, selectedFamilia,
       }
       const isEditing = editingPresetId !== null
       const res = await fetch(isEditing ? `/api/presets/${editingPresetId}` : '/api/presets', {
@@ -329,7 +351,8 @@ export default function PreparacionPedidos() {
     setSelectedDestinos(f.selectedDestinos || [])
     setPedidoSearch(f.pedidoSearch             || '')
     setRefClienteSearch(f.refClienteSearch     || '')
-    setDestinoMlnmSearch(f.destinoMlnmSearch   || '')
+    setSelectedDestinoMlnm(f.selectedDestinoMlnm || [])
+    setSelectedFamilia(f.selectedFamilia         || [])
     setShowPresets(false)
   }
 
@@ -584,18 +607,49 @@ export default function PreparacionPedidos() {
                 className="flex h-9 w-[200px] rounded-md border border-slate-300 bg-white px-3 py-1 text-sm shadow-sm transition-colors focus:outline-none focus:border-slate-500 font-medium placeholder:font-normal placeholder:text-slate-400"
               />
             </div>
+          </div>
+
+          {/* Sección 2b: Filtros desplegables adicionales */}
+          <div className="flex flex-wrap items-end gap-3">
+
+            {/* Nombre Destino F0111 */}
             <div className="grid gap-1.5">
-              <label htmlFor="ped-destino-mlnm" className="text-xs font-semibold text-gray-700">Nombre Destino (F0111)</label>
-              <input
-                id="ped-destino-mlnm"
-                type="text"
-                value={destinoMlnmSearch}
-                onChange={e => setDestinoMlnmSearch(e.target.value)}
-                onKeyDown={e => e.key === 'Enter' && document.getElementById('ped-filtrar')?.click()}
-                placeholder="ej: *MERCADONA*"
-                className="flex h-9 w-[200px] rounded-md border border-slate-300 bg-white px-3 py-1 text-sm shadow-sm transition-colors focus:outline-none focus:border-slate-500 font-medium placeholder:font-normal placeholder:text-slate-400"
-              />
+              <label className="text-xs font-semibold text-gray-700">
+                Nombre Destino (F0111)
+                {availableDestinoMlnm.length > 0 && (
+                  <span className="ml-1 text-slate-400 font-normal">({availableDestinoMlnm.length})</span>
+                )}
+              </label>
+              <div className="w-[220px]">
+                <ArticleMultiSelect
+                  articles={availableDestinoMlnm}
+                  selected={selectedDestinoMlnm}
+                  onChange={setSelectedDestinoMlnm}
+                  label="Nombre Destino"
+                  showId={false}
+                />
+              </div>
             </div>
+
+            {/* Familia */}
+            <div className="grid gap-1.5">
+              <label className="text-xs font-semibold text-gray-700">
+                Familia
+                {availableFamilia.length > 0 && (
+                  <span className="ml-1 text-slate-400 font-normal">({availableFamilia.length})</span>
+                )}
+              </label>
+              <div className="w-[220px]">
+                <ArticleMultiSelect
+                  articles={availableFamilia}
+                  selected={selectedFamilia}
+                  onChange={setSelectedFamilia}
+                  label="Familia"
+                  showId={true}
+                />
+              </div>
+            </div>
+
           </div>
 
           {/* Sección 3: Fechas */}
