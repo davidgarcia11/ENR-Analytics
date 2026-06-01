@@ -27,6 +27,8 @@ app/
   api/
     production/
       route.ts                ← GET /api/production — endpoint principal de datos
+      merma-breakdown/
+        route.ts              ← GET /api/production/merma-breakdown — desglose por tipo (Q/P)
     categories/
       route.ts                ← GET /api/categories?field=X — opciones de filtros
     production-lines/
@@ -35,6 +37,8 @@ app/
 components/
   FilterPanel.tsx             ← Panel de filtros (incluye presets)
   ArticleMultiSelect.tsx      ← Desplegable multi-selección con búsqueda
+  MermaBreakdown.tsx          ← Tabla agrupada Q/P para card global y popover
+  MermaCellPopover.tsx        ← Envoltorio popover para la celda Merma de la tabla
 
 lib/
   utils.ts                    ← parseJdeDate(), parseWasOqs(), cn()
@@ -676,6 +680,17 @@ ws[cellRef].s = {
 
 El nombre del archivo incluye las fechas del filtro: `Produccion_2026-03-01_2026-03-31.xlsx`.
 
+### Hojas adicionales con el desglose de merma
+
+A partir de la feature "Desglose de merma" el `.xlsx` incluye dos hojas extra (si hay merma):
+
+| Hoja | Origen | Formato |
+|---|---|---|
+| **Merma por tipo** | `globalBreakdown` (ya cargado en pantalla) | Una fila por código de motivo: Tipo (Calidad/Proceso) · Código · Descripción · Cantidad · % sobre merma. Última fila con `TOTAL`. |
+| **Merma por artículo** | Fetch on-demand a `/api/production/merma-breakdown?mode=matrix` | **Formato largo**: una fila por par `(artículo, código)`. Columnas: Artículo · Descripción artículo · Tipo · Código · Descripción código · Cantidad. Diseñada para crear tablas dinámicas en Excel. |
+
+Detalles completos en la sección 16 (Desglose de merma por tipo).
+
 ---
 
 ## 12. La función `parseJdeDate` en detalle
@@ -861,3 +876,92 @@ La API agrupa filas SQL en memoria (varias filas por unidad → una fila agrupad
 -- Si el usuario seleccionó "Sin línea" + algunas líneas específicas:
 AND (TRIM(C.ILMCUZ) IN (:prodLine_0, ...) OR TRIM(C.ILMCUZ) IS NULL)
 ```
+
+---
+
+## 16. Desglose de merma por tipo (Q/P)
+
+Funcionalidad complementaria al cálculo de merma total. Permite ver, para una consulta dada, **qué tipos de motivo** (`ILRCD` de F4111) componen esa merma y en qué cantidades.
+
+### Motivación
+
+Calidad y Producción/Proceso necesitan saber qué motivos están generando la merma. Los códigos `Q*` corresponden a Calidad y los `P*` a Proceso, así que la UI los agrupa en dos bloques con subtotal por bloque.
+
+### Catálogo de códigos — `prodctl.f0005`
+
+Los códigos válidos para producción están en F0005 con `DRSY=42`, `DRRT=RC`. Solo se incluyen en el cálculo los que empiezan por `Q` o `P` (el resto se ignora aunque existan en F0005):
+
+```sql
+SELECT TRIM(DRKY) as CODE, TRIM(DRDL01) as DESCRIPTION
+FROM prodctl.f0005
+WHERE TRIM(DRSY) = '42' AND TRIM(DRRT) = 'RC'
+```
+
+La lista cerrada que se usa en el código (idéntica a la del endpoint principal) es:
+
+```
+P01, P02, P03, P04, P05,
+Q01, Q02, Q03, Q04, Q05, Q06, Q07, Q08, Q09, Q10
+```
+
+### Endpoint — `GET /api/production/merma-breakdown`
+
+Acepta exactamente los mismos parámetros de filtro que `/api/production` (plant, subLine, startDate, endDate, startTime, endTime, article, prp6, srp1..5, ze03, prodLine) más un parámetro `mode` que controla la forma de respuesta:
+
+| `mode` | Parámetros extra | Devuelve |
+|---|---|---|
+| `global` (default) | — | `{ mode, codes: [{code, description, group, qty, percent}], total }` — desglose agregado por código respetando los filtros |
+| `row` | `order`, `productionDateRaw`, `rowArticle` (10 dígitos) | `{ mode, codes: [...], total }` — desglose para una fila concreta de la tabla |
+| `matrix` | — | `{ mode, items: [{article, articleDesc, code, description, group, qty}] }` — formato largo para Excel (una entrada por par artículo×código) |
+
+`group` es `'Q'`, `'P'` o `'O'` (otros, no debería aparecer dado el filtro `IN`).
+
+#### SQL clave
+
+El endpoint reutiliza la misma estructura de JOINs y filtros que `/api/production`, pero filtra solo movimientos `IS` con `ILRCD` en la lista, y agrupa por `WAITM + ILRCD + ILTRUM` (más `WAAITM + IMDSC1` en modo `matrix`). La conversión de UM se aplica igual que en el endpoint principal (busca `IMUOM1` en F4101 y resuelve cadenas hasta 3 saltos en F41002). El JOIN a F0005 se hace **al final, solo con los códigos que aparecen** en el resultado para minimizar lecturas.
+
+```sql
+-- Núcleo del JOIN (idéntico al de /api/production pero solo IS)
+LEFT JOIN F4111 C ON C.ILDOC = A.WADOCO
+  AND MOD(C.ILTRDJ, 100000) = MOD(B.TO55TAREA, 100000)
+  AND C.ILDCT = 'IS'
+  AND TRIM(C.ILRCD) IN ('P01',...,'Q10')
+```
+
+#### Por qué un endpoint nuevo y no extender `/api/production`
+
+Para no tocar el endpoint más complejo del proyecto y mantener la SQL principal estable. El cálculo de merma total que se muestra en la tabla y los KPIs sigue exactamente igual; el desglose es un fetch adicional opcional.
+
+### UI
+
+**Card global "Desglose de merma"** (debajo de los KPIs en `/produccion`):
+- Se carga en cada Filtrar / Cargar todos junto con la tabla principal (fetch paralelo, no bloqueante)
+- Dos columnas: **Calidad (Q*)** y **Proceso (P*)** con subtotal por bloque
+- Dentro de cada bloque: lista ordenada por cantidad descendente, con código, descripción, cantidad y % sobre merma total
+
+**Popover por fila** (al pulsar la celda Merma de una fila):
+- Hace fetch en modo `row` solo al abrir (lazy)
+- Se desactiva si la fila no tiene merma o si la tabla está en modo "Agrupar por artículo" (porque la fila no corresponde a una orden/día concreto)
+- Misma estructura visual que la card global, en versión compacta
+
+### Componentes
+
+- `components/MermaBreakdown.tsx` — Componente puro: recibe `codes` y `total` y renderiza los dos bloques Q/P. Reutilizado por la card global y por el popover.
+- `components/MermaCellPopover.tsx` — Envuelve la celda Merma de la tabla. Gestiona el estado del popover y el fetch on-demand al modo `row`.
+
+### Hojas Excel añadidas
+
+El export del panel (`exportToExcel` en `page.tsx`) añade dos hojas además de "Producción":
+
+1. **"Merma por tipo"** — Una fila por código de motivo (los Q primero, luego P, ordenados por cantidad dentro de cada bloque). Última fila con `TOTAL`. Reutiliza el `globalBreakdown` ya cargado en pantalla, no hace fetch extra.
+2. **"Merma por artículo"** — Fetch al modo `matrix` en el momento del export. Formato largo: una fila por par `(artículo, código)`. Pensado para que el usuario pivote fácilmente en Excel sin depender de columnas dinámicas.
+
+Si no hay merma en el rango filtrado, las hojas se omiten.
+
+### Cómo añadir un código nuevo o cambiar la lista
+
+La lista de códigos válidos está embebida en dos sitios y debe mantenerse sincronizada:
+- `app/api/production/route.ts` → constante `MERMA_CODES` (controla qué entra en la suma total)
+- `app/api/production/merma-breakdown/route.ts` → constante `MERMA_CODES_ARR` (controla qué entra en el desglose)
+
+Si Calidad/Producción dieran de alta un código nuevo en F0005 con DRSY=42/DRRT=RC, hay que añadirlo en ambos sitios.
