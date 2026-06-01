@@ -34,6 +34,8 @@ Esta aplicación es un **panel de control (dashboard) de producción** para la e
 | **recharts** | — | Gráficos de líneas para estadísticas de logs |
 | **lucide-react** | 0.563 | Iconos SVG (Search, Factory, Download...) |
 | **date-fns** | 4 | Utilidades de fecha (`getDayOfYear`) |
+| **react-day-picker** | 10 | Calendario interactivo (usado por `DatePicker`) |
+| **@radix-ui/react-popover** | — | Popover posicionado con Portal (usado por `DatePicker`) |
 | **Bun** | — | Gestor de paquetes y runtime (alternativa a npm/node) |
 
 ---
@@ -716,15 +718,6 @@ Cada panel tiene su documentación específica en la carpeta `docs/`:
 | Dashboard de producción | `/produccion` | [docs/produccion.md](docs/produccion.md) |
 | Control de pedidos | `/preparacion-pedidos` | [docs/control-pedidos.md](docs/control-pedidos.md) |
 | Palets caducados/obsoletos/bloqueados | `/caducados` | [docs/palets-caducados.md](docs/palets-caducados.md) |
-| Comparativa SERES vs JDE | `/comparativa-seres` | [docs/seres-jde-comparativa.md](docs/seres-jde-comparativa.md) |
-
-### Panel Comparativa SERES vs JDE
-
-Panel integrado en el dashboard que cruza pedidos EDI recibidos en SERES con los registrados en JDE (tabla `F47011`) para detectar discrepancias. Hace scraping de SERES y consulta Oracle directamente desde el servidor Next.js.
-
-Existe también un **workflow N8N** equivalente (`n8n-local`, ID `nhTMqtPSA8RZZMT1`) útil para automatizar ejecuciones programadas o enviar alertas.
-
-Ver documentación completa: [docs/seres-jde-comparativa.md](docs/seres-jde-comparativa.md)
 
 ### API externa — `GET /api/jde-orders`
 
@@ -786,36 +779,39 @@ Panel de filtros del dashboard de producción. Ver [docs/produccion.md](docs/pro
 
 ### `DatePicker.tsx`
 
-Selector de fecha con calendario emergente. Reemplaza los `<input type="date">` nativos (que varían visualmente por navegador) con un calendario uniforme y en español.
+Selector de fecha con calendario emergente. Reemplaza los `<input type="date">` nativos con un calendario uniforme, en español y con botón de limpiar.
 
 **Props:**
 
 | Prop | Tipo | Descripción |
 |---|---|---|
 | `value` | `string` | Fecha seleccionada en formato `YYYY-MM-DD` (vacío = sin selección) |
-| `onChange` | `(value: string) => void` | Callback al seleccionar fecha. Devuelve `YYYY-MM-DD` |
+| `onChange` | `(value: string) => void` | Callback al seleccionar o limpiar fecha. Devuelve `YYYY-MM-DD` o `''` |
 | `placeholder` | `string` | Texto cuando no hay fecha (por defecto: `dd/mm/aaaa`) |
 | `className` | `string` | Clases CSS adicionales (ej: `w-[150px]`) |
 
 **Comportamiento:**
 - El botón muestra la fecha en formato `DD/MM/YYYY` (español) o el placeholder si está vacío
-- Abre un popover con `DayPicker` de `react-day-picker` v10 en español (`date-fns/locale/es`)
+- Icono **×** visible cuando hay fecha seleccionada — limpiar llama a `onChange('')`
+- Usa `@radix-ui/react-popover` con Portal para posicionamiento correcto sobre tablas y modales
+- Dentro del popover renderiza el componente `Calendar` (`components/ui/calendar.tsx`)
 - El día seleccionado se resalta en rojo corporativo `#D30B15`
 - El día de hoy tiene borde gris
-- La navegación entre meses usa flechas `ChevronLeft` / `ChevronRight` de lucide-react
-- Se cierra al hacer clic fuera (listener en `mousedown`)
 
-**Implementación importante (react-day-picker v10):**
-- `month` lleva `relative` para que el `nav` en `absolute` se posicione correctamente
-- `caption_label` lleva `pointer-events-none` para que los clicks pasen al `nav` detrás
-- `nav` lleva `z-10` para situarse sobre el caption
+**Dependencias internas:** `components/ui/calendar.tsx`, `components/ui/popover.tsx`
 
 **Usado en:**
 - `components/FilterPanel.tsx` — fechas inicio/fin del dashboard de producción
 - `app/preparacion-pedidos/page.tsx` — fechas carga y entrega del panel de pedidos
 - `app/admin/logs/page.tsx` — filtros de fecha en los logs de consultas
 
-**Dependencias:** `react-day-picker` v10, `date-fns` v4 (ya incluidas en el proyecto).
+### `components/ui/calendar.tsx`
+
+Componente `Calendar` estilo shadcn/ui basado en `react-day-picker` v10 con locale español. Acepta todas las props de `DayPicker`. El día seleccionado usa el color corporativo `#D30B15`. Se usa exclusivamente a través de `DatePicker`.
+
+### `components/ui/popover.tsx`
+
+Componente `Popover` / `PopoverTrigger` / `PopoverContent` estilo shadcn/ui basado en `@radix-ui/react-popover`. `PopoverContent` renderiza en Portal para garantizar z-index correcto sobre cualquier elemento. Se usa exclusivamente a través de `DatePicker`.
 
 ### `ArticleMultiSelect.tsx`
 

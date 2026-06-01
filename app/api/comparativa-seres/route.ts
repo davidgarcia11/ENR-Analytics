@@ -87,6 +87,7 @@ export interface PedidoJde {
     fecha: string | null;
     shanNum: number | null;
     shanDesc: string | null;
+    shanMlnm: string | null;
     urabNum: number | null;
     urabDesc: string | null;
 }
@@ -223,11 +224,13 @@ async function fetchJdePedidos(days: number): Promise<PedidoJde[]> {
                     A.SYTRDJ      AS FECHA_JDE,
                     A.SYSHAN      AS SHAN_NUM,
                     TRIM(B.ABALPH) AS SHAN_DESC,
+                    TRIM(D.WWMLNM) AS SHAN_MLNM,
                     A.SYURAB      AS URAB_NUM,
                     TRIM(C.ABALPH) AS URAB_DESC
              FROM F47011 A
              LEFT JOIN F0101 B ON B.ABAN8 = A.SYSHAN
              LEFT JOIN F0101 C ON C.ABAN8 = A.SYURAB
+             LEFT JOIN (SELECT WWAN8, MIN(TRIM(WWMLNM)) AS WWMLNM FROM F0111 GROUP BY WWAN8) D ON D.WWAN8 = A.SYSHAN
              WHERE A.SYTRDJ >= :fechaDesde
                AND TRIM(A.SYVR01) IS NOT NULL
              ORDER BY A.SYTRDJ DESC`,
@@ -243,6 +246,7 @@ async function fetchJdePedidos(days: number): Promise<PedidoJde[]> {
                 fecha: dayOfYear > 0 ? date.toISOString().split('T')[0] : null,
                 shanNum: row.SHAN_NUM ?? null,
                 shanDesc: row.SHAN_DESC ? String(row.SHAN_DESC).trim() : null,
+                shanMlnm: row.SHAN_MLNM ? String(row.SHAN_MLNM).trim() : null,
                 urabNum: row.URAB_NUM ?? null,
                 urabDesc: row.URAB_DESC ? String(row.URAB_DESC).trim() : null,
             };
@@ -282,7 +286,7 @@ export async function GET(req: NextRequest) {
             .filter(p => jdeRefs.has(p.referencia.toUpperCase()))
             .map(p => {
                 const jde = jdeByRef.get(p.referencia.toUpperCase());
-                return { ...p, shanNum: jde?.shanNum ?? null, shanDesc: jde?.shanDesc ?? null, urabNum: jde?.urabNum ?? null, urabDesc: jde?.urabDesc ?? null };
+                return { ...p, shanNum: jde?.shanNum ?? null, shanDesc: jde?.shanDesc ?? null, shanMlnm: jde?.shanMlnm ?? null, urabNum: jde?.urabNum ?? null, urabDesc: jde?.urabDesc ?? null };
             });
 
         const resultCount = soloEnSeres.length + soloEnJde.length + enAmbos.length;
