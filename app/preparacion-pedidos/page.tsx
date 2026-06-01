@@ -57,6 +57,7 @@ interface Order {
   plantName: string
   shipToNum: number | null
   shipToDesc: string
+  shipToMlnm: string
   soldToNum: number | null
   soldToDesc: string
   articles: ArticleGroup[]
@@ -106,10 +107,12 @@ export default function PreparacionPedidos() {
   const [appliedArticles, setAppliedArticles]     = useState<string[]>([])
   const [selectedDestinos, setSelectedDestinos]   = useState<string[]>([])
   const [appliedDestinos, setAppliedDestinos]     = useState<string[]>([])
-  const [pedidoSearch, setPedidoSearch]           = useState('')
-  const [appliedPedidoSearch, setAppliedPedidoSearch]         = useState('')
-  const [refClienteSearch, setRefClienteSearch]   = useState('')
-  const [appliedRefClienteSearch, setAppliedRefClienteSearch] = useState('')
+  const [pedidoSearch, setPedidoSearch]                         = useState('')
+  const [appliedPedidoSearch, setAppliedPedidoSearch]           = useState('')
+  const [refClienteSearch, setRefClienteSearch]                 = useState('')
+  const [appliedRefClienteSearch, setAppliedRefClienteSearch]   = useState('')
+  const [destinoMlnmSearch, setDestinoMlnmSearch]               = useState('')
+  const [appliedDestinoMlnmSearch, setAppliedDestinoMlnmSearch] = useState('')
 
   // --- EXPAND / COLLAPSE ---
   const [expandedOrders, setExpandedOrders]     = useState<Set<number>>(new Set())
@@ -153,9 +156,10 @@ export default function PreparacionPedidos() {
       if (appliedDestinos.length > 0 && !appliedDestinos.includes(String(order.shipToNum ?? ''))) return false
       if (appliedPedidoSearch && !matchesWildcard(String(order.orderNumber), appliedPedidoSearch.trim())) return false
       if (appliedRefClienteSearch && !matchesWildcard(order.customerRef, appliedRefClienteSearch.trim())) return false
+      if (appliedDestinoMlnmSearch && !matchesWildcard(order.shipToMlnm, appliedDestinoMlnmSearch.trim())) return false
       return true
     })
-  }, [orders, showStatus, appliedArticles, appliedDestinos, appliedPedidoSearch, appliedRefClienteSearch])
+  }, [orders, showStatus, appliedArticles, appliedDestinos, appliedPedidoSearch, appliedRefClienteSearch, appliedDestinoMlnmSearch])
 
   const displaySummary = useMemo<Summary>(() => ({
     totalOrders: filteredOrders.length,
@@ -220,6 +224,7 @@ export default function PreparacionPedidos() {
     setAppliedDestinos(selectedDestinos)
     setAppliedPedidoSearch(pedidoSearch)
     setAppliedRefClienteSearch(refClienteSearch)
+    setAppliedDestinoMlnmSearch(destinoMlnmSearch)
     setLoading(true)
     try {
       const params = new URLSearchParams()
@@ -253,8 +258,9 @@ export default function PreparacionPedidos() {
     setShowStatus({ pendiente: true, en_progreso: true, completado: true })
     setSelectedArticles([]);  setAppliedArticles([])
     setSelectedDestinos([]);  setAppliedDestinos([])
-    setPedidoSearch('');      setAppliedPedidoSearch('')
-    setRefClienteSearch('');  setAppliedRefClienteSearch('')
+    setPedidoSearch('');            setAppliedPedidoSearch('')
+    setRefClienteSearch('');        setAppliedRefClienteSearch('')
+    setDestinoMlnmSearch('');       setAppliedDestinoMlnmSearch('')
     setExpandedOrders(new Set())
     setExpandedArticles(new Set())
     setOrders([])
@@ -296,7 +302,7 @@ export default function PreparacionPedidos() {
         deliveryStartDate: filters.deliveryStartDate, deliveryEndDate: filters.deliveryEndDate,
         showStatus,
         selectedArticles, selectedDestinos,
-        pedidoSearch, refClienteSearch,
+        pedidoSearch, refClienteSearch, destinoMlnmSearch,
       }
       const isEditing = editingPresetId !== null
       const res = await fetch(isEditing ? `/api/presets/${editingPresetId}` : '/api/presets', {
@@ -321,8 +327,9 @@ export default function PreparacionPedidos() {
     setShowStatus(f.showStatus || { pendiente: true, en_progreso: true, completado: true })
     setSelectedArticles(f.selectedArticles || [])
     setSelectedDestinos(f.selectedDestinos || [])
-    setPedidoSearch(f.pedidoSearch         || '')
-    setRefClienteSearch(f.refClienteSearch || '')
+    setPedidoSearch(f.pedidoSearch             || '')
+    setRefClienteSearch(f.refClienteSearch     || '')
+    setDestinoMlnmSearch(f.destinoMlnmSearch   || '')
     setShowPresets(false)
   }
 
@@ -348,6 +355,7 @@ export default function PreparacionPedidos() {
           'Ref. Cliente':     order.customerRef || '',
           'Nº Destino':       order.shipToNum   || '',
           'Desc. Destino':    order.shipToDesc   || '',
+          'Nombre Destino':   order.shipToMlnm   || '',
           'Nº Comprador':     order.soldToNum    || '',
           'Desc. Comprador':  order.soldToDesc   || '',
           'Fecha Carga':      order.loadDate     ? new Date(order.loadDate).toLocaleDateString('es-ES')    : '',
@@ -576,6 +584,18 @@ export default function PreparacionPedidos() {
                 className="flex h-9 w-[200px] rounded-md border border-slate-300 bg-white px-3 py-1 text-sm shadow-sm transition-colors focus:outline-none focus:border-slate-500 font-medium placeholder:font-normal placeholder:text-slate-400"
               />
             </div>
+            <div className="grid gap-1.5">
+              <label htmlFor="ped-destino-mlnm" className="text-xs font-semibold text-gray-700">Nombre Destino (F0111)</label>
+              <input
+                id="ped-destino-mlnm"
+                type="text"
+                value={destinoMlnmSearch}
+                onChange={e => setDestinoMlnmSearch(e.target.value)}
+                onKeyDown={e => e.key === 'Enter' && document.getElementById('ped-filtrar')?.click()}
+                placeholder="ej: *MERCADONA*"
+                className="flex h-9 w-[200px] rounded-md border border-slate-300 bg-white px-3 py-1 text-sm shadow-sm transition-colors focus:outline-none focus:border-slate-500 font-medium placeholder:font-normal placeholder:text-slate-400"
+              />
+            </div>
           </div>
 
           {/* Sección 3: Fechas */}
@@ -777,6 +797,9 @@ export default function PreparacionPedidos() {
                       <TableCell className="text-gray-700">
                         <div className="leading-tight">
                           <div className="text-sm font-medium">{order.shipToDesc || '—'}</div>
+                          {order.shipToMlnm && order.shipToMlnm !== order.shipToDesc && (
+                            <div className="text-[11px] text-gray-500">{order.shipToMlnm}</div>
+                          )}
                           {order.shipToNum && (
                             <div className="text-[11px] text-gray-400 font-mono">{order.shipToNum}</div>
                           )}

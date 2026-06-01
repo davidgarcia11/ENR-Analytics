@@ -36,11 +36,12 @@ export async function GET(req: NextRequest) {
              A.SDUORG, A.SDSOQS, A.SDSOBK, A.SDSOCN,
              TRIM(A.SDUOM) AS SDUOM, TRIM(A.SDLOTN) AS SDLOTN, A.SDLNID,
              TRIM(A.SDVR01) AS SDVR01,
-             A.SDSHAN AS SDSHAN, TRIM(B.ABALPH) AS SHAN_DESC,
+             A.SDSHAN AS SDSHAN, TRIM(B.ABALPH) AS SHAN_DESC, TRIM(D.WWMLNM) AS SHAN_MLNM,
              A.SDAN8  AS SDAN8,  TRIM(C.ABALPH) AS AN8_DESC
       FROM F4211 A
       LEFT JOIN F0101 B ON B.ABAN8 = A.SDSHAN
       LEFT JOIN F0101 C ON C.ABAN8 = A.SDAN8
+      LEFT JOIN (SELECT WWAN8, MIN(TRIM(WWMLNM)) AS WWMLNM FROM F0111 GROUP BY WWAN8) D ON D.WWAN8 = A.SDSHAN
       WHERE A.SDNXTR != 999
     `;
     const binds: any = {};
@@ -126,6 +127,7 @@ export async function GET(req: NextRequest) {
           plantName: plantNames[plantCode] || plantCode,
           shipToNum: row.SDSHAN || null,
           shipToDesc: String(row.SHAN_DESC || '').trim(),
+          shipToMlnm: String(row.SHAN_MLNM || '').trim(),
           soldToNum: row.SDAN8 || null,
           soldToDesc: String(row.AN8_DESC || '').trim(),
           lines: [],

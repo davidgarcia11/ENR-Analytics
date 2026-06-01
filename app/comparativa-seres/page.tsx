@@ -20,6 +20,7 @@ interface Pedido {
     clienteNombre?: string | null;
     shanNum?: number | null;
     shanDesc?: string | null;
+    shanMlnm?: string | null;
     urabNum?: number | null;
     urabDesc?: string | null;
 }
@@ -57,6 +58,7 @@ export default function ComparativaSeresPage() {
     const [error, setError] = useState<string | null>(null)
     const [days, setDays] = useState(0)
     const [activeTab, setActiveTab] = useState<Tab>('solo_seres')
+    const [destinoMlnmFilter, setDestinoMlnmFilter] = useState('')
 
     // Comprobar sesión al montar
     useEffect(() => {
@@ -110,6 +112,7 @@ export default function ComparativaSeresPage() {
         setResult(null)
         setError(null)
         setDays(0)
+        setDestinoMlnmFilter('')
     }
 
     const exportToExcel = () => {
@@ -133,8 +136,24 @@ export default function ComparativaSeresPage() {
         XLSX.writeFile(wb, `Comparativa_SERES_JDE_${new Date().toISOString().split('T')[0]}.xlsx`)
     }
 
+    const filterByMlnm = (rows: Pedido[]) => {
+        if (!destinoMlnmFilter.trim()) return rows
+        const pat = destinoMlnmFilter.trim().toLowerCase()
+        const isWild = pat.includes('*')
+        return rows.filter(p => {
+            const v = (p.shanMlnm ?? '').toLowerCase()
+            if (!isWild) return v.includes(pat)
+            const esc = pat.replace(/[.+^${}()|[\]\\]/g, '\\$&')
+            return new RegExp('^' + esc.replace(/\*/g, '.*') + '$').test(v)
+        })
+    }
+
     const tabData: Record<Tab, Pedido[]> = result
-        ? { solo_seres: result.solo_en_seres, solo_jde: result.solo_en_jde, ambos: result.en_ambos }
+        ? {
+            solo_seres: result.solo_en_seres,
+            solo_jde:   filterByMlnm(result.solo_en_jde),
+            ambos:      filterByMlnm(result.en_ambos),
+          }
         : { solo_seres: [], solo_jde: [], ambos: [] }
 
     const dayOptions = [
@@ -174,6 +193,19 @@ export default function ComparativaSeresPage() {
                                         </button>
                                     ))}
                                 </div>
+                            </div>
+
+                            {/* Nombre Destino F0111 */}
+                            <div className="grid gap-1.5">
+                                <label htmlFor="seres-destino-mlnm" className="text-xs font-semibold text-gray-700">Nombre Destino (F0111)</label>
+                                <input
+                                    id="seres-destino-mlnm"
+                                    type="text"
+                                    value={destinoMlnmFilter}
+                                    onChange={e => setDestinoMlnmFilter(e.target.value)}
+                                    placeholder="ej: *MERCADONA*"
+                                    className="flex h-9 w-[200px] rounded-md border border-slate-300 bg-white px-3 py-1 text-sm shadow-sm transition-colors focus:outline-none focus:border-slate-500 font-medium placeholder:font-normal placeholder:text-slate-400"
+                                />
                             </div>
                         </div>
                     </div>
@@ -341,6 +373,7 @@ export default function ComparativaSeresPage() {
                                             <>
                                                 <TableHead className="font-bold text-gray-700">Nº Destino</TableHead>
                                                 <TableHead className="font-bold text-gray-700">Desc. Destino</TableHead>
+                                                <TableHead className="font-bold text-gray-700">Nombre Destino</TableHead>
                                                 <TableHead className="font-bold text-gray-700">Nº Comprador</TableHead>
                                                 <TableHead className="font-bold text-gray-700">Desc. Comprador</TableHead>
                                             </>
@@ -372,6 +405,7 @@ export default function ComparativaSeresPage() {
                                                     <>
                                                         <TableCell className="font-mono text-sm text-gray-700">{p.shanNum ?? '-'}</TableCell>
                                                         <TableCell className="text-sm text-gray-600">{p.shanDesc ?? '-'}</TableCell>
+                                                        <TableCell className="text-sm text-gray-600">{p.shanMlnm ?? '-'}</TableCell>
                                                         <TableCell className="font-mono text-sm text-gray-700">{p.urabNum ?? '-'}</TableCell>
                                                         <TableCell className="text-sm text-gray-600">{p.urabDesc ?? '-'}</TableCell>
                                                     </>
