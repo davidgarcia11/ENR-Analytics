@@ -290,6 +290,7 @@ Sistema idéntico al del resto de paneles. Aislado por `screen='comparativa'` en
 | Nº Comprador `SYURAB` | — | ✓ | ✓ | ✓ |
 | Desc. Comprador (`ABALPH` de F0101) | — | ✓ | ✓ | ✓ |
 | **Estado JDE** (`SYEDSP`) — badge coloreado | — | ✓ | ✓ | ✓ |
+| **Descripción** (de SQLite, editable en /admin) | — | ✓ | ✓ | ✓ |
 
 - **Referencia** — número de pedido (fuente monospace)
 - **Fecha** — fecha del documento (SERES) o `SYTRDJ` convertida (JDE), formato `DD/MM/YY`. Los registros SERES también muestran la **hora** (`HH:MM:SS`) en gris junto a la fecha
@@ -309,6 +310,10 @@ Cada pedido en `F47011` tiene un campo `SYEDSP` que indica en qué fase está su
 | `M` | **Modificado** — la referencia llegó dos veces (duplicado) | ámbar |
 | `N` | **Sin procesar** — el report de JDE aún no ha intentado crear el pedido | gris |
 | `E` | **Error** — JDE no ha podido crear el pedido | rojo |
+
+> **Descripciones editables desde `/admin` → pestaña "Estados JDE".** El panel lee las descripciones desde la tabla SQLite `jde_status_descriptions` via `GET /api/jde-statuses` al cargar. Si el fetch falla, hay un fallback hardcodeado con los mismos textos. Ver [DOCUMENTACION.md sección 5 → Pestaña Estados JDE](../DOCUMENTACION.md#pestaña-estados-jde).
+
+**Columna "Descripción":** además del badge coloreado con la letra (`Y`/`M`/`N`/`E`), hay una columna "Descripción" en las pestañas con datos JDE (*Solo en JDE*, *En ambos*, *Incidencias*) que muestra el texto completo a la derecha del badge. Esto es lo que pide "que salga la descripción del error" sin tener que pasar el ratón por encima.
 
 **KPI "Incidencias JDE":** card naranja en la fila de KPIs con el conteo de pedidos JDE con `SYEDSP != 'Y'`. Bajo el número se muestra el desglose por estado (p. ej. `3 E · 2 M · 1 N`). Pulsar la card va a la pestaña "Incidencias JDE".
 
