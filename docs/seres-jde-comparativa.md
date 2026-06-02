@@ -257,13 +257,19 @@ Sistema idéntico al del resto de paneles. Aislado por `screen='comparativa'` en
 │ [Comparar ▶]  [Excel ↓]  [Limpiar ×]               │
 └──────────────────────────────────────────────────────┘
 
-┌─ Tarjetas métricas (5) ──────────────────────────────┐
-│ ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐ │
-│ │  SERES   │ │   JDE    │ │Solo SERES│ │Solo JDE  │ │En ambos  │ │
-│ │   326    │ │   350    │ │    4 ⚠️  │ │    2 🔴  │ │  322 ✅  │ │
-│ └──────────┘ └──────────┘ └──────────┘ └──────────┘ └──────────┘ │
-│ Las 3 últimas tarjetas son clicables → activan la pestaña         │
-└──────────────────────────────────────────────────────┘
+┌─ Tarjetas métricas (4) ──────────────────────────────────────────┐
+│ ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────────┐         │
+│ │Solo SERES│ │Solo JDE  │ │En ambos  │ │Incidencias JDE│         │
+│ │    4 ⚠️  │ │    2 🔴  │ │  322 ✅  │ │     7 🛡️      │         │
+│ └──────────┘ └──────────┘ └──────────┘ └──────────────┘         │
+│ Todas las tarjetas son clicables → activan la pestaña             │
+└──────────────────────────────────────────────────────────────────┘
+
+> **Por qué no se muestran los totales brutos de SERES y JDE:** son redundantes
+> (`Solo + En ambos` ya es el total visible) y, con el fix de reprocesado en
+> `days=0`, el total bruto de JDE incluye los pedidos de ayer ocultos del
+> resultado, lo que confundía visualmente. El detalle bruto sigue disponible
+> en `resumen.total_seres_pedidos` y `resumen.total_jde` de la respuesta JSON.
 
 ┌─ Tabla con pestañas ──────────────────────────────────────────────────┐
 │ [Solo en SERES (4)] [Solo en JDE (2)] [En ambos (322)] [Incidencias (7)]│

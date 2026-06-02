@@ -487,31 +487,13 @@ export default function ComparativaSeresPage() {
                     </div>
                 )}
 
-                {/* --- TARJETAS METRICAS --- */}
+                {/* --- TARJETAS METRICAS ---
+                    Solo las 4 KPIs accionables (Solo SERES + Solo JDE + En ambos + Incidencias).
+                    El total bruto de cada sistema no se muestra: era redundante
+                    (Solo+En ambos ya es el total visible) y con days=0 confundía
+                    porque la consulta JDE incluye ayer por el fix de reprocesado. */}
                 {result && (
-                    <div className="grid gap-4 grid-cols-2 md:grid-cols-3 lg:grid-cols-6">
-                        <Card className="border-gray-200 shadow-sm overflow-hidden" style={{ borderTop: '3px solid #D30B15' }}>
-                            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                                <CardTitle className="text-sm font-bold text-gray-700">SERES</CardTitle>
-                                <ArrowLeftRight className="h-4 w-4" style={{ color: '#D30B15' }} />
-                            </CardHeader>
-                            <CardContent>
-                                <div className="text-2xl font-black text-gray-900">{result.resumen.total_seres_pedidos.toLocaleString('es-ES')}</div>
-                                <p className="text-xs text-gray-500 font-medium">de {result.resumen.total_seres_todos} docs totales</p>
-                            </CardContent>
-                        </Card>
-
-                        <Card className="border-gray-200 shadow-sm overflow-hidden" style={{ borderTop: '3px solid #D30B15' }}>
-                            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                                <CardTitle className="text-sm font-bold text-gray-700">JDE</CardTitle>
-                                <ArrowLeftRight className="h-4 w-4" style={{ color: '#D30B15' }} />
-                            </CardHeader>
-                            <CardContent>
-                                <div className="text-2xl font-black text-gray-900">{result.resumen.total_jde.toLocaleString('es-ES')}</div>
-                                <p className="text-xs text-gray-500 font-medium">últimos {result.resumen.days} días</p>
-                            </CardContent>
-                        </Card>
-
+                    <div className="grid gap-4 grid-cols-2 md:grid-cols-4">
                         <Card className="border-gray-200 shadow-sm overflow-hidden cursor-pointer hover:shadow-md transition-shadow" style={{ borderTop: '3px solid #f59e0b' }} onClick={() => setActiveTab('solo_seres')}>
                             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
                                 <CardTitle className="text-sm font-bold text-gray-700">Solo en SERES</CardTitle>
