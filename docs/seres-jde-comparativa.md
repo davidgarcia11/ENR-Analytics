@@ -191,9 +191,31 @@ const enAmbos     = seresPedidos
 
 **Parámetro:** `?days=N` (0 a 90 días, **default 0 = Hoy**). El panel ofrece botones de selección rápida: Hoy / 1 / 3 / 7 / 14 / 30 días.
 
-**Filtro Cliente:** desplegable multi-select derivado de los valores `WWMLNM` (F0111) presentes en el resultado cargado. Se aplica en cliente sobre las pestañas "Solo en JDE" y "En ambos" (la pestaña "Solo en SERES" no tiene datos JDE, no se puede filtrar por este campo). Las tarjetas KPI y los badges de las pestañas muestran los conteos **del resultado filtrado**, no del total bruto de la consulta.
+**Filtro Cliente:** desplegable multi-select derivado de los valores `WWMLNM` (F0111) presentes en el resultado cargado. Se aplica en cliente sobre las pestañas "Solo en JDE" y "En ambos". Las tarjetas KPI y los badges de las pestañas muestran los conteos **del resultado filtrado**, no del total bruto de la consulta.
 
-> **`days=0` ("Hoy"):** caso especial. SERES filtra por Fecha Doc. (cuando se creó el pedido en origen), que puede ser el día anterior incluso si llegó hoy. Para evitar falsos negativos, cuando `days=0` la API pide 1 día extra de margen a SERES y luego filtra los resultados por **Fecha Estado** (la fecha real de recepción en SERES). En JDE simplemente no se aplica el `setDate` (se usa `since = hoy`). 
+> **Importante — dos "Cliente" distintos en el panel:** en la columna **Cliente** de la pestaña *Solo en SERES* se muestra el **Interlocutor EDI** (`clienteCodigo` + `clienteNombre`, scrapeados de la web de SERES). En las pestañas *Solo en JDE* y *En ambos* se muestra el **Destino del pedido** (`shanMlnm` desde JDE F0111). **No son el mismo dato** — el primero identifica el emisor EDI del archivo y el segundo la dirección de destino del envío. Por eso el filtro Cliente del panel (que usa `shanMlnm`) **no se aplica a "Solo en SERES"**: SERES no proporciona los datos de destino del pedido y no hay cruce posible sin enriquecer cada referencia desde JDE — algo que con los pedidos "Solo en SERES" no podemos hacer porque, por definición, no están en JDE.
+
+**Implementación:** `filterByMlnm()` en `app/comparativa-seres/page.tsx` línea 214:
+
+```ts
+const filterByMlnm = (rows: Pedido[]) => {
+  if (selectedDestinoMlnm.length === 0) return rows
+  return rows.filter(p => selectedDestinoMlnm.includes(p.shanMlnm ?? ''))
+}
+
+const tabData = {
+  solo_seres: result.solo_en_seres,            // sin filtro
+  solo_jde:   filterByMlnm(result.solo_en_jde), // filtrado
+  ambos:      filterByMlnm(result.en_ambos),    // filtrado
+}
+```
+
+> **`days=0` ("Hoy"):** caso especial. SERES filtra por Fecha Doc. (cuando se creó el pedido en origen), que puede ser el día anterior incluso si llegó hoy. Para evitar falsos negativos, cuando `days=0` la API pide **1 día extra de margen a SERES** y filtra los resultados por **Fecha Estado** (la fecha real de recepción en SERES). En JDE se hace la **misma ampliación de 1 día** (`since = ayer`) para detectar pedidos reprocesados — ver siguiente bloque.
+
+> **Pedidos reprocesados (`days=0`):** cuando un pedido se reprocesa en la web de SERES (por ejemplo, porque cayó mal en JDE y hubo que reenviarlo), SERES conserva la **Fecha Documento original** (ayer) pero actualiza la **Fecha Estado** a hoy. Al re-llegar a JDE, se guarda con `SYTRDJ = ayer`. Para que estos pedidos aparezcan correctamente en "En ambos" en `days=0`:
+> 1. **JDE pide simétricamente desde ayer** (no sólo desde hoy), igual que SERES, así el reprocesado entra en el resultado JDE.
+> 2. Los pedidos reales de ayer NO reprocesados (SERES con Fecha Estado=ayer) se descartan del "Solo en JDE" mediante un filtro post-query: `if (days === 0) descartar pedidos con SYTRDJ < hoy del array solo_en_jde`. Así no aparecen como falsos positivos.
+> 3. "En ambos" sí los conserva si SERES tiene la misma referencia con Fecha Estado=hoy, capturando el caso de reproceso.
 
 **Paralelismo:** el scraping de SERES y la consulta a JDE se lanzan en paralelo con `Promise.all`.
 
