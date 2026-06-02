@@ -197,6 +197,29 @@ const enAmbos     = seresPedidos
 
 **Paralelismo:** el scraping de SERES y la consulta a JDE se lanzan en paralelo con `Promise.all`.
 
+### Presets de filtros
+
+Sistema idéntico al del resto de paneles. Aislado por `screen='comparativa'` en la tabla SQLite `presets`.
+
+**Filtros que se guardan:**
+```json
+{
+  "days": 7,
+  "selectedDestinoMlnm": ["CLIENTE A", "CLIENTE B"]
+}
+```
+
+**Cómo se abre el panel de presets:**
+- Botón **"Presets"** en la Navbar superior (solo con sesión activa) → incrementa una señal `presetsSignal` que un `useEffect` observa para hacer `setShowPresets(true)`. Este panel no tiene botón "Guardar" inline en la barra de filtros como pedidos/caducados; la única entrada es desde la Navbar.
+
+**Reglas:**
+- Solo visible para usuarios logueados (`sessionUser !== null`)
+- Al cargar un preset se restauran `days` y `selectedDestinoMlnm`. El panel se cierra y hay que pulsar **Comparar** para ejecutar la consulta de nuevo.
+- Editar (✏) carga el preset en los controles y activa modo edición; el botón Guardar pasa a "Actualizar"
+- Eliminar (🗑) borra directamente con `DELETE /api/presets/:id`
+
+**Endpoints reutilizados:** `GET/POST /api/presets`, `PUT/DELETE /api/presets/:id`. Documentación en `DOCUMENTACION.md` sección 6.
+
 ### Interfaz de usuario
 
 ```

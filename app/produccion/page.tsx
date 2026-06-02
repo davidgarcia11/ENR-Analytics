@@ -13,11 +13,35 @@ import {
   TableRow,
 } from "@/components/ui/table"
 // Iconos de la librería lucide-react para dar estilo visual
-import { Loader2, Factory, Calendar, ChevronDown, ChevronsDown } from "lucide-react"
+import { Loader2, Factory, Calendar, ChevronDown, ChevronsDown, ChevronRight } from "lucide-react"
 import Navbar from "@/components/Navbar"
 import * as XLSX from 'xlsx'; // Librería 'xlsx' para generar archivos Excel
 import { useRouter } from "next/navigation"
 import { FilterPanel, AppliedFilters } from "@/components/FilterPanel"
+import MermaBreakdown, { MermaCode } from "@/components/MermaBreakdown"
+import MermaCellPopover from "@/components/MermaCellPopover"
+
+// Construye los URLSearchParams para los endpoints de producción a partir de los filtros aplicados.
+// Se reutiliza en /api/production y /api/production/merma-breakdown.
+function buildProductionParams(filtersArg: AppliedFilters): URLSearchParams {
+  const params = new URLSearchParams()
+  if (filtersArg.plant !== 'all') params.append('plant', filtersArg.plant)
+  if (filtersArg.subLine !== 'all') params.append('subLine', filtersArg.subLine)
+  if (filtersArg.startDate) params.append('startDate', filtersArg.startDate)
+  if (filtersArg.endDate) params.append('endDate', filtersArg.endDate)
+  if (filtersArg.startTime && filtersArg.startTime !== '00:00' && filtersArg.startTime !== '00:00:00') params.append('startTime', filtersArg.startTime)
+  if (filtersArg.endTime && filtersArg.endTime !== '00:00' && filtersArg.endTime !== '00:00:00') params.append('endTime', filtersArg.endTime)
+  filtersArg.selectedArticles.forEach(a => params.append('article', a))
+  filtersArg.selectedPrp6.forEach(v => params.append('prp6', v))
+  filtersArg.selectedSrp3.forEach(v => params.append('srp3', v))
+  filtersArg.selectedSrp5.forEach(v => params.append('srp5', v))
+  filtersArg.selectedSrp2.forEach(v => params.append('srp2', v))
+  filtersArg.selectedSrp1.forEach(v => params.append('srp1', v))
+  filtersArg.selectedSrp4.forEach(v => params.append('srp4', v))
+  filtersArg.selectedZe03.forEach(v => params.append('ze03', v))
+  filtersArg.selectedProdLines.forEach(v => params.append('prodLine', v))
+  return params
+}
 
 interface SessionUser { id: number; username: string; role: string; name: string; surname: string }
 
@@ -25,10 +49,11 @@ interface SessionUser { id: number; username: string; role: string; name: string
 // cuando el usuario edita filtros sin haber pulsado "Filtrar" todavía.
 // React.memo compara las props por referencia: como displayData solo cambia cuando
 // cambia deferredData (no al editar filtros), la tabla no se re-renderiza al escribir.
-const ProductionTable = memo(({ displayData, mermaP75, groupByArticle, loading, dataLength, hasMore, onLoadMore, onLoadAll }: {
+const ProductionTable = memo(({ displayData, mermaP75, groupByArticle, loading, dataLength, hasMore, onLoadMore, onLoadAll, appliedFilters }: {
   displayData: any[]; mermaP75: number; groupByArticle: boolean;
   loading: boolean; dataLength: number; hasMore: boolean;
   onLoadMore: () => void; onLoadAll: () => void;
+  appliedFilters: AppliedFilters;
 }) => {
   const getMermaColor = (percent: number) => {
     if (percent === 0) return 'text-gray-400';
@@ -69,7 +94,19 @@ const ProductionTable = memo(({ displayData, mermaP75, groupByArticle, loading, 
                   {row.quantity?.toLocaleString('es-ES', { maximumFractionDigits: 0 })}
                 </TableCell>
                 <TableCell className="text-right text-sm text-gray-700">
-                  {Math.abs(row.merma || 0).toLocaleString('es-ES', { maximumFractionDigits: 0 })}
+                  {groupByArticle ? (
+                    // En modo agrupado por artículo no se puede pedir el desglose por fila concreta
+                    Math.abs(row.merma || 0).toLocaleString('es-ES', { maximumFractionDigits: 0 })
+                  ) : (
+                    <MermaCellPopover
+                      rowMerma={row.merma || 0}
+                      buildParams={() => buildProductionParams(appliedFilters)}
+                      order={row.order}
+                      productionDateRaw={row.productionDateRaw}
+                      article={row.article}
+                      cellContent={Math.abs(row.merma || 0).toLocaleString('es-ES', { maximumFractionDigits: 0 })}
+                    />
+                  )}
                 </TableCell>
                 <TableCell className="text-right text-sm font-semibold text-gray-800">
                   {(Math.round(row.quantity || 0) + Math.round(Math.abs(row.merma || 0))).toLocaleString('es-ES')}
@@ -168,13 +205,42 @@ export default function Dashboard() {
     totalProduced: 0,
   })
 
+  // --- DESGLOSE DE MERMA (global) ---
+  // Se rellena en cada Filtrar/Cargar todos en paralelo a fetchData
+  const [globalBreakdown, setGlobalBreakdown] = useState<{ codes: MermaCode[]; total: number } | null>(null)
+  const [breakdownLoading, setBreakdownLoading] = useState(false)
+  const [breakdownOpen, setBreakdownOpen] = useState(false) // Arranca colapsado, el usuario lo abre si le interesa
+
   // --- CARGA INICIAL ---
   useEffect(() => {
     const initial = makeTodayFilters()
     setAppliedFilters(initial)
     fetchData(1, true, false, initial)
+    fetchGlobalBreakdown(initial)
     checkSession()
   }, [])
+
+  // Pide el desglose global de merma para los filtros aplicados.
+  // No bloquea la tabla principal; corre en paralelo.
+  const fetchGlobalBreakdown = async (filtersArg: AppliedFilters) => {
+    setBreakdownLoading(true)
+    try {
+      const params = buildProductionParams(filtersArg)
+      params.append('mode', 'global')
+      const res = await fetch(`/api/production/merma-breakdown?${params.toString()}`)
+      const json = await res.json()
+      if (json && Array.isArray(json.codes)) {
+        setGlobalBreakdown({ codes: json.codes, total: json.total || 0 })
+      } else {
+        setGlobalBreakdown({ codes: [], total: 0 })
+      }
+    } catch (err) {
+      console.error('Error cargando desglose global:', err)
+      setGlobalBreakdown(null)
+    } finally {
+      setBreakdownLoading(false)
+    }
+  }
 
   // --- AUTENTICACIÓN ---
 
@@ -216,23 +282,7 @@ export default function Dashboard() {
     setLoading(true)
     try {
       // Construimos los parámetros de la URL
-      const params = new URLSearchParams()
-      if (filtersArg.plant !== 'all') params.append('plant', filtersArg.plant)
-      if (filtersArg.subLine !== 'all') params.append('subLine', filtersArg.subLine)
-      if (filtersArg.startDate) params.append('startDate', filtersArg.startDate)
-      if (filtersArg.endDate) params.append('endDate', filtersArg.endDate)
-      if (filtersArg.startTime && filtersArg.startTime !== '00:00' && filtersArg.startTime !== '00:00:00') params.append('startTime', filtersArg.startTime)
-      if (filtersArg.endTime && filtersArg.endTime !== '00:00' && filtersArg.endTime !== '00:00:00') params.append('endTime', filtersArg.endTime)
-      filtersArg.selectedArticles.forEach(a => params.append('article', a))
-      filtersArg.selectedPrp6.forEach(v => params.append('prp6', v))
-      filtersArg.selectedSrp3.forEach(v => params.append('srp3', v))
-      filtersArg.selectedSrp5.forEach(v => params.append('srp5', v))
-      filtersArg.selectedSrp2.forEach(v => params.append('srp2', v))
-      filtersArg.selectedSrp1.forEach(v => params.append('srp1', v))
-      filtersArg.selectedSrp4.forEach(v => params.append('srp4', v))
-      filtersArg.selectedZe03.forEach(v => params.append('ze03', v))
-      filtersArg.selectedProdLines.forEach(v => params.append('prodLine', v))
-
+      const params = buildProductionParams(filtersArg)
       params.append('page', pageNum.toString())
       params.append('limit', allRecords ? '0' : '150')
 
@@ -304,6 +354,7 @@ export default function Dashboard() {
     setPage(1)
     setData([])
     fetchData(1, true, true, filters)
+    fetchGlobalBreakdown(filters)
   }
 
   // Carga la siguiente página (usa los mismos filtros ya aplicados)
@@ -318,10 +369,11 @@ export default function Dashboard() {
     setPage(1)
     setData([])
     fetchData(1, true, true, appliedFilters)
+    fetchGlobalBreakdown(appliedFilters)
   }
 
-  // Exporta los datos visibles a Excel
-  const exportToExcel = () => {
+  // Exporta los datos visibles a Excel (Producción + 2 hojas de desglose de merma)
+  const exportToExcel = async () => {
     const sorted = [...displayData].sort((a, b) => (b.mermaPercent || 0) - (a.mermaPercent || 0))
 
     const excelRows = sorted.map(item => ({
@@ -362,6 +414,64 @@ export default function Dashboard() {
 
     const wb = XLSX.utils.book_new()
     XLSX.utils.book_append_sheet(wb, ws, "Produccion")
+
+    // --- Hoja "Merma por tipo" (desglose global agrupado Q/P) ---
+    // Reutilizamos el globalBreakdown ya cargado; si no hay datos no añadimos la hoja.
+    if (globalBreakdown && globalBreakdown.codes.length > 0) {
+      const groupLabel = (g: string) => g === 'Q' ? 'Etiquetado' : g === 'P' ? 'Pasteurizado' : 'Otros'
+      const ordered = [...globalBreakdown.codes].sort((a, b) => {
+        if (a.group !== b.group) return a.group.localeCompare(b.group)
+        return b.qty - a.qty
+      })
+      const tipoRows = ordered.map(c => ({
+        Tipo: groupLabel(c.group),
+        Codigo: c.code,
+        Descripcion: c.description,
+        Cantidad: Math.round(c.qty),
+        '% sobre merma': (c.percent || 0) / 100,
+      }))
+      // Fila final con total global
+      tipoRows.push({
+        Tipo: '',
+        Codigo: '',
+        Descripcion: 'TOTAL',
+        Cantidad: Math.round(globalBreakdown.total),
+        '% sobre merma': 1,
+      })
+      const wsTipo = XLSX.utils.json_to_sheet(tipoRows)
+      // Formato porcentaje en columna E (% sobre merma)
+      for (let r = 0; r < tipoRows.length; r++) {
+        const cellRef = XLSX.utils.encode_cell({ r: r + 1, c: 4 })
+        if (wsTipo[cellRef]) wsTipo[cellRef].z = '0.00%'
+      }
+      XLSX.utils.book_append_sheet(wb, wsTipo, "Merma por tipo")
+    }
+
+    // --- Hoja "Merma por artículo" (formato largo) ---
+    // Fetch del modo matrix con los filtros vigentes. Si falla o no hay datos, se omite la hoja.
+    try {
+      const matrixParams = buildProductionParams(appliedFilters)
+      matrixParams.append('mode', 'matrix')
+      const res = await fetch(`/api/production/merma-breakdown?${matrixParams.toString()}`)
+      const json = await res.json()
+      const items: any[] = (json && Array.isArray(json.items)) ? json.items : []
+      if (items.length > 0) {
+        const groupLabel = (g: string) => g === 'Q' ? 'Etiquetado' : g === 'P' ? 'Pasteurizado' : 'Otros'
+        const matrixRows = items.map(it => ({
+          Articulo: it.article,
+          'Descripción artículo': it.articleDesc,
+          Tipo: groupLabel(it.group),
+          Codigo: it.code,
+          'Descripción código': it.description,
+          Cantidad: Math.round(it.qty),
+        }))
+        const wsMatrix = XLSX.utils.json_to_sheet(matrixRows)
+        XLSX.utils.book_append_sheet(wb, wsMatrix, "Merma por artículo")
+      }
+    } catch (err) {
+      console.error('Error al cargar el desglose de merma por artículo para Excel:', err)
+    }
+
     XLSX.writeFile(wb, `Produccion_${appliedFilters.startDate}_${appliedFilters.endDate}.xlsx`)
   }
 
@@ -510,6 +620,51 @@ export default function Dashboard() {
           </Card>
         </div>
 
+        {/* --- DESGLOSE DE MERMA (global) ---
+            Arranca colapsada. El header completo es un botón que la abre/cierra. */}
+        <Card className="border-gray-200 shadow-sm overflow-hidden" style={{ borderTop: '3px solid #D30B15' }}>
+          <button
+            type="button"
+            onClick={() => setBreakdownOpen(o => !o)}
+            aria-expanded={breakdownOpen}
+            aria-controls="desglose-merma-content"
+            className="w-full text-left"
+          >
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-3 hover:bg-gray-50/60 transition-colors">
+              <div className="flex items-center gap-2">
+                {breakdownOpen ? (
+                  <ChevronDown className="h-4 w-4 text-gray-500" />
+                ) : (
+                  <ChevronRight className="h-4 w-4 text-gray-500" />
+                )}
+                <div>
+                  <CardTitle className="text-lg font-bold text-gray-800">Desglose de merma</CardTitle>
+                  <p className="text-xs text-gray-500 font-medium mt-1">
+                    Por tipo de motivo (Q: Etiquetado · P: Pasteurizado). Pulsa para {breakdownOpen ? 'ocultar' : 'desplegar'}.
+                  </p>
+                </div>
+              </div>
+              {globalBreakdown && globalBreakdown.total > 0 && (
+                <div className="text-right">
+                  <div className="text-2xl font-black text-gray-900">
+                    {Math.round(globalBreakdown.total).toLocaleString('es-ES')}
+                  </div>
+                  <div className="text-[10px] text-gray-500">Total merma</div>
+                </div>
+              )}
+            </CardHeader>
+          </button>
+          {breakdownOpen && (
+            <CardContent id="desglose-merma-content">
+              <MermaBreakdown
+                codes={globalBreakdown?.codes || []}
+                total={globalBreakdown?.total || 0}
+                loading={breakdownLoading}
+              />
+            </CardContent>
+          )}
+        </Card>
+
         {/* --- TABLA DE DATOS --- */}
         <ProductionTable
           displayData={displayData}
@@ -520,6 +675,7 @@ export default function Dashboard() {
           hasMore={hasMore}
           onLoadMore={loadMore}
           onLoadAll={loadAll}
+          appliedFilters={appliedFilters}
         />
 
       </div>

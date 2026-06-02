@@ -126,6 +126,11 @@ export default function CaducadosPage() {
   const [presetName, setPresetName] = useState('')
   const [savingPreset, setSavingPreset] = useState(false)
   const [editingPresetId, setEditingPresetId] = useState<number | null>(null)
+  // Señal que dispara la apertura del panel de presets desde el botón del Navbar
+  const [presetsSignal, setPresetsSignal] = useState(0)
+  useEffect(() => {
+    if (presetsSignal > 0) setShowPresets(true)
+  }, [presetsSignal])
   // Artículos aplicados: solo se actualizan al pulsar "Filtrar" (igual que producción)
   const [appliedArticles, setAppliedArticles] = useState<string[]>([])
 
@@ -389,7 +394,12 @@ export default function CaducadosPage() {
     <main className="min-h-screen bg-gray-100 p-8 font-sans text-gray-900">
       <div className="mx-auto max-w-7xl space-y-8">
 
-        <Navbar currentPanel="caducados" user={sessionUser} onLogout={logout} />
+        <Navbar
+          currentPanel="caducados"
+          user={sessionUser}
+          onLogout={logout}
+          onPresetsClick={() => setPresetsSignal(s => s + 1)}
+        />
 
         {/* --- PANEL DE PRESETS --- */}
         {sessionUser && showPresets && (
