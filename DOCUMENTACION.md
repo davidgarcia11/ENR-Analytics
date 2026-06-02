@@ -76,6 +76,8 @@ dashboard/
 │   ├── ArticleMultiSelect.tsx    ← Desplegable multi-selección con búsqueda
 │   ├── DatePicker.tsx            ← Selector de fecha (Popover + Calendar + botón limpiar)
 │   ├── FilterPanel.tsx           ← Panel de filtros del dashboard de producción
+│   ├── MermaBreakdown.tsx        ← Desglose de merma agrupado Q/P (usado en /produccion)
+│   ├── MermaCellPopover.tsx      ← Popover por fila al pulsar celda Merma en /produccion
 │   ├── Navbar.tsx                ← Barra de navegación compartida
 │   ├── SingleSelect.tsx          ← Variante de selección única de ArticleMultiSelect
 │   └── ui/                       ← Componentes de interfaz base (estilo shadcn)
@@ -130,7 +132,9 @@ dashboard/
         ├── categories/
         │   └── route.ts          ← GET /api/categories?field=X
         ├── production/
-        │   └── route.ts          ← GET /api/production?...filtros...
+        │   ├── route.ts          ← GET /api/production?...filtros...
+        │   └── merma-breakdown/
+        │       └── route.ts      ← GET /api/production/merma-breakdown (modos global/row/matrix)
         ├── production-lines/
         │   └── route.ts          ← GET /api/production-lines
         └── jde-orders/
@@ -819,11 +823,19 @@ Componente `Calendar` estilo shadcn/ui basado en `react-day-picker` v10 con loca
 
 ### `components/ui/popover.tsx`
 
-Componente `Popover` / `PopoverTrigger` / `PopoverContent` estilo shadcn/ui basado en `@radix-ui/react-popover`. `PopoverContent` renderiza en Portal para garantizar z-index correcto sobre cualquier elemento. Se usa exclusivamente a través de `DatePicker`.
+Componente `Popover` / `PopoverTrigger` / `PopoverContent` estilo shadcn/ui basado en `@radix-ui/react-popover`. `PopoverContent` renderiza en Portal para garantizar z-index correcto sobre cualquier elemento. Lo usan `DatePicker` y `MermaCellPopover`.
 
 ### `ArticleMultiSelect.tsx`
 
 Desplegable multi-selección con búsqueda. Ver [docs/produccion.md](docs/produccion.md).
+
+### `MermaBreakdown.tsx`
+
+Tabla puramente visual que muestra el desglose de merma agrupado en dos bloques: Calidad (códigos `Q*`) y Proceso (códigos `P*`), con subtotales por bloque. Recibe `codes` (lista con `{code, description, group, qty, percent}`) y `total`. Reutilizado por la card global en `/produccion` y por el popover por fila. Detalles en [docs/produccion.md sección 16](docs/produccion.md).
+
+### `MermaCellPopover.tsx`
+
+Envuelve la celda Merma de cada fila en la tabla de `/produccion`. Al abrirse, hace fetch on-demand a `/api/production/merma-breakdown?mode=row` con los filtros vigentes + parámetros de la fila (`order`, `productionDateRaw`, `rowArticle`). Si la fila no tiene merma o la tabla está en modo agrupar-por-artículo, la celda no es clicable. Ver [docs/produccion.md sección 16](docs/produccion.md).
 
 ### `SingleSelect.tsx`
 

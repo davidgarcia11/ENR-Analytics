@@ -37,6 +37,7 @@ app/                          # Rutas Next.js (App Router)
   cambiar-contrasena/         # Cambio forzado de contraseña
   api/                        # API Routes (servidor)
     production/               # GET datos producción (endpoint más complejo)
+    production/merma-breakdown/ # GET desglose de merma por tipo (Q/P), modos global/row/matrix
     categories/               # GET opciones para filtros de producción
     production-lines/         # GET líneas de producción
     orders/                   # GET control de pedidos
@@ -56,7 +57,9 @@ components/
   Navbar.tsx                  # Barra de navegación compartida por todos los paneles (dropdown "Paneles ▾")
   FilterPanel.tsx             # Panel de filtros del dashboard de producción (incluye presets)
   ArticleMultiSelect.tsx      # Desplegable multi-selección con búsqueda (usado en FilterPanel)
-  ui/                         # button, card, input, table (estilo shadcn)
+  MermaBreakdown.tsx          # Desglose de merma agrupado Q/P (card global + popover en /produccion)
+  MermaCellPopover.tsx        # Popover por fila al pulsar celda Merma en /produccion
+  ui/                         # button, card, input, table, popover (estilo shadcn)
 middleware.ts                 # Protege /api/admin/* (JWT + role admin)
 docs/                         # Documentación específica por panel
   produccion.md               # Dashboard de producción — completo para juniors
