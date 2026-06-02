@@ -503,6 +503,7 @@ Los usuarios logueados pueden guardar combinaciones de filtros con nombre para r
 | Producción | `'produccion'` |
 | Caducados | `'caducados'` |
 | Pedidos | `'pedidos'` |
+| Comparativa SERES vs JDE | `'comparativa'` |
 
 ### Qué se guarda en un preset
 
@@ -543,12 +544,21 @@ El JSON varía según el panel. Ejemplos:
 }
 ```
 
+**Comparativa SERES vs JDE:**
+```json
+{
+  "days": 7,
+  "selectedDestinoMlnm": ["CLIENTE A", "CLIENTE B"]
+}
+```
+
 ### UI de presets
 
-Dos formas de interactuar (idénticas en todos los paneles):
+Tres formas de interactuar (los 4 paneles tienen al menos una de ellas):
 
-1. **Panel expandible (botón "Guardar"):** Lista completa de presets con opción de guardar, editar y eliminar
-2. **Acceso rápido en la barra de acciones:** Dropdown "Cargar preset" para carga inmediata
+1. **Panel expandible (botón "Guardar" en la barra de filtros):** Lista completa de presets con opción de guardar, editar y eliminar — en `produccion`, `pedidos` y `caducados`. En `comparativa-seres` no hay botón inline en los filtros.
+2. **Acceso rápido en la barra de acciones:** Dropdown "Cargar preset" para carga inmediata — solo en `produccion` y `caducados`.
+3. **Botón "Presets" en la Navbar superior:** Disponible en los 4 paneles. Cada `page.tsx` incrementa una señal `presetsSignal` que un `useEffect` observa para hacer `setShowPresets(true)`. Es la única forma de abrir el panel en `comparativa-seres`.
 
 ### APIs de presets
 
@@ -772,12 +782,12 @@ Barra de navegación compartida por todos los paneles. Reemplaza el top bar dupl
 | `currentPanel` | `'produccion' \| 'pedidos' \| 'caducados' \| 'comparativa'` | Panel activo (se marca con punto rojo en el dropdown) |
 | `user` | `SessionUser \| null` | Usuario de sesión. Si es null, muestra botón "Iniciar sesión" |
 | `onLogout` | `() => void` | Callback para cerrar sesión |
-| `onPresetsClick` | `() => void` (opcional) | Si se pasa, aparece el botón "Presets" (solo en `/produccion`, solo con sesión) |
+| `onPresetsClick` | `() => void` (opcional) | Si se pasa, aparece el botón "Presets". Lo wirean los 4 paneles (`/produccion`, `/preparacion-pedidos`, `/caducados`, `/comparativa-seres`) sólo con sesión activa |
 
 **Comportamiento:**
 - Logo a la izquierda
 - Botón **"Paneles ▾"** con dropdown filtrado según permisos: solo muestra los paneles a los que el usuario actual tiene acceso. Si no hay ninguno accesible, el botón se oculta.
-- Botón "Presets" solo visible cuando `onPresetsClick` está definido y hay sesión activa
+- Botón "Presets" visible en los 4 paneles cuando hay sesión. Al pulsarlo, cada panel incrementa una señal interna (`presetsSignal`) que abre su propio panel/modal de presets. Los presets están aislados por `screen` (`produccion`, `pedidos`, `caducados`, `comparativa`)
 - Con sesión: nombre del usuario, botones Admin y Logs (solo si `role === 'admin'`), botón Salir
 - Sin sesión: enlace "Iniciar sesión"
 

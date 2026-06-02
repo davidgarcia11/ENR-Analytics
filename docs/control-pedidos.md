@@ -294,6 +294,10 @@ Las tarjetas de resumen (`displaySummary`) se calculan también por `useMemo` a 
 
 Sistema idéntico a producción y caducados. Usa `screen='pedidos'` para aislar los presets de este panel.
 
+**Cómo se abre el panel de presets:**
+- Botón **"💾 Guardar"** dentro de la sección de filtros (siempre visible con sesión)
+- Botón **"Presets"** en la Navbar superior (común a todos los paneles): incrementa una señal `presetsSignal` que un `useEffect` observa para hacer `setShowPresets(true)`
+
 **Filtros que se guardan en un preset de pedidos:**
 ```json
 {

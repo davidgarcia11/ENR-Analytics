@@ -287,6 +287,7 @@ Sistema idéntico al del panel de producción. Permite guardar combinaciones de 
 - **Solo visible para usuarios logueados** — el panel de presets y los botones Guardar/Cargar solo aparecen si `sessionUser !== null`
 - **Botón "Guardar"** (barra de acciones) → abre un panel encima de los filtros con campo de nombre
 - **Botón "Cargar preset"** → dropdown de acceso rápido
+- **Botón "Presets" en la Navbar superior** → incrementa una señal `presetsSignal` que un `useEffect` observa para hacer `setShowPresets(true)` (mismo panel que abre "Guardar")
 - Al cargar un preset se restauran todos los filtros y el panel se cierra — hay que pulsar "Filtrar" para ejecutar la consulta
 
 ### 12.2 Qué se guarda en un preset

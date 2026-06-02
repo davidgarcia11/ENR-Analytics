@@ -3,12 +3,15 @@
 import { useState, useEffect } from "react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
+import { Input } from "@/components/ui/input"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
-import { Loader2, Search, Download, X, AlertTriangle, CheckCircle2, ArrowLeftRight } from "lucide-react"
+import { Loader2, Search, Download, X, AlertTriangle, CheckCircle2, ArrowLeftRight, BookmarkCheck, Save, Pencil, Trash2 } from "lucide-react"
 import Navbar from "@/components/Navbar"
 import { ArticleMultiSelect } from "@/components/ArticleMultiSelect"
 import { useRouter } from "next/navigation"
 import * as XLSX from 'xlsx'
+
+interface Preset { id: number; name: string; filters: string; created_at: string }
 
 interface SessionUser { id: number; username: string; role: string; name: string; surname: string }
 
@@ -60,6 +63,20 @@ export default function ComparativaSeresPage() {
     const [days, setDays] = useState(0)
     const [activeTab, setActiveTab] = useState<Tab>('solo_seres')
     const [selectedDestinoMlnm, setSelectedDestinoMlnm] = useState<string[]>([])
+
+    // --- PRESETS ---
+    // El sistema de presets es compartido por todos los paneles (tabla SQLite `presets`).
+    // Aquí guardamos los filtros propios de este panel (días + clientes) bajo screen='comparativa'.
+    const [presets, setPresets] = useState<Preset[]>([])
+    const [showPresets, setShowPresets] = useState(false)
+    const [presetName, setPresetName] = useState('')
+    const [savingPreset, setSavingPreset] = useState(false)
+    const [editingPresetId, setEditingPresetId] = useState<number | null>(null)
+    // Señal incrementada por el botón Presets del Navbar para abrir el panel desde fuera.
+    const [presetsSignal, setPresetsSignal] = useState(0)
+    useEffect(() => {
+        if (presetsSignal > 0) setShowPresets(true)
+    }, [presetsSignal])
 
     // Comprobar sesión al montar
     useEffect(() => {
@@ -114,6 +131,63 @@ export default function ComparativaSeresPage() {
         setError(null)
         setDays(0)
         setSelectedDestinoMlnm([])
+        setEditingPresetId(null)
+        setPresetName('')
+    }
+
+    // --- PRESETS (helpers) ---
+
+    // Carga los presets del usuario para este panel (screen=comparativa).
+    const loadPresets = async () => {
+        try {
+            const res = await fetch('/api/presets?screen=comparativa')
+            if (res.ok) setPresets(await res.json())
+        } catch { }
+    }
+
+    // Carga la lista al disponer de sesión.
+    useEffect(() => {
+        if (sessionUser) loadPresets()
+    }, [sessionUser])
+
+    // Guarda (o actualiza si hay editingPresetId) los filtros vigentes como preset.
+    const savePreset = async (nameOverride?: string) => {
+        const name = (nameOverride ?? presetName).trim()
+        if (!name) return
+        setSavingPreset(true)
+        try {
+            const filtersData = { days, selectedDestinoMlnm }
+            const isEditing = editingPresetId !== null
+            const res = await fetch(isEditing ? `/api/presets/${editingPresetId}` : '/api/presets', {
+                method: isEditing ? 'PUT' : 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ name, filters: filtersData, screen: 'comparativa' }),
+            })
+            if (res.ok) { setPresetName(''); setEditingPresetId(null); loadPresets() }
+            else { const d = await res.json(); alert(d.error || 'Error al guardar') }
+        } finally { setSavingPreset(false) }
+    }
+
+    // Restaura los filtros guardados en el preset.
+    const loadPreset = (preset: Preset) => {
+        try {
+            const f = JSON.parse(preset.filters)
+            setDays(typeof f.days === 'number' ? f.days : 0)
+            setSelectedDestinoMlnm(Array.isArray(f.selectedDestinoMlnm) ? f.selectedDestinoMlnm : [])
+            setShowPresets(false)
+        } catch (err) {
+            console.error('Preset inválido:', err)
+        }
+    }
+
+    const startEditPreset = (preset: Preset) => {
+        setPresetName(preset.name); setEditingPresetId(preset.id)
+        loadPreset(preset); setShowPresets(true)
+    }
+    const cancelEditPreset = () => { setEditingPresetId(null); setPresetName('') }
+    const deletePreset = async (id: number) => {
+        await fetch(`/api/presets/${id}`, { method: 'DELETE' })
+        loadPresets()
     }
 
     const exportToExcel = () => {
@@ -171,7 +245,81 @@ export default function ComparativaSeresPage() {
             <div className="mx-auto max-w-7xl space-y-8">
 
                 {/* --- BARRA DE NAVEGACIÓN --- */}
-                <Navbar currentPanel="comparativa" user={sessionUser} onLogout={logout} />
+                <Navbar
+                    currentPanel="comparativa"
+                    user={sessionUser}
+                    onLogout={logout}
+                    onPresetsClick={() => setPresetsSignal(s => s + 1)}
+                />
+
+                {/* --- PANEL DE PRESETS (mismo patrón visual que /produccion y /preparacion-pedidos) --- */}
+                {sessionUser && showPresets && (
+                    <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-4" style={{ borderTop: '3px solid #D30B15' }}>
+                        <div className="flex items-center justify-between mb-4">
+                            <h3 className="text-sm font-bold text-gray-700 flex items-center gap-2">
+                                <BookmarkCheck className="h-4 w-4" style={{ color: '#D30B15' }} />
+                                Mis Presets de Filtros
+                            </h3>
+                            <button type="button" aria-label="Cerrar presets" onClick={() => { setShowPresets(false); cancelEditPreset() }} className="text-gray-400 hover:text-gray-600">
+                                <X className="h-4 w-4" />
+                            </button>
+                        </div>
+
+                        <div className="bg-gray-50 rounded-lg p-3 mb-4 border border-gray-100">
+                            <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">
+                                {editingPresetId ? 'Editando preset' : 'Guardar filtros actuales como preset'}
+                            </p>
+                            <div className="flex items-center gap-2 flex-wrap">
+                                <Input
+                                    value={presetName}
+                                    onChange={e => setPresetName(e.target.value)}
+                                    placeholder="Escribe un nombre..."
+                                    className="h-9 text-sm max-w-[220px] bg-white"
+                                    onKeyDown={e => e.key === 'Enter' && savePreset()}
+                                />
+                                <Button
+                                    onClick={() => savePreset()}
+                                    disabled={savingPreset || !presetName.trim()}
+                                    size="sm"
+                                    className="text-white text-xs font-semibold h-9 px-4"
+                                    style={{ backgroundColor: editingPresetId ? '#2563eb' : '#D30B15' }}
+                                >
+                                    <Save className="mr-1.5 h-3.5 w-3.5" />
+                                    {editingPresetId ? 'Actualizar' : 'Guardar'}
+                                </Button>
+                                {editingPresetId && (
+                                    <Button onClick={cancelEditPreset} variant="outline" size="sm" className="text-xs h-9 text-gray-500">
+                                        Cancelar
+                                    </Button>
+                                )}
+                            </div>
+                            {!editingPresetId && (
+                                <p className="text-[11px] text-gray-400 mt-1.5">Se guardarán el periodo y los clientes seleccionados.</p>
+                            )}
+                        </div>
+
+                        <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">Presets guardados</p>
+                        {presets.length === 0 ? (
+                            <p className="text-xs text-gray-400">No tienes presets guardados.</p>
+                        ) : (
+                            <div className="flex flex-wrap gap-2">
+                                {presets.map(p => (
+                                    <div key={p.id} className={`flex items-center gap-1.5 border rounded-lg px-3 py-1.5 text-sm ${editingPresetId === p.id ? 'bg-blue-50 border-blue-300' : 'bg-gray-50 border-gray-200'}`}>
+                                        <button type="button" onClick={() => loadPreset(p)} className="font-medium text-gray-700 hover:text-gray-900" title="Cargar preset">
+                                            {p.name}
+                                        </button>
+                                        <button type="button" onClick={() => startEditPreset(p)} className="text-gray-300 hover:text-blue-500" aria-label={`Editar ${p.name}`}>
+                                            <Pencil className="h-3 w-3" />
+                                        </button>
+                                        <button type="button" onClick={() => deletePreset(p.id)} className="text-gray-300 hover:text-red-500" aria-label={`Eliminar ${p.name}`}>
+                                            <Trash2 className="h-3.5 w-3.5" />
+                                        </button>
+                                    </div>
+                                ))}
+                            </div>
+                        )}
+                    </div>
+                )}
 
                 {/* --- FILTROS --- */}
                 <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-200 space-y-4" style={{ borderTop: '3px solid #D30B15' }}>
