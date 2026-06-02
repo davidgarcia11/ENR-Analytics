@@ -107,7 +107,8 @@ SELECT TRIM(A.SYVR01) AS REFERENCIA,
        TRIM(B.ABALPH)  AS SHAN_DESC,
        TRIM(D.WWMLNM)  AS SHAN_MLNM,
        A.SYURAB        AS URAB_NUM,
-       TRIM(C.ABALPH)  AS URAB_DESC
+       TRIM(C.ABALPH)  AS URAB_DESC,
+       TRIM(A.SYEDSP)  AS ESTADO
 FROM F47011 A
 LEFT JOIN F0101 B ON B.ABAN8 = A.SYSHAN
 LEFT JOIN F0101 C ON C.ABAN8 = A.SYURAB
@@ -125,6 +126,7 @@ ORDER BY A.SYTRDJ DESC
 | `SYTRDJ` | **Fecha de transacción** (cuando se recibió/procesó el EDI) en formato JDE **CYYDDD** |
 | `SYSHAN` | Número de dirección de destino (Ship To) |
 | `SYURAB` | Número de dirección vendida a (Sold To) |
+| `SYEDSP` | **Estado del pedido EDI**: `Y` = Procesado · `M` = Modificado (referencia duplicada) · `N` = Sin procesar (el report aún no ha intentado crearlo) · `E` = Error. Cualquier valor distinto de `Y` se considera incidencia y aparece en la pestaña/KPI "Incidencias JDE" |
 
 > **Por qué `SYTRDJ` y no `SYUPMJ`:** `SYUPMJ` es la fecha de *última modificación* del registro en JDE. Un pedido creado hace 3 meses que se modifica hoy aparecería en una búsqueda de "últimos 7 días" aunque en SERES ya no esté en ese rango, generando falsos "Solo en JDE". `SYTRDJ` es la fecha de *transacción* (cuándo se recibió el EDI), equivalente conceptualmente a la Fecha Documento de SERES, lo que hace que ambos filtros sean consistentes.
 
@@ -263,30 +265,31 @@ Sistema idéntico al del resto de paneles. Aislado por `screen='comparativa'` en
 │ Las 3 últimas tarjetas son clicables → activan la pestaña         │
 └──────────────────────────────────────────────────────┘
 
-┌─ Tabla con pestañas ─────────────────────────────────┐
-│ [Solo en SERES (4)] [Solo en JDE (2)] [En ambos (322)]│
-│ ─────────────────────────────────────────────────────│
-│ Aviso contextual (qué significa cada pestaña)        │
-│ ─────────────────────────────────────────────────────│
-│ Referencia  │ Fecha     │ Tipo SERES                 │
-│ 01565794    │ 06/05/26  │ Pedido                     │
-│ ...                                                  │
-└──────────────────────────────────────────────────────┘
+┌─ Tabla con pestañas ──────────────────────────────────────────────────┐
+│ [Solo en SERES (4)] [Solo en JDE (2)] [En ambos (322)] [Incidencias (7)]│
+│ ──────────────────────────────────────────────────────────────────────│
+│ Aviso contextual (qué significa cada pestaña)                         │
+│ ──────────────────────────────────────────────────────────────────────│
+│ Referencia  │ Fecha     │ Destino │ Cliente │ Estado JDE              │
+│ 01565794    │ 06/05/26  │ 1234    │ XYZ     │ [Y]                     │
+│ 01565800    │ 06/05/26  │ 4321    │ ABC     │ [E]  ← rojo             │
+└───────────────────────────────────────────────────────────────────────┘
 ```
 
 **Columnas según pestaña activa:**
 
-| Columna | Solo en SERES | Solo en JDE | En ambos |
-|---|---|---|---|
-| Referencia | ✓ | ✓ | ✓ |
-| Fecha + Hora | ✓ | ✓ | ✓ |
-| **Cliente** (Cód. + Nombre Interlocutor SERES) | ✓ | — | — |
-| Tipo | ✓ | — | — |
-| Nº Destino `SYSHAN` | — | ✓ | ✓ |
-| Desc. Destino (`ABALPH` de F0101) | — | ✓ | ✓ |
-| **Cliente** (`WWMLNM` de F0111) | — | ✓ | ✓ |
-| Nº Comprador `SYURAB` | — | ✓ | ✓ |
-| Desc. Comprador (`ABALPH` de F0101) | — | ✓ | ✓ |
+| Columna | Solo en SERES | Solo en JDE | En ambos | Incidencias |
+|---|---|---|---|---|
+| Referencia | ✓ | ✓ | ✓ | ✓ |
+| Fecha + Hora | ✓ | ✓ | ✓ | ✓ |
+| **Cliente** (Cód. + Nombre Interlocutor SERES) | ✓ | — | — | — |
+| Tipo | ✓ | — | — | — |
+| Nº Destino `SYSHAN` | — | ✓ | ✓ | ✓ |
+| Desc. Destino (`ABALPH` de F0101) | — | ✓ | ✓ | ✓ |
+| **Cliente** (`WWMLNM` de F0111) | — | ✓ | ✓ | ✓ |
+| Nº Comprador `SYURAB` | — | ✓ | ✓ | ✓ |
+| Desc. Comprador (`ABALPH` de F0101) | — | ✓ | ✓ | ✓ |
+| **Estado JDE** (`SYEDSP`) — badge coloreado | — | ✓ | ✓ | ✓ |
 
 - **Referencia** — número de pedido (fuente monospace)
 - **Fecha** — fecha del documento (SERES) o `SYTRDJ` convertida (JDE), formato `DD/MM/YY`. Los registros SERES también muestran la **hora** (`HH:MM:SS`) en gris junto a la fecha
@@ -294,10 +297,28 @@ Sistema idéntico al del resto de paneles. Aislado por `screen='comparativa'` en
 - **Tipo** — solo en "Solo en SERES" (siempre "Pedido" dado el filtro interno)
 - **Destino (SYSHAN)** — número + nombre de dirección de destino; visible en "Solo en JDE" y "En ambos"
 - **Vendido a (SYURAB)** — número + nombre del cliente comprador; visible en "Solo en JDE" y "En ambos"
+- **Estado JDE (`SYEDSP`)** — badge coloreado por código. Visible en "Solo en JDE", "En ambos" e "Incidencias JDE". Ver bloque "Estado del pedido en JDE" más abajo.
 
-**Exportación Excel:** tres hojas — "Solo en SERES", "Solo en JDE", "En ambos".
+### Estado del pedido en JDE (`SYEDSP`)
+
+Cada pedido en `F47011` tiene un campo `SYEDSP` que indica en qué fase está su procesamiento:
+
+| Código | Significado | Badge UI |
+|---|---|---|
+| `Y` | **Procesado** — pedido creado correctamente | verde |
+| `M` | **Modificado** — la referencia llegó dos veces (duplicado) | ámbar |
+| `N` | **Sin procesar** — el report de JDE aún no ha intentado crear el pedido | gris |
+| `E` | **Error** — JDE no ha podido crear el pedido | rojo |
+
+**KPI "Incidencias JDE":** card naranja en la fila de KPIs con el conteo de pedidos JDE con `SYEDSP != 'Y'`. Bajo el número se muestra el desglose por estado (p. ej. `3 E · 2 M · 1 N`). Pulsar la card va a la pestaña "Incidencias JDE".
+
+**Pestaña "Incidencias JDE":** muestra todos los pedidos JDE con estado distinto de `Y` (independientemente de si están o no en SERES). Es una vista ejecutiva: "todo lo que requiere acción". Los pedidos pueden estar también en otras pestañas (en "En ambos" si tienen su match en SERES, o en "Solo en JDE" si no).
+
+> El estado no aplica a la pestaña "Solo en SERES" porque esos pedidos no han llegado a `F47011` (por definición).
+
+**Exportación Excel:** hasta cuatro hojas — "Solo en SERES", "Solo en JDE", "En ambos" e "Incidencias JDE" (esta última solo si hay incidencias).
 - Hoja "Solo en SERES": Referencia, Fecha, Cód. Cliente, Cliente, Tipo
-- Hojas "Solo en JDE" y "En ambos": Referencia, Fecha, Tipo
+- Hojas "Solo en JDE", "En ambos" e "Incidencias JDE": Referencia, Fecha, Nº Destino, Desc. Destino, Cliente, Nº Comprador, Desc. Comprador, **Estado JDE** (formato `Y - Procesado`). Las celdas de Estado JDE que empiezan por `E` llevan formato condicional **rojo bold**.
 
 Nombre del archivo: `Comparativa_SERES_JDE_YYYY-MM-DD.xlsx`.
 
@@ -311,13 +332,18 @@ Nombre del archivo: `Comparativa_SERES_JDE_YYYY-MM-DD.xlsx`.
     "solo_en_seres": 4,
     "solo_en_jde": 2,
     "en_ambos": 322,
+    "incidencias": 7,
+    "incidencias_por_estado": { "E": 3, "M": 2, "N": 2 },
     "days": 7
   },
   "solo_en_seres": [...],
   "solo_en_jde": [...],
-  "en_ambos": [...]
+  "en_ambos": [...],
+  "incidencias": [...]
 }
 ```
+
+Cada elemento de `solo_en_jde`, `en_ambos` e `incidencias` incluye además el campo `estado` (`Y` | `M` | `N` | `E` | `null`).
 
 ---
 

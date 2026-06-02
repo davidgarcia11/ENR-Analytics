@@ -5,7 +5,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
-import { Loader2, Search, Download, X, AlertTriangle, CheckCircle2, ArrowLeftRight, BookmarkCheck, Save, Pencil, Trash2 } from "lucide-react"
+import { Loader2, Search, Download, X, AlertTriangle, CheckCircle2, ArrowLeftRight, BookmarkCheck, Save, Pencil, Trash2, ShieldAlert } from "lucide-react"
 import Navbar from "@/components/Navbar"
 import { ArticleMultiSelect } from "@/components/ArticleMultiSelect"
 import { useRouter } from "next/navigation"
@@ -27,6 +27,30 @@ interface Pedido {
     shanMlnm?: string | null;
     urabNum?: number | null;
     urabDesc?: string | null;
+    // Estado del pedido en JDE (SYEDSP). Solo presente en filas con origen JDE.
+    estado?: string | null;
+}
+
+// Etiqueta legible para cada código SYEDSP.
+const ESTADO_LABEL: Record<string, string> = {
+    Y: 'Procesado',
+    M: 'Modificado (duplicado)',
+    N: 'Sin procesar',
+    E: 'Error',
+}
+function estadoLabel(code?: string | null): string {
+    if (!code) return 'Desconocido'
+    return ESTADO_LABEL[code] || `Otro (${code})`
+}
+// Tailwind classes por estado para el badge. Y es el único "OK", el resto son incidencias.
+function estadoBadgeClasses(code?: string | null): string {
+    switch (code) {
+        case 'Y': return 'bg-green-100 text-green-800 border-green-200'
+        case 'M': return 'bg-amber-100 text-amber-800 border-amber-200'
+        case 'N': return 'bg-gray-100 text-gray-700 border-gray-200'
+        case 'E': return 'bg-red-100 text-red-800 border-red-200'
+        default: return 'bg-slate-100 text-slate-600 border-slate-200'
+    }
 }
 
 interface Resumen {
@@ -36,6 +60,8 @@ interface Resumen {
     solo_en_seres: number;
     solo_en_jde: number;
     en_ambos: number;
+    incidencias: number;
+    incidencias_por_estado: Record<string, number>;
     days: number;
 }
 
@@ -44,9 +70,10 @@ interface ComparativaResult {
     solo_en_seres: Pedido[];
     solo_en_jde: Pedido[];
     en_ambos: Pedido[];
+    incidencias: Pedido[];
 }
 
-type Tab = 'solo_seres' | 'solo_jde' | 'ambos'
+type Tab = 'solo_seres' | 'solo_jde' | 'ambos' | 'incidencias'
 
 function formatFecha(fecha: string | null | undefined) {
     if (!fecha) return '-'
@@ -193,11 +220,19 @@ export default function ComparativaSeresPage() {
     const exportToExcel = () => {
         if (!result) return
         const wb = XLSX.utils.book_new()
-        const toRows = (arr: Pedido[]) => arr.map(p => ({
+
+        // Fila JDE enriquecida: Destino + Comprador + Estado JDE (código + descripción).
+        // Se usa en las hojas "Solo en JDE", "En ambos" e "Incidencias".
+        const toJdeRow = (p: Pedido) => ({
             Referencia: p.referencia,
             Fecha: formatFecha(p.fecha),
-            ...(p.tipo ? { Tipo: p.tipo } : {}),
-        }))
+            'Nº Destino': p.shanNum ?? '',
+            'Desc. Destino': p.shanDesc ?? '',
+            Cliente: p.shanMlnm ?? '',
+            'Nº Comprador': p.urabNum ?? '',
+            'Desc. Comprador': p.urabDesc ?? '',
+            'Estado JDE': p.estado ? `${p.estado} - ${estadoLabel(p.estado)}` : '',
+        })
         const soloSeresRows = result.solo_en_seres.map(p => ({
             Referencia: p.referencia,
             Fecha: formatFecha(p.fecha),
@@ -205,9 +240,44 @@ export default function ComparativaSeresPage() {
             Cliente: p.clienteNombre ?? '',
             Tipo: p.tipo ?? '',
         }))
-        XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(soloSeresRows), 'Solo en SERES')
-        XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(toRows(result.solo_en_jde)), 'Solo en JDE')
-        XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(toRows(result.en_ambos)), 'En ambos')
+
+        // Helper: aplica formato condicional rojo a las celdas de Estado JDE
+        // cuando el código empieza por 'E'. Columna "Estado JDE" es la 8ª (índice 7).
+        const ESTADO_COL_IDX = 7
+        const paintErrors = (ws: XLSX.WorkSheet, rows: ReturnType<typeof toJdeRow>[]) => {
+            for (let r = 0; r < rows.length; r++) {
+                if (rows[r]['Estado JDE'].startsWith('E')) {
+                    const ref = XLSX.utils.encode_cell({ r: r + 1, c: ESTADO_COL_IDX })
+                    if (ws[ref]) {
+                        ws[ref].s = {
+                            fill: { fgColor: { rgb: 'FECACA' } },
+                            font: { bold: true, color: { rgb: 'B91C1C' } },
+                        }
+                    }
+                }
+            }
+        }
+
+        const wsSoloSeres = XLSX.utils.json_to_sheet(soloSeresRows)
+        const soloJdeRows = result.solo_en_jde.map(toJdeRow)
+        const wsSoloJde = XLSX.utils.json_to_sheet(soloJdeRows)
+        paintErrors(wsSoloJde, soloJdeRows)
+        const ambosRows = result.en_ambos.map(toJdeRow)
+        const wsAmbos = XLSX.utils.json_to_sheet(ambosRows)
+        paintErrors(wsAmbos, ambosRows)
+
+        XLSX.utils.book_append_sheet(wb, wsSoloSeres, 'Solo en SERES')
+        XLSX.utils.book_append_sheet(wb, wsSoloJde, 'Solo en JDE')
+        XLSX.utils.book_append_sheet(wb, wsAmbos, 'En ambos')
+
+        // Hoja "Incidencias" — solo si hay alguna. Mismo formato que JDE.
+        if (result.incidencias && result.incidencias.length > 0) {
+            const incRows = result.incidencias.map(toJdeRow)
+            const wsInc = XLSX.utils.json_to_sheet(incRows)
+            paintErrors(wsInc, incRows)
+            XLSX.utils.book_append_sheet(wb, wsInc, 'Incidencias JDE')
+        }
+
         XLSX.writeFile(wb, `Comparativa_SERES_JDE_${new Date().toISOString().split('T')[0]}.xlsx`)
     }
 
@@ -220,6 +290,7 @@ export default function ComparativaSeresPage() {
         ? Array.from(new Set([
             ...result.solo_en_jde.map(p => p.shanMlnm ?? ''),
             ...result.en_ambos.map(p => p.shanMlnm ?? ''),
+            ...(result.incidencias || []).map(p => p.shanMlnm ?? ''),
           ].filter(Boolean))).sort().map(v => ({ id: v, description: v }))
         : []
 
@@ -228,8 +299,9 @@ export default function ComparativaSeresPage() {
             solo_seres: result.solo_en_seres,
             solo_jde:   filterByMlnm(result.solo_en_jde),
             ambos:      filterByMlnm(result.en_ambos),
+            incidencias: filterByMlnm(result.incidencias || []),
           }
-        : { solo_seres: [], solo_jde: [], ambos: [] }
+        : { solo_seres: [], solo_jde: [], ambos: [], incidencias: [] }
 
     const dayOptions = [
         { value: 0, label: 'Hoy' },
@@ -399,7 +471,7 @@ export default function ComparativaSeresPage() {
 
                 {/* --- TARJETAS METRICAS --- */}
                 {result && (
-                    <div className="grid gap-4 grid-cols-2 md:grid-cols-3 lg:grid-cols-5">
+                    <div className="grid gap-4 grid-cols-2 md:grid-cols-3 lg:grid-cols-6">
                         <Card className="border-gray-200 shadow-sm overflow-hidden" style={{ borderTop: '3px solid #D30B15' }}>
                             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
                                 <CardTitle className="text-sm font-bold text-gray-700">SERES</CardTitle>
@@ -454,6 +526,32 @@ export default function ComparativaSeresPage() {
                                 <p className="text-xs text-gray-500 font-medium">sincronizados</p>
                             </CardContent>
                         </Card>
+
+                        {/* KPI 'Incidencias': todos los JDE con SYEDSP != 'Y'. Pulsar la card va a la pestaña Incidencias. */}
+                        <Card
+                            className="border-gray-200 shadow-sm overflow-hidden cursor-pointer hover:shadow-md transition-shadow"
+                            style={{ borderTop: '3px solid #f97316' }}
+                            onClick={() => setActiveTab('incidencias')}
+                            title="Pedidos JDE con estado distinto de 'Procesado' (Y)"
+                        >
+                            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                                <CardTitle className="text-sm font-bold text-gray-700">Incidencias JDE</CardTitle>
+                                <ShieldAlert className="h-4 w-4 text-orange-500" />
+                            </CardHeader>
+                            <CardContent>
+                                <div className="text-2xl font-black text-orange-600">{tabData.incidencias.length.toLocaleString('es-ES')}</div>
+                                <p className="text-xs text-gray-500 font-medium">
+                                    {(() => {
+                                        const byEstado = result.resumen.incidencias_por_estado || {}
+                                        const parts: string[] = []
+                                        if (byEstado.E) parts.push(`${byEstado.E} E`)
+                                        if (byEstado.M) parts.push(`${byEstado.M} M`)
+                                        if (byEstado.N) parts.push(`${byEstado.N} N`)
+                                        return parts.length > 0 ? parts.join(' · ') : 'sin incidencias'
+                                    })()}
+                                </p>
+                            </CardContent>
+                        </Card>
                     </div>
                 )}
 
@@ -493,6 +591,16 @@ export default function ComparativaSeresPage() {
                                     {tabData.ambos.length}
                                 </span>
                             </button>
+                            <button
+                                type="button"
+                                onClick={() => setActiveTab('incidencias')}
+                                className={`px-4 py-2 text-sm font-semibold rounded-t-md border-b-2 transition-colors ${activeTab === 'incidencias' ? 'border-orange-500 text-orange-700' : 'border-transparent text-gray-500 hover:text-gray-700'}`}
+                            >
+                                Incidencias JDE
+                                <span className="ml-2 bg-orange-100 text-orange-700 text-xs font-bold px-1.5 py-0.5 rounded-full">
+                                    {tabData.incidencias.length}
+                                </span>
+                            </button>
                         </div>
 
                         {/* Aviso contextual */}
@@ -515,6 +623,12 @@ export default function ComparativaSeresPage() {
                                     Pedidos correctamente <strong>sincronizados</strong> en ambos sistemas.
                                 </p>
                             )}
+                            {activeTab === 'incidencias' && (
+                                <p className="text-xs text-orange-700 bg-orange-50 border border-orange-200 rounded-md px-3 py-2">
+                                    <ShieldAlert className="inline h-3.5 w-3.5 mr-1 mb-0.5" />
+                                    Pedidos JDE con <strong>estado distinto de Procesado (Y)</strong>: M (duplicado), N (sin procesar) o E (error). Requieren revisión.
+                                </p>
+                            )}
                         </div>
 
                         {/* Tabla */}
@@ -531,6 +645,7 @@ export default function ComparativaSeresPage() {
                                                 <TableHead className="font-bold text-gray-700">Cliente</TableHead>
                                                 <TableHead className="font-bold text-gray-700">Nº Comprador</TableHead>
                                                 <TableHead className="font-bold text-gray-700">Desc. Comprador</TableHead>
+                                                <TableHead className="font-bold text-gray-700 text-center">Estado JDE</TableHead>
                                             </>
                                         )}
                                         {activeTab === 'solo_seres' && (
@@ -563,6 +678,14 @@ export default function ComparativaSeresPage() {
                                                         <TableCell className="text-sm text-gray-600">{p.shanMlnm ?? '-'}</TableCell>
                                                         <TableCell className="font-mono text-sm text-gray-700">{p.urabNum ?? '-'}</TableCell>
                                                         <TableCell className="text-sm text-gray-600">{p.urabDesc ?? '-'}</TableCell>
+                                                        <TableCell className="text-center">
+                                                            <span
+                                                                className={`inline-flex items-center gap-1 text-xs font-bold px-2 py-0.5 rounded-md border ${estadoBadgeClasses(p.estado)}`}
+                                                                title={estadoLabel(p.estado)}
+                                                            >
+                                                                {p.estado || '?'}
+                                                            </span>
+                                                        </TableCell>
                                                     </>
                                                 )}
                                                 {activeTab === 'solo_seres' && (
