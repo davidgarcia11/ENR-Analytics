@@ -214,6 +214,14 @@ async function fetchSeresPedidos(days: number): Promise<PedidoSeres[]> {
 async function fetchJdePedidos(days: number): Promise<PedidoJde[]> {
     const since = new Date();
     if (days > 0) since.setDate(since.getDate() - days);
+    // Para "Hoy" (days=0) pedimos 1 día extra de margen, simétrico a SERES.
+    // Motivo: un pedido reprocesado HOY en SERES conserva su Fecha Documento original
+    // (ayer). Cuando SERES lo re-envía a JDE, JDE lo guarda con SYTRDJ = ayer.
+    // Si pedimos sólo SYTRDJ >= hoy se nos quedaría fuera y aparecería como
+    // falso positivo en "Solo en SERES". La asimetría se corrige aquí.
+    // Los pedidos REALES de ayer (no reprocesados hoy) que entren en este rango
+    // ampliado se filtran después en el handler GET — ver "filtrado days=0".
+    else since.setDate(since.getDate() - 1);
     const sinceJde = 100000 + (since.getFullYear() - 2000) * 1000 + getDayOfYear(since);
 
     let conn;
@@ -281,7 +289,18 @@ export async function GET(req: NextRequest) {
         const jdeByRef = new Map(jdeResult.map(p => [p.referencia.toUpperCase(), p]));
 
         const soloEnSeres = seresPedidos.filter(p => !jdeRefs.has(p.referencia.toUpperCase()));
-        const soloEnJde = jdeResult.filter(p => !seresRefs.has(p.referencia.toUpperCase()));
+
+        // Filtrado days=0: cuando ampliamos el rango JDE a ayer (ver fetchJdePedidos),
+        // los pedidos REALES de ayer no reprocesados hoy NO deben aparecer como
+        // "Solo en JDE" (SERES con days=0 los descarta y crearían falsos positivos).
+        // Los conservamos en jdeResult / enAmbos por si machean con un row SERES de
+        // hoy (caso reproceso), pero los excluimos de soloEnJde si SYTRDJ < hoy.
+        const todayIso = new Date().toISOString().split('T')[0];
+        const soloEnJdeRaw = jdeResult.filter(p => !seresRefs.has(p.referencia.toUpperCase()));
+        const soloEnJde = days === 0
+            ? soloEnJdeRaw.filter(p => !p.fecha || p.fecha >= todayIso)
+            : soloEnJdeRaw;
+
         const enAmbos = seresPedidos
             .filter(p => jdeRefs.has(p.referencia.toUpperCase()))
             .map(p => {

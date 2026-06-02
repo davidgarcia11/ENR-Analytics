@@ -193,7 +193,12 @@ const enAmbos     = seresPedidos
 
 **Filtro Cliente:** desplegable multi-select derivado de los valores `WWMLNM` (F0111) presentes en el resultado cargado. Se aplica en cliente sobre las pestañas "Solo en JDE" y "En ambos" (la pestaña "Solo en SERES" no tiene datos JDE, no se puede filtrar por este campo). Las tarjetas KPI y los badges de las pestañas muestran los conteos **del resultado filtrado**, no del total bruto de la consulta.
 
-> **`days=0` ("Hoy"):** caso especial. SERES filtra por Fecha Doc. (cuando se creó el pedido en origen), que puede ser el día anterior incluso si llegó hoy. Para evitar falsos negativos, cuando `days=0` la API pide 1 día extra de margen a SERES y luego filtra los resultados por **Fecha Estado** (la fecha real de recepción en SERES). En JDE simplemente no se aplica el `setDate` (se usa `since = hoy`). 
+> **`days=0` ("Hoy"):** caso especial. SERES filtra por Fecha Doc. (cuando se creó el pedido en origen), que puede ser el día anterior incluso si llegó hoy. Para evitar falsos negativos, cuando `days=0` la API pide **1 día extra de margen a SERES** y filtra los resultados por **Fecha Estado** (la fecha real de recepción en SERES). En JDE se hace la **misma ampliación de 1 día** (`since = ayer`) para detectar pedidos reprocesados — ver siguiente bloque.
+
+> **Pedidos reprocesados (`days=0`):** cuando un pedido se reprocesa en la web de SERES (por ejemplo, porque cayó mal en JDE y hubo que reenviarlo), SERES conserva la **Fecha Documento original** (ayer) pero actualiza la **Fecha Estado** a hoy. Al re-llegar a JDE, se guarda con `SYTRDJ = ayer`. Para que estos pedidos aparezcan correctamente en "En ambos" en `days=0`:
+> 1. **JDE pide simétricamente desde ayer** (no sólo desde hoy), igual que SERES, así el reprocesado entra en el resultado JDE.
+> 2. Los pedidos reales de ayer NO reprocesados (SERES con Fecha Estado=ayer) se descartan del "Solo en JDE" mediante un filtro post-query: `if (days === 0) descartar pedidos con SYTRDJ < hoy del array solo_en_jde`. Así no aparecen como falsos positivos.
+> 3. "En ambos" sí los conserva si SERES tiene la misma referencia con Fecha Estado=hoy, capturando el caso de reproceso.
 
 **Paralelismo:** el scraping de SERES y la consulta a JDE se lanzan en paralelo con `Promise.all`.
 
