@@ -1,6 +1,6 @@
 "use client"
 
-import { Loader2, ShieldAlert, Settings2 } from "lucide-react"
+import { Loader2, Tag, Thermometer, MoreHorizontal } from "lucide-react"
 
 export interface MermaCode {
   code: string
@@ -19,7 +19,7 @@ interface MermaBreakdownProps {
 }
 
 // Componente reutilizable que muestra el desglose de merma agrupado por:
-//   Calidad (códigos Q*) y Proceso (códigos P*)
+//   Etiquetado (códigos Q*) y Pasteurizado (códigos P*)
 // Se usa en la card global (debajo de los KPIs) y en el popover por fila.
 export default function MermaBreakdown({ codes, total, loading, emptyMessage, compact }: MermaBreakdownProps) {
   if (loading) {
@@ -53,8 +53,8 @@ export default function MermaBreakdown({ codes, total, loading, emptyMessage, co
   return (
     <div className={compact ? 'space-y-3' : 'grid gap-4 md:grid-cols-2'}>
       <BreakdownBlock
-        title="Calidad (Q)"
-        icon={<ShieldAlert className="h-4 w-4 text-red-600" />}
+        title="Etiquetado (Q)"
+        icon={<Tag className="h-4 w-4 text-blue-600" />}
         items={calidad}
         subtotal={calidadTotal}
         total={total}
@@ -63,8 +63,8 @@ export default function MermaBreakdown({ codes, total, loading, emptyMessage, co
         compact={compact}
       />
       <BreakdownBlock
-        title="Proceso (P)"
-        icon={<Settings2 className="h-4 w-4 text-amber-600" />}
+        title="Pasteurizado (P)"
+        icon={<Thermometer className="h-4 w-4 text-amber-600" />}
         items={proceso}
         subtotal={procesoTotal}
         total={total}
@@ -75,7 +75,7 @@ export default function MermaBreakdown({ codes, total, loading, emptyMessage, co
       {otros.length > 0 && (
         <BreakdownBlock
           title="Otros"
-          icon={<Settings2 className="h-4 w-4 text-slate-500" />}
+          icon={<MoreHorizontal className="h-4 w-4 text-slate-500" />}
           items={otros}
           subtotal={otrosTotal}
           total={total}

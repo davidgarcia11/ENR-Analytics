@@ -57,7 +57,7 @@ components/
   Navbar.tsx                  # Barra de navegación compartida por todos los paneles (dropdown "Paneles ▾")
   FilterPanel.tsx             # Panel de filtros del dashboard de producción (incluye presets)
   ArticleMultiSelect.tsx      # Desplegable multi-selección con búsqueda (usado en FilterPanel)
-  MermaBreakdown.tsx          # Desglose de merma agrupado Q/P (card global + popover en /produccion)
+  MermaBreakdown.tsx          # Desglose de merma agrupado Q=Etiquetado / P=Pasteurizado (card global + popover en /produccion)
   MermaCellPopover.tsx        # Popover por fila al pulsar celda Merma en /produccion
   ui/                         # button, card, input, table, popover (estilo shadcn)
 middleware.ts                 # Protege /api/admin/* (JWT + role admin)

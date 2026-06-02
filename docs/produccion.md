@@ -686,7 +686,7 @@ A partir de la feature "Desglose de merma" el `.xlsx` incluye dos hojas extra (s
 
 | Hoja | Origen | Formato |
 |---|---|---|
-| **Merma por tipo** | `globalBreakdown` (ya cargado en pantalla) | Una fila por código de motivo: Tipo (Calidad/Proceso) · Código · Descripción · Cantidad · % sobre merma. Última fila con `TOTAL`. |
+| **Merma por tipo** | `globalBreakdown` (ya cargado en pantalla) | Una fila por código de motivo: Tipo (Etiquetado/Pasteurizado) · Código · Descripción · Cantidad · % sobre merma. Última fila con `TOTAL`. |
 | **Merma por artículo** | Fetch on-demand a `/api/production/merma-breakdown?mode=matrix` | **Formato largo**: una fila por par `(artículo, código)`. Columnas: Artículo · Descripción artículo · Tipo · Código · Descripción código · Cantidad. Diseñada para crear tablas dinámicas en Excel. |
 
 Detalles completos en la sección 16 (Desglose de merma por tipo).
@@ -885,7 +885,7 @@ Funcionalidad complementaria al cálculo de merma total. Permite ver, para una c
 
 ### Motivación
 
-Calidad y Producción/Proceso necesitan saber qué motivos están generando la merma. Los códigos `Q*` corresponden a Calidad y los `P*` a Proceso, así que la UI los agrupa en dos bloques con subtotal por bloque.
+Producción necesita saber qué etapa está generando la merma. Los códigos `Q*` corresponden a la fase de **Etiquetado** y los `P*` a la fase de **Pasteurizado**, así que la UI los agrupa en dos bloques con subtotal por bloque.
 
 ### Catálogo de códigos — `prodctl.f0005`
 
@@ -936,7 +936,8 @@ Para no tocar el endpoint más complejo del proyecto y mantener la SQL principal
 
 **Card global "Desglose de merma"** (debajo de los KPIs en `/produccion`):
 - Se carga en cada Filtrar / Cargar todos junto con la tabla principal (fetch paralelo, no bloqueante)
-- Dos columnas: **Calidad (Q*)** y **Proceso (P*)** con subtotal por bloque
+- Dos columnas: **Etiquetado (Q*)** y **Pasteurizado (P*)** con subtotal por bloque
+- La card arranca **colapsada**; el header completo actúa como botón de abrir/cerrar (icono chevron a la izquierda + indicador "Pulsa para desplegar/ocultar")
 - Dentro de cada bloque: lista ordenada por cantidad descendente, con código, descripción, cantidad y % sobre merma total
 
 **Popover por fila** (al pulsar la celda Merma de una fila):
@@ -964,4 +965,4 @@ La lista de códigos válidos está embebida en dos sitios y debe mantenerse sin
 - `app/api/production/route.ts` → constante `MERMA_CODES` (controla qué entra en la suma total)
 - `app/api/production/merma-breakdown/route.ts` → constante `MERMA_CODES_ARR` (controla qué entra en el desglose)
 
-Si Calidad/Producción dieran de alta un código nuevo en F0005 con DRSY=42/DRRT=RC, hay que añadirlo en ambos sitios.
+Si se diera de alta un código nuevo en F0005 con DRSY=42/DRRT=RC para una fase ya existente (Etiquetado/Pasteurizado), hay que añadirlo en ambos sitios. Si apareciera una **fase nueva** (prefijo distinto de Q o P), además habría que añadir un bloque nuevo en `components/MermaBreakdown.tsx` con su título e icono.

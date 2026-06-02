@@ -831,7 +831,7 @@ Desplegable multi-selección con búsqueda. Ver [docs/produccion.md](docs/produc
 
 ### `MermaBreakdown.tsx`
 
-Tabla puramente visual que muestra el desglose de merma agrupado en dos bloques: Calidad (códigos `Q*`) y Proceso (códigos `P*`), con subtotales por bloque. Recibe `codes` (lista con `{code, description, group, qty, percent}`) y `total`. Reutilizado por la card global en `/produccion` y por el popover por fila. Detalles en [docs/produccion.md sección 16](docs/produccion.md).
+Tabla puramente visual que muestra el desglose de merma agrupado en dos bloques: Etiquetado (códigos `Q*`) y Pasteurizado (códigos `P*`), con subtotales por bloque. Recibe `codes` (lista con `{code, description, group, qty, percent}`) y `total`. Reutilizado por la card global en `/produccion` y por el popover por fila. Detalles en [docs/produccion.md sección 16](docs/produccion.md).
 
 ### `MermaCellPopover.tsx`
 

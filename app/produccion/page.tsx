@@ -13,7 +13,7 @@ import {
   TableRow,
 } from "@/components/ui/table"
 // Iconos de la librería lucide-react para dar estilo visual
-import { Loader2, Factory, Calendar, ChevronDown, ChevronsDown } from "lucide-react"
+import { Loader2, Factory, Calendar, ChevronDown, ChevronsDown, ChevronRight } from "lucide-react"
 import Navbar from "@/components/Navbar"
 import * as XLSX from 'xlsx'; // Librería 'xlsx' para generar archivos Excel
 import { useRouter } from "next/navigation"
@@ -209,6 +209,7 @@ export default function Dashboard() {
   // Se rellena en cada Filtrar/Cargar todos en paralelo a fetchData
   const [globalBreakdown, setGlobalBreakdown] = useState<{ codes: MermaCode[]; total: number } | null>(null)
   const [breakdownLoading, setBreakdownLoading] = useState(false)
+  const [breakdownOpen, setBreakdownOpen] = useState(false) // Arranca colapsado, el usuario lo abre si le interesa
 
   // --- CARGA INICIAL ---
   useEffect(() => {
@@ -417,7 +418,7 @@ export default function Dashboard() {
     // --- Hoja "Merma por tipo" (desglose global agrupado Q/P) ---
     // Reutilizamos el globalBreakdown ya cargado; si no hay datos no añadimos la hoja.
     if (globalBreakdown && globalBreakdown.codes.length > 0) {
-      const groupLabel = (g: string) => g === 'Q' ? 'Calidad' : g === 'P' ? 'Proceso' : 'Otros'
+      const groupLabel = (g: string) => g === 'Q' ? 'Etiquetado' : g === 'P' ? 'Pasteurizado' : 'Otros'
       const ordered = [...globalBreakdown.codes].sort((a, b) => {
         if (a.group !== b.group) return a.group.localeCompare(b.group)
         return b.qty - a.qty
@@ -455,7 +456,7 @@ export default function Dashboard() {
       const json = await res.json()
       const items: any[] = (json && Array.isArray(json.items)) ? json.items : []
       if (items.length > 0) {
-        const groupLabel = (g: string) => g === 'Q' ? 'Calidad' : g === 'P' ? 'Proceso' : 'Otros'
+        const groupLabel = (g: string) => g === 'Q' ? 'Etiquetado' : g === 'P' ? 'Pasteurizado' : 'Otros'
         const matrixRows = items.map(it => ({
           Articulo: it.article,
           'Descripción artículo': it.articleDesc,
@@ -619,31 +620,49 @@ export default function Dashboard() {
           </Card>
         </div>
 
-        {/* --- DESGLOSE DE MERMA (global) --- */}
+        {/* --- DESGLOSE DE MERMA (global) ---
+            Arranca colapsada. El header completo es un botón que la abre/cierra. */}
         <Card className="border-gray-200 shadow-sm overflow-hidden" style={{ borderTop: '3px solid #D30B15' }}>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-3">
-            <div>
-              <CardTitle className="text-lg font-bold text-gray-800">Desglose de merma</CardTitle>
-              <p className="text-xs text-gray-500 font-medium mt-1">
-                Por tipo de motivo (Q: Calidad · P: Proceso). Pulsa una celda de Merma de la tabla para ver el desglose de esa fila.
-              </p>
-            </div>
-            {globalBreakdown && globalBreakdown.total > 0 && (
-              <div className="text-right">
-                <div className="text-2xl font-black text-gray-900">
-                  {Math.round(globalBreakdown.total).toLocaleString('es-ES')}
+          <button
+            type="button"
+            onClick={() => setBreakdownOpen(o => !o)}
+            aria-expanded={breakdownOpen}
+            aria-controls="desglose-merma-content"
+            className="w-full text-left"
+          >
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-3 hover:bg-gray-50/60 transition-colors">
+              <div className="flex items-center gap-2">
+                {breakdownOpen ? (
+                  <ChevronDown className="h-4 w-4 text-gray-500" />
+                ) : (
+                  <ChevronRight className="h-4 w-4 text-gray-500" />
+                )}
+                <div>
+                  <CardTitle className="text-lg font-bold text-gray-800">Desglose de merma</CardTitle>
+                  <p className="text-xs text-gray-500 font-medium mt-1">
+                    Por tipo de motivo (Q: Etiquetado · P: Pasteurizado). Pulsa para {breakdownOpen ? 'ocultar' : 'desplegar'}.
+                  </p>
                 </div>
-                <div className="text-[10px] text-gray-500">Total merma</div>
               </div>
-            )}
-          </CardHeader>
-          <CardContent>
-            <MermaBreakdown
-              codes={globalBreakdown?.codes || []}
-              total={globalBreakdown?.total || 0}
-              loading={breakdownLoading}
-            />
-          </CardContent>
+              {globalBreakdown && globalBreakdown.total > 0 && (
+                <div className="text-right">
+                  <div className="text-2xl font-black text-gray-900">
+                    {Math.round(globalBreakdown.total).toLocaleString('es-ES')}
+                  </div>
+                  <div className="text-[10px] text-gray-500">Total merma</div>
+                </div>
+              )}
+            </CardHeader>
+          </button>
+          {breakdownOpen && (
+            <CardContent id="desglose-merma-content">
+              <MermaBreakdown
+                codes={globalBreakdown?.codes || []}
+                total={globalBreakdown?.total || 0}
+                loading={breakdownLoading}
+              />
+            </CardContent>
+          )}
         </Card>
 
         {/* --- TABLA DE DATOS --- */}
