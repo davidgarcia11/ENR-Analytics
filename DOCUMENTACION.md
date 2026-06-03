@@ -76,6 +76,8 @@ dashboard/
 │   ├── ArticleMultiSelect.tsx    ← Desplegable multi-selección con búsqueda
 │   ├── DatePicker.tsx            ← Selector de fecha (Popover + Calendar + botón limpiar)
 │   ├── FilterPanel.tsx           ← Panel de filtros del dashboard de producción
+│   ├── MermaBreakdown.tsx        ← Desglose de merma agrupado Q/P (usado en /produccion)
+│   ├── MermaCellPopover.tsx      ← Popover por fila al pulsar celda Merma en /produccion
 │   ├── Navbar.tsx                ← Barra de navegación compartida
 │   ├── SingleSelect.tsx          ← Variante de selección única de ArticleMultiSelect
 │   └── ui/                       ← Componentes de interfaz base (estilo shadcn)
@@ -130,7 +132,9 @@ dashboard/
         ├── categories/
         │   └── route.ts          ← GET /api/categories?field=X
         ├── production/
-        │   └── route.ts          ← GET /api/production?...filtros...
+        │   ├── route.ts          ← GET /api/production?...filtros...
+        │   └── merma-breakdown/
+        │       └── route.ts      ← GET /api/production/merma-breakdown (modos global/row/matrix)
         ├── production-lines/
         │   └── route.ts          ← GET /api/production-lines
         └── jde-orders/
@@ -264,12 +268,20 @@ CREATE TABLE screen_permissions (
   role_id   INTEGER NOT NULL REFERENCES roles(id)   ON DELETE CASCADE,
   PRIMARY KEY (screen_id, role_id)
 );
+
+-- Descripciones editables de los códigos SYEDSP de F47011 (consumidas por /comparativa-seres)
+CREATE TABLE jde_status_descriptions (
+  code TEXT PRIMARY KEY,
+  description TEXT NOT NULL,
+  updated_at TEXT DEFAULT (datetime('now'))
+);
 ```
 
 **Seeds iniciales:**
 - Roles: `admin` (Administrador) y `user` (Usuario)
 - Pantallas: `produccion`, `pedidos`, `caducados`, `comparativa` (todas `is_public=1`), `admin` (`is_public=0`)
 - Permisos: rol `admin` → pantalla `admin`
+- Estados JDE: `Y`, `M`, `N`, `E` con sus descripciones por defecto
 
 Todos los seeds usan `INSERT OR IGNORE` para no romper DBs existentes.
 
@@ -336,7 +348,7 @@ Solo usuarios con `role === 'admin'`. Si no eres admin, te redirige a `/producci
 
 ### Pestañas
 
-El panel tiene tres pestañas: **Usuarios**, **Roles** y **Pantallas**.
+El panel tiene cuatro pestañas: **Usuarios**, **Roles**, **Pantallas** y **Estados JDE**.
 
 #### Pestaña Usuarios
 1. **Crear usuario:** Formulario con campos Nombre, Apellido, Usuario (login), Contraseña, Rol (dropdown dinámico desde BD), checkbox "Forzar cambio de contraseña"
@@ -357,6 +369,14 @@ Para cada pantalla del dashboard:
 - Botón **Guardar** por pantalla → `PUT /api/admin/screens/:key`
 - La pantalla `admin` no es editable (siempre solo accesible para `admin`)
 
+#### Pestaña Estados JDE
+Edición de las descripciones de los códigos `F47011.SYEDSP` que se muestran en `/comparativa-seres` (badge tooltip, columna "Descripción" y export Excel).
+
+- Tabla con los 4 códigos sembrados (`Y`, `M`, `N`, `E`) — no se pueden añadir ni borrar nuevos códigos desde aquí, solo editar el texto.
+- Input por fila con la descripción + botón **Guardar** que se habilita solo si el texto ha cambiado respecto al guardado.
+- Persistencia en SQLite (tabla `jde_status_descriptions`). El seed inicial es idempotente (`INSERT OR IGNORE`), por lo que las ediciones manuales **no se sobreescriben** en futuros despliegues.
+- Cuando el admin guarda un cambio, el panel `/comparativa-seres` lo verá la próxima vez que se cargue (hace `fetch('/api/jde-statuses')` al montar).
+
 ### APIs de administración
 
 | Método | Ruta | Descripción |
@@ -370,6 +390,9 @@ Para cada pantalla del dashboard:
 | POST | `/api/admin/roles` | Crea rol (`name` + `label`). Nombre normalizado automáticamente |
 | DELETE | `/api/admin/roles/:id` | Elimina rol. Bloqueado para `admin`. Reasigna usuarios afectados a `user` |
 | PUT | `/api/admin/screens/:key` | Actualiza `is_public` y `allowed_roles[]` de una pantalla. Bloqueado para `admin` |
+| GET | `/api/admin/jde-statuses` | Lista las descripciones de los códigos SYEDSP (con `updated_at`) |
+| PUT | `/api/admin/jde-statuses/:code` | Actualiza la descripción de un código existente. No permite crear ni borrar |
+| GET | `/api/jde-statuses` | Lista pública (con sesión) consumida por `/comparativa-seres` |
 | GET | `/api/admin/logs` | Logs de consultas con paginación, filtros y estadísticas (ver sección 7) |
 
 ---
@@ -499,6 +522,7 @@ Los usuarios logueados pueden guardar combinaciones de filtros con nombre para r
 | Producción | `'produccion'` |
 | Caducados | `'caducados'` |
 | Pedidos | `'pedidos'` |
+| Comparativa SERES vs JDE | `'comparativa'` |
 
 ### Qué se guarda en un preset
 
@@ -539,12 +563,21 @@ El JSON varía según el panel. Ejemplos:
 }
 ```
 
+**Comparativa SERES vs JDE:**
+```json
+{
+  "days": 7,
+  "selectedDestinoMlnm": ["CLIENTE A", "CLIENTE B"]
+}
+```
+
 ### UI de presets
 
-Dos formas de interactuar (idénticas en todos los paneles):
+Tres formas de interactuar (los 4 paneles tienen al menos una de ellas):
 
-1. **Panel expandible (botón "Guardar"):** Lista completa de presets con opción de guardar, editar y eliminar
-2. **Acceso rápido en la barra de acciones:** Dropdown "Cargar preset" para carga inmediata
+1. **Panel expandible (botón "Guardar" en la barra de filtros):** Lista completa de presets con opción de guardar, editar y eliminar — en `produccion`, `pedidos` y `caducados`. En `comparativa-seres` no hay botón inline en los filtros.
+2. **Acceso rápido en la barra de acciones:** Dropdown "Cargar preset" para carga inmediata — solo en `produccion` y `caducados`.
+3. **Botón "Presets" en la Navbar superior:** Disponible en los 4 paneles. Cada `page.tsx` incrementa una señal `presetsSignal` que un `useEffect` observa para hacer `setShowPresets(true)`. Es la única forma de abrir el panel en `comparativa-seres`.
 
 ### APIs de presets
 
@@ -768,12 +801,12 @@ Barra de navegación compartida por todos los paneles. Reemplaza el top bar dupl
 | `currentPanel` | `'produccion' \| 'pedidos' \| 'caducados' \| 'comparativa'` | Panel activo (se marca con punto rojo en el dropdown) |
 | `user` | `SessionUser \| null` | Usuario de sesión. Si es null, muestra botón "Iniciar sesión" |
 | `onLogout` | `() => void` | Callback para cerrar sesión |
-| `onPresetsClick` | `() => void` (opcional) | Si se pasa, aparece el botón "Presets" (solo en `/produccion`, solo con sesión) |
+| `onPresetsClick` | `() => void` (opcional) | Si se pasa, aparece el botón "Presets". Lo wirean los 4 paneles (`/produccion`, `/preparacion-pedidos`, `/caducados`, `/comparativa-seres`) sólo con sesión activa |
 
 **Comportamiento:**
 - Logo a la izquierda
 - Botón **"Paneles ▾"** con dropdown filtrado según permisos: solo muestra los paneles a los que el usuario actual tiene acceso. Si no hay ninguno accesible, el botón se oculta.
-- Botón "Presets" solo visible cuando `onPresetsClick` está definido y hay sesión activa
+- Botón "Presets" visible en los 4 paneles cuando hay sesión. Al pulsarlo, cada panel incrementa una señal interna (`presetsSignal`) que abre su propio panel/modal de presets. Los presets están aislados por `screen` (`produccion`, `pedidos`, `caducados`, `comparativa`)
 - Con sesión: nombre del usuario, botones Admin y Logs (solo si `role === 'admin'`), botón Salir
 - Sin sesión: enlace "Iniciar sesión"
 
@@ -819,11 +852,19 @@ Componente `Calendar` estilo shadcn/ui basado en `react-day-picker` v10 con loca
 
 ### `components/ui/popover.tsx`
 
-Componente `Popover` / `PopoverTrigger` / `PopoverContent` estilo shadcn/ui basado en `@radix-ui/react-popover`. `PopoverContent` renderiza en Portal para garantizar z-index correcto sobre cualquier elemento. Se usa exclusivamente a través de `DatePicker`.
+Componente `Popover` / `PopoverTrigger` / `PopoverContent` estilo shadcn/ui basado en `@radix-ui/react-popover`. `PopoverContent` renderiza en Portal para garantizar z-index correcto sobre cualquier elemento. Lo usan `DatePicker` y `MermaCellPopover`.
 
 ### `ArticleMultiSelect.tsx`
 
 Desplegable multi-selección con búsqueda. Ver [docs/produccion.md](docs/produccion.md).
+
+### `MermaBreakdown.tsx`
+
+Tabla puramente visual que muestra el desglose de merma agrupado en dos bloques: Etiquetado (códigos `Q*`) y Pasteurizado (códigos `P*`), con subtotales por bloque. Recibe `codes` (lista con `{code, description, group, qty, percent}`) y `total`. Reutilizado por la card global en `/produccion` y por el popover por fila. Detalles en [docs/produccion.md sección 16](docs/produccion.md).
+
+### `MermaCellPopover.tsx`
+
+Envuelve la celda Merma de cada fila en la tabla de `/produccion`. Al abrirse, hace fetch on-demand a `/api/production/merma-breakdown?mode=row` con los filtros vigentes + parámetros de la fila (`order`, `productionDateRaw`, `rowArticle`). Si la fila no tiene merma o la tabla está en modo agrupar-por-artículo, la celda no es clicable. Ver [docs/produccion.md sección 16](docs/produccion.md).
 
 ### `SingleSelect.tsx`
 

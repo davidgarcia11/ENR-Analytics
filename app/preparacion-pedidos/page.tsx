@@ -129,6 +129,11 @@ export default function PreparacionPedidos() {
   const [presetName, setPresetName]         = useState('')
   const [savingPreset, setSavingPreset]     = useState(false)
   const [editingPresetId, setEditingPresetId] = useState<number | null>(null)
+  // Señal que dispara la apertura del panel de presets desde el botón del Navbar
+  const [presetsSignal, setPresetsSignal] = useState(0)
+  useEffect(() => {
+    if (presetsSignal > 0) setShowPresets(true)
+  }, [presetsSignal])
 
   // --- DERIVADOS (memos) ---
 
@@ -428,7 +433,12 @@ export default function PreparacionPedidos() {
       <div className="mx-auto max-w-7xl space-y-8">
 
         {/* --- BARRA DE NAVEGACIÓN --- */}
-        <Navbar currentPanel="pedidos" user={sessionUser} onLogout={logout} />
+        <Navbar
+          currentPanel="pedidos"
+          user={sessionUser}
+          onLogout={logout}
+          onPresetsClick={() => setPresetsSignal(s => s + 1)}
+        />
 
         {/* --- PANEL DE PRESETS --- */}
         {sessionUser && showPresets && (

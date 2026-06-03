@@ -90,6 +90,26 @@ export interface PedidoJde {
     shanMlnm: string | null;
     urabNum: number | null;
     urabDesc: string | null;
+    // Estado del pedido EDI en JDE (F47011.SYEDSP):
+    //   Y = Procesado correctamente (pedido creado)
+    //   M = Modificado (la referencia llegó dos veces)
+    //   N = Sin procesar (el report de JDE aún no ha intentado crearlo)
+    //   E = Error (no ha podido crear el pedido)
+    // Cualquier valor distinto de Y se considera incidencia.
+    estado: string | null;
+}
+
+// Descripción legible de cada código SYEDSP. Centralizado aquí para que
+// frontend y Excel usen el mismo texto.
+export const ESTADO_LABEL: Record<string, string> = {
+    Y: 'Procesado',
+    M: 'Modificado (duplicado)',
+    N: 'Sin procesar',
+    E: 'Error',
+};
+export function estadoLabel(code: string | null | undefined): string {
+    if (!code) return 'Desconocido';
+    return ESTADO_LABEL[code] || `Otro (${code})`;
 }
 
 // Scraping completo de SERES con paginación
@@ -214,6 +234,14 @@ async function fetchSeresPedidos(days: number): Promise<PedidoSeres[]> {
 async function fetchJdePedidos(days: number): Promise<PedidoJde[]> {
     const since = new Date();
     if (days > 0) since.setDate(since.getDate() - days);
+    // Para "Hoy" (days=0) pedimos 1 día extra de margen, simétrico a SERES.
+    // Motivo: un pedido reprocesado HOY en SERES conserva su Fecha Documento original
+    // (ayer). Cuando SERES lo re-envía a JDE, JDE lo guarda con SYTRDJ = ayer.
+    // Si pedimos sólo SYTRDJ >= hoy se nos quedaría fuera y aparecería como
+    // falso positivo en "Solo en SERES". La asimetría se corrige aquí.
+    // Los pedidos REALES de ayer (no reprocesados hoy) que entren en este rango
+    // ampliado se filtran después en el handler GET — ver "filtrado days=0".
+    else since.setDate(since.getDate() - 1);
     const sinceJde = 100000 + (since.getFullYear() - 2000) * 1000 + getDayOfYear(since);
 
     let conn;
@@ -226,7 +254,8 @@ async function fetchJdePedidos(days: number): Promise<PedidoJde[]> {
                     TRIM(B.ABALPH) AS SHAN_DESC,
                     TRIM(D.WWMLNM) AS SHAN_MLNM,
                     A.SYURAB      AS URAB_NUM,
-                    TRIM(C.ABALPH) AS URAB_DESC
+                    TRIM(C.ABALPH) AS URAB_DESC,
+                    TRIM(A.SYEDSP) AS ESTADO
              FROM F47011 A
              LEFT JOIN F0101 B ON B.ABAN8 = A.SYSHAN
              LEFT JOIN F0101 C ON C.ABAN8 = A.SYURAB
@@ -249,6 +278,7 @@ async function fetchJdePedidos(days: number): Promise<PedidoJde[]> {
                 shanMlnm: row.SHAN_MLNM ? String(row.SHAN_MLNM).trim() : null,
                 urabNum: row.URAB_NUM ?? null,
                 urabDesc: row.URAB_DESC ? String(row.URAB_DESC).trim() : null,
+                estado: row.ESTADO ? String(row.ESTADO).trim() : null,
             };
         });
     } finally {
@@ -281,13 +311,37 @@ export async function GET(req: NextRequest) {
         const jdeByRef = new Map(jdeResult.map(p => [p.referencia.toUpperCase(), p]));
 
         const soloEnSeres = seresPedidos.filter(p => !jdeRefs.has(p.referencia.toUpperCase()));
-        const soloEnJde = jdeResult.filter(p => !seresRefs.has(p.referencia.toUpperCase()));
+
+        // Filtrado days=0: cuando ampliamos el rango JDE a ayer (ver fetchJdePedidos),
+        // los pedidos REALES de ayer no reprocesados hoy NO deben aparecer como
+        // "Solo en JDE" (SERES con days=0 los descarta y crearían falsos positivos).
+        // Los conservamos en jdeResult / enAmbos por si machean con un row SERES de
+        // hoy (caso reproceso), pero los excluimos de soloEnJde si SYTRDJ < hoy.
+        const todayIso = new Date().toISOString().split('T')[0];
+        const soloEnJdeRaw = jdeResult.filter(p => !seresRefs.has(p.referencia.toUpperCase()));
+        const soloEnJde = days === 0
+            ? soloEnJdeRaw.filter(p => !p.fecha || p.fecha >= todayIso)
+            : soloEnJdeRaw;
+
         const enAmbos = seresPedidos
             .filter(p => jdeRefs.has(p.referencia.toUpperCase()))
             .map(p => {
                 const jde = jdeByRef.get(p.referencia.toUpperCase());
-                return { ...p, shanNum: jde?.shanNum ?? null, shanDesc: jde?.shanDesc ?? null, shanMlnm: jde?.shanMlnm ?? null, urabNum: jde?.urabNum ?? null, urabDesc: jde?.urabDesc ?? null };
+                return {
+                    ...p,
+                    shanNum: jde?.shanNum ?? null,
+                    shanDesc: jde?.shanDesc ?? null,
+                    shanMlnm: jde?.shanMlnm ?? null,
+                    urabNum: jde?.urabNum ?? null,
+                    urabDesc: jde?.urabDesc ?? null,
+                    estado: jde?.estado ?? null,
+                };
             });
+
+        // Pestaña "Incidencias": todos los pedidos JDE con estado distinto de 'Y'
+        // (independientemente de si están o no en SERES). Sirve como vista
+        // ejecutiva: aquí está todo lo que requiere acción.
+        const incidencias = jdeResult.filter(p => p.estado !== 'Y');
 
         const resultCount = soloEnSeres.length + soloEnJde.length + enAmbos.length;
 
@@ -309,6 +363,13 @@ export async function GET(req: NextRequest) {
             console.error('Error logging query:', logErr);
         }
 
+        // Conteo de incidencias desglosado por estado (útil para tooltip o futuras métricas)
+        const incidenciasByEstado: Record<string, number> = {};
+        for (const p of incidencias) {
+            const k = p.estado || '(sin estado)';
+            incidenciasByEstado[k] = (incidenciasByEstado[k] || 0) + 1;
+        }
+
         return NextResponse.json({
             resumen: {
                 total_seres_todos: seresResult.length,
@@ -317,11 +378,14 @@ export async function GET(req: NextRequest) {
                 solo_en_seres: soloEnSeres.length,
                 solo_en_jde: soloEnJde.length,
                 en_ambos: enAmbos.length,
+                incidencias: incidencias.length,
+                incidencias_por_estado: incidenciasByEstado,
                 days,
             },
             solo_en_seres: soloEnSeres,
             solo_en_jde: soloEnJde,
             en_ambos: enAmbos,
+            incidencias,
         });
 
     } catch (err: any) {

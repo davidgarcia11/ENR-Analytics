@@ -68,6 +68,15 @@ export function getDb(): Database.Database {
       role_id   INTEGER NOT NULL REFERENCES roles(id)   ON DELETE CASCADE,
       PRIMARY KEY (screen_id, role_id)
     );
+
+    -- Descripciones editables para los códigos de estado SYEDSP de JDE.
+    -- Se usan en /comparativa-seres (tooltip del badge, columna Descripción,
+    -- Excel) y son editables por admin desde /admin.
+    CREATE TABLE IF NOT EXISTS jde_status_descriptions (
+      code TEXT PRIMARY KEY,
+      description TEXT NOT NULL,
+      updated_at TEXT DEFAULT (datetime('now'))
+    );
   `);
 
   // Migración: añadir columna must_change_password si no existe (para BDs creadas antes de esta versión)
@@ -113,6 +122,15 @@ export function getDb(): Database.Database {
   _db.exec(`
     INSERT OR IGNORE INTO screen_permissions (screen_id, role_id)
     SELECT s.id, r.id FROM screens s, roles r WHERE s.key = 'admin' AND r.name = 'admin';
+  `);
+
+  // Seed descripciones de estados JDE (idempotente). Si admin las edita en
+  // producción, el INSERT OR IGNORE no las sobreescribe en futuros despliegues.
+  _db.exec(`
+    INSERT OR IGNORE INTO jde_status_descriptions (code, description) VALUES ('Y', 'Procesado y con pedido creado');
+    INSERT OR IGNORE INTO jde_status_descriptions (code, description) VALUES ('M', 'Pedido que ha llegado dos veces (M de Modificado)');
+    INSERT OR IGNORE INTO jde_status_descriptions (code, description) VALUES ('N', 'Sin procesar, el report de JDE todavía no ha intentado crear el pedido');
+    INSERT OR IGNORE INTO jde_status_descriptions (code, description) VALUES ('E', 'Error, no ha podido crear el pedido porque algo falla');
   `);
 
   // Crear admin por defecto si no existe ningún usuario

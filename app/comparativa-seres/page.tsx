@@ -3,12 +3,15 @@
 import { useState, useEffect } from "react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
+import { Input } from "@/components/ui/input"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
-import { Loader2, Search, Download, X, AlertTriangle, CheckCircle2, ArrowLeftRight } from "lucide-react"
+import { Loader2, Search, Download, X, AlertTriangle, CheckCircle2, ArrowLeftRight, BookmarkCheck, Save, Pencil, Trash2, ShieldAlert } from "lucide-react"
 import Navbar from "@/components/Navbar"
 import { ArticleMultiSelect } from "@/components/ArticleMultiSelect"
 import { useRouter } from "next/navigation"
 import * as XLSX from 'xlsx'
+
+interface Preset { id: number; name: string; filters: string; created_at: string }
 
 interface SessionUser { id: number; username: string; role: string; name: string; surname: string }
 
@@ -24,6 +27,33 @@ interface Pedido {
     shanMlnm?: string | null;
     urabNum?: number | null;
     urabDesc?: string | null;
+    // Estado del pedido en JDE (SYEDSP). Solo presente en filas con origen JDE.
+    estado?: string | null;
+}
+
+// Etiqueta legible para cada código SYEDSP.
+// Las descripciones reales se cargan desde SQLite via /api/jde-statuses
+// (editables por admin). ESTADO_LABEL_FALLBACK actúa como red de seguridad
+// si el fetch falla o aún no ha terminado al renderizar.
+const ESTADO_LABEL_FALLBACK: Record<string, string> = {
+    Y: 'Procesado',
+    M: 'Modificado (duplicado)',
+    N: 'Sin procesar',
+    E: 'Error',
+}
+function estadoLabel(code?: string | null, customMap?: Record<string, string>): string {
+    if (!code) return 'Desconocido'
+    return customMap?.[code] || ESTADO_LABEL_FALLBACK[code] || `Otro (${code})`
+}
+// Tailwind classes por estado para el badge. Y es el único "OK", el resto son incidencias.
+function estadoBadgeClasses(code?: string | null): string {
+    switch (code) {
+        case 'Y': return 'bg-green-100 text-green-800 border-green-200'
+        case 'M': return 'bg-amber-100 text-amber-800 border-amber-200'
+        case 'N': return 'bg-gray-100 text-gray-700 border-gray-200'
+        case 'E': return 'bg-red-100 text-red-800 border-red-200'
+        default: return 'bg-slate-100 text-slate-600 border-slate-200'
+    }
 }
 
 interface Resumen {
@@ -33,6 +63,8 @@ interface Resumen {
     solo_en_seres: number;
     solo_en_jde: number;
     en_ambos: number;
+    incidencias: number;
+    incidencias_por_estado: Record<string, number>;
     days: number;
 }
 
@@ -41,9 +73,10 @@ interface ComparativaResult {
     solo_en_seres: Pedido[];
     solo_en_jde: Pedido[];
     en_ambos: Pedido[];
+    incidencias: Pedido[];
 }
 
-type Tab = 'solo_seres' | 'solo_jde' | 'ambos'
+type Tab = 'solo_seres' | 'solo_jde' | 'ambos' | 'incidencias'
 
 function formatFecha(fecha: string | null | undefined) {
     if (!fecha) return '-'
@@ -60,6 +93,24 @@ export default function ComparativaSeresPage() {
     const [days, setDays] = useState(0)
     const [activeTab, setActiveTab] = useState<Tab>('solo_seres')
     const [selectedDestinoMlnm, setSelectedDestinoMlnm] = useState<string[]>([])
+
+    // Descripciones de estados JDE cargadas desde la BD (editables en /admin).
+    // Si el fetch falla, estadoLabel usa el fallback hardcodeado.
+    const [statusDescriptions, setStatusDescriptions] = useState<Record<string, string>>({})
+
+    // --- PRESETS ---
+    // El sistema de presets es compartido por todos los paneles (tabla SQLite `presets`).
+    // Aquí guardamos los filtros propios de este panel (días + clientes) bajo screen='comparativa'.
+    const [presets, setPresets] = useState<Preset[]>([])
+    const [showPresets, setShowPresets] = useState(false)
+    const [presetName, setPresetName] = useState('')
+    const [savingPreset, setSavingPreset] = useState(false)
+    const [editingPresetId, setEditingPresetId] = useState<number | null>(null)
+    // Señal incrementada por el botón Presets del Navbar para abrir el panel desde fuera.
+    const [presetsSignal, setPresetsSignal] = useState(0)
+    useEffect(() => {
+        if (presetsSignal > 0) setShowPresets(true)
+    }, [presetsSignal])
 
     // Comprobar sesión al montar
     useEffect(() => {
@@ -114,16 +165,92 @@ export default function ComparativaSeresPage() {
         setError(null)
         setDays(0)
         setSelectedDestinoMlnm([])
+        setEditingPresetId(null)
+        setPresetName('')
+    }
+
+    // --- PRESETS (helpers) ---
+
+    // Carga los presets del usuario para este panel (screen=comparativa).
+    const loadPresets = async () => {
+        try {
+            const res = await fetch('/api/presets?screen=comparativa')
+            if (res.ok) setPresets(await res.json())
+        } catch { }
+    }
+
+    // Carga la lista al disponer de sesión.
+    useEffect(() => {
+        if (sessionUser) {
+            loadPresets()
+            // Descripciones JDE (también requiere sesión)
+            fetch('/api/jde-statuses')
+                .then(r => r.ok ? r.json() : [])
+                .then((rows: { code: string; description: string }[]) => {
+                    const map: Record<string, string> = {}
+                    rows.forEach(r => { map[r.code] = r.description })
+                    setStatusDescriptions(map)
+                })
+                .catch(err => console.error('No se pudieron cargar las descripciones de estado JDE:', err))
+        }
+    }, [sessionUser])
+
+    // Guarda (o actualiza si hay editingPresetId) los filtros vigentes como preset.
+    const savePreset = async (nameOverride?: string) => {
+        const name = (nameOverride ?? presetName).trim()
+        if (!name) return
+        setSavingPreset(true)
+        try {
+            const filtersData = { days, selectedDestinoMlnm }
+            const isEditing = editingPresetId !== null
+            const res = await fetch(isEditing ? `/api/presets/${editingPresetId}` : '/api/presets', {
+                method: isEditing ? 'PUT' : 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ name, filters: filtersData, screen: 'comparativa' }),
+            })
+            if (res.ok) { setPresetName(''); setEditingPresetId(null); loadPresets() }
+            else { const d = await res.json(); alert(d.error || 'Error al guardar') }
+        } finally { setSavingPreset(false) }
+    }
+
+    // Restaura los filtros guardados en el preset.
+    const loadPreset = (preset: Preset) => {
+        try {
+            const f = JSON.parse(preset.filters)
+            setDays(typeof f.days === 'number' ? f.days : 0)
+            setSelectedDestinoMlnm(Array.isArray(f.selectedDestinoMlnm) ? f.selectedDestinoMlnm : [])
+            setShowPresets(false)
+        } catch (err) {
+            console.error('Preset inválido:', err)
+        }
+    }
+
+    const startEditPreset = (preset: Preset) => {
+        setPresetName(preset.name); setEditingPresetId(preset.id)
+        loadPreset(preset); setShowPresets(true)
+    }
+    const cancelEditPreset = () => { setEditingPresetId(null); setPresetName('') }
+    const deletePreset = async (id: number) => {
+        await fetch(`/api/presets/${id}`, { method: 'DELETE' })
+        loadPresets()
     }
 
     const exportToExcel = () => {
         if (!result) return
         const wb = XLSX.utils.book_new()
-        const toRows = (arr: Pedido[]) => arr.map(p => ({
+
+        // Fila JDE enriquecida: Destino + Comprador + Estado JDE (código + descripción de la BD).
+        // Se usa en las hojas "Solo en JDE", "En ambos" e "Incidencias".
+        const toJdeRow = (p: Pedido) => ({
             Referencia: p.referencia,
             Fecha: formatFecha(p.fecha),
-            ...(p.tipo ? { Tipo: p.tipo } : {}),
-        }))
+            'Nº Destino': p.shanNum ?? '',
+            'Desc. Destino': p.shanDesc ?? '',
+            Cliente: p.shanMlnm ?? '',
+            'Nº Comprador': p.urabNum ?? '',
+            'Desc. Comprador': p.urabDesc ?? '',
+            'Estado JDE': p.estado ? `${p.estado} - ${estadoLabel(p.estado, statusDescriptions)}` : '',
+        })
         const soloSeresRows = result.solo_en_seres.map(p => ({
             Referencia: p.referencia,
             Fecha: formatFecha(p.fecha),
@@ -131,9 +258,44 @@ export default function ComparativaSeresPage() {
             Cliente: p.clienteNombre ?? '',
             Tipo: p.tipo ?? '',
         }))
-        XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(soloSeresRows), 'Solo en SERES')
-        XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(toRows(result.solo_en_jde)), 'Solo en JDE')
-        XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(toRows(result.en_ambos)), 'En ambos')
+
+        // Helper: aplica formato condicional rojo a las celdas de Estado JDE
+        // cuando el código empieza por 'E'. Columna "Estado JDE" es la 8ª (índice 7).
+        const ESTADO_COL_IDX = 7
+        const paintErrors = (ws: XLSX.WorkSheet, rows: ReturnType<typeof toJdeRow>[]) => {
+            for (let r = 0; r < rows.length; r++) {
+                if (rows[r]['Estado JDE'].startsWith('E')) {
+                    const ref = XLSX.utils.encode_cell({ r: r + 1, c: ESTADO_COL_IDX })
+                    if (ws[ref]) {
+                        ws[ref].s = {
+                            fill: { fgColor: { rgb: 'FECACA' } },
+                            font: { bold: true, color: { rgb: 'B91C1C' } },
+                        }
+                    }
+                }
+            }
+        }
+
+        const wsSoloSeres = XLSX.utils.json_to_sheet(soloSeresRows)
+        const soloJdeRows = result.solo_en_jde.map(toJdeRow)
+        const wsSoloJde = XLSX.utils.json_to_sheet(soloJdeRows)
+        paintErrors(wsSoloJde, soloJdeRows)
+        const ambosRows = result.en_ambos.map(toJdeRow)
+        const wsAmbos = XLSX.utils.json_to_sheet(ambosRows)
+        paintErrors(wsAmbos, ambosRows)
+
+        XLSX.utils.book_append_sheet(wb, wsSoloSeres, 'Solo en SERES')
+        XLSX.utils.book_append_sheet(wb, wsSoloJde, 'Solo en JDE')
+        XLSX.utils.book_append_sheet(wb, wsAmbos, 'En ambos')
+
+        // Hoja "Incidencias" — solo si hay alguna. Mismo formato que JDE.
+        if (result.incidencias && result.incidencias.length > 0) {
+            const incRows = result.incidencias.map(toJdeRow)
+            const wsInc = XLSX.utils.json_to_sheet(incRows)
+            paintErrors(wsInc, incRows)
+            XLSX.utils.book_append_sheet(wb, wsInc, 'Incidencias JDE')
+        }
+
         XLSX.writeFile(wb, `Comparativa_SERES_JDE_${new Date().toISOString().split('T')[0]}.xlsx`)
     }
 
@@ -146,6 +308,7 @@ export default function ComparativaSeresPage() {
         ? Array.from(new Set([
             ...result.solo_en_jde.map(p => p.shanMlnm ?? ''),
             ...result.en_ambos.map(p => p.shanMlnm ?? ''),
+            ...(result.incidencias || []).map(p => p.shanMlnm ?? ''),
           ].filter(Boolean))).sort().map(v => ({ id: v, description: v }))
         : []
 
@@ -154,8 +317,9 @@ export default function ComparativaSeresPage() {
             solo_seres: result.solo_en_seres,
             solo_jde:   filterByMlnm(result.solo_en_jde),
             ambos:      filterByMlnm(result.en_ambos),
+            incidencias: filterByMlnm(result.incidencias || []),
           }
-        : { solo_seres: [], solo_jde: [], ambos: [] }
+        : { solo_seres: [], solo_jde: [], ambos: [], incidencias: [] }
 
     const dayOptions = [
         { value: 0, label: 'Hoy' },
@@ -171,7 +335,81 @@ export default function ComparativaSeresPage() {
             <div className="mx-auto max-w-7xl space-y-8">
 
                 {/* --- BARRA DE NAVEGACIÓN --- */}
-                <Navbar currentPanel="comparativa" user={sessionUser} onLogout={logout} />
+                <Navbar
+                    currentPanel="comparativa"
+                    user={sessionUser}
+                    onLogout={logout}
+                    onPresetsClick={() => setPresetsSignal(s => s + 1)}
+                />
+
+                {/* --- PANEL DE PRESETS (mismo patrón visual que /produccion y /preparacion-pedidos) --- */}
+                {sessionUser && showPresets && (
+                    <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-4" style={{ borderTop: '3px solid #D30B15' }}>
+                        <div className="flex items-center justify-between mb-4">
+                            <h3 className="text-sm font-bold text-gray-700 flex items-center gap-2">
+                                <BookmarkCheck className="h-4 w-4" style={{ color: '#D30B15' }} />
+                                Mis Presets de Filtros
+                            </h3>
+                            <button type="button" aria-label="Cerrar presets" onClick={() => { setShowPresets(false); cancelEditPreset() }} className="text-gray-400 hover:text-gray-600">
+                                <X className="h-4 w-4" />
+                            </button>
+                        </div>
+
+                        <div className="bg-gray-50 rounded-lg p-3 mb-4 border border-gray-100">
+                            <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">
+                                {editingPresetId ? 'Editando preset' : 'Guardar filtros actuales como preset'}
+                            </p>
+                            <div className="flex items-center gap-2 flex-wrap">
+                                <Input
+                                    value={presetName}
+                                    onChange={e => setPresetName(e.target.value)}
+                                    placeholder="Escribe un nombre..."
+                                    className="h-9 text-sm max-w-[220px] bg-white"
+                                    onKeyDown={e => e.key === 'Enter' && savePreset()}
+                                />
+                                <Button
+                                    onClick={() => savePreset()}
+                                    disabled={savingPreset || !presetName.trim()}
+                                    size="sm"
+                                    className="text-white text-xs font-semibold h-9 px-4"
+                                    style={{ backgroundColor: editingPresetId ? '#2563eb' : '#D30B15' }}
+                                >
+                                    <Save className="mr-1.5 h-3.5 w-3.5" />
+                                    {editingPresetId ? 'Actualizar' : 'Guardar'}
+                                </Button>
+                                {editingPresetId && (
+                                    <Button onClick={cancelEditPreset} variant="outline" size="sm" className="text-xs h-9 text-gray-500">
+                                        Cancelar
+                                    </Button>
+                                )}
+                            </div>
+                            {!editingPresetId && (
+                                <p className="text-[11px] text-gray-400 mt-1.5">Se guardarán el periodo y los clientes seleccionados.</p>
+                            )}
+                        </div>
+
+                        <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">Presets guardados</p>
+                        {presets.length === 0 ? (
+                            <p className="text-xs text-gray-400">No tienes presets guardados.</p>
+                        ) : (
+                            <div className="flex flex-wrap gap-2">
+                                {presets.map(p => (
+                                    <div key={p.id} className={`flex items-center gap-1.5 border rounded-lg px-3 py-1.5 text-sm ${editingPresetId === p.id ? 'bg-blue-50 border-blue-300' : 'bg-gray-50 border-gray-200'}`}>
+                                        <button type="button" onClick={() => loadPreset(p)} className="font-medium text-gray-700 hover:text-gray-900" title="Cargar preset">
+                                            {p.name}
+                                        </button>
+                                        <button type="button" onClick={() => startEditPreset(p)} className="text-gray-300 hover:text-blue-500" aria-label={`Editar ${p.name}`}>
+                                            <Pencil className="h-3 w-3" />
+                                        </button>
+                                        <button type="button" onClick={() => deletePreset(p.id)} className="text-gray-300 hover:text-red-500" aria-label={`Eliminar ${p.name}`}>
+                                            <Trash2 className="h-3.5 w-3.5" />
+                                        </button>
+                                    </div>
+                                ))}
+                            </div>
+                        )}
+                    </div>
+                )}
 
                 {/* --- FILTROS --- */}
                 <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-200 space-y-4" style={{ borderTop: '3px solid #D30B15' }}>
@@ -249,31 +487,13 @@ export default function ComparativaSeresPage() {
                     </div>
                 )}
 
-                {/* --- TARJETAS METRICAS --- */}
+                {/* --- TARJETAS METRICAS ---
+                    Solo las 4 KPIs accionables (Solo SERES + Solo JDE + En ambos + Incidencias).
+                    El total bruto de cada sistema no se muestra: era redundante
+                    (Solo+En ambos ya es el total visible) y con days=0 confundía
+                    porque la consulta JDE incluye ayer por el fix de reprocesado. */}
                 {result && (
-                    <div className="grid gap-4 grid-cols-2 md:grid-cols-3 lg:grid-cols-5">
-                        <Card className="border-gray-200 shadow-sm overflow-hidden" style={{ borderTop: '3px solid #D30B15' }}>
-                            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                                <CardTitle className="text-sm font-bold text-gray-700">SERES</CardTitle>
-                                <ArrowLeftRight className="h-4 w-4" style={{ color: '#D30B15' }} />
-                            </CardHeader>
-                            <CardContent>
-                                <div className="text-2xl font-black text-gray-900">{result.resumen.total_seres_pedidos.toLocaleString('es-ES')}</div>
-                                <p className="text-xs text-gray-500 font-medium">de {result.resumen.total_seres_todos} docs totales</p>
-                            </CardContent>
-                        </Card>
-
-                        <Card className="border-gray-200 shadow-sm overflow-hidden" style={{ borderTop: '3px solid #D30B15' }}>
-                            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                                <CardTitle className="text-sm font-bold text-gray-700">JDE</CardTitle>
-                                <ArrowLeftRight className="h-4 w-4" style={{ color: '#D30B15' }} />
-                            </CardHeader>
-                            <CardContent>
-                                <div className="text-2xl font-black text-gray-900">{result.resumen.total_jde.toLocaleString('es-ES')}</div>
-                                <p className="text-xs text-gray-500 font-medium">últimos {result.resumen.days} días</p>
-                            </CardContent>
-                        </Card>
-
+                    <div className="grid gap-4 grid-cols-2 md:grid-cols-4">
                         <Card className="border-gray-200 shadow-sm overflow-hidden cursor-pointer hover:shadow-md transition-shadow" style={{ borderTop: '3px solid #f59e0b' }} onClick={() => setActiveTab('solo_seres')}>
                             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
                                 <CardTitle className="text-sm font-bold text-gray-700">Solo en SERES</CardTitle>
@@ -304,6 +524,32 @@ export default function ComparativaSeresPage() {
                             <CardContent>
                                 <div className="text-2xl font-black text-green-600">{tabData.ambos.length.toLocaleString('es-ES')}</div>
                                 <p className="text-xs text-gray-500 font-medium">sincronizados</p>
+                            </CardContent>
+                        </Card>
+
+                        {/* KPI 'Incidencias': todos los JDE con SYEDSP != 'Y'. Pulsar la card va a la pestaña Incidencias. */}
+                        <Card
+                            className="border-gray-200 shadow-sm overflow-hidden cursor-pointer hover:shadow-md transition-shadow"
+                            style={{ borderTop: '3px solid #f97316' }}
+                            onClick={() => setActiveTab('incidencias')}
+                            title="Pedidos JDE con estado distinto de 'Procesado' (Y)"
+                        >
+                            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                                <CardTitle className="text-sm font-bold text-gray-700">Incidencias JDE</CardTitle>
+                                <ShieldAlert className="h-4 w-4 text-orange-500" />
+                            </CardHeader>
+                            <CardContent>
+                                <div className="text-2xl font-black text-orange-600">{tabData.incidencias.length.toLocaleString('es-ES')}</div>
+                                <p className="text-xs text-gray-500 font-medium">
+                                    {(() => {
+                                        const byEstado = result.resumen.incidencias_por_estado || {}
+                                        const parts: string[] = []
+                                        if (byEstado.E) parts.push(`${byEstado.E} E`)
+                                        if (byEstado.M) parts.push(`${byEstado.M} M`)
+                                        if (byEstado.N) parts.push(`${byEstado.N} N`)
+                                        return parts.length > 0 ? parts.join(' · ') : 'sin incidencias'
+                                    })()}
+                                </p>
                             </CardContent>
                         </Card>
                     </div>
@@ -345,6 +591,16 @@ export default function ComparativaSeresPage() {
                                     {tabData.ambos.length}
                                 </span>
                             </button>
+                            <button
+                                type="button"
+                                onClick={() => setActiveTab('incidencias')}
+                                className={`px-4 py-2 text-sm font-semibold rounded-t-md border-b-2 transition-colors ${activeTab === 'incidencias' ? 'border-orange-500 text-orange-700' : 'border-transparent text-gray-500 hover:text-gray-700'}`}
+                            >
+                                Incidencias JDE
+                                <span className="ml-2 bg-orange-100 text-orange-700 text-xs font-bold px-1.5 py-0.5 rounded-full">
+                                    {tabData.incidencias.length}
+                                </span>
+                            </button>
                         </div>
 
                         {/* Aviso contextual */}
@@ -367,6 +623,12 @@ export default function ComparativaSeresPage() {
                                     Pedidos correctamente <strong>sincronizados</strong> en ambos sistemas.
                                 </p>
                             )}
+                            {activeTab === 'incidencias' && (
+                                <p className="text-xs text-orange-700 bg-orange-50 border border-orange-200 rounded-md px-3 py-2">
+                                    <ShieldAlert className="inline h-3.5 w-3.5 mr-1 mb-0.5" />
+                                    Pedidos JDE con <strong>estado distinto de Procesado (Y)</strong>: M (duplicado), N (sin procesar) o E (error). Requieren revisión.
+                                </p>
+                            )}
                         </div>
 
                         {/* Tabla */}
@@ -383,6 +645,8 @@ export default function ComparativaSeresPage() {
                                                 <TableHead className="font-bold text-gray-700">Cliente</TableHead>
                                                 <TableHead className="font-bold text-gray-700">Nº Comprador</TableHead>
                                                 <TableHead className="font-bold text-gray-700">Desc. Comprador</TableHead>
+                                                <TableHead className="font-bold text-gray-700 text-center">Estado JDE</TableHead>
+                                                <TableHead className="font-bold text-gray-700">Descripción</TableHead>
                                             </>
                                         )}
                                         {activeTab === 'solo_seres' && (
@@ -415,6 +679,17 @@ export default function ComparativaSeresPage() {
                                                         <TableCell className="text-sm text-gray-600">{p.shanMlnm ?? '-'}</TableCell>
                                                         <TableCell className="font-mono text-sm text-gray-700">{p.urabNum ?? '-'}</TableCell>
                                                         <TableCell className="text-sm text-gray-600">{p.urabDesc ?? '-'}</TableCell>
+                                                        <TableCell className="text-center">
+                                                            <span
+                                                                className={`inline-flex items-center gap-1 text-xs font-bold px-2 py-0.5 rounded-md border ${estadoBadgeClasses(p.estado)}`}
+                                                                title={estadoLabel(p.estado, statusDescriptions)}
+                                                            >
+                                                                {p.estado || '?'}
+                                                            </span>
+                                                        </TableCell>
+                                                        <TableCell className="text-sm text-gray-600 max-w-[260px]">
+                                                            {estadoLabel(p.estado, statusDescriptions)}
+                                                        </TableCell>
                                                     </>
                                                 )}
                                                 {activeTab === 'solo_seres' && (

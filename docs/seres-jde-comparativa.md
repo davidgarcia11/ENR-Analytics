@@ -107,7 +107,8 @@ SELECT TRIM(A.SYVR01) AS REFERENCIA,
        TRIM(B.ABALPH)  AS SHAN_DESC,
        TRIM(D.WWMLNM)  AS SHAN_MLNM,
        A.SYURAB        AS URAB_NUM,
-       TRIM(C.ABALPH)  AS URAB_DESC
+       TRIM(C.ABALPH)  AS URAB_DESC,
+       TRIM(A.SYEDSP)  AS ESTADO
 FROM F47011 A
 LEFT JOIN F0101 B ON B.ABAN8 = A.SYSHAN
 LEFT JOIN F0101 C ON C.ABAN8 = A.SYURAB
@@ -125,6 +126,7 @@ ORDER BY A.SYTRDJ DESC
 | `SYTRDJ` | **Fecha de transacción** (cuando se recibió/procesó el EDI) en formato JDE **CYYDDD** |
 | `SYSHAN` | Número de dirección de destino (Ship To) |
 | `SYURAB` | Número de dirección vendida a (Sold To) |
+| `SYEDSP` | **Estado del pedido EDI**: `Y` = Procesado · `M` = Modificado (referencia duplicada) · `N` = Sin procesar (el report aún no ha intentado crearlo) · `E` = Error. Cualquier valor distinto de `Y` se considera incidencia y aparece en la pestaña/KPI "Incidencias JDE" |
 
 > **Por qué `SYTRDJ` y no `SYUPMJ`:** `SYUPMJ` es la fecha de *última modificación* del registro en JDE. Un pedido creado hace 3 meses que se modifica hoy aparecería en una búsqueda de "últimos 7 días" aunque en SERES ya no esté en ese rango, generando falsos "Solo en JDE". `SYTRDJ` es la fecha de *transacción* (cuándo se recibió el EDI), equivalente conceptualmente a la Fecha Documento de SERES, lo que hace que ambos filtros sean consistentes.
 
@@ -191,11 +193,56 @@ const enAmbos     = seresPedidos
 
 **Parámetro:** `?days=N` (0 a 90 días, **default 0 = Hoy**). El panel ofrece botones de selección rápida: Hoy / 1 / 3 / 7 / 14 / 30 días.
 
-**Filtro Cliente:** desplegable multi-select derivado de los valores `WWMLNM` (F0111) presentes en el resultado cargado. Se aplica en cliente sobre las pestañas "Solo en JDE" y "En ambos" (la pestaña "Solo en SERES" no tiene datos JDE, no se puede filtrar por este campo). Las tarjetas KPI y los badges de las pestañas muestran los conteos **del resultado filtrado**, no del total bruto de la consulta.
+**Filtro Cliente:** desplegable multi-select derivado de los valores `WWMLNM` (F0111) presentes en el resultado cargado. Se aplica en cliente sobre las pestañas "Solo en JDE" y "En ambos". Las tarjetas KPI y los badges de las pestañas muestran los conteos **del resultado filtrado**, no del total bruto de la consulta.
 
-> **`days=0` ("Hoy"):** caso especial. SERES filtra por Fecha Doc. (cuando se creó el pedido en origen), que puede ser el día anterior incluso si llegó hoy. Para evitar falsos negativos, cuando `days=0` la API pide 1 día extra de margen a SERES y luego filtra los resultados por **Fecha Estado** (la fecha real de recepción en SERES). En JDE simplemente no se aplica el `setDate` (se usa `since = hoy`). 
+> **Importante — dos "Cliente" distintos en el panel:** en la columna **Cliente** de la pestaña *Solo en SERES* se muestra el **Interlocutor EDI** (`clienteCodigo` + `clienteNombre`, scrapeados de la web de SERES). En las pestañas *Solo en JDE* y *En ambos* se muestra el **Destino del pedido** (`shanMlnm` desde JDE F0111). **No son el mismo dato** — el primero identifica el emisor EDI del archivo y el segundo la dirección de destino del envío. Por eso el filtro Cliente del panel (que usa `shanMlnm`) **no se aplica a "Solo en SERES"**: SERES no proporciona los datos de destino del pedido y no hay cruce posible sin enriquecer cada referencia desde JDE — algo que con los pedidos "Solo en SERES" no podemos hacer porque, por definición, no están en JDE.
+
+**Implementación:** `filterByMlnm()` en `app/comparativa-seres/page.tsx` línea 214:
+
+```ts
+const filterByMlnm = (rows: Pedido[]) => {
+  if (selectedDestinoMlnm.length === 0) return rows
+  return rows.filter(p => selectedDestinoMlnm.includes(p.shanMlnm ?? ''))
+}
+
+const tabData = {
+  solo_seres: result.solo_en_seres,            // sin filtro
+  solo_jde:   filterByMlnm(result.solo_en_jde), // filtrado
+  ambos:      filterByMlnm(result.en_ambos),    // filtrado
+}
+```
+
+> **`days=0` ("Hoy"):** caso especial. SERES filtra por Fecha Doc. (cuando se creó el pedido en origen), que puede ser el día anterior incluso si llegó hoy. Para evitar falsos negativos, cuando `days=0` la API pide **1 día extra de margen a SERES** y filtra los resultados por **Fecha Estado** (la fecha real de recepción en SERES). En JDE se hace la **misma ampliación de 1 día** (`since = ayer`) para detectar pedidos reprocesados — ver siguiente bloque.
+
+> **Pedidos reprocesados (`days=0`):** cuando un pedido se reprocesa en la web de SERES (por ejemplo, porque cayó mal en JDE y hubo que reenviarlo), SERES conserva la **Fecha Documento original** (ayer) pero actualiza la **Fecha Estado** a hoy. Al re-llegar a JDE, se guarda con `SYTRDJ = ayer`. Para que estos pedidos aparezcan correctamente en "En ambos" en `days=0`:
+> 1. **JDE pide simétricamente desde ayer** (no sólo desde hoy), igual que SERES, así el reprocesado entra en el resultado JDE.
+> 2. Los pedidos reales de ayer NO reprocesados (SERES con Fecha Estado=ayer) se descartan del "Solo en JDE" mediante un filtro post-query: `if (days === 0) descartar pedidos con SYTRDJ < hoy del array solo_en_jde`. Así no aparecen como falsos positivos.
+> 3. "En ambos" sí los conserva si SERES tiene la misma referencia con Fecha Estado=hoy, capturando el caso de reproceso.
 
 **Paralelismo:** el scraping de SERES y la consulta a JDE se lanzan en paralelo con `Promise.all`.
+
+### Presets de filtros
+
+Sistema idéntico al del resto de paneles. Aislado por `screen='comparativa'` en la tabla SQLite `presets`.
+
+**Filtros que se guardan:**
+```json
+{
+  "days": 7,
+  "selectedDestinoMlnm": ["CLIENTE A", "CLIENTE B"]
+}
+```
+
+**Cómo se abre el panel de presets:**
+- Botón **"Presets"** en la Navbar superior (solo con sesión activa) → incrementa una señal `presetsSignal` que un `useEffect` observa para hacer `setShowPresets(true)`. Este panel no tiene botón "Guardar" inline en la barra de filtros como pedidos/caducados; la única entrada es desde la Navbar.
+
+**Reglas:**
+- Solo visible para usuarios logueados (`sessionUser !== null`)
+- Al cargar un preset se restauran `days` y `selectedDestinoMlnm`. El panel se cierra y hay que pulsar **Comparar** para ejecutar la consulta de nuevo.
+- Editar (✏) carga el preset en los controles y activa modo edición; el botón Guardar pasa a "Actualizar"
+- Eliminar (🗑) borra directamente con `DELETE /api/presets/:id`
+
+**Endpoints reutilizados:** `GET/POST /api/presets`, `PUT/DELETE /api/presets/:id`. Documentación en `DOCUMENTACION.md` sección 6.
 
 ### Interfaz de usuario
 
@@ -210,38 +257,46 @@ const enAmbos     = seresPedidos
 │ [Comparar ▶]  [Excel ↓]  [Limpiar ×]               │
 └──────────────────────────────────────────────────────┘
 
-┌─ Tarjetas métricas (5) ──────────────────────────────┐
-│ ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐ │
-│ │  SERES   │ │   JDE    │ │Solo SERES│ │Solo JDE  │ │En ambos  │ │
-│ │   326    │ │   350    │ │    4 ⚠️  │ │    2 🔴  │ │  322 ✅  │ │
-│ └──────────┘ └──────────┘ └──────────┘ └──────────┘ └──────────┘ │
-│ Las 3 últimas tarjetas son clicables → activan la pestaña         │
-└──────────────────────────────────────────────────────┘
+┌─ Tarjetas métricas (4) ──────────────────────────────────────────┐
+│ ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────────┐         │
+│ │Solo SERES│ │Solo JDE  │ │En ambos  │ │Incidencias JDE│         │
+│ │    4 ⚠️  │ │    2 🔴  │ │  322 ✅  │ │     7 🛡️      │         │
+│ └──────────┘ └──────────┘ └──────────┘ └──────────────┘         │
+│ Todas las tarjetas son clicables → activan la pestaña             │
+└──────────────────────────────────────────────────────────────────┘
 
-┌─ Tabla con pestañas ─────────────────────────────────┐
-│ [Solo en SERES (4)] [Solo en JDE (2)] [En ambos (322)]│
-│ ─────────────────────────────────────────────────────│
-│ Aviso contextual (qué significa cada pestaña)        │
-│ ─────────────────────────────────────────────────────│
-│ Referencia  │ Fecha     │ Tipo SERES                 │
-│ 01565794    │ 06/05/26  │ Pedido                     │
-│ ...                                                  │
-└──────────────────────────────────────────────────────┘
+> **Por qué no se muestran los totales brutos de SERES y JDE:** son redundantes
+> (`Solo + En ambos` ya es el total visible) y, con el fix de reprocesado en
+> `days=0`, el total bruto de JDE incluye los pedidos de ayer ocultos del
+> resultado, lo que confundía visualmente. El detalle bruto sigue disponible
+> en `resumen.total_seres_pedidos` y `resumen.total_jde` de la respuesta JSON.
+
+┌─ Tabla con pestañas ──────────────────────────────────────────────────┐
+│ [Solo en SERES (4)] [Solo en JDE (2)] [En ambos (322)] [Incidencias (7)]│
+│ ──────────────────────────────────────────────────────────────────────│
+│ Aviso contextual (qué significa cada pestaña)                         │
+│ ──────────────────────────────────────────────────────────────────────│
+│ Referencia  │ Fecha     │ Destino │ Cliente │ Estado JDE              │
+│ 01565794    │ 06/05/26  │ 1234    │ XYZ     │ [Y]                     │
+│ 01565800    │ 06/05/26  │ 4321    │ ABC     │ [E]  ← rojo             │
+└───────────────────────────────────────────────────────────────────────┘
 ```
 
 **Columnas según pestaña activa:**
 
-| Columna | Solo en SERES | Solo en JDE | En ambos |
-|---|---|---|---|
-| Referencia | ✓ | ✓ | ✓ |
-| Fecha + Hora | ✓ | ✓ | ✓ |
-| **Cliente** (Cód. + Nombre Interlocutor SERES) | ✓ | — | — |
-| Tipo | ✓ | — | — |
-| Nº Destino `SYSHAN` | — | ✓ | ✓ |
-| Desc. Destino (`ABALPH` de F0101) | — | ✓ | ✓ |
-| **Cliente** (`WWMLNM` de F0111) | — | ✓ | ✓ |
-| Nº Comprador `SYURAB` | — | ✓ | ✓ |
-| Desc. Comprador (`ABALPH` de F0101) | — | ✓ | ✓ |
+| Columna | Solo en SERES | Solo en JDE | En ambos | Incidencias |
+|---|---|---|---|---|
+| Referencia | ✓ | ✓ | ✓ | ✓ |
+| Fecha + Hora | ✓ | ✓ | ✓ | ✓ |
+| **Cliente** (Cód. + Nombre Interlocutor SERES) | ✓ | — | — | — |
+| Tipo | ✓ | — | — | — |
+| Nº Destino `SYSHAN` | — | ✓ | ✓ | ✓ |
+| Desc. Destino (`ABALPH` de F0101) | — | ✓ | ✓ | ✓ |
+| **Cliente** (`WWMLNM` de F0111) | — | ✓ | ✓ | ✓ |
+| Nº Comprador `SYURAB` | — | ✓ | ✓ | ✓ |
+| Desc. Comprador (`ABALPH` de F0101) | — | ✓ | ✓ | ✓ |
+| **Estado JDE** (`SYEDSP`) — badge coloreado | — | ✓ | ✓ | ✓ |
+| **Descripción** (de SQLite, editable en /admin) | — | ✓ | ✓ | ✓ |
 
 - **Referencia** — número de pedido (fuente monospace)
 - **Fecha** — fecha del documento (SERES) o `SYTRDJ` convertida (JDE), formato `DD/MM/YY`. Los registros SERES también muestran la **hora** (`HH:MM:SS`) en gris junto a la fecha
@@ -249,10 +304,32 @@ const enAmbos     = seresPedidos
 - **Tipo** — solo en "Solo en SERES" (siempre "Pedido" dado el filtro interno)
 - **Destino (SYSHAN)** — número + nombre de dirección de destino; visible en "Solo en JDE" y "En ambos"
 - **Vendido a (SYURAB)** — número + nombre del cliente comprador; visible en "Solo en JDE" y "En ambos"
+- **Estado JDE (`SYEDSP`)** — badge coloreado por código. Visible en "Solo en JDE", "En ambos" e "Incidencias JDE". Ver bloque "Estado del pedido en JDE" más abajo.
 
-**Exportación Excel:** tres hojas — "Solo en SERES", "Solo en JDE", "En ambos".
+### Estado del pedido en JDE (`SYEDSP`)
+
+Cada pedido en `F47011` tiene un campo `SYEDSP` que indica en qué fase está su procesamiento:
+
+| Código | Significado | Badge UI |
+|---|---|---|
+| `Y` | **Procesado** — pedido creado correctamente | verde |
+| `M` | **Modificado** — la referencia llegó dos veces (duplicado) | ámbar |
+| `N` | **Sin procesar** — el report de JDE aún no ha intentado crear el pedido | gris |
+| `E` | **Error** — JDE no ha podido crear el pedido | rojo |
+
+> **Descripciones editables desde `/admin` → pestaña "Estados JDE".** El panel lee las descripciones desde la tabla SQLite `jde_status_descriptions` via `GET /api/jde-statuses` al cargar. Si el fetch falla, hay un fallback hardcodeado con los mismos textos. Ver [DOCUMENTACION.md sección 5 → Pestaña Estados JDE](../DOCUMENTACION.md#pestaña-estados-jde).
+
+**Columna "Descripción":** además del badge coloreado con la letra (`Y`/`M`/`N`/`E`), hay una columna "Descripción" en las pestañas con datos JDE (*Solo en JDE*, *En ambos*, *Incidencias*) que muestra el texto completo a la derecha del badge. Esto es lo que pide "que salga la descripción del error" sin tener que pasar el ratón por encima.
+
+**KPI "Incidencias JDE":** card naranja en la fila de KPIs con el conteo de pedidos JDE con `SYEDSP != 'Y'`. Bajo el número se muestra el desglose por estado (p. ej. `3 E · 2 M · 1 N`). Pulsar la card va a la pestaña "Incidencias JDE".
+
+**Pestaña "Incidencias JDE":** muestra todos los pedidos JDE con estado distinto de `Y` (independientemente de si están o no en SERES). Es una vista ejecutiva: "todo lo que requiere acción". Los pedidos pueden estar también en otras pestañas (en "En ambos" si tienen su match en SERES, o en "Solo en JDE" si no).
+
+> El estado no aplica a la pestaña "Solo en SERES" porque esos pedidos no han llegado a `F47011` (por definición).
+
+**Exportación Excel:** hasta cuatro hojas — "Solo en SERES", "Solo en JDE", "En ambos" e "Incidencias JDE" (esta última solo si hay incidencias).
 - Hoja "Solo en SERES": Referencia, Fecha, Cód. Cliente, Cliente, Tipo
-- Hojas "Solo en JDE" y "En ambos": Referencia, Fecha, Tipo
+- Hojas "Solo en JDE", "En ambos" e "Incidencias JDE": Referencia, Fecha, Nº Destino, Desc. Destino, Cliente, Nº Comprador, Desc. Comprador, **Estado JDE** (formato `Y - Procesado`). Las celdas de Estado JDE que empiezan por `E` llevan formato condicional **rojo bold**.
 
 Nombre del archivo: `Comparativa_SERES_JDE_YYYY-MM-DD.xlsx`.
 
@@ -266,13 +343,18 @@ Nombre del archivo: `Comparativa_SERES_JDE_YYYY-MM-DD.xlsx`.
     "solo_en_seres": 4,
     "solo_en_jde": 2,
     "en_ambos": 322,
+    "incidencias": 7,
+    "incidencias_por_estado": { "E": 3, "M": 2, "N": 2 },
     "days": 7
   },
   "solo_en_seres": [...],
   "solo_en_jde": [...],
-  "en_ambos": [...]
+  "en_ambos": [...],
+  "incidencias": [...]
 }
 ```
+
+Cada elemento de `solo_en_jde`, `en_ambos` e `incidencias` incluye además el campo `estado` (`Y` | `M` | `N` | `E` | `null`).
 
 ---
 
