@@ -1,6 +1,6 @@
 "use client" // Indica que este componente se ejecuta en el navegador del usuario (cliente), no en el servidor
 
-import { useState, useEffect, useMemo, useDeferredValue, memo } from "react" // Hooks de React para manejar estado y efectos secundarios
+import { useState, useEffect, useMemo, useDeferredValue, memo, useCallback } from "react" // Hooks de React para manejar estado y efectos secundarios
 // Importamos componentes de interfaz de usuario (UI) reutilizables desde nuestra carpeta local
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
@@ -222,7 +222,9 @@ export default function Dashboard() {
 
   // Pide el desglose global de merma para los filtros aplicados.
   // No bloquea la tabla principal; corre en paralelo.
-  const fetchGlobalBreakdown = async (filtersArg: AppliedFilters) => {
+  // Memoizado para que el toggle de la card no recree la función
+  // y dispare re-renders en cascada.
+  const fetchGlobalBreakdown = useCallback(async (filtersArg: AppliedFilters) => {
     setBreakdownLoading(true)
     try {
       const params = buildProductionParams(filtersArg)
@@ -240,7 +242,7 @@ export default function Dashboard() {
     } finally {
       setBreakdownLoading(false)
     }
-  }
+  }, [])
 
   // --- AUTENTICACIÓN ---
 
@@ -277,8 +279,13 @@ export default function Dashboard() {
 
   // --- FETCH DE DATOS ---
 
-  // Función asíncrona principal para pedir datos al servidor (API)
-  const fetchData = async (pageNum: number, isNewSearch: boolean, allRecords = false, filtersArg: AppliedFilters) => {
+  // Función asíncrona principal para pedir datos al servidor (API).
+  // Memoizada SIN dependencia de `data`: usamos setData(prev => ...) para evitar
+  // que la referencia cambie en cada actualización. Así loadMore/loadAll
+  // (que dependen de fetchData) mantienen referencia estable y el React.memo
+  // de ProductionTable funciona, evitando re-renders innecesarios de la tabla
+  // grande cuando solo cambia algo ajeno (p. ej. toggle del desglose de merma).
+  const fetchData = useCallback(async (pageNum: number, isNewSearch: boolean, allRecords = false, filtersArg: AppliedFilters) => {
     setLoading(true)
     try {
       // Construimos los parámetros de la URL
@@ -298,79 +305,71 @@ export default function Dashboard() {
         if (allRecords || sqlRowCount < 150) setHasMore(false)
         else setHasMore(true)
 
-        const newData = isNewSearch ? items : [...data, ...items]
-        setData(newData)
+        // Actualizamos data con functional update y, sobre el array resultante,
+        // calculamos métricas y artículos disponibles (un único cómputo).
+        setData(prev => {
+          const newData = isNewSearch ? items : [...prev, ...items]
 
-        // Extraer artículos únicos de los datos para el multi-select
-        const articleMap = new Map<string, { id: string; description: string }>()
-        if (isNewSearch) {
+          // Artículos únicos para el multi-select
+          const articleMap = new Map<string, { id: string; description: string }>()
           newData.forEach((item: any) => {
             if (item.article && item.description)
               articleMap.set(String(item.article).trim(), { id: String(item.article).trim(), description: item.description })
           })
           setAvailableArticles(Array.from(articleMap.values()))
-        } else {
-          setAvailableArticles(prev => {
-            prev.forEach(a => articleMap.set(a.id, a))
-            newData.slice(-items.length).forEach((item: any) => {
-              if (item.article && item.description)
-                articleMap.set(String(item.article).trim(), { id: String(item.article).trim(), description: item.description })
-            })
-            return Array.from(articleMap.values())
+
+          // Métricas
+          let qtyUN = 0, qtyKG = 0, totalMerma = 0, totalProduced = 0
+          const plants: Record<string, number> = {}
+          const orders = new Set()
+          newData.forEach((item: any) => {
+            const u = item.unit ? item.unit.toUpperCase() : ''
+            if (u === 'UN') qtyUN += item.quantity || 0
+            else if (u === 'KG') qtyKG += item.quantity || 0
+            orders.add(item.order)
+            const pName = item.subLine || 'Desconocido'
+            plants[pName] = (plants[pName] || 0) + (item.quantity || 0)
+            totalMerma += Math.abs(item.merma || 0)
+            totalProduced += item.quantity || 0
           })
-        }
+          setMetrics({ totalQtyUN: qtyUN, totalQtyKG: qtyKG, totalOrders: orders.size, byPlant: plants, totalMerma, totalProduced })
 
-        // --- CÁLCULO DE MÉTRICAS ---
-        let qtyUN = 0, qtyKG = 0, totalMerma = 0, totalProduced = 0
-        const plants: Record<string, number> = {}
-        const orders = new Set()
-
-        newData.forEach((item: any) => {
-          const u = item.unit ? item.unit.toUpperCase() : ''
-          if (u === 'UN') qtyUN += item.quantity || 0
-          else if (u === 'KG') qtyKG += item.quantity || 0
-          orders.add(item.order)
-          const pName = item.subLine || 'Desconocido'
-          plants[pName] = (plants[pName] || 0) + (item.quantity || 0)
-          totalMerma += Math.abs(item.merma || 0)
-          totalProduced += item.quantity || 0
+          return newData
         })
-
-        setMetrics({ totalQtyUN: qtyUN, totalQtyKG: qtyKG, totalOrders: orders.size, byPlant: plants, totalMerma, totalProduced })
       }
     } catch (error) {
       console.error("Error cargando datos", error)
     } finally {
       setLoading(false)
     }
-  }
+  }, [])
 
   // --- HANDLERS ---
 
   // Llamado por FilterPanel cuando el usuario pulsa "Filtrar"
   // allRecords=true: carga todos los registros de golpe (sin paginación), igual que el comportamiento original
-  const handleApply = (filters: AppliedFilters) => {
+  const handleApply = useCallback((filters: AppliedFilters) => {
     setAppliedFilters(filters)
     setPage(1)
     setData([])
     fetchData(1, true, true, filters)
     fetchGlobalBreakdown(filters)
-  }
+  }, [fetchData, fetchGlobalBreakdown])
 
   // Carga la siguiente página (usa los mismos filtros ya aplicados)
-  const loadMore = () => {
+  const loadMore = useCallback(() => {
     const nextPage = page + 1
     setPage(nextPage)
     fetchData(nextPage, false, false, appliedFilters)
-  }
+  }, [page, appliedFilters, fetchData])
 
   // Carga todos los registros de golpe
-  const loadAll = () => {
+  const loadAll = useCallback(() => {
     setPage(1)
     setData([])
     fetchData(1, true, true, appliedFilters)
     fetchGlobalBreakdown(appliedFilters)
-  }
+  }, [appliedFilters, fetchData, fetchGlobalBreakdown])
 
   // Exporta los datos visibles a Excel (Producción + 2 hojas de desglose de merma)
   const exportToExcel = async () => {
