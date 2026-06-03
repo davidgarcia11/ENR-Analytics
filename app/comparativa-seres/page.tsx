@@ -32,15 +32,18 @@ interface Pedido {
 }
 
 // Etiqueta legible para cada código SYEDSP.
-const ESTADO_LABEL: Record<string, string> = {
+// Las descripciones reales se cargan desde SQLite via /api/jde-statuses
+// (editables por admin). ESTADO_LABEL_FALLBACK actúa como red de seguridad
+// si el fetch falla o aún no ha terminado al renderizar.
+const ESTADO_LABEL_FALLBACK: Record<string, string> = {
     Y: 'Procesado',
     M: 'Modificado (duplicado)',
     N: 'Sin procesar',
     E: 'Error',
 }
-function estadoLabel(code?: string | null): string {
+function estadoLabel(code?: string | null, customMap?: Record<string, string>): string {
     if (!code) return 'Desconocido'
-    return ESTADO_LABEL[code] || `Otro (${code})`
+    return customMap?.[code] || ESTADO_LABEL_FALLBACK[code] || `Otro (${code})`
 }
 // Tailwind classes por estado para el badge. Y es el único "OK", el resto son incidencias.
 function estadoBadgeClasses(code?: string | null): string {
@@ -90,6 +93,10 @@ export default function ComparativaSeresPage() {
     const [days, setDays] = useState(0)
     const [activeTab, setActiveTab] = useState<Tab>('solo_seres')
     const [selectedDestinoMlnm, setSelectedDestinoMlnm] = useState<string[]>([])
+
+    // Descripciones de estados JDE cargadas desde la BD (editables en /admin).
+    // Si el fetch falla, estadoLabel usa el fallback hardcodeado.
+    const [statusDescriptions, setStatusDescriptions] = useState<Record<string, string>>({})
 
     // --- PRESETS ---
     // El sistema de presets es compartido por todos los paneles (tabla SQLite `presets`).
@@ -174,7 +181,18 @@ export default function ComparativaSeresPage() {
 
     // Carga la lista al disponer de sesión.
     useEffect(() => {
-        if (sessionUser) loadPresets()
+        if (sessionUser) {
+            loadPresets()
+            // Descripciones JDE (también requiere sesión)
+            fetch('/api/jde-statuses')
+                .then(r => r.ok ? r.json() : [])
+                .then((rows: { code: string; description: string }[]) => {
+                    const map: Record<string, string> = {}
+                    rows.forEach(r => { map[r.code] = r.description })
+                    setStatusDescriptions(map)
+                })
+                .catch(err => console.error('No se pudieron cargar las descripciones de estado JDE:', err))
+        }
     }, [sessionUser])
 
     // Guarda (o actualiza si hay editingPresetId) los filtros vigentes como preset.
@@ -221,7 +239,7 @@ export default function ComparativaSeresPage() {
         if (!result) return
         const wb = XLSX.utils.book_new()
 
-        // Fila JDE enriquecida: Destino + Comprador + Estado JDE (código + descripción).
+        // Fila JDE enriquecida: Destino + Comprador + Estado JDE (código + descripción de la BD).
         // Se usa en las hojas "Solo en JDE", "En ambos" e "Incidencias".
         const toJdeRow = (p: Pedido) => ({
             Referencia: p.referencia,
@@ -231,7 +249,7 @@ export default function ComparativaSeresPage() {
             Cliente: p.shanMlnm ?? '',
             'Nº Comprador': p.urabNum ?? '',
             'Desc. Comprador': p.urabDesc ?? '',
-            'Estado JDE': p.estado ? `${p.estado} - ${estadoLabel(p.estado)}` : '',
+            'Estado JDE': p.estado ? `${p.estado} - ${estadoLabel(p.estado, statusDescriptions)}` : '',
         })
         const soloSeresRows = result.solo_en_seres.map(p => ({
             Referencia: p.referencia,
@@ -469,31 +487,13 @@ export default function ComparativaSeresPage() {
                     </div>
                 )}
 
-                {/* --- TARJETAS METRICAS --- */}
+                {/* --- TARJETAS METRICAS ---
+                    Solo las 4 KPIs accionables (Solo SERES + Solo JDE + En ambos + Incidencias).
+                    El total bruto de cada sistema no se muestra: era redundante
+                    (Solo+En ambos ya es el total visible) y con days=0 confundía
+                    porque la consulta JDE incluye ayer por el fix de reprocesado. */}
                 {result && (
-                    <div className="grid gap-4 grid-cols-2 md:grid-cols-3 lg:grid-cols-6">
-                        <Card className="border-gray-200 shadow-sm overflow-hidden" style={{ borderTop: '3px solid #D30B15' }}>
-                            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                                <CardTitle className="text-sm font-bold text-gray-700">SERES</CardTitle>
-                                <ArrowLeftRight className="h-4 w-4" style={{ color: '#D30B15' }} />
-                            </CardHeader>
-                            <CardContent>
-                                <div className="text-2xl font-black text-gray-900">{result.resumen.total_seres_pedidos.toLocaleString('es-ES')}</div>
-                                <p className="text-xs text-gray-500 font-medium">de {result.resumen.total_seres_todos} docs totales</p>
-                            </CardContent>
-                        </Card>
-
-                        <Card className="border-gray-200 shadow-sm overflow-hidden" style={{ borderTop: '3px solid #D30B15' }}>
-                            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                                <CardTitle className="text-sm font-bold text-gray-700">JDE</CardTitle>
-                                <ArrowLeftRight className="h-4 w-4" style={{ color: '#D30B15' }} />
-                            </CardHeader>
-                            <CardContent>
-                                <div className="text-2xl font-black text-gray-900">{result.resumen.total_jde.toLocaleString('es-ES')}</div>
-                                <p className="text-xs text-gray-500 font-medium">últimos {result.resumen.days} días</p>
-                            </CardContent>
-                        </Card>
-
+                    <div className="grid gap-4 grid-cols-2 md:grid-cols-4">
                         <Card className="border-gray-200 shadow-sm overflow-hidden cursor-pointer hover:shadow-md transition-shadow" style={{ borderTop: '3px solid #f59e0b' }} onClick={() => setActiveTab('solo_seres')}>
                             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
                                 <CardTitle className="text-sm font-bold text-gray-700">Solo en SERES</CardTitle>
@@ -646,6 +646,7 @@ export default function ComparativaSeresPage() {
                                                 <TableHead className="font-bold text-gray-700">Nº Comprador</TableHead>
                                                 <TableHead className="font-bold text-gray-700">Desc. Comprador</TableHead>
                                                 <TableHead className="font-bold text-gray-700 text-center">Estado JDE</TableHead>
+                                                <TableHead className="font-bold text-gray-700">Descripción</TableHead>
                                             </>
                                         )}
                                         {activeTab === 'solo_seres' && (
@@ -681,10 +682,13 @@ export default function ComparativaSeresPage() {
                                                         <TableCell className="text-center">
                                                             <span
                                                                 className={`inline-flex items-center gap-1 text-xs font-bold px-2 py-0.5 rounded-md border ${estadoBadgeClasses(p.estado)}`}
-                                                                title={estadoLabel(p.estado)}
+                                                                title={estadoLabel(p.estado, statusDescriptions)}
                                                             >
                                                                 {p.estado || '?'}
                                                             </span>
+                                                        </TableCell>
+                                                        <TableCell className="text-sm text-gray-600 max-w-[260px]">
+                                                            {estadoLabel(p.estado, statusDescriptions)}
                                                         </TableCell>
                                                     </>
                                                 )}

@@ -268,12 +268,20 @@ CREATE TABLE screen_permissions (
   role_id   INTEGER NOT NULL REFERENCES roles(id)   ON DELETE CASCADE,
   PRIMARY KEY (screen_id, role_id)
 );
+
+-- Descripciones editables de los códigos SYEDSP de F47011 (consumidas por /comparativa-seres)
+CREATE TABLE jde_status_descriptions (
+  code TEXT PRIMARY KEY,
+  description TEXT NOT NULL,
+  updated_at TEXT DEFAULT (datetime('now'))
+);
 ```
 
 **Seeds iniciales:**
 - Roles: `admin` (Administrador) y `user` (Usuario)
 - Pantallas: `produccion`, `pedidos`, `caducados`, `comparativa` (todas `is_public=1`), `admin` (`is_public=0`)
 - Permisos: rol `admin` → pantalla `admin`
+- Estados JDE: `Y`, `M`, `N`, `E` con sus descripciones por defecto
 
 Todos los seeds usan `INSERT OR IGNORE` para no romper DBs existentes.
 
@@ -340,7 +348,7 @@ Solo usuarios con `role === 'admin'`. Si no eres admin, te redirige a `/producci
 
 ### Pestañas
 
-El panel tiene tres pestañas: **Usuarios**, **Roles** y **Pantallas**.
+El panel tiene cuatro pestañas: **Usuarios**, **Roles**, **Pantallas** y **Estados JDE**.
 
 #### Pestaña Usuarios
 1. **Crear usuario:** Formulario con campos Nombre, Apellido, Usuario (login), Contraseña, Rol (dropdown dinámico desde BD), checkbox "Forzar cambio de contraseña"
@@ -361,6 +369,14 @@ Para cada pantalla del dashboard:
 - Botón **Guardar** por pantalla → `PUT /api/admin/screens/:key`
 - La pantalla `admin` no es editable (siempre solo accesible para `admin`)
 
+#### Pestaña Estados JDE
+Edición de las descripciones de los códigos `F47011.SYEDSP` que se muestran en `/comparativa-seres` (badge tooltip, columna "Descripción" y export Excel).
+
+- Tabla con los 4 códigos sembrados (`Y`, `M`, `N`, `E`) — no se pueden añadir ni borrar nuevos códigos desde aquí, solo editar el texto.
+- Input por fila con la descripción + botón **Guardar** que se habilita solo si el texto ha cambiado respecto al guardado.
+- Persistencia en SQLite (tabla `jde_status_descriptions`). El seed inicial es idempotente (`INSERT OR IGNORE`), por lo que las ediciones manuales **no se sobreescriben** en futuros despliegues.
+- Cuando el admin guarda un cambio, el panel `/comparativa-seres` lo verá la próxima vez que se cargue (hace `fetch('/api/jde-statuses')` al montar).
+
 ### APIs de administración
 
 | Método | Ruta | Descripción |
@@ -374,6 +390,9 @@ Para cada pantalla del dashboard:
 | POST | `/api/admin/roles` | Crea rol (`name` + `label`). Nombre normalizado automáticamente |
 | DELETE | `/api/admin/roles/:id` | Elimina rol. Bloqueado para `admin`. Reasigna usuarios afectados a `user` |
 | PUT | `/api/admin/screens/:key` | Actualiza `is_public` y `allowed_roles[]` de una pantalla. Bloqueado para `admin` |
+| GET | `/api/admin/jde-statuses` | Lista las descripciones de los códigos SYEDSP (con `updated_at`) |
+| PUT | `/api/admin/jde-statuses/:code` | Actualiza la descripción de un código existente. No permite crear ni borrar |
+| GET | `/api/jde-statuses` | Lista pública (con sesión) consumida por `/comparativa-seres` |
 | GET | `/api/admin/logs` | Logs de consultas con paginación, filtros y estadísticas (ver sección 7) |
 
 ---

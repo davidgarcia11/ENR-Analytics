@@ -6,7 +6,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
-import { Loader2, Trash2, UserPlus, ArrowLeft, KeyRound, Pencil, FileText, ShieldCheck, LayoutGrid } from "lucide-react"
+import { Loader2, Trash2, UserPlus, ArrowLeft, KeyRound, Pencil, FileText, ShieldCheck, LayoutGrid, Tag } from "lucide-react"
 import Image from "next/image"
 
 interface User {
@@ -37,7 +37,13 @@ interface Screen {
   config: ScreenConfig
 }
 
-type Tab = 'usuarios' | 'roles' | 'pantallas'
+type Tab = 'usuarios' | 'roles' | 'pantallas' | 'estados-jde'
+
+interface JdeStatus {
+  code: string
+  description: string
+  updated_at?: string
+}
 
 const SCREEN_KEYS: { key: string; label: string }[] = [
   { key: 'produccion',  label: 'Producción' },
@@ -87,6 +93,15 @@ export default function AdminPage() {
   const [savingScreen, setSavingScreen] = useState<string | null>(null)
   const [screenSuccess, setScreenSuccess] = useState("")
 
+  // ─── Estados JDE (descripciones editables de SYEDSP) ─────────────────────────
+  const [jdeStatuses, setJdeStatuses] = useState<JdeStatus[]>([])
+  const [loadingJdeStatuses, setLoadingJdeStatuses] = useState(false)
+  // Borradores locales (lo que el admin escribe antes de guardar) y el código que estamos guardando
+  const [jdeStatusDrafts, setJdeStatusDrafts] = useState<Record<string, string>>({})
+  const [savingJdeStatus, setSavingJdeStatus] = useState<string | null>(null)
+  const [jdeStatusSuccess, setJdeStatusSuccess] = useState("")
+  const [jdeStatusError, setJdeStatusError] = useState("")
+
   useEffect(() => { checkAuth() }, [])
 
   const checkAuth = async () => {
@@ -99,6 +114,7 @@ export default function AdminPage() {
       loadUsers()
       loadRoles()
       loadScreens()
+      loadJdeStatuses()
     } catch {
       router.push("/login")
     }
@@ -128,6 +144,44 @@ export default function AdminPage() {
       const res = await fetch("/api/screen-permissions")
       if (res.ok) setScreens(await res.json())
     } finally { setLoadingScreens(false) }
+  }
+
+  const loadJdeStatuses = async () => {
+    setLoadingJdeStatuses(true)
+    try {
+      const res = await fetch("/api/admin/jde-statuses")
+      if (res.ok) {
+        const data: JdeStatus[] = await res.json()
+        setJdeStatuses(data)
+        const drafts: Record<string, string> = {}
+        data.forEach(s => { drafts[s.code] = s.description })
+        setJdeStatusDrafts(drafts)
+      }
+    } finally { setLoadingJdeStatuses(false) }
+  }
+
+  const saveJdeStatus = async (code: string) => {
+    const description = (jdeStatusDrafts[code] ?? '').trim()
+    if (!description) {
+      setJdeStatusError(`La descripción de ${code} no puede estar vacía`)
+      return
+    }
+    setJdeStatusError(""); setJdeStatusSuccess(""); setSavingJdeStatus(code)
+    try {
+      const res = await fetch(`/api/admin/jde-statuses/${encodeURIComponent(code)}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ description }),
+      })
+      const data = await res.json()
+      if (!res.ok) { setJdeStatusError(data.error || 'Error al guardar'); return }
+      setJdeStatusSuccess(`Descripción de "${code}" guardada`)
+      loadJdeStatuses()
+    } catch {
+      setJdeStatusError('Error de conexión')
+    } finally {
+      setSavingJdeStatus(null)
+    }
   }
 
   // ─── Acciones de usuarios ────────────────────────────────────────────────────
@@ -292,6 +346,7 @@ export default function AdminPage() {
             { key: 'usuarios', label: 'Usuarios', Icon: UserPlus },
             { key: 'roles',    label: 'Roles',    Icon: ShieldCheck },
             { key: 'pantallas', label: 'Pantallas', Icon: LayoutGrid },
+            { key: 'estados-jde', label: 'Estados JDE', Icon: Tag },
           ] as const).map(({ key, label, Icon }) => (
             <button
               key={key}
@@ -614,6 +669,75 @@ export default function AdminPage() {
                 )
               })
             )}
+          </div>
+        )}
+
+        {/* ── Pestaña Estados JDE ──────────────────────────────────────────────
+            Descripciones editables de los códigos SYEDSP (F47011).
+            Se muestran en /comparativa-seres (badge tooltip, columna Descripción y Excel). */}
+        {activeTab === 'estados-jde' && (
+          <div className="space-y-4">
+            <Card className="overflow-hidden" style={{ borderTop: '3px solid #D30B15' }}>
+              <CardHeader>
+                <CardTitle className="text-sm font-bold text-gray-700 flex items-center gap-2">
+                  <Tag className="h-4 w-4" style={{ color: '#D30B15' }} />
+                  Descripciones de estados JDE (F47011.SYEDSP)
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <p className="text-xs text-gray-500 mb-4">
+                  Estas descripciones aparecen en el panel <strong>Comparativa SERES</strong>: en el tooltip del badge de estado, en la columna &quot;Descripción&quot; de las pestañas con datos JDE, y en la exportación a Excel.
+                </p>
+
+                {jdeStatusSuccess && (
+                  <div className="bg-green-50 border border-green-200 text-green-700 text-sm px-4 py-2 rounded-md mb-3">{jdeStatusSuccess}</div>
+                )}
+                {jdeStatusError && (
+                  <div className="bg-red-50 border border-red-200 text-red-700 text-sm px-4 py-2 rounded-md mb-3">{jdeStatusError}</div>
+                )}
+
+                {loadingJdeStatuses ? (
+                  <div className="flex justify-center py-12"><Loader2 className="h-6 w-6 animate-spin text-gray-400" /></div>
+                ) : (
+                  <Table>
+                    <TableHeader>
+                      <TableRow className="border-gray-200 hover:bg-transparent">
+                        <TableHead className="font-bold text-gray-700 w-24 text-center">Código</TableHead>
+                        <TableHead className="font-bold text-gray-700">Descripción</TableHead>
+                        <TableHead className="font-bold text-gray-700 w-32 text-right">Acción</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {jdeStatuses.map(s => (
+                        <TableRow key={s.code} className="hover:bg-slate-50 border-gray-100">
+                          <TableCell className="text-center">
+                            <span className="font-mono font-bold text-gray-800 bg-gray-100 px-2 py-1 rounded">{s.code}</span>
+                          </TableCell>
+                          <TableCell>
+                            <Input
+                              value={jdeStatusDrafts[s.code] ?? ''}
+                              onChange={e => setJdeStatusDrafts(d => ({ ...d, [s.code]: e.target.value }))}
+                              className="h-9 text-sm"
+                            />
+                          </TableCell>
+                          <TableCell className="text-right">
+                            <Button
+                              size="sm"
+                              onClick={() => saveJdeStatus(s.code)}
+                              disabled={savingJdeStatus === s.code || (jdeStatusDrafts[s.code] ?? '').trim() === s.description}
+                              className="text-white font-semibold"
+                              style={{ backgroundColor: '#D30B15' }}
+                            >
+                              {savingJdeStatus === s.code ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Guardar'}
+                            </Button>
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                )}
+              </CardContent>
+            </Card>
           </div>
         )}
 
