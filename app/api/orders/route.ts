@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getDbConnection } from '@/lib/db';
-import { getDayOfYear } from 'date-fns';
+import { getDayOfYear } from '@/lib/utils';
 import { getDb } from '@/lib/sqlite';
 import { verifySession } from '@/lib/auth';
 import { requireScreenAccess } from '@/lib/permissions';

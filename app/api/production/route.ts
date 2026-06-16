@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'; // Importamos tipos necesarios para manejar peticiones y respuestas en Next.js
 import { getDbConnection } from '@/lib/db'; // Importamos nuestra función personalizada para conectar a la base de datos
 import { parseJdeDate, parseWasOqs } from '@/lib/utils'; // Importamos funciones de utilidad para parsear fechas formato JDE y cantidades
-import { getDayOfYear } from 'date-fns'; // Importamos una función de una librería externa para obtener el día del año (1-366)
+import { getDayOfYear } from '@/lib/utils';
 import { getDb } from '@/lib/sqlite';
 import { verifySession } from '@/lib/auth';
 import { requireScreenAccess } from '@/lib/permissions';

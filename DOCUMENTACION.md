@@ -1,7 +1,7 @@
 # Documentación Técnica — Dashboard de Producción
 
 > **Audiencia:** Desarrolladores que se incorporan al proyecto.
-> **Última actualización:** Mayo 2026
+> **Última actualización:** Junio 2026
 
 ---
 
@@ -33,9 +33,7 @@ Esta aplicación es un **panel de control (dashboard) de producción** para la e
 | **xlsx** | 0.18 | Generar archivos Excel (.xlsx) |
 | **recharts** | — | Gráficos de líneas para estadísticas de logs |
 | **lucide-react** | 0.563 | Iconos SVG (Search, Factory, Download...) |
-| **date-fns** | 4 | Utilidades de fecha (`getDayOfYear`) |
-| **react-day-picker** | 10 | Calendario interactivo (usado por `DatePicker`) |
-| **@radix-ui/react-popover** | — | Popover posicionado con Portal (usado por `DatePicker`) |
+| **@radix-ui/react-popover** | — | Popover posicionado con Portal (usado por `DatePicker` y `MermaCellPopover`) |
 | **Bun** | — | Gestor de paquetes y runtime (alternativa a npm/node) |
 
 ---
@@ -74,7 +72,7 @@ dashboard/
 │
 ├── components/                   ← Componentes React reutilizables
 │   ├── ArticleMultiSelect.tsx    ← Desplegable multi-selección con búsqueda
-│   ├── DatePicker.tsx            ← Selector de fecha (Popover + Calendar + botón limpiar)
+│   ├── DatePicker.tsx            ← Selector de fecha (wrapper de <input type="date"> nativo)
 │   ├── FilterPanel.tsx           ← Panel de filtros del dashboard de producción
 │   ├── MermaBreakdown.tsx        ← Desglose de merma agrupado Q/P (usado en /produccion)
 │   ├── MermaCellPopover.tsx      ← Popover por fila al pulsar celda Merma en /produccion
@@ -82,7 +80,6 @@ dashboard/
 │   ├── SingleSelect.tsx          ← Variante de selección única de ArticleMultiSelect
 │   └── ui/                       ← Componentes de interfaz base (estilo shadcn)
 │       ├── button.tsx
-│       ├── calendar.tsx          ← Calendar shadcn (react-day-picker v10)
 │       ├── card.tsx
 │       ├── input.tsx
 │       ├── popover.tsx           ← Popover Radix con Portal
@@ -748,6 +745,10 @@ El parámetro `wamcu` personaliza los nombres de sub-línea según planta (10100
 
 Divide entre 100 (JDE almacena cantidades ×100).
 
+#### `getDayOfYear(date)` — Día del año
+
+Devuelve el día del año (1-366) para una `Date`. Equivalente nativo a `getDayOfYear` de `date-fns`, sin dependencia externa. Usado en las rutas API que construyen fechas JDE para filtrar consultas Oracle.
+
 ---
 
 ## 9. Paneles de la aplicación
@@ -820,35 +821,26 @@ Panel de filtros del dashboard de producción. Ver [docs/produccion.md](docs/pro
 
 ### `DatePicker.tsx`
 
-Selector de fecha con calendario emergente. Reemplaza los `<input type="date">` nativos con un calendario uniforme, en español y con botón de limpiar.
+Wrapper fino sobre `<input type="date">` nativo del navegador. Devuelve y recibe fechas en formato `YYYY-MM-DD`, que es el formato nativo del input — no se necesita ninguna conversión.
 
 **Props:**
 
 | Prop | Tipo | Descripción |
 |---|---|---|
 | `value` | `string` | Fecha seleccionada en formato `YYYY-MM-DD` (vacío = sin selección) |
-| `onChange` | `(value: string) => void` | Callback al seleccionar o limpiar fecha. Devuelve `YYYY-MM-DD` o `''` |
-| `placeholder` | `string` | Texto cuando no hay fecha (por defecto: `dd/mm/aaaa`) |
+| `onChange` | `(value: string) => void` | Callback al cambiar la fecha. Devuelve `YYYY-MM-DD` o `''` al limpiar |
+| `placeholder` | `string` | Reservado para compatibilidad de API (el input nativo no lo usa) |
 | `className` | `string` | Clases CSS adicionales (ej: `w-[150px]`) |
 
 **Comportamiento:**
-- El botón muestra la fecha en formato `DD/MM/YYYY` (español) o el placeholder si está vacío
-- Icono **×** visible cuando hay fecha seleccionada — limpiar llama a `onChange('')`
-- Usa `@radix-ui/react-popover` con Portal para posicionamiento correcto sobre tablas y modales
-- Dentro del popover renderiza el componente `Calendar` (`components/ui/calendar.tsx`)
-- El día seleccionado se resalta en rojo corporativo `#D30B15`
-- El día de hoy tiene borde gris
-
-**Dependencias internas:** `components/ui/calendar.tsx`, `components/ui/popover.tsx`
+- El navegador renderiza su propio picker nativo (varía según OS/browser)
+- Al limpiar la fecha, el input devuelve `''` y `onChange` recibe `''`
+- Sin dependencias externas de calendario
 
 **Usado en:**
 - `components/FilterPanel.tsx` — fechas inicio/fin del dashboard de producción
 - `app/preparacion-pedidos/page.tsx` — fechas carga y entrega del panel de pedidos
 - `app/admin/logs/page.tsx` — filtros de fecha en los logs de consultas
-
-### `components/ui/calendar.tsx`
-
-Componente `Calendar` estilo shadcn/ui basado en `react-day-picker` v10 con locale español. Acepta todas las props de `DayPicker`. El día seleccionado usa el color corporativo `#D30B15`. Se usa exclusivamente a través de `DatePicker`.
 
 ### `components/ui/popover.tsx`
 
@@ -877,6 +869,7 @@ Variante de `ArticleMultiSelect` para selección única. Mismo estilo visual (bu
 | `button.tsx` | Botón con variantes (default, outline, ghost, destructive, secondary, link) |
 | `card.tsx` | Card, CardHeader, CardTitle, CardContent |
 | `input.tsx` | Input estilizado |
+| `popover.tsx` | Popover / PopoverTrigger / PopoverContent (Radix UI con Portal) |
 | `table.tsx` | Table, TableHeader, TableBody, TableRow, TableHead, TableCell |
 
 ---
@@ -892,7 +885,7 @@ El driver `oracledb` envía bind variables como VARCHAR2. Los campos CHAR tienen
 
 ### Fechas JDE (CYYDDD)
 
-Usar `parseJdeDate()`. Para convertir a JDE: `(year - 2000) * 1000 + getDayOfYear(date)`.
+Usar `parseJdeDate()`. Para convertir a JDE: `(year - 2000) * 1000 + getDayOfYear(date)` donde `getDayOfYear` se importa desde `@/lib/utils`.
 
 #### Conversión en TypeScript (frontend / API)
 
