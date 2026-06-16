@@ -3,7 +3,7 @@ import { getDbConnection } from '@/lib/db';
 import { getDb } from '@/lib/sqlite';
 import { verifySession } from '@/lib/auth';
 import { requireScreenAccess } from '@/lib/permissions';
-import { getDayOfYear } from 'date-fns';
+import { getDayOfYear } from '@/lib/utils';
 
 function jdeDateToISO(jdeDate: number): string | null {
     if (!jdeDate || jdeDate <= 0) return null;
