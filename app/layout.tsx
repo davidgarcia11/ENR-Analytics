@@ -1,6 +1,7 @@
 import type { Metadata } from "next"; // Tipo de dato para definir metadatos (título, descripción) para SEO
 import { Geist, Geist_Mono } from "next/font/google"; // Fuentes de Google optimizadas por Next.js
 import "./globals.css"; // Importamos los estilos globales (Tailwind, resets, etc.)
+import { ToastProvider } from "@/components/ui/toast"; // Sistema de notificaciones global
 
 // Configuración de la fuente Sans Serif (Geist)
 const geistSans = Geist({
@@ -35,7 +36,7 @@ export default function RootLayout({
         className={`${geistSans.variable} ${geistMono.variable}`}
       >
         {/* Aquí se inyecta el contenido de la página que estés visitando */}
-        {children}
+        <ToastProvider>{children}</ToastProvider>
       </body>
     </html>
   );
