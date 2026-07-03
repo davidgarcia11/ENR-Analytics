@@ -29,10 +29,10 @@ export default function RootLayout({
 }>) {
   return (
     // La etiqueta html y body deben estar aquí porque es el layout raíz
-    <html lang="en">
+    <html lang="es">
       <body
-        // Aplicamos las clases de las fuentes y el antialiasing para que el texto se vea nítido
-        className={`${geistSans.variable} ${geistMono.variable} antialiased`}
+        // Las variables de fuente Geist se consumen desde los tokens de globals.css
+        className={`${geistSans.variable} ${geistMono.variable}`}
       >
         {/* Aquí se inyecta el contenido de la página que estés visitando */}
         {children}
