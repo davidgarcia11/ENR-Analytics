@@ -11,7 +11,7 @@ Dashboard para visualizar palets problemáticos: caducados (fecha de caducidad v
 
 **Acceso configurable** — público por defecto. Cualquier usuario puede consultar sin sesión activa. El administrador puede restringirlo a roles específicos desde `/admin` → pestaña Pantallas.
 
-**Navegación:** dropdown "Paneles ▾" en la barra superior (componente `Navbar`).
+**Navegación:** dropdown "Paneles ▾" en la barra superior, dentro del `Navbar` que integra `AppShell` (ver sección 2).
 
 ---
 
@@ -19,8 +19,11 @@ Dashboard para visualizar palets problemáticos: caducados (fecha de caducidad v
 
 | Archivo | Descripción |
 |---|---|
-| `app/caducados/page.tsx` | Página cliente (filtros, tabla, métricas, Excel) |
+| `app/caducados/page.tsx` | Página cliente (filtros, tabla, métricas, Excel), envuelta en `<AppShell>` |
 | `app/api/caducados/route.ts` | API Route servidor — consultas Oracle |
+| `components/AppShell.tsx` | Layout compartido (navbar, título, descripción) usado por todos los paneles |
+| `components/KpiCard.tsx` | Tarjeta de métrica/KPI usada en las tarjetas resumen (sección 4) |
+| `components/PresetPanel.tsx` | Sistema compartido de presets: `usePresets`, `<PresetPanel>`, `<PresetQuickSelect>` (sección 12) |
 | `components/ArticleMultiSelect.tsx` | Componente multi-select con buscador (usado en todos los filtros desplegables) |
 | `components/SingleSelect.tsx` | Componente single-select con buscador (mismo estilo visual que ArticleMultiSelect) |
 
@@ -89,6 +92,8 @@ Pulsar **Enter** en cualquiera de los dos inputs dispara el filtro (equivalente 
 
 ## 4. Tarjetas métricas
 
+Se construyen con el componente compartido `<KpiCard title icon value caption>` (o pasando contenido custom como children, ver `components/KpiCard.tsx`), no con `<Card>` escrito a mano.
+
 | Tarjeta | Descripción |
 |---|---|
 | **Total Palets** | Nº registros devueltos por la query |
@@ -106,16 +111,18 @@ Columnas: Artículo, Descripción, Planta, Ubicación, Palet, Lote, Cantidad, Fe
 
 ### Badge de Motivo
 
-El campo `motivo` se construye en el backend concatenando los motivos aplicables separados por ` + `. El color del badge sigue esta lógica:
+El campo `motivo` se construye en el backend concatenando los motivos aplicables separados por ` + `. Se renderiza con el componente `<Badge>` (`components/ui/badge.tsx`), cuya variante semántica calcula `getMotivoBadgeProps()` en `app/caducados/page.tsx`:
 
-| Condición | Color |
-|---|---|
-| Contiene "Caducado" + "+" (combinado) | Rojo intenso |
-| Solo "Caducado" | Rojo suave |
-| Solo "Obsoleto" | Ámbar |
-| Contiene "+" (otra combinación) | Morado |
-| Cualquier otro valor (estado de lote) | Azul |
-| "Desconocido" | Gris |
+| Condición | Variante `Badge` | Color resultante |
+|---|---|---|
+| Contiene "Caducado" + "+" (combinado) | `destructive` (+ `font-bold`) | Rojo intenso |
+| Solo "Caducado" | `destructive` | Rojo |
+| Solo "Obsoleto" | `warning` | Ámbar |
+| Contiene "+" (otra combinación de bloqueos) | `outline` con clases moradas explícitas | Morado |
+| Cualquier otro valor (estado de lote) | `info` | Azul |
+| "Desconocido" | `default` | Gris |
+
+Las variantes usan los tokens del sistema de diseño (`text-destructive`, `text-warning`, `text-info`, ver `docs/design-system.md`), no colores hex hardcodeados. La combinación de bloqueos morada no tiene token semántico propio, así que mantiene clases Tailwind explícitas (`border-purple-200 bg-purple-50 text-purple-700`).
 
 **El texto del badge para estados de lote es dinámico** — proviene de la descripción de F0005, no de un texto hardcodeado. Si el estado es `B` y F0005 tiene `DRDL01='Bloqueado calidad'`, el badge mostrará "Bloqueado calidad".
 
@@ -280,17 +287,24 @@ Y una pesada con los datos reales:
 
 ## 12. Presets de filtros
 
-Sistema idéntico al del panel de producción. Permite guardar combinaciones de filtros para reutilizarlas.
+Usa el sistema de presets compartido (`components/PresetPanel.tsx`), el mismo que usan el resto de paneles. Permite guardar combinaciones de filtros para reutilizarlas.
 
-### 12.1 Comportamiento
+### 12.1 Componentes usados en `app/caducados/page.tsx`
 
-- **Solo visible para usuarios logueados** — el panel de presets y los botones Guardar/Cargar solo aparecen si `sessionUser !== null`
-- **Botón "Guardar"** (barra de acciones) → abre un panel encima de los filtros con campo de nombre
-- **Botón "Cargar preset"** → dropdown de acceso rápido
-- **Botón "Presets" en la Navbar superior** → incrementa una señal `presetsSignal` que un `useEffect` observa para hacer `setShowPresets(true)` (mismo panel que abre "Guardar")
-- Al cargar un preset se restauran todos los filtros y el panel se cierra — hay que pulsar "Filtrar" para ejecutar la consulta
+- **`usePresets('caducados')`** — hook que carga la lista de presets una vez (`GET /api/presets?screen=caducados`) y expone `{ presets, reload }`.
+- **`<PresetPanel screen="caducados" presets={presets} onReload={reloadPresets} open={showPresets} onClose={...} getFilters={getPresetFilters} applyFilters={applyPresetFilters} hint="..." />`** — panel completo de guardar/editar/listar/borrar presets.
+- **`<PresetQuickSelect presets={presets} onSelect={p => applyPresetFilters(JSON.parse(p.filters))} />`** — desplegable de carga rápida en la barra de acciones.
 
-### 12.2 Qué se guarda en un preset
+### 12.2 Comportamiento
+
+- **Solo visible para usuarios logueados** — `<PresetPanel>`, `<PresetQuickSelect>` y el botón "Guardar" solo se renderizan si `sessionUser !== null`
+- **Botón "Guardar"** (barra de acciones) → `setShowPresets(true)`, abre `<PresetPanel>` encima de los filtros con campo de nombre
+- **`<PresetQuickSelect>`** → dropdown de acceso rápido, carga el preset al seleccionarlo
+- **Botón "Presets" en la Navbar superior** (`onPresetsClick` del `AppShell`) → incrementa una señal `presetsSignal` que un `useEffect` observa para hacer `setShowPresets(true)` (mismo panel que abre "Guardar")
+- Al cargar un preset (`applyPresetFilters`) se restauran todos los filtros y el panel se cierra — hay que pulsar "Filtrar" para ejecutar la consulta
+- Los mensajes de error/éxito al guardar se muestran con `useToast()` (`toast(mensaje, 'success' | 'error')`) en vez de `alert()`
+
+### 12.3 Qué se guarda en un preset
 
 ```json
 {
@@ -306,7 +320,7 @@ Sistema idéntico al del panel de producción. Permite guardar combinaciones de 
 }
 ```
 
-### 12.3 Aislamiento por panel
+### 12.4 Aislamiento por panel
 
 Los presets llevan una columna `screen` en SQLite para que no mezclen entre paneles:
 
@@ -319,14 +333,14 @@ La API `/api/presets` acepta `?screen=caducados` para filtrar. El frontend siemp
 
 **Migración automática:** al arrancar la aplicación, `lib/sqlite.ts` añade la columna `screen TEXT DEFAULT 'produccion'` si no existe — los presets anteriores de producción no se ven afectados.
 
-### 12.4 Editar y eliminar presets
+### 12.5 Editar y eliminar presets
 
-Desde el panel de presets (botón Guardar → se abre el panel):
-- **Editar (✏)** → carga los filtros del preset en los controles y activa el modo edición (botón pasa a "Actualizar")
-- **Eliminar (🗑)** → borra directamente llamando a `DELETE /api/presets/:id`
+Desde el panel de presets (botón Guardar → se abre `<PresetPanel>`):
+- **Editar (icono lápiz)** → carga los filtros del preset en los controles y activa el modo edición (botón pasa a "Actualizar")
+- **Eliminar (icono papelera)** → abre un `<ConfirmDialog>` de confirmación ("Se eliminará el preset... Esta acción no se puede deshacer") antes de llamar a `DELETE /api/presets/:id`. Ya no se borra de forma inmediata.
 - **Cancelar** → sale del modo edición sin guardar
 
-### 12.5 Rutas API de presets
+### 12.6 Rutas API de presets
 
 | Método | Ruta | Descripción |
 |---|---|---|
