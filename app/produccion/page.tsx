@@ -48,12 +48,38 @@ function buildProductionParams(filtersArg: AppliedFilters): URLSearchParams {
 
 interface SessionUser { id: number; username: string; role: string; name: string; surname: string }
 
+// Fila de producción tal como la devuelve GET /api/production (fecha ya serializada a ISO string)
+interface ProductionRow {
+  order: string
+  date: string | null
+  productionDateRaw: number | string
+  description: string
+  quantity: number
+  merma: number
+  plantCode: string
+  article: string
+  subLine: string
+  subLineCode?: string
+  unit: string
+}
+
+// Fila agregada (agrupada por artículo+fecha o solo por artículo) con el % de merma ya calculado
+interface DisplayRow extends ProductionRow {
+  mermaPercent: number
+}
+
+// Fila del desglose de merma en modo "matrix" (GET /api/production/merma-breakdown?mode=matrix)
+interface MermaMatrixItem {
+  article: string; articleDesc: string
+  group: string; code: string; description: string; qty: number
+}
+
 // Tabla de producción extraída como componente memoizado para evitar re-renders
 // cuando el usuario edita filtros sin haber pulsado "Filtrar" todavía.
 // React.memo compara las props por referencia: como displayData solo cambia cuando
 // cambia deferredData (no al editar filtros), la tabla no se re-renderiza al escribir.
 const ProductionTable = memo(({ displayData, mermaP75, groupByArticle, loading, dataLength, hasMore, onLoadMore, onLoadAll, appliedFilters }: {
-  displayData: any[]; mermaP75: number; groupByArticle: boolean;
+  displayData: DisplayRow[]; mermaP75: number; groupByArticle: boolean;
   loading: boolean; dataLength: number; hasMore: boolean;
   onLoadMore: () => void; onLoadAll: () => void;
   appliedFilters: AppliedFilters;
@@ -188,7 +214,7 @@ export default function Dashboard() {
   const [presetsSignal, setPresetsSignal] = useState(0)
 
   // --- DATOS ---
-  const [data, setData] = useState<any[]>([]) // Lista de registros de producción
+  const [data, setData] = useState<ProductionRow[]>([]) // Lista de registros de producción
   const [loading, setLoading] = useState(false) // Spinner de carga
   const [page, setPage] = useState(1) // Página actual para paginación
   const [hasMore, setHasMore] = useState(true) // Si hay más datos por cargar
@@ -304,7 +330,7 @@ export default function Dashboard() {
       const json = await res.json()
 
       // La API devuelve { data: [...], sqlRowCount: N }
-      const items = json.data ?? json
+      const items: ProductionRow[] = json.data ?? json
       const sqlRowCount = json.sqlRowCount ?? (Array.isArray(json) ? json.length : items.length)
 
       if (Array.isArray(items)) {
@@ -319,7 +345,7 @@ export default function Dashboard() {
 
           // Artículos únicos para el multi-select
           const articleMap = new Map<string, { id: string; description: string }>()
-          newData.forEach((item: any) => {
+          newData.forEach((item: ProductionRow) => {
             if (item.article && item.description)
               articleMap.set(String(item.article).trim(), { id: String(item.article).trim(), description: item.description })
           })
@@ -329,7 +355,7 @@ export default function Dashboard() {
           let qtyUN = 0, qtyKG = 0, totalMerma = 0, totalProduced = 0
           const plants: Record<string, number> = {}
           const orders = new Set()
-          newData.forEach((item: any) => {
+          newData.forEach((item: ProductionRow) => {
             const u = item.unit ? item.unit.toUpperCase() : ''
             if (u === 'UN') qtyUN += item.quantity || 0
             else if (u === 'KG') qtyKG += item.quantity || 0
@@ -460,7 +486,7 @@ export default function Dashboard() {
       matrixParams.append('mode', 'matrix')
       const res = await fetch(`/api/production/merma-breakdown?${matrixParams.toString()}`)
       const json = await res.json()
-      const items: any[] = (json && Array.isArray(json.items)) ? json.items : []
+      const items: MermaMatrixItem[] = (json && Array.isArray(json.items)) ? json.items : []
       if (items.length > 0) {
         const groupLabel = (g: string) => g === 'Q' ? 'Etiquetado' : g === 'P' ? 'Pasteurizado' : 'Otros'
         const matrixRows = items.map(it => ({
@@ -490,7 +516,7 @@ export default function Dashboard() {
   const deferredGroupByArticle = useDeferredValue(groupByArticle)
 
   const displayData = useMemo(() => {
-    const groupMap = new Map<string, any>()
+    const groupMap = new Map<string, ProductionRow>()
     deferredData.forEach(item => {
       const key = deferredGroupByArticle
         ? `${item.article}-${item.subLineCode}-${item.unit}`
@@ -498,7 +524,7 @@ export default function Dashboard() {
       if (!groupMap.has(key)) {
         groupMap.set(key, { ...item, quantity: 0, merma: 0 })
       }
-      const g = groupMap.get(key)
+      const g = groupMap.get(key)!
       g.quantity += item.quantity || 0
       g.merma += item.merma || 0
     })

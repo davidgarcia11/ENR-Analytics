@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, type Dispatch, type SetStateAction } from "react"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 import { ArticleMultiSelect } from "@/components/ArticleMultiSelect"
@@ -14,6 +14,16 @@ import { cn } from "@/lib/utils"
 
 interface SessionUser { id: number; username: string; role: string; name: string; surname: string }
 interface Preset { id: number; name: string; filters: string; created_at: string }
+type CategoryOption = { id: string; description: string }
+
+// Filtros serializados al guardar un preset (fechas/horas son opcionales según los checkboxes)
+interface PresetFiltersData {
+  plant: string; subLine: string
+  selectedArticles: string[]; selectedPrp6: string[]; selectedSrp3: string[]; selectedSrp5: string[]
+  selectedSrp2: string[]; selectedSrp1: string[]; selectedSrp4: string[]; selectedZe03: string[]
+  selectedProdLines: string[]
+  startDate?: string; endDate?: string; startTime?: string; endTime?: string
+}
 
 export interface AppliedFilters {
   plant: string; subLine: string
@@ -90,7 +100,7 @@ export function FilterPanel({
 
   useEffect(() => {
     const fields:  string[]   = ['prp6', 'srp3', 'srp5', 'srp2', 'srp1', 'srp4', 'ze03']
-    const setters: ((v: any) => void)[] = [
+    const setters: Dispatch<SetStateAction<CategoryOption[]>>[] = [
       setAvailablePrp6, setAvailableSrp3, setAvailableSrp5,
       setAvailableSrp2, setAvailableSrp1, setAvailableSrp4, setAvailableZe03,
     ]
@@ -138,7 +148,7 @@ export function FilterPanel({
     if (!name.trim()) return
     setSavingPreset(true)
     try {
-      const filtersData: Record<string, any> = {
+      const filtersData: PresetFiltersData = {
         plant: filters.plant, subLine: filters.subLine,
         selectedArticles, selectedPrp6, selectedSrp3, selectedSrp5,
         selectedSrp2, selectedSrp1, selectedSrp4, selectedZe03, selectedProdLines,

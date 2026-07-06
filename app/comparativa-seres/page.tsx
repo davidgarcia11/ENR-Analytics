@@ -152,8 +152,8 @@ export default function ComparativaSeresPage() {
             const data: ComparativaResult = await res.json()
             setResult(data)
             setActiveTab('solo_seres')
-        } catch (err: any) {
-            setError(err.message)
+        } catch (err) {
+            setError(err instanceof Error ? err.message : 'Error desconocido')
         } finally {
             setLoading(false)
         }
