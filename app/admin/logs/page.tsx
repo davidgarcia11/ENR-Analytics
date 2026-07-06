@@ -5,11 +5,15 @@ import { useRouter } from "next/navigation"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
-import { Loader2, ArrowLeft, FileText, ChevronLeft, ChevronRight, LogIn, Clock, Search, Users, Zap, BarChart3, Download, Trophy } from "lucide-react"
-import Image from "next/image"
+import { Spinner } from "@/components/ui/spinner"
+import { EmptyState } from "@/components/ui/empty-state"
+import { AppShell } from "@/components/AppShell"
+import { FileText, ChevronLeft, ChevronRight, LogIn, Clock, Search, Users, Zap, BarChart3, Download, Trophy, Inbox } from "lucide-react"
 import * as XLSX from 'xlsx'
 import { DatePicker } from "@/components/DatePicker"
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from "recharts"
+
+interface SessionUser { id: number; username: string; role: string; name: string; surname: string }
 
 interface LogEntry {
   id: number
@@ -119,6 +123,7 @@ export default function LogsPage() {
   const [logs, setLogs] = useState<LogEntry[]>([])
   const [loading, setLoading] = useState(true)
   const [authorized, setAuthorized] = useState(false)
+  const [sessionUser, setSessionUser] = useState<SessionUser | null>(null)
   const [page, setPage] = useState(1)
   const [totalPages, setTotalPages] = useState(1)
   const [total, setTotal] = useState(0)
@@ -151,10 +156,17 @@ export default function LogsPage() {
       if (!res.ok) { router.push("/login"); return }
       const data = await res.json()
       if (data.role !== "admin") { router.push("/produccion"); return }
+      setSessionUser(data)
       setAuthorized(true)
     } catch {
       router.push("/login")
     }
+  }
+
+  // Cierre de sesión para la Navbar del AppShell
+  const logout = async () => {
+    await fetch("/api/auth/logout", { method: "POST" })
+    router.push("/login")
   }
 
   const loadLogs = async () => {
@@ -223,74 +235,61 @@ export default function LogsPage() {
 
   if (!authorized) {
     return (
-      <div className="min-h-screen bg-gray-100 flex items-center justify-center">
-        <Loader2 className="h-8 w-8 animate-spin text-gray-400" />
+      <div className="min-h-screen bg-background flex items-center justify-center">
+        <Spinner label="Comprobando permisos..." />
       </div>
     )
   }
 
   return (
-    <div className="min-h-screen bg-gray-100 p-8 font-sans text-gray-900">
-      <div className="mx-auto max-w-5xl space-y-6">
-
-        {/* Header */}
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-4">
-            <Image src="/logo.png" alt="Elaborados Naturales" width={120} height={42} priority />
-            <div>
-              <h1 className="text-xl font-semibold text-gray-800">Logs de Consultas</h1>
-              <p className="text-sm text-gray-500">{total} registros totales</p>
-            </div>
-          </div>
-          <div className="flex gap-2">
-            <Button variant="outline" onClick={() => router.push("/admin")} className="text-gray-600">
-              <ArrowLeft className="mr-2 h-4 w-4" />
-              Admin
-            </Button>
-            <Button variant="outline" onClick={() => router.push("/produccion")} className="text-gray-600">
-              Dashboard
-            </Button>
-          </div>
-        </div>
+    <AppShell
+      navbar={{
+        currentPanel: "produccion",
+        user: sessionUser,
+        onLogout: logout,
+      }}
+      title="Logs de consultas"
+      description="Registro de consultas ejecutadas por panel y usuario"
+    >
 
         {/* Tarjetas de estadísticas */}
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-          <Card className="overflow-hidden" style={{ borderTop: '3px solid #D30B15' }}>
+          <Card accent className="overflow-hidden">
             <CardContent className="pt-4 pb-3">
               <div className="flex items-center gap-2 mb-1">
-                <Search className="h-4 w-4 text-gray-400" />
-                <span className="text-xs font-semibold text-gray-500 uppercase">Consultas</span>
+                <Search className="h-4 w-4 text-muted-foreground" aria-hidden="true" />
+                <span className="text-xs font-semibold text-muted-foreground uppercase">Consultas</span>
               </div>
-              <p className="text-2xl font-bold text-gray-800">{stats.totalQueries.toLocaleString('es-ES')}</p>
+              <p className="text-2xl font-bold text-foreground">{stats.totalQueries.toLocaleString('es-ES')}</p>
             </CardContent>
           </Card>
-          <Card className="overflow-hidden" style={{ borderTop: '3px solid #D30B15' }}>
+          <Card accent className="overflow-hidden">
             <CardContent className="pt-4 pb-3">
               <div className="flex items-center gap-2 mb-1">
-                <Clock className="h-4 w-4 text-gray-400" />
-                <span className="text-xs font-semibold text-gray-500 uppercase">Tiempo medio</span>
+                <Clock className="h-4 w-4 text-muted-foreground" aria-hidden="true" />
+                <span className="text-xs font-semibold text-muted-foreground uppercase">Tiempo medio</span>
               </div>
-              <p className="text-2xl font-bold text-gray-800">{formatTime(stats.avgTime)}</p>
+              <p className="text-2xl font-bold text-foreground">{formatTime(stats.avgTime)}</p>
             </CardContent>
           </Card>
-          <Card className="overflow-hidden" style={{ borderTop: '3px solid #D30B15' }}>
+          <Card accent className="overflow-hidden">
             <CardContent className="pt-4 pb-3">
               <div className="flex items-center gap-2 mb-1">
-                <Zap className="h-4 w-4 text-gray-400" />
-                <span className="text-xs font-semibold text-gray-500 uppercase">Tiempo máximo</span>
+                <Zap className="h-4 w-4 text-muted-foreground" aria-hidden="true" />
+                <span className="text-xs font-semibold text-muted-foreground uppercase">Tiempo máximo</span>
               </div>
-              <p className={`text-2xl font-bold ${stats.maxTime > SLOW_QUERY_MS ? 'text-red-600' : 'text-gray-800'}`}>
+              <p className={`text-2xl font-bold ${stats.maxTime > SLOW_QUERY_MS ? 'text-destructive' : 'text-foreground'}`}>
                 {formatTime(stats.maxTime)}
               </p>
             </CardContent>
           </Card>
-          <Card className="overflow-hidden" style={{ borderTop: '3px solid #D30B15' }}>
+          <Card accent className="overflow-hidden">
             <CardContent className="pt-4 pb-3">
               <div className="flex items-center gap-2 mb-1">
-                <Users className="h-4 w-4 text-gray-400" />
-                <span className="text-xs font-semibold text-gray-500 uppercase">Resultados medio</span>
+                <Users className="h-4 w-4 text-muted-foreground" aria-hidden="true" />
+                <span className="text-xs font-semibold text-muted-foreground uppercase">Resultados medio</span>
               </div>
-              <p className="text-2xl font-bold text-gray-800">{Math.round(stats.avgResults).toLocaleString('es-ES')}</p>
+              <p className="text-2xl font-bold text-foreground">{Math.round(stats.avgResults).toLocaleString('es-ES')}</p>
             </CardContent>
           </Card>
         </div>
@@ -299,31 +298,31 @@ export default function LogsPage() {
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
 
           {/* Ranking usuarios */}
-          <Card className="overflow-hidden" style={{ borderTop: '3px solid #D30B15' }}>
+          <Card accent>
             <CardHeader className="pb-2">
-              <CardTitle className="text-sm font-bold text-gray-700 flex items-center gap-2">
-                <Trophy className="h-4 w-4" style={{ color: '#D30B15' }} />
+              <CardTitle className="text-sm font-bold text-secondary-foreground flex items-center gap-2">
+                <Trophy className="h-4 w-4 text-primary" aria-hidden="true" />
                 Usuarios más activos
               </CardTitle>
             </CardHeader>
             <CardContent>
               {topUsers.length === 0 ? (
-                <p className="text-sm text-gray-400">Sin datos</p>
+                <p className="text-sm text-muted-foreground">Sin datos</p>
               ) : (
                 <div className="space-y-2">
                   {topUsers.map((u, i) => (
                     <div key={u.username} className="flex items-center justify-between">
                       <div className="flex items-center gap-2">
-                        <span className="text-xs font-bold text-gray-400 w-4">{i + 1}.</span>
-                        <span className="text-sm font-medium text-gray-700">{u.username}</span>
+                        <span className="text-xs font-bold text-muted-foreground w-4">{i + 1}.</span>
+                        <span className="text-sm font-medium text-secondary-foreground">{u.username}</span>
                       </div>
-                      <span className="text-sm font-bold text-gray-900">{u.queries.toLocaleString('es-ES')}</span>
+                      <span className="text-sm font-bold text-foreground">{u.queries.toLocaleString('es-ES')}</span>
                     </div>
                   ))}
                   {invitadoCount > 0 && (
-                    <div className="flex items-center justify-between pt-2 mt-2 border-t border-gray-100">
-                      <span className="text-xs text-gray-400 italic">Anónimas (Invitado)</span>
-                      <span className="text-xs font-medium text-gray-400">{invitadoCount.toLocaleString('es-ES')}</span>
+                    <div className="flex items-center justify-between pt-2 mt-2 border-t border-border">
+                      <span className="text-xs text-muted-foreground italic">Anónimas (Invitado)</span>
+                      <span className="text-xs font-medium text-muted-foreground">{invitadoCount.toLocaleString('es-ES')}</span>
                     </div>
                   )}
                 </div>
@@ -337,14 +336,13 @@ export default function LogsPage() {
               <Button
                 variant={showChart ? "default" : "outline"}
                 onClick={() => setShowChart(!showChart)}
-                className={showChart ? "text-white font-semibold flex-1" : "text-gray-600 flex-1"}
-                style={showChart ? { backgroundColor: '#D30B15' } : {}}
+                className={showChart ? "font-semibold flex-1" : "flex-1"}
               >
-                <BarChart3 className="mr-2 h-4 w-4" />
+                <BarChart3 className="mr-2 h-4 w-4" aria-hidden="true" />
                 {showChart ? 'Ocultar gráfico' : 'Ver gráfico'}
               </Button>
-              <Button variant="outline" onClick={exportToExcel} disabled={logs.length === 0} className="text-gray-600">
-                <Download className="mr-2 h-4 w-4" />
+              <Button variant="outline" onClick={exportToExcel} disabled={logs.length === 0}>
+                <Download className="mr-2 h-4 w-4" aria-hidden="true" />
                 Excel
               </Button>
             </div>
@@ -354,8 +352,7 @@ export default function LogsPage() {
                   <button
                     key={d}
                     onClick={() => setChartDays(d)}
-                    className={`px-3 py-1.5 text-xs font-semibold rounded-md border transition-colors ${chartDays === d ? 'text-white border-transparent' : 'bg-white text-gray-600 border-gray-300 hover:bg-gray-50'}`}
-                    style={chartDays === d ? { backgroundColor: '#D30B15', borderColor: '#D30B15' } : {}}
+                    className={`px-3 py-1.5 text-xs font-semibold rounded-md border transition-colors ${chartDays === d ? 'bg-primary text-primary-foreground border-primary' : 'bg-card text-secondary-foreground border-input hover:bg-muted/50'}`}
                   >
                     {d}d
                   </button>
@@ -367,13 +364,13 @@ export default function LogsPage() {
 
         {/* Gráfico de actividad */}
         {showChart && (
-          <Card className="overflow-hidden" style={{ borderTop: '3px solid #D30B15' }}>
+          <Card accent>
             <CardHeader>
-              <CardTitle className="text-sm font-bold text-gray-700">Actividad últimos {chartDays} días</CardTitle>
+              <CardTitle className="text-sm font-bold text-secondary-foreground">Actividad últimos {chartDays} días</CardTitle>
             </CardHeader>
             <CardContent>
               {chartData.length === 0 ? (
-                <p className="text-center text-gray-500 py-8">No hay datos suficientes para mostrar el gráfico</p>
+                <p className="text-center text-muted-foreground py-8">No hay datos suficientes para mostrar el gráfico</p>
               ) : (
                 <ResponsiveContainer width="100%" height={280}>
                   <LineChart data={chartData} margin={{ top: 5, right: 20, left: 0, bottom: 5 }}>
@@ -393,15 +390,15 @@ export default function LogsPage() {
         )}
 
         {/* Filtros */}
-        <Card className="overflow-hidden" style={{ borderTop: '3px solid #D30B15' }}>
+        <Card accent>
           <CardContent className="pt-4">
             <div className="flex flex-wrap items-end gap-4">
               <div className="space-y-1.5">
-                <label className="text-xs font-semibold text-gray-700">Panel</label>
+                <label className="text-xs font-semibold text-secondary-foreground">Panel</label>
                 <select
                   value={filterSource}
                   onChange={e => setFilterSource(e.target.value)}
-                  className="flex h-9 w-[170px] rounded-md border border-gray-300 bg-white px-3 py-1 text-sm shadow-sm"
+                  className="flex h-9 w-[170px] rounded-md border border-input bg-card px-3 py-1 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
                 >
                   <option value="">Todos</option>
                   {Object.entries(SOURCE_LABELS).map(([key, label]) => (
@@ -410,11 +407,11 @@ export default function LogsPage() {
                 </select>
               </div>
               <div className="space-y-1.5">
-                <label className="text-xs font-semibold text-gray-700">Usuario</label>
+                <label className="text-xs font-semibold text-secondary-foreground">Usuario</label>
                 <select
                   value={filterUsername}
                   onChange={e => setFilterUsername(e.target.value)}
-                  className="flex h-9 w-[160px] rounded-md border border-gray-300 bg-white px-3 py-1 text-sm shadow-sm"
+                  className="flex h-9 w-[160px] rounded-md border border-input bg-card px-3 py-1 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
                 >
                   <option value="">Todos</option>
                   {usernames.map(u => (
@@ -423,17 +420,17 @@ export default function LogsPage() {
                 </select>
               </div>
               <div className="space-y-1.5">
-                <label className="text-xs font-semibold text-gray-700">Desde</label>
+                <label className="text-xs font-semibold text-secondary-foreground">Desde</label>
                 <DatePicker value={filterStartDate} onChange={setFilterStartDate} className="w-[150px]" />
               </div>
               <div className="space-y-1.5">
-                <label className="text-xs font-semibold text-gray-700">Hasta</label>
+                <label className="text-xs font-semibold text-secondary-foreground">Hasta</label>
                 <DatePicker value={filterEndDate} onChange={setFilterEndDate} className="w-[150px]" />
               </div>
-              <Button onClick={applyFilters} className="text-white font-semibold" style={{ backgroundColor: '#D30B15' }}>
+              <Button onClick={applyFilters} className="font-semibold">
                 Filtrar
               </Button>
-              <Button variant="outline" onClick={clearFilters} className="text-gray-500">
+              <Button variant="outline" onClick={clearFilters}>
                 Limpiar
               </Button>
             </div>
@@ -441,31 +438,33 @@ export default function LogsPage() {
         </Card>
 
         {/* Tabla de logs */}
-        <Card className="overflow-hidden" style={{ borderTop: '3px solid #D30B15' }}>
+        <Card accent>
           <CardHeader>
-            <CardTitle className="text-sm font-bold text-gray-700 flex items-center gap-2">
-              <FileText className="h-4 w-4" style={{ color: '#D30B15' }} />
+            <CardTitle className="text-sm font-bold text-secondary-foreground flex items-center gap-2">
+              <FileText className="h-4 w-4 text-primary" aria-hidden="true" />
               Historial de Consultas
             </CardTitle>
           </CardHeader>
           <CardContent>
             {loading ? (
-              <div className="flex justify-center py-8">
-                <Loader2 className="h-6 w-6 animate-spin text-gray-400" />
-              </div>
+              <Spinner label="Cargando logs..." className="py-10" />
             ) : logs.length === 0 ? (
-              <p className="text-center text-gray-500 py-8">No hay consultas registradas</p>
+              <EmptyState
+                icon={Inbox}
+                title="Sin registros"
+                description="No hay consultas registradas para los filtros seleccionados"
+              />
             ) : (
               <>
                 <Table>
                   <TableHeader>
-                    <TableRow className="border-gray-200 hover:bg-transparent">
-                      <TableHead className="font-bold text-gray-700">Fecha / Hora</TableHead>
-                      <TableHead className="font-bold text-gray-700">Usuario</TableHead>
-                      <TableHead className="font-bold text-gray-700">Panel</TableHead>
-                      <TableHead className="font-bold text-gray-700">Filtros</TableHead>
-                      <TableHead className="font-bold text-gray-700 text-right">Resultados</TableHead>
-                      <TableHead className="font-bold text-gray-700 text-right">Tiempo</TableHead>
+                    <TableRow className="border-border hover:bg-transparent">
+                      <TableHead className="font-bold text-secondary-foreground">Fecha / Hora</TableHead>
+                      <TableHead className="font-bold text-secondary-foreground">Usuario</TableHead>
+                      <TableHead className="font-bold text-secondary-foreground">Panel</TableHead>
+                      <TableHead className="font-bold text-secondary-foreground">Filtros</TableHead>
+                      <TableHead className="font-bold text-secondary-foreground text-right">Resultados</TableHead>
+                      <TableHead className="font-bold text-secondary-foreground text-right">Tiempo</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -473,33 +472,33 @@ export default function LogsPage() {
                       const isLogin = isLoginLog(log.filters)
                       const isSlow = !isLogin && log.execution_time_ms > SLOW_QUERY_MS
                       return (
-                        <TableRow key={log.id} className={`border-gray-100 ${isLogin ? 'bg-blue-50/50 hover:bg-blue-50' : isSlow ? 'bg-red-50/50 hover:bg-red-50' : 'hover:bg-slate-50'}`}>
-                          <TableCell className="text-sm text-gray-600 whitespace-nowrap">
+                        <TableRow key={log.id} className={`border-border ${isLogin ? 'bg-blue-50/50 hover:bg-blue-50' : isSlow ? 'bg-red-50/50 hover:bg-red-50' : 'hover:bg-muted/50'}`}>
+                          <TableCell className="text-sm text-muted-foreground whitespace-nowrap">
                             {new Date(log.created_at + 'Z').toLocaleString('es-ES', {
                               day: '2-digit', month: '2-digit', year: 'numeric',
                               hour: '2-digit', minute: '2-digit'
                             })}
                           </TableCell>
                           <TableCell>
-                            <span className={`text-sm font-medium ${log.user_id ? 'text-gray-800' : 'text-gray-400 italic'}`}>
+                            <span className={`text-sm font-medium ${log.user_id ? 'text-foreground' : 'text-muted-foreground italic'}`}>
                               {log.username}
                             </span>
                           </TableCell>
                           <TableCell>
-                            <span className={`text-xs font-semibold px-2 py-0.5 rounded ${isLogin ? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-600'}`}>
+                            <span className={`text-xs font-semibold px-2 py-0.5 rounded ${isLogin ? 'bg-blue-100 text-blue-700' : 'bg-muted text-secondary-foreground'}`}>
                               {SOURCE_LABELS[log.source] || log.source}
                             </span>
                           </TableCell>
-                          <TableCell className="text-sm text-gray-600 max-w-[300px] truncate" title={isLogin ? 'Inicio de sesión' : log.filters}>
+                          <TableCell className="text-sm text-muted-foreground max-w-[300px] truncate" title={isLogin ? 'Inicio de sesión' : log.filters}>
                             <span className="flex items-center gap-1.5">
-                              {isLogin && <LogIn className="h-3.5 w-3.5 text-blue-500" />}
+                              {isLogin && <LogIn className="h-3.5 w-3.5 text-blue-500" aria-hidden="true" />}
                               {summarizeFilters(log.filters)}
                             </span>
                           </TableCell>
-                          <TableCell className="text-right text-sm font-medium text-gray-700">
+                          <TableCell className="text-right text-sm font-medium text-secondary-foreground">
                             {isLogin ? '—' : (log.result_count?.toLocaleString('es-ES') ?? '—')}
                           </TableCell>
-                          <TableCell className={`text-right text-sm font-semibold ${isSlow ? 'text-red-600' : 'text-gray-500'}`}>
+                          <TableCell className={`text-right text-sm font-semibold ${isSlow ? 'text-destructive' : 'text-muted-foreground'}`}>
                             {isLogin ? '—' : (log.execution_time_ms != null ? formatTime(log.execution_time_ms) : '—')}
                           </TableCell>
                         </TableRow>
@@ -510,18 +509,18 @@ export default function LogsPage() {
 
                 {/* Paginación */}
                 {totalPages > 1 && (
-                  <div className="flex items-center justify-between mt-4 pt-4 border-t border-gray-100">
-                    <p className="text-sm text-gray-500">
+                  <div className="flex items-center justify-between mt-4 pt-4 border-t border-border">
+                    <p className="text-sm text-muted-foreground">
                       Página {page} de {totalPages}
                     </p>
                     <div className="flex gap-2">
                       <Button variant="outline" size="sm" disabled={page <= 1} onClick={() => setPage(p => p - 1)}>
-                        <ChevronLeft className="h-4 w-4" />
+                        <ChevronLeft className="h-4 w-4" aria-hidden="true" />
                         Anterior
                       </Button>
                       <Button variant="outline" size="sm" disabled={page >= totalPages} onClick={() => setPage(p => p + 1)}>
                         Siguiente
-                        <ChevronRight className="h-4 w-4" />
+                        <ChevronRight className="h-4 w-4" aria-hidden="true" />
                       </Button>
                     </div>
                   </div>
@@ -530,7 +529,6 @@ export default function LogsPage() {
             )}
           </CardContent>
         </Card>
-      </div>
-    </div>
+    </AppShell>
   )
 }
