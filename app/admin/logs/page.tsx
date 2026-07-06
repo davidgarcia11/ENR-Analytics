@@ -244,7 +244,6 @@ export default function LogsPage() {
   return (
     <AppShell
       navbar={{
-        currentPanel: "produccion",
         user: sessionUser,
         onLogout: logout,
       }}
