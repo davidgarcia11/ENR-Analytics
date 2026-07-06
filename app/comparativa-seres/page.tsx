@@ -3,15 +3,17 @@
 import { useState, useEffect } from "react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
-import { Loader2, Search, Download, X, AlertTriangle, CheckCircle2, ArrowLeftRight, BookmarkCheck, Save, Pencil, Trash2, ShieldAlert } from "lucide-react"
-import Navbar from "@/components/Navbar"
+import { Tabs } from "@/components/ui/tabs"
+import { Badge } from "@/components/ui/badge"
+import { Spinner } from "@/components/ui/spinner"
+import { EmptyState } from "@/components/ui/empty-state"
+import { Loader2, Search, Download, X, AlertTriangle, CheckCircle2, ArrowLeftRight, ShieldAlert, SearchX } from "lucide-react"
+import { AppShell } from "@/components/AppShell"
+import { PresetPanel } from "@/components/PresetPanel"
 import { ArticleMultiSelect } from "@/components/ArticleMultiSelect"
 import { useRouter } from "next/navigation"
 import * as XLSX from 'xlsx'
-
-interface Preset { id: number; name: string; filters: string; created_at: string }
 
 interface SessionUser { id: number; username: string; role: string; name: string; surname: string }
 
@@ -45,14 +47,14 @@ function estadoLabel(code?: string | null, customMap?: Record<string, string>): 
     if (!code) return 'Desconocido'
     return customMap?.[code] || ESTADO_LABEL_FALLBACK[code] || `Otro (${code})`
 }
-// Tailwind classes por estado para el badge. Y es el único "OK", el resto son incidencias.
-function estadoBadgeClasses(code?: string | null): string {
+// Variante semántica del Badge por estado. Y es el único "OK", el resto son incidencias.
+function estadoBadgeVariant(code?: string | null): 'success' | 'warning' | 'default' | 'destructive' {
     switch (code) {
-        case 'Y': return 'bg-green-100 text-green-800 border-green-200'
-        case 'M': return 'bg-amber-100 text-amber-800 border-amber-200'
-        case 'N': return 'bg-gray-100 text-gray-700 border-gray-200'
-        case 'E': return 'bg-red-100 text-red-800 border-red-200'
-        default: return 'bg-slate-100 text-slate-600 border-slate-200'
+        case 'Y': return 'success'
+        case 'M': return 'warning'
+        case 'N': return 'default'
+        case 'E': return 'destructive'
+        default: return 'default'
     }
 }
 
@@ -100,12 +102,9 @@ export default function ComparativaSeresPage() {
 
     // --- PRESETS ---
     // El sistema de presets es compartido por todos los paneles (tabla SQLite `presets`).
-    // Aquí guardamos los filtros propios de este panel (días + clientes) bajo screen='comparativa'.
-    const [presets, setPresets] = useState<Preset[]>([])
+    // El estado y las llamadas a /api/presets viven en <PresetPanel screen="comparativa">;
+    // aquí solo controlamos la visibilidad del panel.
     const [showPresets, setShowPresets] = useState(false)
-    const [presetName, setPresetName] = useState('')
-    const [savingPreset, setSavingPreset] = useState(false)
-    const [editingPresetId, setEditingPresetId] = useState<number | null>(null)
     // Señal incrementada por el botón Presets del Navbar para abrir el panel desde fuera.
     const [presetsSignal, setPresetsSignal] = useState(0)
     useEffect(() => {
@@ -165,25 +164,11 @@ export default function ComparativaSeresPage() {
         setError(null)
         setDays(0)
         setSelectedDestinoMlnm([])
-        setEditingPresetId(null)
-        setPresetName('')
     }
 
-    // --- PRESETS (helpers) ---
-
-    // Carga los presets del usuario para este panel (screen=comparativa).
-    const loadPresets = async () => {
-        try {
-            const res = await fetch('/api/presets?screen=comparativa')
-            if (res.ok) setPresets(await res.json())
-        } catch { }
-    }
-
-    // Carga la lista al disponer de sesión.
+    // Descripciones JDE (requiere sesión)
     useEffect(() => {
         if (sessionUser) {
-            loadPresets()
-            // Descripciones JDE (también requiere sesión)
             fetch('/api/jde-statuses')
                 .then(r => r.ok ? r.json() : [])
                 .then((rows: { code: string; description: string }[]) => {
@@ -194,46 +179,6 @@ export default function ComparativaSeresPage() {
                 .catch(err => console.error('No se pudieron cargar las descripciones de estado JDE:', err))
         }
     }, [sessionUser])
-
-    // Guarda (o actualiza si hay editingPresetId) los filtros vigentes como preset.
-    const savePreset = async (nameOverride?: string) => {
-        const name = (nameOverride ?? presetName).trim()
-        if (!name) return
-        setSavingPreset(true)
-        try {
-            const filtersData = { days, selectedDestinoMlnm }
-            const isEditing = editingPresetId !== null
-            const res = await fetch(isEditing ? `/api/presets/${editingPresetId}` : '/api/presets', {
-                method: isEditing ? 'PUT' : 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ name, filters: filtersData, screen: 'comparativa' }),
-            })
-            if (res.ok) { setPresetName(''); setEditingPresetId(null); loadPresets() }
-            else { const d = await res.json(); alert(d.error || 'Error al guardar') }
-        } finally { setSavingPreset(false) }
-    }
-
-    // Restaura los filtros guardados en el preset.
-    const loadPreset = (preset: Preset) => {
-        try {
-            const f = JSON.parse(preset.filters)
-            setDays(typeof f.days === 'number' ? f.days : 0)
-            setSelectedDestinoMlnm(Array.isArray(f.selectedDestinoMlnm) ? f.selectedDestinoMlnm : [])
-            setShowPresets(false)
-        } catch (err) {
-            console.error('Preset inválido:', err)
-        }
-    }
-
-    const startEditPreset = (preset: Preset) => {
-        setPresetName(preset.name); setEditingPresetId(preset.id)
-        loadPreset(preset); setShowPresets(true)
-    }
-    const cancelEditPreset = () => { setEditingPresetId(null); setPresetName('') }
-    const deletePreset = async (id: number) => {
-        await fetch(`/api/presets/${id}`, { method: 'DELETE' })
-        loadPresets()
-    }
 
     const exportToExcel = () => {
         if (!result) return
@@ -331,102 +276,46 @@ export default function ComparativaSeresPage() {
     ]
 
     return (
-        <main className="min-h-screen bg-gray-100 p-8 font-sans text-gray-900">
-            <div className="mx-auto max-w-7xl space-y-8">
-
-                {/* --- BARRA DE NAVEGACIÓN --- */}
-                <Navbar
-                    currentPanel="comparativa"
-                    user={sessionUser}
-                    onLogout={logout}
-                    onPresetsClick={() => setPresetsSignal(s => s + 1)}
-                />
-
-                {/* --- PANEL DE PRESETS (mismo patrón visual que /produccion y /preparacion-pedidos) --- */}
-                {sessionUser && showPresets && (
-                    <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-4" style={{ borderTop: '3px solid #D30B15' }}>
-                        <div className="flex items-center justify-between mb-4">
-                            <h3 className="text-sm font-bold text-gray-700 flex items-center gap-2">
-                                <BookmarkCheck className="h-4 w-4" style={{ color: '#D30B15' }} />
-                                Mis Presets de Filtros
-                            </h3>
-                            <button type="button" aria-label="Cerrar presets" onClick={() => { setShowPresets(false); cancelEditPreset() }} className="text-gray-400 hover:text-gray-600">
-                                <X className="h-4 w-4" />
-                            </button>
-                        </div>
-
-                        <div className="bg-gray-50 rounded-lg p-3 mb-4 border border-gray-100">
-                            <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">
-                                {editingPresetId ? 'Editando preset' : 'Guardar filtros actuales como preset'}
-                            </p>
-                            <div className="flex items-center gap-2 flex-wrap">
-                                <Input
-                                    value={presetName}
-                                    onChange={e => setPresetName(e.target.value)}
-                                    placeholder="Escribe un nombre..."
-                                    className="h-9 text-sm max-w-[220px] bg-white"
-                                    onKeyDown={e => e.key === 'Enter' && savePreset()}
-                                />
-                                <Button
-                                    onClick={() => savePreset()}
-                                    disabled={savingPreset || !presetName.trim()}
-                                    size="sm"
-                                    className="text-white text-xs font-semibold h-9 px-4"
-                                    style={{ backgroundColor: editingPresetId ? '#2563eb' : '#D30B15' }}
-                                >
-                                    <Save className="mr-1.5 h-3.5 w-3.5" />
-                                    {editingPresetId ? 'Actualizar' : 'Guardar'}
-                                </Button>
-                                {editingPresetId && (
-                                    <Button onClick={cancelEditPreset} variant="outline" size="sm" className="text-xs h-9 text-gray-500">
-                                        Cancelar
-                                    </Button>
-                                )}
-                            </div>
-                            {!editingPresetId && (
-                                <p className="text-[11px] text-gray-400 mt-1.5">Se guardarán el periodo y los clientes seleccionados.</p>
-                            )}
-                        </div>
-
-                        <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">Presets guardados</p>
-                        {presets.length === 0 ? (
-                            <p className="text-xs text-gray-400">No tienes presets guardados.</p>
-                        ) : (
-                            <div className="flex flex-wrap gap-2">
-                                {presets.map(p => (
-                                    <div key={p.id} className={`flex items-center gap-1.5 border rounded-lg px-3 py-1.5 text-sm ${editingPresetId === p.id ? 'bg-blue-50 border-blue-300' : 'bg-gray-50 border-gray-200'}`}>
-                                        <button type="button" onClick={() => loadPreset(p)} className="font-medium text-gray-700 hover:text-gray-900" title="Cargar preset">
-                                            {p.name}
-                                        </button>
-                                        <button type="button" onClick={() => startEditPreset(p)} className="text-gray-300 hover:text-blue-500" aria-label={`Editar ${p.name}`}>
-                                            <Pencil className="h-3 w-3" />
-                                        </button>
-                                        <button type="button" onClick={() => deletePreset(p.id)} className="text-gray-300 hover:text-red-500" aria-label={`Eliminar ${p.name}`}>
-                                            <Trash2 className="h-3.5 w-3.5" />
-                                        </button>
-                                    </div>
-                                ))}
-                            </div>
-                        )}
-                    </div>
+        <AppShell
+            navbar={{
+                currentPanel: "comparativa",
+                user: sessionUser,
+                onLogout: logout,
+                onPresetsClick: () => setPresetsSignal(s => s + 1),
+            }}
+            title="Comparativa SERES"
+            description="Contraste de pedidos EDI (SERES) frente a órdenes en JDE"
+        >
+                {/* --- PANEL DE PRESETS (componente compartido, mismo patrón que el resto de paneles) --- */}
+                {sessionUser && (
+                    <PresetPanel
+                        screen="comparativa"
+                        open={showPresets}
+                        onClose={() => setShowPresets(false)}
+                        getFilters={() => ({ days, selectedDestinoMlnm })}
+                        applyFilters={(f) => {
+                            setDays(typeof f.days === 'number' ? f.days : 0)
+                            setSelectedDestinoMlnm(Array.isArray(f.selectedDestinoMlnm) ? f.selectedDestinoMlnm : [])
+                        }}
+                        hint="Se guardarán el periodo y los clientes seleccionados."
+                    />
                 )}
 
                 {/* --- FILTROS --- */}
-                <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-200 space-y-4" style={{ borderTop: '3px solid #D30B15' }}>
+                <Card accent className="space-y-4 p-4">
                     <div>
-                        <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">Filtros</p>
+                        <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2">Filtros</p>
                         <div className="flex flex-wrap items-end gap-3">
                             {/* Rango de días */}
                             <div className="grid gap-1.5">
-                                <label htmlFor="comp-days" className="text-xs font-semibold text-gray-700">Periodo</label>
-                                <div className="flex rounded-md overflow-hidden border border-gray-300">
+                                <label htmlFor="comp-days" className="text-xs font-semibold text-secondary-foreground">Periodo</label>
+                                <div className="flex rounded-md overflow-hidden border border-input">
                                     {dayOptions.map(opt => (
                                         <button
                                             type="button"
                                             key={opt.value}
                                             onClick={() => setDays(opt.value)}
-                                            className={`px-3 py-1.5 text-xs font-semibold transition-colors ${days === opt.value ? 'text-white' : 'bg-white text-gray-600 hover:bg-gray-50'}`}
-                                            style={days === opt.value ? { backgroundColor: '#D30B15' } : {}}
+                                            className={`px-3 py-1.5 text-xs font-semibold transition-colors ${days === opt.value ? 'bg-primary text-primary-foreground' : 'bg-card text-secondary-foreground hover:bg-muted/50'}`}
                                         >
                                             {opt.label}
                                         </button>
@@ -436,10 +325,10 @@ export default function ComparativaSeresPage() {
 
                             {/* Cliente (F0111.WWMLNM) */}
                             <div className="grid gap-1.5">
-                                <label className="text-xs font-semibold text-gray-700">
+                                <label className="text-xs font-semibold text-secondary-foreground">
                                     Cliente
                                     {availableDestinoMlnm.length > 0 && (
-                                        <span className="ml-1 text-slate-400 font-normal">({availableDestinoMlnm.length})</span>
+                                        <span className="ml-1 text-muted-foreground font-normal">({availableDestinoMlnm.length})</span>
                                     )}
                                 </label>
                                 <div className="w-[220px]">
@@ -455,34 +344,34 @@ export default function ComparativaSeresPage() {
                         </div>
                     </div>
 
-                    <div className="border-t border-gray-100" />
+                    <div className="border-t border-border" />
 
                     {/* Acciones */}
                     <div className="flex flex-wrap items-center gap-3 justify-between">
                         <div className="flex gap-3">
-                            <Button onClick={fetchData} disabled={loading} className="text-white font-semibold" style={{ backgroundColor: '#D30B15' }} onMouseEnter={e => (e.currentTarget.style.backgroundColor = '#b00a12')} onMouseLeave={e => (e.currentTarget.style.backgroundColor = '#D30B15')}>
-                                {loading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Search className="mr-2 h-4 w-4" />}
+                            <Button onClick={fetchData} disabled={loading} className="font-semibold">
+                                {loading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" aria-hidden="true" /> : <Search className="mr-2 h-4 w-4" aria-hidden="true" />}
                                 Comparar
                             </Button>
                             <Button onClick={exportToExcel} variant="outline" disabled={!result} className="border-green-600 text-green-700 hover:bg-green-50">
-                                <Download className="mr-2 h-4 w-4" />
+                                <Download className="mr-2 h-4 w-4" aria-hidden="true" />
                                 Excel
                             </Button>
-                            <Button onClick={clearFilters} variant="outline" className="border-gray-400 text-gray-600 hover:bg-gray-50">
-                                <X className="mr-2 h-4 w-4" />
+                            <Button onClick={clearFilters} variant="outline" className="text-secondary-foreground">
+                                <X className="mr-2 h-4 w-4" aria-hidden="true" />
                                 Limpiar
                             </Button>
                         </div>
                         {loading && (
-                            <p className="text-xs text-gray-400 italic">Consultando SERES y JDE… puede tardar unos segundos.</p>
+                            <p className="text-xs text-muted-foreground italic">Consultando SERES y JDE… puede tardar unos segundos.</p>
                         )}
                     </div>
-                </div>
+                </Card>
 
                 {/* --- ERROR --- */}
                 {error && (
                     <div className="flex items-center gap-3 bg-red-50 border border-red-200 rounded-lg px-4 py-3 text-red-700">
-                        <AlertTriangle className="h-5 w-5 flex-shrink-0" />
+                        <AlertTriangle className="h-5 w-5 flex-shrink-0" aria-hidden="true" />
                         <span className="text-sm font-medium">{error}</span>
                     </div>
                 )}
@@ -494,53 +383,52 @@ export default function ComparativaSeresPage() {
                     porque la consulta JDE incluye ayer por el fix de reprocesado. */}
                 {result && (
                     <div className="grid gap-4 grid-cols-2 md:grid-cols-4">
-                        <Card className="border-gray-200 shadow-sm overflow-hidden cursor-pointer hover:shadow-md transition-shadow" style={{ borderTop: '3px solid #f59e0b' }} onClick={() => setActiveTab('solo_seres')}>
+                        <Card className="overflow-hidden border-t-[3px] border-t-amber-500 cursor-pointer transition-shadow hover:shadow-md" onClick={() => setActiveTab('solo_seres')}>
                             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                                <CardTitle className="text-sm font-bold text-gray-700">Solo en SERES</CardTitle>
-                                <AlertTriangle className="h-4 w-4 text-amber-500" />
+                                <CardTitle className="text-sm font-bold text-secondary-foreground">Solo en SERES</CardTitle>
+                                <AlertTriangle className="h-4 w-4 text-amber-500" aria-hidden="true" />
                             </CardHeader>
                             <CardContent>
                                 <div className="text-2xl font-black text-amber-600">{tabData.solo_seres.length.toLocaleString('es-ES')}</div>
-                                <p className="text-xs text-gray-500 font-medium">no están en JDE</p>
+                                <p className="text-xs text-muted-foreground font-medium">no están en JDE</p>
                             </CardContent>
                         </Card>
 
-                        <Card className="border-gray-200 shadow-sm overflow-hidden cursor-pointer hover:shadow-md transition-shadow" style={{ borderTop: '3px solid #ef4444' }} onClick={() => setActiveTab('solo_jde')}>
+                        <Card className="overflow-hidden border-t-[3px] border-t-red-500 cursor-pointer transition-shadow hover:shadow-md" onClick={() => setActiveTab('solo_jde')}>
                             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                                <CardTitle className="text-sm font-bold text-gray-700">Solo en JDE</CardTitle>
-                                <AlertTriangle className="h-4 w-4 text-red-500" />
+                                <CardTitle className="text-sm font-bold text-secondary-foreground">Solo en JDE</CardTitle>
+                                <AlertTriangle className="h-4 w-4 text-red-500" aria-hidden="true" />
                             </CardHeader>
                             <CardContent>
                                 <div className="text-2xl font-black text-red-600">{tabData.solo_jde.length.toLocaleString('es-ES')}</div>
-                                <p className="text-xs text-gray-500 font-medium">no están en SERES</p>
+                                <p className="text-xs text-muted-foreground font-medium">no están en SERES</p>
                             </CardContent>
                         </Card>
 
-                        <Card className="border-gray-200 shadow-sm overflow-hidden cursor-pointer hover:shadow-md transition-shadow" style={{ borderTop: '3px solid #22c55e' }} onClick={() => setActiveTab('ambos')}>
+                        <Card className="overflow-hidden border-t-[3px] border-t-green-500 cursor-pointer transition-shadow hover:shadow-md" onClick={() => setActiveTab('ambos')}>
                             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                                <CardTitle className="text-sm font-bold text-gray-700">En ambos</CardTitle>
-                                <CheckCircle2 className="h-4 w-4 text-green-500" />
+                                <CardTitle className="text-sm font-bold text-secondary-foreground">En ambos</CardTitle>
+                                <CheckCircle2 className="h-4 w-4 text-green-500" aria-hidden="true" />
                             </CardHeader>
                             <CardContent>
                                 <div className="text-2xl font-black text-green-600">{tabData.ambos.length.toLocaleString('es-ES')}</div>
-                                <p className="text-xs text-gray-500 font-medium">sincronizados</p>
+                                <p className="text-xs text-muted-foreground font-medium">sincronizados</p>
                             </CardContent>
                         </Card>
 
                         {/* KPI 'Incidencias': todos los JDE con SYEDSP != 'Y'. Pulsar la card va a la pestaña Incidencias. */}
                         <Card
-                            className="border-gray-200 shadow-sm overflow-hidden cursor-pointer hover:shadow-md transition-shadow"
-                            style={{ borderTop: '3px solid #f97316' }}
+                            className="overflow-hidden border-t-[3px] border-t-orange-500 cursor-pointer transition-shadow hover:shadow-md"
                             onClick={() => setActiveTab('incidencias')}
                             title="Pedidos JDE con estado distinto de 'Procesado' (Y)"
                         >
                             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                                <CardTitle className="text-sm font-bold text-gray-700">Incidencias JDE</CardTitle>
-                                <ShieldAlert className="h-4 w-4 text-orange-500" />
+                                <CardTitle className="text-sm font-bold text-secondary-foreground">Incidencias JDE</CardTitle>
+                                <ShieldAlert className="h-4 w-4 text-orange-500" aria-hidden="true" />
                             </CardHeader>
                             <CardContent>
                                 <div className="text-2xl font-black text-orange-600">{tabData.incidencias.length.toLocaleString('es-ES')}</div>
-                                <p className="text-xs text-gray-500 font-medium">
+                                <p className="text-xs text-muted-foreground font-medium">
                                     {(() => {
                                         const byEstado = result.resumen.incidencias_por_estado || {}
                                         const parts: string[] = []
@@ -557,75 +445,44 @@ export default function ComparativaSeresPage() {
 
                 {/* --- TABLA CON TABS --- */}
                 {result && (
-                    <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden" style={{ borderTop: '3px solid #D30B15' }}>
+                    <Card accent className="overflow-hidden">
 
-                        {/* Tabs */}
-                        <div className="border-b border-gray-200 px-4 flex gap-1 pt-3">
-                            <button
-                                type="button"
-                                onClick={() => setActiveTab('solo_seres')}
-                                className={`px-4 py-2 text-sm font-semibold rounded-t-md border-b-2 transition-colors ${activeTab === 'solo_seres' ? 'border-amber-500 text-amber-700' : 'border-transparent text-gray-500 hover:text-gray-700'}`}
-                            >
-                                Solo en SERES
-                                <span className="ml-2 bg-amber-100 text-amber-700 text-xs font-bold px-1.5 py-0.5 rounded-full">
-                                    {tabData.solo_seres.length}
-                                </span>
-                            </button>
-                            <button
-                                type="button"
-                                onClick={() => setActiveTab('solo_jde')}
-                                className={`px-4 py-2 text-sm font-semibold rounded-t-md border-b-2 transition-colors ${activeTab === 'solo_jde' ? 'border-red-500 text-red-700' : 'border-transparent text-gray-500 hover:text-gray-700'}`}
-                            >
-                                Solo en JDE
-                                <span className="ml-2 bg-red-100 text-red-700 text-xs font-bold px-1.5 py-0.5 rounded-full">
-                                    {tabData.solo_jde.length}
-                                </span>
-                            </button>
-                            <button
-                                type="button"
-                                onClick={() => setActiveTab('ambos')}
-                                className={`px-4 py-2 text-sm font-semibold rounded-t-md border-b-2 transition-colors ${activeTab === 'ambos' ? 'border-green-500 text-green-700' : 'border-transparent text-gray-500 hover:text-gray-700'}`}
-                            >
-                                En ambos
-                                <span className="ml-2 bg-green-100 text-green-700 text-xs font-bold px-1.5 py-0.5 rounded-full">
-                                    {tabData.ambos.length}
-                                </span>
-                            </button>
-                            <button
-                                type="button"
-                                onClick={() => setActiveTab('incidencias')}
-                                className={`px-4 py-2 text-sm font-semibold rounded-t-md border-b-2 transition-colors ${activeTab === 'incidencias' ? 'border-orange-500 text-orange-700' : 'border-transparent text-gray-500 hover:text-gray-700'}`}
-                            >
-                                Incidencias JDE
-                                <span className="ml-2 bg-orange-100 text-orange-700 text-xs font-bold px-1.5 py-0.5 rounded-full">
-                                    {tabData.incidencias.length}
-                                </span>
-                            </button>
-                        </div>
+                        {/* Tabs (componente compartido; el contenido lo decide activeTab) */}
+                        <Tabs
+                            value={activeTab}
+                            onValueChange={(v) => setActiveTab(v as Tab)}
+                            className="px-4 pt-3"
+                            tabs={[
+                                { value: 'solo_seres', label: 'Solo en SERES', count: tabData.solo_seres.length },
+                                { value: 'solo_jde', label: 'Solo en JDE', count: tabData.solo_jde.length },
+                                { value: 'ambos', label: 'En ambos', count: tabData.ambos.length },
+                                { value: 'incidencias', label: 'Incidencias JDE', count: tabData.incidencias.length },
+                            ]}
+                        />
 
                         {/* Aviso contextual */}
                         <div className="px-4 pt-3">
                             {activeTab === 'solo_seres' && (
                                 <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-md px-3 py-2">
-                                    <AlertTriangle className="inline h-3.5 w-3.5 mr-1 mb-0.5" />
+                                    <AlertTriangle className="inline h-3.5 w-3.5 mr-1 mb-0.5" aria-hidden="true" />
                                     Pedidos recibidos en SERES por EDI que <strong>no se han volcado en JDE</strong>. Revisar si se han creado manualmente.
                                 </p>
                             )}
                             {activeTab === 'solo_jde' && (
                                 <p className="text-xs text-red-700 bg-red-50 border border-red-200 rounded-md px-3 py-2">
-                                    <AlertTriangle className="inline h-3.5 w-3.5 mr-1 mb-0.5" />
+                                    <AlertTriangle className="inline h-3.5 w-3.5 mr-1 mb-0.5" aria-hidden="true" />
                                     Pedidos en JDE que <strong>no aparecen en SERES</strong>.
                                 </p>
                             )}
                             {activeTab === 'ambos' && (
                                 <p className="text-xs text-green-700 bg-green-50 border border-green-200 rounded-md px-3 py-2">
-                                    <CheckCircle2 className="inline h-3.5 w-3.5 mr-1 mb-0.5" />
+                                    <CheckCircle2 className="inline h-3.5 w-3.5 mr-1 mb-0.5" aria-hidden="true" />
                                     Pedidos correctamente <strong>sincronizados</strong> en ambos sistemas.
                                 </p>
                             )}
                             {activeTab === 'incidencias' && (
                                 <p className="text-xs text-orange-700 bg-orange-50 border border-orange-200 rounded-md px-3 py-2">
-                                    <ShieldAlert className="inline h-3.5 w-3.5 mr-1 mb-0.5" />
+                                    <ShieldAlert className="inline h-3.5 w-3.5 mr-1 mb-0.5" aria-hidden="true" />
                                     Pedidos JDE con <strong>estado distinto de Procesado (Y)</strong>: M (duplicado), N (sin procesar) o E (error). Requieren revisión.
                                 </p>
                             )}
@@ -635,72 +492,77 @@ export default function ComparativaSeresPage() {
                         <div className="p-4">
                             <Table>
                                 <TableHeader>
-                                    <TableRow className="border-gray-200 hover:bg-transparent">
-                                        <TableHead className="font-bold text-gray-700">Referencia</TableHead>
-                                        <TableHead className="font-bold text-gray-700">Fecha</TableHead>
+                                    <TableRow className="hover:bg-transparent">
+                                        <TableHead className="font-bold text-secondary-foreground">Referencia</TableHead>
+                                        <TableHead className="font-bold text-secondary-foreground">Fecha</TableHead>
                                         {activeTab !== 'solo_seres' && (
                                             <>
-                                                <TableHead className="font-bold text-gray-700">Nº Destino</TableHead>
-                                                <TableHead className="font-bold text-gray-700">Desc. Destino</TableHead>
-                                                <TableHead className="font-bold text-gray-700">Cliente</TableHead>
-                                                <TableHead className="font-bold text-gray-700">Nº Comprador</TableHead>
-                                                <TableHead className="font-bold text-gray-700">Desc. Comprador</TableHead>
-                                                <TableHead className="font-bold text-gray-700 text-center">Estado JDE</TableHead>
-                                                <TableHead className="font-bold text-gray-700">Descripción</TableHead>
+                                                <TableHead className="font-bold text-secondary-foreground">Nº Destino</TableHead>
+                                                <TableHead className="font-bold text-secondary-foreground">Desc. Destino</TableHead>
+                                                <TableHead className="font-bold text-secondary-foreground">Cliente</TableHead>
+                                                <TableHead className="font-bold text-secondary-foreground">Nº Comprador</TableHead>
+                                                <TableHead className="font-bold text-secondary-foreground">Desc. Comprador</TableHead>
+                                                <TableHead className="font-bold text-secondary-foreground text-center">Estado JDE</TableHead>
+                                                <TableHead className="font-bold text-secondary-foreground">Descripción</TableHead>
                                             </>
                                         )}
                                         {activeTab === 'solo_seres' && (
                                             <>
-                                                <TableHead className="font-bold text-gray-700">Cliente</TableHead>
-                                                <TableHead className="font-bold text-gray-700">Tipo</TableHead>
+                                                <TableHead className="font-bold text-secondary-foreground">Cliente</TableHead>
+                                                <TableHead className="font-bold text-secondary-foreground">Tipo</TableHead>
                                             </>
                                         )}
                                     </TableRow>
                                 </TableHeader>
                                 <TableBody>
                                     {tabData[activeTab].length === 0 ? (
-                                        <TableRow>
-                                            <TableCell colSpan={6} className="text-center py-10 text-gray-500 font-medium">
-                                                No hay registros en esta categoría.
+                                        <TableRow className="hover:bg-transparent">
+                                            <TableCell colSpan={activeTab === 'solo_seres' ? 4 : 9}>
+                                                <EmptyState
+                                                    icon={SearchX}
+                                                    title="Sin resultados"
+                                                    description="No hay registros en esta categoría."
+                                                />
                                             </TableCell>
                                         </TableRow>
                                     ) : (
                                         tabData[activeTab].map((p, i) => (
-                                            <TableRow key={i} className="hover:bg-slate-50 border-gray-100">
-                                                <TableCell className="font-mono text-sm font-semibold text-gray-800">{p.referencia}</TableCell>
-                                                <TableCell className="text-gray-600 text-sm">
+                                            <TableRow key={i}>
+                                                <TableCell className="font-mono text-sm font-semibold text-foreground">{p.referencia}</TableCell>
+                                                <TableCell className="text-secondary-foreground text-sm">
                                                     {formatFecha(p.fecha)}
-                                                    {p.hora && <span className="ml-1.5 text-xs text-gray-400">{p.hora}</span>}
+                                                    {p.hora && <span className="ml-1.5 text-xs text-muted-foreground">{p.hora}</span>}
                                                 </TableCell>
                                                 {activeTab !== 'solo_seres' && (
                                                     <>
-                                                        <TableCell className="font-mono text-sm text-gray-700">{p.shanNum ?? '-'}</TableCell>
-                                                        <TableCell className="text-sm text-gray-600">{p.shanDesc ?? '-'}</TableCell>
-                                                        <TableCell className="text-sm text-gray-600">{p.shanMlnm ?? '-'}</TableCell>
-                                                        <TableCell className="font-mono text-sm text-gray-700">{p.urabNum ?? '-'}</TableCell>
-                                                        <TableCell className="text-sm text-gray-600">{p.urabDesc ?? '-'}</TableCell>
+                                                        <TableCell className="font-mono text-sm text-secondary-foreground">{p.shanNum ?? '-'}</TableCell>
+                                                        <TableCell className="text-sm text-secondary-foreground">{p.shanDesc ?? '-'}</TableCell>
+                                                        <TableCell className="text-sm text-secondary-foreground">{p.shanMlnm ?? '-'}</TableCell>
+                                                        <TableCell className="font-mono text-sm text-secondary-foreground">{p.urabNum ?? '-'}</TableCell>
+                                                        <TableCell className="text-sm text-secondary-foreground">{p.urabDesc ?? '-'}</TableCell>
                                                         <TableCell className="text-center">
-                                                            <span
-                                                                className={`inline-flex items-center gap-1 text-xs font-bold px-2 py-0.5 rounded-md border ${estadoBadgeClasses(p.estado)}`}
+                                                            <Badge
+                                                                variant={estadoBadgeVariant(p.estado)}
+                                                                className="font-bold"
                                                                 title={estadoLabel(p.estado, statusDescriptions)}
                                                             >
                                                                 {p.estado || '?'}
-                                                            </span>
+                                                            </Badge>
                                                         </TableCell>
-                                                        <TableCell className="text-sm text-gray-600 max-w-[260px]">
+                                                        <TableCell className="text-sm text-secondary-foreground max-w-[260px]">
                                                             {estadoLabel(p.estado, statusDescriptions)}
                                                         </TableCell>
                                                     </>
                                                 )}
                                                 {activeTab === 'solo_seres' && (
                                                     <>
-                                                        <TableCell className="text-sm text-gray-800">
+                                                        <TableCell className="text-sm text-foreground">
                                                             {p.clienteCodigo && (
-                                                                <span className="text-xs text-gray-400 font-mono mr-1.5">{p.clienteCodigo}</span>
+                                                                <span className="text-xs text-muted-foreground font-mono mr-1.5">{p.clienteCodigo}</span>
                                                             )}
                                                             {p.clienteNombre || '-'}
                                                         </TableCell>
-                                                        <TableCell className="text-gray-500 text-xs">{p.tipo}</TableCell>
+                                                        <TableCell className="text-muted-foreground text-xs">{p.tipo}</TableCell>
                                                     </>
                                                 )}
                                             </TableRow>
@@ -709,18 +571,24 @@ export default function ComparativaSeresPage() {
                                 </TableBody>
                             </Table>
                         </div>
-                    </div>
+                    </Card>
+                )}
+
+                {/* Estado de carga (sin resultados previos en pantalla) */}
+                {loading && !result && (
+                    <Spinner label="Cargando comparativa..." className="py-10" />
                 )}
 
                 {/* Estado inicial */}
                 {!result && !loading && !error && (
-                    <div className="text-center py-16 text-gray-400">
-                        <ArrowLeftRight className="h-10 w-10 mx-auto mb-3 opacity-30" />
-                        <p className="text-sm">Selecciona el periodo y pulsa <strong className="text-gray-500">Comparar</strong></p>
-                    </div>
+                    <EmptyState
+                        icon={ArrowLeftRight}
+                        title="Sin datos que mostrar"
+                        description="Selecciona el periodo y pulsa Comparar."
+                        className="py-16"
+                    />
                 )}
 
-            </div>
-        </main>
+        </AppShell>
     )
 }
