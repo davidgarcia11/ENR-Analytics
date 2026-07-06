@@ -56,7 +56,7 @@ lib/
 components/
   AppShell.tsx                # AppShell (contenedor de página + Navbar) y PageHeader — punto de entrada de todo panel
   KpiCard.tsx                 # Tarjeta KPI reutilizable (icono + valor + caption, o children para casos custom)
-  PresetPanel.tsx             # Panel de presets compartido (screen/open/onClose/getFilters/applyFilters)
+  PresetPanel.tsx             # Sistema de presets compartido: usePresets(screen) hook + PresetPanel (panel completo) + PresetQuickSelect (desplegable rápido)
   Navbar.tsx                  # Barra de navegación compartida por todos los paneles (dropdown "Paneles ▾")
   FilterPanel.tsx             # Panel de filtros del dashboard de producción (incluye presets)
   ArticleMultiSelect.tsx      # Desplegable multi-selección con búsqueda (usado en FilterPanel)
@@ -120,7 +120,7 @@ docs/                         # Documentación específica por panel
 ### Crear o tocar la UI de un panel (nuevo o existente)
 1. Lee **[`docs/design-system.md`](docs/design-system.md)** primero — tokens de color, componentes base y checklist paso a paso para un panel nuevo
 2. Todo panel se monta con `<AppShell navbar={{...}} title="..." description="...">` (`components/AppShell.tsx`)
-3. Presets → `<PresetPanel screen="..." .../>` (`components/PresetPanel.tsx`), nunca un panel de presets escrito a mano
+3. Presets → `usePresets(screen)` + `<PresetPanel>` + `<PresetQuickSelect>` (`components/PresetPanel.tsx`), nunca un panel de presets escrito a mano — ver `docs/design-system.md` §5
 4. `alert()`/`confirm()` → `useToast()` / `<ConfirmDialog>` (`components/ui/toast.tsx`, `components/ui/dialog.tsx`)
 5. KPIs → `<KpiCard>` (`components/KpiCard.tsx`); tarjetas con borde superior de marca → `<Card accent>`
 
