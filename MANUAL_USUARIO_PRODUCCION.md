@@ -6,7 +6,7 @@
 
 Desde JDE: pestaña **"Planta"** → **"Prod_Diaria_Agrupada"**.
 
-Al entrar verás la pantalla principal con el panel de filtros, las tarjetas de métricas y la tabla de datos.
+Al entrar verás el título **"Producción"** con una breve descripción debajo, seguido del panel de filtros, las tarjetas de métricas y la tabla de datos.
 
 ---
 
@@ -188,7 +188,8 @@ Los presets que tienen fechas guardadas muestran un icono de calendario junto a 
 
 1. Abre el panel de Presets.
 2. Junto a cada preset aparece un icono de papelera.
-3. Haz clic en la papelera para eliminar el preset.
+3. Haz clic en la papelera. Te pedirá confirmar la eliminación antes de borrarlo.
+4. Confirma pulsando **"Eliminar"** (o pulsa **"Cancelar"** si no quieres borrarlo).
 
 ---
 
@@ -217,6 +218,6 @@ Pulsa el botón **"Salir"** en la esquina superior derecha para cerrar tu sesió
 | Guardar filtros | Inicia sesión → Pulsa **"Guardar"** → Escribe un nombre → Elige si incluir fechas/horas |
 | Cargar filtros guardados | Selecciona en **"Cargar preset"** o abre **"Presets"** y haz clic en el nombre |
 | Editar un preset | Abre **"Presets"** → Icono de lápiz → Modifica → **"Actualizar"** |
-| Eliminar filtros guardados | Abre **"Presets"** → Icono de papelera |
+| Eliminar filtros guardados | Abre **"Presets"** → Icono de papelera → Confirma en el cuadro que aparece |
 | Sin sesión | Puedes consultar y exportar, pero **no guardar filtros** |
 | Ir a Caducados | Pulsa **"Caducados"** en la barra superior |
