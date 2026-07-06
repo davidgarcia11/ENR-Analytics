@@ -12,10 +12,78 @@ import { cn } from "@/lib/utils"
 export type Preset = { id: number; name: string; filters: string; created_at: string }
 
 /**
- * PresetPanel — panel "Mis Presets de Filtros" compartido por todos los paneles.
- * Centraliza el estado y las llamadas a /api/presets que antes estaban
- * cuadruplicadas (caducados, pedidos, comparativa, producción).
+ * usePresets — carga y mantiene la lista de presets de un panel.
+ * Se comparte entre `<PresetPanel>` (gestión completa) y `<PresetQuickSelect>`
+ * (desplegable rápido en la barra de filtros) para que ambos vean siempre
+ * la misma lista sin duplicar el fetch ni desincronizarse tras guardar/borrar.
  *
+ * @example
+ * const { presets, reload } = usePresets("caducados")
+ * <PresetQuickSelect presets={presets} onSelect={p => applyFilters(JSON.parse(p.filters))} />
+ * <PresetPanel screen="caducados" presets={presets} onReload={reload} ... />
+ */
+export function usePresets(screen: string) {
+    const [presets, setPresets] = React.useState<Preset[]>([])
+
+    const reload = React.useCallback(async () => {
+        try {
+            const res = await fetch(`/api/presets?screen=${screen}`)
+            if (res.ok) setPresets(await res.json())
+        } catch { /* silencioso: igual que el comportamiento original */ }
+    }, [screen])
+
+    React.useEffect(() => { reload() }, [reload])
+
+    return { presets, reload }
+}
+
+/**
+ * PresetQuickSelect — desplegable de carga inmediata en la barra de acciones,
+ * junto a los botones Filtrar/Excel/Limpiar. Complementa a `<PresetPanel>`
+ * (que requiere abrir el panel) para cargar un preset guardado en un solo paso.
+ * No se renderiza si no hay presets guardados.
+ *
+ * @example
+ * <PresetQuickSelect presets={presets} onSelect={p => applyFilters(JSON.parse(p.filters))} />
+ */
+export function PresetQuickSelect({
+    presets,
+    onSelect,
+    className,
+}: {
+    presets: Preset[]
+    onSelect: (preset: Preset) => void
+    className?: string
+}) {
+    if (presets.length === 0) return null
+    return (
+        <div className="grid gap-1.5">
+            <label className="text-xs font-semibold text-secondary-foreground">Cargar preset</label>
+            <select
+                onChange={(e) => {
+                    const p = presets.find((pp) => pp.id === Number(e.target.value))
+                    if (p) onSelect(p)
+                    e.target.value = ""
+                }}
+                defaultValue=""
+                className={cn("flex h-9 w-[160px] rounded-md border border-input bg-card px-3 py-1 text-sm shadow-sm", className)}
+            >
+                <option value="" disabled>Seleccionar...</option>
+                {presets.map((p) => (
+                    <option key={p.id} value={p.id}>{p.name}</option>
+                ))}
+            </select>
+        </div>
+    )
+}
+
+/**
+ * PresetPanel — panel "Mis Presets de Filtros" compartido por todos los paneles.
+ * Centraliza el guardado/edición/borrado y las llamadas a /api/presets que antes
+ * estaban cuadruplicadas (caducados, pedidos, comparativa, producción).
+ *
+ * La lista de presets se recibe por props (ver `usePresets`) en vez de gestionarse
+ * internamente, para poder compartirla con `<PresetQuickSelect>` en la misma página.
  * La página solo aporta la serialización de sus filtros:
  * - `getFilters`   → objeto con los filtros actuales (se guarda como JSON)
  * - `applyFilters` → recibe el objeto parseado al cargar un preset
@@ -28,8 +96,11 @@ export type Preset = { id: number; name: string; filters: string; created_at: st
  * @param hint   Texto de ayuda bajo el guardado (qué campos incluye el preset).
  *
  * @example
+ * const { presets, reload } = usePresets("caducados")
  * <PresetPanel
  *   screen="caducados"
+ *   presets={presets}
+ *   onReload={reload}
  *   open={showPresets}
  *   onClose={() => setShowPresets(false)}
  *   getFilters={() => ({ type: selectedType, selectedPlants })}
@@ -39,6 +110,8 @@ export type Preset = { id: number; name: string; filters: string; created_at: st
  */
 export function PresetPanel({
     screen,
+    presets,
+    onReload,
     open,
     onClose,
     getFilters,
@@ -46,6 +119,8 @@ export function PresetPanel({
     hint,
 }: {
     screen: string
+    presets: Preset[]
+    onReload: () => void
     open: boolean
     onClose: () => void
     getFilters: () => Record<string, unknown>
@@ -53,21 +128,10 @@ export function PresetPanel({
     hint?: string
 }) {
     const { toast } = useToast()
-    const [presets, setPresets] = React.useState<Preset[]>([])
     const [presetName, setPresetName] = React.useState("")
     const [saving, setSaving] = React.useState(false)
     const [editingId, setEditingId] = React.useState<number | null>(null)
     const [deleteTarget, setDeleteTarget] = React.useState<Preset | null>(null)
-
-    const loadPresets = React.useCallback(async () => {
-        try {
-            const res = await fetch(`/api/presets?screen=${screen}`)
-            if (res.ok) setPresets(await res.json())
-        } catch { /* silencioso: igual que el comportamiento original */ }
-    }, [screen])
-
-    // Precarga la lista al montar para que esté lista al abrir el panel
-    React.useEffect(() => { loadPresets() }, [loadPresets])
 
     const cancelEdit = () => {
         setEditingId(null)
@@ -87,7 +151,7 @@ export function PresetPanel({
             })
             if (res.ok) {
                 cancelEdit()
-                loadPresets()
+                onReload()
                 toast(isEditing ? "Preset actualizado" : "Preset guardado", "success")
             } else {
                 const data = await res.json()
@@ -112,7 +176,7 @@ export function PresetPanel({
     const deletePreset = async (id: number) => {
         await fetch(`/api/presets/${id}`, { method: "DELETE" })
         if (editingId === id) cancelEdit()
-        loadPresets()
+        onReload()
         toast("Preset eliminado", "success")
     }
 

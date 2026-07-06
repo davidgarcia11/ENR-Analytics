@@ -10,7 +10,7 @@ import { Spinner } from "@/components/ui/spinner"
 import { EmptyState } from "@/components/ui/empty-state"
 import { Loader2, Search, Download, X, AlertTriangle, CheckCircle2, ArrowLeftRight, ShieldAlert, SearchX } from "lucide-react"
 import { AppShell } from "@/components/AppShell"
-import { PresetPanel } from "@/components/PresetPanel"
+import { PresetPanel, PresetQuickSelect, usePresets } from "@/components/PresetPanel"
 import { ArticleMultiSelect } from "@/components/ArticleMultiSelect"
 import { useRouter } from "next/navigation"
 import * as XLSX from 'xlsx'
@@ -110,6 +110,13 @@ export default function ComparativaSeresPage() {
     useEffect(() => {
         if (presetsSignal > 0) setShowPresets(true)
     }, [presetsSignal])
+    const { presets, reload: reloadPresets } = usePresets('comparativa')
+
+    // Aplica los filtros de un preset cargado (compartida entre PresetPanel y PresetQuickSelect)
+    const applyPresetFilters = (f: Record<string, unknown>) => {
+        setDays(typeof f.days === 'number' ? f.days : 0)
+        setSelectedDestinoMlnm(Array.isArray(f.selectedDestinoMlnm) ? f.selectedDestinoMlnm : [])
+    }
 
     // Comprobar sesión al montar
     useEffect(() => {
@@ -290,13 +297,12 @@ export default function ComparativaSeresPage() {
                 {sessionUser && (
                     <PresetPanel
                         screen="comparativa"
+                        presets={presets}
+                        onReload={reloadPresets}
                         open={showPresets}
                         onClose={() => setShowPresets(false)}
                         getFilters={() => ({ days, selectedDestinoMlnm })}
-                        applyFilters={(f) => {
-                            setDays(typeof f.days === 'number' ? f.days : 0)
-                            setSelectedDestinoMlnm(Array.isArray(f.selectedDestinoMlnm) ? f.selectedDestinoMlnm : [])
-                        }}
+                        applyFilters={applyPresetFilters}
                         hint="Se guardarán el periodo y los clientes seleccionados."
                     />
                 )}
@@ -361,6 +367,9 @@ export default function ComparativaSeresPage() {
                                 <X className="mr-2 h-4 w-4" aria-hidden="true" />
                                 Limpiar
                             </Button>
+                            {sessionUser && (
+                                <PresetQuickSelect presets={presets} onSelect={(p) => applyPresetFilters(JSON.parse(p.filters))} />
+                            )}
                         </div>
                         {loading && (
                             <p className="text-xs text-muted-foreground italic">Consultando SERES y JDE… puede tardar unos segundos.</p>

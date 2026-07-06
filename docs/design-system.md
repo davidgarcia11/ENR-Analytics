@@ -119,27 +119,43 @@ Sustituye a la tarjeta KPI copiada en cada panel (`Card` + `CardHeader` + icono 
 ```
 Usa `children` en vez de `value`/`caption` cuando el cuerpo necesita más de una línea o un color condicional. El grid de KPIs es siempre `grid gap-4 sm:grid-cols-2 md:grid-cols-4` (o menos columnas si hay menos de 4 KPIs) — el `sm:grid-cols-2` es obligatorio para que no se aplasten en tablet vertical.
 
-### `PresetPanel` (`components/PresetPanel.tsx`)
+### `PresetPanel` + `PresetQuickSelect` + `usePresets` (`components/PresetPanel.tsx`)
 
-**Nunca vuelvas a escribir un panel de presets a mano.** Antes estaba copiado y pegado en 4 páginas (con pequeñas divergencias que eran bugs latentes). Ahora:
+**Nunca vuelvas a escribir un panel de presets a mano.** Antes estaba copiado y pegado en 4 páginas (con pequeñas divergencias que eran bugs latentes). Todo panel con presets guardados debe ofrecer **dos** formas de usarlos: el panel completo (guardar/editar/borrar) y un **desplegable de carga rápida** en la barra de acciones — no uses solo uno de los dos.
 
 ```tsx
+const { presets, reload: reloadPresets } = usePresets('nombre_del_panel')  // mismo valor que /api/presets?screen=...
+
+const applyPresetFilters = (f: Record<string, unknown>) => {
+  /* setters para restaurar cada filtro, con sus defaults — la usan AMBOS componentes de abajo */
+}
+
+// 1) Panel completo (guardar/editar/listar/borrar) — normalmente antes de los filtros
 <PresetPanel
-  screen="nombre_del_panel"           // mismo valor que usas en /api/presets?screen=...
+  screen="nombre_del_panel"
+  presets={presets}
+  onReload={reloadPresets}
   open={showPresets}
   onClose={() => setShowPresets(false)}
   getFilters={() => ({ /* objeto con TUS filtros actuales */ })}
-  applyFilters={(f) => { /* setters para restaurar cada filtro, con sus defaults */ }}
+  applyFilters={applyPresetFilters}
   hint="Se guardarán X, Y y Z."       // opcional, texto de ayuda bajo el botón Guardar
 />
+
+// 2) Desplegable de carga rápida — junto a los botones Filtrar/Excel/Limpiar
+{sessionUser && (
+  <PresetQuickSelect presets={presets} onSelect={(p) => applyPresetFilters(JSON.parse(p.filters))} />
+)}
 ```
 
-La página solo aporta:
+La página aporta:
 - `screen`: la clave de tu panel (consistente con lo que ya guardas en `/api/presets`).
 - `getFilters`: serializa tu estado de filtros actual a un objeto plano.
-- `applyFilters`: hace el `setX(f.x ?? default)` de cada filtro al cargar un preset.
+- `applyPresetFilters` (nómbrala como quieras): hace el `setX(f.x ?? default)` de cada filtro al cargar un preset — **una sola función**, compartida por `PresetPanel` y `PresetQuickSelect`, para que cargar un preset se comporte igual desde cualquiera de los dos sitios.
 
-Todo lo demás (fetch, guardar, editar, listar, `ConfirmDialog` al borrar, toasts de éxito/error) lo gestiona el componente. La página sigue necesitando su propio estado `showPresets` (booleano) y `presetsSignal` (para que el botón "Presets" del Navbar lo abra) — eso no cambia.
+El hook `usePresets(screen)` es quien de verdad hace el fetch a `/api/presets?screen=...` — se llama **una vez** en la página y se reparte a ambos componentes. Esto es importante: si cada componente hiciera su propio fetch, el desplegable rápido y el panel podrían mostrar listas desincronizadas después de guardar/borrar un preset. `PresetPanel` llama a `onReload()` (el `reload` del hook) tras guardar/editar/borrar, así que el desplegable rápido se actualiza solo.
+
+Todo lo demás (guardar, editar, listar, `ConfirmDialog` al borrar, toasts de éxito/error) lo gestiona `PresetPanel`. La página sigue necesitando su propio estado `showPresets` (booleano) y `presetsSignal` (para que el botón "Presets" del Navbar lo abra) — eso no cambia.
 
 ### `Navbar` (`components/Navbar.tsx`)
 
@@ -161,7 +177,7 @@ Estas cuatro reglas sustituyeron comportamientos concretos que existían en el c
 | `if (!confirm('¿Seguro?')) return` antes de borrar | `<ConfirmDialog open={...} onOpenChange={...} title="..." description="..." destructive onConfirm={...} />` — guarda el elemento a borrar en un `useState` y abre el diálogo en vez de borrar directamente |
 | `<Loader2 className="animate-spin" />` suelto en cada sitio distinto | `<Spinner label="Cargando X..." />` |
 | Fila de tabla con texto gris centrado para "sin resultados" | `<EmptyState icon={...} title="Sin resultados" description="..." />` dentro de la celda con `colSpan` |
-| Panel de presets copiado por página | `<PresetPanel screen="..." ... />` (ver punto 5) |
+| Panel de presets copiado por página | `<PresetPanel>` + `<PresetQuickSelect>` compartiendo `usePresets(screen)` (ver punto 5) |
 
 ---
 
@@ -172,7 +188,7 @@ Sigue este orden; cada paso da por hecho que el anterior está hecho.
 1. **Página** (`app/mi-panel/page.tsx`, `"use client"`): monta `<AppShell navbar={{...}} title="..." description="...">` como contenedor raíz. No repitas `<main>`/`max-w-*`/`<Navbar>` sueltos.
 2. **Navbar**: añade tu panel al array `PANELS` en `components/Navbar.tsx` (clave, label, href, icono de lucide-react). Si el panel debe poder restringirse por rol, añade su `key` a `SCREEN_KEYS` en `app/admin/page.tsx` para que aparezca en la pestaña "Pantallas".
 3. **Filtros**: bloque propio en un `<Card accent>` siguiendo el patrón del punto 5 (FilterPanel). Usa `Input`, `DatePicker`, `ArticleMultiSelect`/`SingleSelect` según el tipo de filtro.
-4. **Presets** (si el panel los necesita): estado `showPresets`/`presetsSignal` + `<PresetPanel screen="mi_panel" .../>` — ver punto 5. Recuerda pasar `onPresetsClick` al `navbar` del `AppShell`.
+4. **Presets** (si el panel los necesita): estado `showPresets`/`presetsSignal` + `const { presets, reload } = usePresets('mi_panel')` + `<PresetPanel .../>` **y** `<PresetQuickSelect .../>` en la barra de acciones — ver punto 5. Recuerda pasar `onPresetsClick` al `navbar` del `AppShell`.
 5. **KPIs** (si aplica): `<KpiCard>` en un grid `sm:grid-cols-2 md:grid-cols-N`.
 6. **Tabla**: `Table`/`TableHeader`/`TableBody`/`TableRow`/`TableHead`/`TableCell` dentro de `<Card accent>`. Estados de `loading` → `Spinner`, sin resultados → `EmptyState`, ambos en una `TableRow className="hover:bg-transparent"` con `colSpan` al nº de columnas.
 7. **Acciones destructivas o de escritura**: `toast()` para feedback, `ConfirmDialog` para confirmaciones — nunca `alert()`/`confirm()`.

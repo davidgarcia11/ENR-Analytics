@@ -12,7 +12,7 @@ import { EmptyState } from "@/components/ui/empty-state"
 import { Search, Loader2, Download, X, AlertTriangle, Package, MapPin, Lock, Save, SearchX } from "lucide-react"
 import { AppShell } from "@/components/AppShell"
 import { KpiCard } from "@/components/KpiCard"
-import { PresetPanel } from "@/components/PresetPanel"
+import { PresetPanel, PresetQuickSelect, usePresets } from "@/components/PresetPanel"
 import { ArticleMultiSelect } from "@/components/ArticleMultiSelect"
 import * as XLSX from 'xlsx'
 import { useRouter } from "next/navigation"
@@ -285,6 +285,8 @@ export default function CaducadosPage() {
 
   // --- PRESETS (serialización de filtros para PresetPanel) ---
 
+  const { presets, reload: reloadPresets } = usePresets('caducados')
+
   // Objeto de filtros que se guarda como preset (mismo formato que antes)
   const getPresetFilters = () => ({
     type: selectedType,
@@ -359,6 +361,8 @@ export default function CaducadosPage() {
       {sessionUser && (
         <PresetPanel
           screen="caducados"
+          presets={presets}
+          onReload={reloadPresets}
           open={showPresets}
           onClose={() => setShowPresets(false)}
           getFilters={getPresetFilters}
@@ -520,10 +524,13 @@ export default function CaducadosPage() {
 
           {/* Presets (solo si logueado) */}
           {sessionUser && (
-            <Button variant="outline" className="border-info text-info hover:bg-info/10 hover:text-info" onClick={() => setShowPresets(true)}>
-              <Save className="mr-2 h-4 w-4" aria-hidden="true" />
-              Guardar
-            </Button>
+            <>
+              <PresetQuickSelect presets={presets} onSelect={(p) => applyPresetFilters(JSON.parse(p.filters))} />
+              <Button variant="outline" className="border-info text-info hover:bg-info/10 hover:text-info" onClick={() => setShowPresets(true)}>
+                <Save className="mr-2 h-4 w-4" aria-hidden="true" />
+                Guardar
+              </Button>
+            </>
           )}
         </div>
       </Card>

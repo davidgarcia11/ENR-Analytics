@@ -569,11 +569,13 @@ El JSON varía según el panel. Ejemplos:
 
 ### UI de presets
 
-Tres formas de interactuar (los 4 paneles tienen al menos una de ellas):
+Tres formas de interactuar, disponibles en los **4 paneles por igual** (ver `docs/design-system.md` — es una regla explícita del sistema de diseño, no una opción por panel):
 
-1. **Panel expandible (botón "Guardar" en la barra de filtros):** Lista completa de presets con opción de guardar, editar y eliminar — en `produccion`, `pedidos` y `caducados`. En `comparativa-seres` no hay botón inline en los filtros.
-2. **Acceso rápido en la barra de acciones:** Dropdown "Cargar preset" para carga inmediata — solo en `produccion` y `caducados`.
-3. **Botón "Presets" en la Navbar superior:** Disponible en los 4 paneles. Cada `page.tsx` incrementa una señal `presetsSignal` que un `useEffect` observa para hacer `setShowPresets(true)`. Es la única forma de abrir el panel en `comparativa-seres`.
+1. **Panel expandible (botón "Guardar"/"Presets" en la barra de filtros):** Lista completa de presets con opción de guardar, editar y eliminar.
+2. **Acceso rápido en la barra de acciones:** `<PresetQuickSelect>` — dropdown "Cargar preset" para carga inmediata sin abrir el panel.
+3. **Botón "Presets" en la Navbar superior:** Cada `page.tsx` incrementa una señal `presetsSignal` que un `useEffect` observa para hacer `setShowPresets(true)`.
+
+`produccion` implementa las tres dentro de `FilterPanel` (con su propio estado, no usa el componente `PresetPanel` compartido). `caducados`, `pedidos` y `comparativa-seres` usan `usePresets` + `PresetPanel` + `PresetQuickSelect` de `components/PresetPanel.tsx`.
 
 ### APIs de presets
 
@@ -814,13 +816,15 @@ Tarjeta de métrica (borde superior rojo corporativo vía `Card accent`, icono, 
 
 **Props:** `title`, `icon?` (componente de lucide-react), `iconClassName?` (color del icono; por defecto `text-primary` — usar para iconos con semántica de estado, ej. verde/ámbar), `value?`, `caption?`, `children?` (para cuerpos con más de una línea o color condicional — sustituye a `value`/`caption`).
 
-### `PresetPanel.tsx`
+### `PresetPanel.tsx` — `PresetPanel`, `PresetQuickSelect`, `usePresets`
 
-Panel "Mis Presets de Filtros" compartido por todos los paneles con presets. Antes estaba duplicado (con pequeñas divergencias) en `produccion` (dentro de `FilterPanel`), `caducados`, `preparacion-pedidos` y `comparativa-seres`.
+Sistema de presets compartido por todos los paneles con presets (`caducados`, `preparacion-pedidos`, `comparativa-seres`; `produccion` mantiene su propia variante integrada en `FilterPanel`). Antes estaba duplicado (con pequeñas divergencias que eran bugs latentes) en cada página.
 
-**Props:** `screen` (clave del panel, la misma que usa `/api/presets?screen=...`), `open`, `onClose`, `getFilters()` (serializa el estado de filtros actual), `applyFilters(filters)` (restaura cada filtro con sus defaults), `hint?` (texto de ayuda).
+- **`usePresets(screen)`** — hook que hace el `fetch('/api/presets?screen=...')` y expone `{ presets, reload }`. Se llama **una vez por página** y su resultado se reparte a los otros dos componentes, para que ambos vean siempre la misma lista sin fetches duplicados ni desincronización tras guardar/borrar.
+- **`PresetPanel`** — panel "Mis Presets de Filtros" (guardar/editar/listar/borrar). Props: `screen`, `presets`, `onReload` (del hook), `open`, `onClose`, `getFilters()` (serializa el estado de filtros actual), `applyFilters(filters)` (restaura cada filtro con sus defaults), `hint?`. Gestiona guardar/editar (`toast` de éxito/error) y borrado con `ConfirmDialog` de confirmación (antes era un borrado inmediato sin confirmar); llama a `onReload()` tras cada cambio.
+- **`PresetQuickSelect`** — desplegable de carga inmediata en la barra de acciones (junto a Filtrar/Excel/Limpiar), para cargar un preset sin abrir el panel completo. Props: `presets`, `onSelect(preset)`. No renderiza nada si no hay presets guardados.
 
-Gestiona internamente: fetch de la lista, guardar/editar (`toast` de éxito/error), y borrado con `ConfirmDialog` de confirmación (antes era un borrado inmediato sin confirmar).
+Cada panel debe montar los tres juntos — ver el checklist de [`docs/design-system.md`](docs/design-system.md#5-componentes-de-panel-components) para el patrón completo.
 
 ### `Navbar.tsx`
 

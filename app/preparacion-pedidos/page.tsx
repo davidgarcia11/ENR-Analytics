@@ -18,7 +18,7 @@ import { ArticleMultiSelect } from "@/components/ArticleMultiSelect"
 import { DatePicker } from "@/components/DatePicker"
 import { AppShell } from "@/components/AppShell"
 import { KpiCard } from "@/components/KpiCard"
-import { PresetPanel } from "@/components/PresetPanel"
+import { PresetPanel, PresetQuickSelect, usePresets } from "@/components/PresetPanel"
 import * as XLSX from 'xlsx'
 import { useRouter } from "next/navigation"
 import React from "react"
@@ -307,6 +307,8 @@ export default function PreparacionPedidos() {
 
   // --- PRESETS (serialización propia de este panel; el resto lo gestiona PresetPanel) ---
 
+  const { presets, reload: reloadPresets } = usePresets('pedidos')
+
   // Objeto de filtros que se guarda como preset (mismo contrato que antes)
   const getPresetFilters = () => ({
     selectedPlants,
@@ -410,6 +412,8 @@ export default function PreparacionPedidos() {
         {sessionUser && (
           <PresetPanel
             screen="pedidos"
+            presets={presets}
+            onReload={reloadPresets}
             open={showPresets}
             onClose={() => setShowPresets(false)}
             getFilters={getPresetFilters}
@@ -647,12 +651,15 @@ export default function PreparacionPedidos() {
               Limpiar
             </Button>
 
-            {/* Guardar/cargar presets: botón "Presets" del Navbar → PresetPanel compartido */}
+            {/* Presets (solo si logueado) */}
             {sessionUser && (
-              <Button variant="outline" className="border-info/50 text-info hover:bg-blue-50" onClick={() => setShowPresets(true)}>
-                <Save className="mr-2 h-4 w-4" aria-hidden="true" />
-                Presets
-              </Button>
+              <>
+                <PresetQuickSelect presets={presets} onSelect={(p) => applyPresetFilters(JSON.parse(p.filters))} />
+                <Button variant="outline" className="border-info/50 text-info hover:bg-blue-50" onClick={() => setShowPresets(true)}>
+                  <Save className="mr-2 h-4 w-4" aria-hidden="true" />
+                  Guardar
+                </Button>
+              </>
             )}
           </div>
         </div>
