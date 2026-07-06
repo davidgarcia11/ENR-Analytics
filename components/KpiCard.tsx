@@ -21,6 +21,7 @@ import { cn } from "@/lib/utils"
 export function KpiCard({
     title,
     icon: Icon,
+    iconClassName,
     value,
     caption,
     children,
@@ -28,6 +29,8 @@ export function KpiCard({
 }: {
     title: string
     icon?: LucideIcon
+    /** Color del icono; por defecto rojo corporativo. Útil para KPIs con semántica de estado. */
+    iconClassName?: string
     value?: React.ReactNode
     caption?: string
     children?: React.ReactNode
@@ -37,7 +40,7 @@ export function KpiCard({
         <Card accent className={cn("shadow-sm", className)}>
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
                 <CardTitle className="text-sm font-bold text-secondary-foreground">{title}</CardTitle>
-                {Icon && <Icon className="h-4 w-4 text-primary" aria-hidden="true" />}
+                {Icon && <Icon className={cn("h-4 w-4", iconClassName ?? "text-primary")} aria-hidden="true" />}
             </CardHeader>
             <CardContent>
                 {children ?? (
