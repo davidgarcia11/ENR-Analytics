@@ -834,7 +834,7 @@ Barra de navegación compartida por todos los paneles. Reemplaza el top bar dupl
 
 | Prop | Tipo | Descripción |
 |---|---|---|
-| `currentPanel` | `'produccion' \| 'pedidos' \| 'caducados' \| 'comparativa'` | Panel activo (se marca con punto rojo en el dropdown) |
+| `currentPanel` | `'produccion' \| 'pedidos' \| 'caducados' \| 'comparativa'` (opcional) | Panel activo (se marca con punto rojo en el dropdown). Se omite en páginas que usan `Navbar`/`AppShell` pero no son uno de los 4 paneles reales (ej. `/admin/logs`) — así no marcan ninguno como activo |
 | `user` | `SessionUser \| null` | Usuario de sesión. Si es null, muestra botón "Iniciar sesión" |
 | `onLogout` | `() => void` | Callback para cerrar sesión |
 | `onPresetsClick` | `() => void` (opcional) | Si se pasa, aparece el botón "Presets". Lo wirean los 4 paneles (`/produccion`, `/preparacion-pedidos`, `/caducados`, `/comparativa-seres`) sólo con sesión activa |
