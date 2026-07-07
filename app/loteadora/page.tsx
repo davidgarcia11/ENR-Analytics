@@ -3,8 +3,9 @@
 import { useState, useEffect } from "react"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
-import { Tag, CheckCircle2, XCircle, Loader2, Send, AlertTriangle, Calendar, ChevronDown } from "lucide-react"
+import { Tag, CheckCircle2, XCircle, Loader2, Send, AlertTriangle, Calendar } from "lucide-react"
 import Navbar from "@/components/Navbar"
+import { SingleSelect } from "@/components/SingleSelect"
 import { useRouter } from "next/navigation"
 
 interface SessionUser { id: number; username: string; role: string; name: string; surname: string }
@@ -44,8 +45,6 @@ function parseFecha(val: string): Date | null {
   if (!y || !m || !d) return null
   return new Date(y, m - 1, d)
 }
-
-const selectCls = "h-9 w-full rounded-md border border-gray-200 bg-white px-3 py-1 text-sm shadow-sm transition-colors focus:outline-none focus:ring-1 focus:ring-gray-400 disabled:opacity-50 disabled:cursor-not-allowed text-gray-900 appearance-none"
 
 export default function LoteadoraPage() {
   const router = useRouter()
@@ -209,20 +208,14 @@ export default function LoteadoraPage() {
                   Marca
                   {loadingMarcas && <Loader2 className="inline h-3 w-3 animate-spin ml-1.5 text-gray-400" />}
                 </label>
-                <div className="relative">
-                  <select
-                    id="marca"
-                    value={selectedMarca}
-                    onChange={e => setSelectedMarca(e.target.value)}
-                    disabled={loadingMarcas || !jdeOnline}
-                    className={selectCls}
-                  >
-                    <option value="">Seleccionar marca…</option>
-                    {marcas.map(m => (
-                      <option key={m.id} value={m.id}>{m.descripcion || m.id}</option>
-                    ))}
-                  </select>
-                  <ChevronDown className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-gray-400" />
+                <div className={!jdeOnline ? 'opacity-50 pointer-events-none' : ''}>
+                  <SingleSelect
+                    label="marca"
+                    allLabel="Seleccionar marca…"
+                    value={selectedMarca || 'all'}
+                    onChange={id => setSelectedMarca(id === 'all' ? '' : id)}
+                    options={marcas.map(m => ({ id: m.id, description: m.descripcion || m.id }))}
+                  />
                 </div>
               </div>
 
@@ -232,32 +225,24 @@ export default function LoteadoraPage() {
                   Artículo
                   {loadingArticulos && <Loader2 className="inline h-3 w-3 animate-spin ml-1.5 text-gray-400" />}
                 </label>
-                <div className="relative">
-                  <select
-                    id="articulo"
-                    value={selectedArticulo?.id ?? ''}
-                    onChange={e => handleArticuloChange(e.target.value)}
-                    disabled={!selectedMarca || loadingArticulos || articulos.length === 0}
-                    className={selectCls}
-                  >
-                    <option value="">
-                      {!selectedMarca
+                <div className={(!selectedMarca || loadingArticulos || articulos.length === 0) ? 'opacity-50 pointer-events-none' : ''}>
+                  <SingleSelect
+                    label="artículo"
+                    showId
+                    allLabel={
+                      !selectedMarca
                         ? 'Primero selecciona una marca'
                         : loadingArticulos
                           ? 'Cargando…'
                           : articulos.length === 0
                             ? 'Sin artículos para esta marca'
-                            : 'Seleccionar artículo…'}
-                    </option>
-                    {articulos.map(a => (
-                      <option key={a.id} value={a.id}>{a.descripcion}</option>
-                    ))}
-                  </select>
-                  <ChevronDown className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-gray-400" />
+                            : 'Seleccionar artículo…'
+                    }
+                    value={selectedArticulo?.id || 'all'}
+                    onChange={id => id === 'all' ? setSelectedArticulo(null) : handleArticuloChange(id)}
+                    options={articulos.map(a => ({ id: a.id, description: a.descripcion }))}
+                  />
                 </div>
-                {selectedArticulo && (
-                  <p className="text-xs text-gray-500 font-mono">{selectedArticulo.id}</p>
-                )}
               </div>
 
               {(selectedMarca || selectedArticulo) && (

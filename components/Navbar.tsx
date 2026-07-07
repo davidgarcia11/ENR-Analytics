@@ -22,7 +22,7 @@ const PANELS = [
 type PanelKey = typeof PANELS[number]['key']
 
 interface NavbarProps {
-  // Opcional: páginas que no son uno de los 4 paneles (ej. /admin/logs) no marcan ninguno como activo
+  // Opcional: páginas que no son uno de los paneles listados en PANELS (ej. /admin/logs) no marcan ninguno como activo
   currentPanel?: PanelKey
   user: SessionUser | null
   onLogout: () => void
