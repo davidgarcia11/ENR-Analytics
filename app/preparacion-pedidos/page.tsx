@@ -2,19 +2,23 @@
 
 import { useState, useEffect, useMemo, useDeferredValue } from "react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
-import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
+import { Badge } from "@/components/ui/badge"
+import { Spinner } from "@/components/ui/spinner"
+import { EmptyState } from "@/components/ui/empty-state"
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from "@/components/ui/table"
 import {
   Search, Loader2, Download, X,
   ChevronDown, ChevronRight, Package, CheckCircle2, Clock, AlertCircle,
-  Save, BookmarkCheck, Trash2, Pencil, Calendar,
+  Save, Calendar, SearchX,
 } from "lucide-react"
 import { ArticleMultiSelect } from "@/components/ArticleMultiSelect"
 import { DatePicker } from "@/components/DatePicker"
-import Navbar from "@/components/Navbar"
+import { AppShell } from "@/components/AppShell"
+import { KpiCard } from "@/components/KpiCard"
+import { PresetPanel, PresetQuickSelect, usePresets } from "@/components/PresetPanel"
 import * as XLSX from 'xlsx'
 import { useRouter } from "next/navigation"
 import React from "react"
@@ -74,8 +78,6 @@ interface Summary {
   pendientes: number
 }
 
-type Preset = { id: number; name: string; filters: string; created_at: string }
-
 export default function PreparacionPedidos() {
   const router = useRouter()
 
@@ -124,11 +126,7 @@ export default function PreparacionPedidos() {
   const [expandedArticles, setExpandedArticles] = useState<Set<string>>(new Set())
 
   // --- PRESETS ---
-  const [presets, setPresets]               = useState<Preset[]>([])
-  const [showPresets, setShowPresets]       = useState(false)
-  const [presetName, setPresetName]         = useState('')
-  const [savingPreset, setSavingPreset]     = useState(false)
-  const [editingPresetId, setEditingPresetId] = useState<number | null>(null)
+  const [showPresets, setShowPresets] = useState(false)
   // Señal que dispara la apertura del panel de presets desde el botón del Navbar
   const [presetsSignal, setPresetsSignal] = useState(0)
   useEffect(() => {
@@ -198,11 +196,6 @@ export default function PreparacionPedidos() {
     fetchData()
     fetch('/api/categories?field=srp2').then(r => r.ok ? r.json() : []).then(setAllFamilias).catch(() => {})
   }, [])
-
-  useEffect(() => {
-    if (sessionUser) loadPresets()
-    else setPresets([])
-  }, [sessionUser])
 
   // --- DATOS ---
 
@@ -289,8 +282,6 @@ export default function PreparacionPedidos() {
     setExpandedOrders(new Set())
     setExpandedArticles(new Set())
     setOrders([])
-    setEditingPresetId(null)
-    setPresetName('')
   }
 
   const applyFilters = () => {
@@ -314,41 +305,31 @@ export default function PreparacionPedidos() {
     setExpandedArticles(prev => { const n = new Set(prev); n.has(key) ? n.delete(key) : n.add(key); return n })
   }
 
-  // --- PRESETS ---
+  // --- PRESETS (serialización propia de este panel; el resto lo gestiona PresetPanel) ---
 
-  const loadPresets = async () => {
-    try {
-      const res = await fetch('/api/presets?screen=pedidos')
-      if (res.ok) setPresets(await res.json())
-    } catch { }
-  }
+  const { presets, reload: reloadPresets } = usePresets('pedidos')
 
-  const savePreset = async (nameOverride?: string) => {
-    const name = nameOverride || presetName
-    if (!name.trim()) return
-    setSavingPreset(true)
-    try {
-      const filtersData = {
-        selectedPlants,
-        startDate: filters.startDate, endDate: filters.endDate,
-        deliveryStartDate: filters.deliveryStartDate, deliveryEndDate: filters.deliveryEndDate,
-        showStatus,
-        selectedArticles, selectedDestinos,
-        pedidoSearch, refClienteSearch, selectedDestinoMlnm, selectedFamilia,
-      }
-      const isEditing = editingPresetId !== null
-      const res = await fetch(isEditing ? `/api/presets/${editingPresetId}` : '/api/presets', {
-        method: isEditing ? 'PUT' : 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name, filters: filtersData, screen: 'pedidos' }),
-      })
-      if (res.ok) { setPresetName(''); setEditingPresetId(null); loadPresets() }
-      else { const d = await res.json(); alert(d.error || 'Error al guardar') }
-    } finally { setSavingPreset(false) }
-  }
+  // Objeto de filtros que se guarda como preset (mismo contrato que antes)
+  const getPresetFilters = () => ({
+    selectedPlants,
+    startDate: filters.startDate, endDate: filters.endDate,
+    deliveryStartDate: filters.deliveryStartDate, deliveryEndDate: filters.deliveryEndDate,
+    showStatus,
+    selectedArticles, selectedDestinos,
+    pedidoSearch, refClienteSearch, selectedDestinoMlnm, selectedFamilia,
+  })
 
-  const loadPreset = (preset: Preset) => {
-    const f = JSON.parse(preset.filters)
+  // Aplica un preset cargado (mismos defaults que el loadPreset original)
+  const applyPresetFilters = (raw: Record<string, unknown>) => {
+    const f = raw as {
+      selectedPlants?: string[]
+      startDate?: string; endDate?: string
+      deliveryStartDate?: string; deliveryEndDate?: string
+      showStatus?: { pendiente: boolean; en_progreso: boolean; completado: boolean }
+      selectedArticles?: string[]; selectedDestinos?: string[]
+      pedidoSearch?: string; refClienteSearch?: string
+      selectedDestinoMlnm?: string[]; selectedFamilia?: string[]
+    }
     setSelectedPlants(f.selectedPlants || [])
     setFilters({
       startDate:        f.startDate        || todayStr,
@@ -363,19 +344,6 @@ export default function PreparacionPedidos() {
     setRefClienteSearch(f.refClienteSearch     || '')
     setSelectedDestinoMlnm(f.selectedDestinoMlnm || [])
     setSelectedFamilia(f.selectedFamilia         || [])
-    setShowPresets(false)
-  }
-
-  const startEditPreset = (preset: Preset) => {
-    setPresetName(preset.name); setEditingPresetId(preset.id)
-    loadPreset(preset); setShowPresets(true)
-  }
-
-  const cancelEditPreset = () => { setEditingPresetId(null); setPresetName('') }
-
-  const deletePreset = async (id: number) => {
-    await fetch(`/api/presets/${id}`, { method: 'DELETE' })
-    loadPresets()
   }
 
   // --- EXCEL ---
@@ -429,111 +397,49 @@ export default function PreparacionPedidos() {
   ]
 
   return (
-    <div className="min-h-screen bg-gray-100 p-8 font-sans text-gray-900">
-      <div className="mx-auto max-w-7xl space-y-8">
+    <AppShell
+      navbar={{
+        currentPanel: "pedidos",
+        user: sessionUser,
+        onLogout: logout,
+        onPresetsClick: () => setPresetsSignal(s => s + 1),
+      }}
+      title="Control de pedidos"
+      description="Estado de preparación de pedidos por planta"
+    >
 
-        {/* --- BARRA DE NAVEGACIÓN --- */}
-        <Navbar
-          currentPanel="pedidos"
-          user={sessionUser}
-          onLogout={logout}
-          onPresetsClick={() => setPresetsSignal(s => s + 1)}
-        />
-
-        {/* --- PANEL DE PRESETS --- */}
-        {sessionUser && showPresets && (
-          <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-4" style={{ borderTop: '3px solid #D30B15' }}>
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="text-sm font-bold text-gray-700 flex items-center gap-2">
-                <BookmarkCheck className="h-4 w-4" style={{ color: '#D30B15' }} />
-                Mis Presets de Filtros
-              </h3>
-              <button type="button" aria-label="Cerrar presets" onClick={() => { setShowPresets(false); cancelEditPreset() }} className="text-gray-400 hover:text-gray-600">
-                <X className="h-4 w-4" />
-              </button>
-            </div>
-
-            <div className="bg-gray-50 rounded-lg p-3 mb-4 border border-gray-100">
-              <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">
-                {editingPresetId ? 'Editando preset' : 'Guardar filtros actuales como preset'}
-              </p>
-              <div className="flex items-center gap-2 flex-wrap">
-                <Input
-                  value={presetName}
-                  onChange={e => setPresetName(e.target.value)}
-                  placeholder="Escribe un nombre..."
-                  className="h-9 text-sm max-w-[220px] bg-white"
-                  onKeyDown={e => e.key === 'Enter' && savePreset()}
-                />
-                <Button
-                  onClick={() => savePreset()}
-                  disabled={savingPreset || !presetName.trim()}
-                  size="sm"
-                  className="text-white text-xs font-semibold h-9 px-4"
-                  style={{ backgroundColor: editingPresetId ? '#2563eb' : '#D30B15' }}
-                >
-                  <Save className="mr-1.5 h-3.5 w-3.5" />
-                  {editingPresetId ? 'Actualizar' : 'Guardar'}
-                </Button>
-                {editingPresetId && (
-                  <Button onClick={cancelEditPreset} variant="outline" size="sm" className="text-xs h-9 text-gray-500">
-                    Cancelar
-                  </Button>
-                )}
-              </div>
-              {!editingPresetId && (
-                <p className="text-[11px] text-gray-400 mt-1.5">Se guardarán las plantas, fechas, estado, artículo, destino y búsquedas seleccionados.</p>
-              )}
-            </div>
-
-            <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">Presets guardados</p>
-            {presets.length === 0 ? (
-              <p className="text-xs text-gray-400">No tienes presets guardados.</p>
-            ) : (
-              <div className="flex flex-wrap gap-2">
-                {presets.map(p => (
-                  <div key={p.id} className={`flex items-center gap-1.5 border rounded-lg px-3 py-1.5 text-sm ${editingPresetId === p.id ? 'bg-blue-50 border-blue-300' : 'bg-gray-50 border-gray-200'}`}>
-                    <button type="button" onClick={() => loadPreset(p)} className="font-medium text-gray-700 hover:text-gray-900" title="Cargar preset">
-                      {p.name}
-                    </button>
-                    <button type="button" onClick={() => startEditPreset(p)} className="text-gray-300 hover:text-blue-500" aria-label={`Editar ${p.name}`}>
-                      <Pencil className="h-3 w-3" />
-                    </button>
-                    <button type="button" onClick={() => deletePreset(p.id)} className="text-gray-300 hover:text-red-500" aria-label={`Eliminar ${p.name}`}>
-                      <Trash2 className="h-3.5 w-3.5" />
-                    </button>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
+        {/* --- PANEL DE PRESETS (compartido) --- */}
+        {sessionUser && (
+          <PresetPanel
+            screen="pedidos"
+            presets={presets}
+            onReload={reloadPresets}
+            open={showPresets}
+            onClose={() => setShowPresets(false)}
+            getFilters={getPresetFilters}
+            applyFilters={applyPresetFilters}
+            hint="Se guardarán las plantas, fechas, estado, artículo, destino y búsquedas seleccionados."
+          />
         )}
 
-        {/* --- TÍTULO --- */}
-        <div>
-          <h1 className="text-2xl font-black text-gray-900">Preparación de Pedidos</h1>
-          <p className="text-sm text-gray-500 mt-1">Progreso de asignación de palets a pedidos de venta</p>
-        </div>
-
         {/* --- FILTROS --- */}
-        <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-200 space-y-4" style={{ borderTop: '3px solid #D30B15' }}>
+        <div className="bg-card p-4 rounded-xl shadow-sm border border-border border-t-[3px] border-t-primary space-y-4">
 
           {/* Sección 1: Filtros principales */}
           <div>
-            <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">Filtros</p>
+            <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2">Filtros</p>
             <div className="flex flex-wrap items-end gap-3">
 
               {/* Estado */}
               <div className="grid gap-1.5">
-                <label className="text-xs font-semibold text-gray-700">Estado</label>
-                <div className="flex rounded-md overflow-hidden border border-gray-300">
+                <label className="text-xs font-semibold text-secondary-foreground">Estado</label>
+                <div className="flex rounded-md overflow-hidden border border-input">
                   {statusButtons.map((btn, i) => (
                     <button
                       key={btn.value}
                       type="button"
                       onClick={() => setShowStatus(prev => ({ ...prev, [btn.value]: !prev[btn.value] }))}
-                      className={`px-3 py-1.5 text-xs font-semibold transition-colors ${i < statusButtons.length - 1 ? 'border-r border-gray-300' : ''} ${showStatus[btn.value] ? 'text-white' : 'bg-white text-gray-600 hover:bg-gray-50'}`}
-                      style={showStatus[btn.value] ? { backgroundColor: '#D30B15' } : {}}
+                      className={`px-3 py-1.5 text-xs font-semibold transition-colors ${i < statusButtons.length - 1 ? 'border-r border-input' : ''} ${showStatus[btn.value] ? 'bg-primary text-primary-foreground' : 'bg-card text-secondary-foreground hover:bg-muted/50'}`}
                     >
                       {btn.label}
                     </button>
@@ -543,7 +449,7 @@ export default function PreparacionPedidos() {
 
               {/* Planta */}
               <div className="grid gap-1.5">
-                <label className="text-xs font-semibold text-gray-700">Planta</label>
+                <label className="text-xs font-semibold text-secondary-foreground">Planta</label>
                 <div className="w-[180px]">
                   <ArticleMultiSelect
                     articles={plants}
@@ -557,10 +463,10 @@ export default function PreparacionPedidos() {
 
               {/* Artículo */}
               <div className="grid gap-1.5">
-                <label className="text-xs font-semibold text-gray-700">
+                <label className="text-xs font-semibold text-secondary-foreground">
                   Artículo
                   {availableArticles.length > 0 && (
-                    <span className="ml-1 text-slate-400 font-normal">({availableArticles.length})</span>
+                    <span className="ml-1 text-muted-foreground font-normal">({availableArticles.length})</span>
                   )}
                 </label>
                 <div className="w-[220px]">
@@ -576,10 +482,10 @@ export default function PreparacionPedidos() {
 
               {/* Destino */}
               <div className="grid gap-1.5">
-                <label className="text-xs font-semibold text-gray-700">
+                <label className="text-xs font-semibold text-secondary-foreground">
                   Destino
                   {availableDestinos.length > 0 && (
-                    <span className="ml-1 text-slate-400 font-normal">({availableDestinos.length})</span>
+                    <span className="ml-1 text-muted-foreground font-normal">({availableDestinos.length})</span>
                   )}
                 </label>
                 <div className="w-[220px]">
@@ -599,7 +505,7 @@ export default function PreparacionPedidos() {
           {/* Sección 2: Búsqueda libre */}
           <div className="flex flex-wrap items-end gap-3">
             <div className="grid gap-1.5">
-              <label htmlFor="ped-pedido" className="text-xs font-semibold text-gray-700">Nº Pedido</label>
+              <label htmlFor="ped-pedido" className="text-xs font-semibold text-secondary-foreground">Nº Pedido</label>
               <input
                 id="ped-pedido"
                 type="text"
@@ -607,11 +513,11 @@ export default function PreparacionPedidos() {
                 onChange={e => setPedidoSearch(e.target.value)}
                 onKeyDown={e => e.key === 'Enter' && document.getElementById('ped-filtrar')?.click()}
                 placeholder="ej: *12345 ó 12345*"
-                className="flex h-9 w-[200px] rounded-md border border-slate-300 bg-white px-3 py-1 text-sm shadow-sm transition-colors focus:outline-none focus:border-slate-500 font-medium placeholder:font-normal placeholder:text-slate-400"
+                className="flex h-9 w-[200px] rounded-md border border-input bg-card px-3 py-1 text-sm shadow-sm transition-colors focus:outline-none focus:border-ring font-medium placeholder:font-normal placeholder:text-muted-foreground"
               />
             </div>
             <div className="grid gap-1.5">
-              <label htmlFor="ped-ref" className="text-xs font-semibold text-gray-700">Ref. Cliente</label>
+              <label htmlFor="ped-ref" className="text-xs font-semibold text-secondary-foreground">Ref. Cliente</label>
               <input
                 id="ped-ref"
                 type="text"
@@ -619,7 +525,7 @@ export default function PreparacionPedidos() {
                 onChange={e => setRefClienteSearch(e.target.value)}
                 onKeyDown={e => e.key === 'Enter' && document.getElementById('ped-filtrar')?.click()}
                 placeholder="ej: *REF ó REF*"
-                className="flex h-9 w-[200px] rounded-md border border-slate-300 bg-white px-3 py-1 text-sm shadow-sm transition-colors focus:outline-none focus:border-slate-500 font-medium placeholder:font-normal placeholder:text-slate-400"
+                className="flex h-9 w-[200px] rounded-md border border-input bg-card px-3 py-1 text-sm shadow-sm transition-colors focus:outline-none focus:border-ring font-medium placeholder:font-normal placeholder:text-muted-foreground"
               />
             </div>
           </div>
@@ -629,10 +535,10 @@ export default function PreparacionPedidos() {
 
             {/* Cliente (F0111.WWMLNM) */}
             <div className="grid gap-1.5">
-              <label className="text-xs font-semibold text-gray-700">
+              <label className="text-xs font-semibold text-secondary-foreground">
                 Cliente
                 {availableDestinoMlnm.length > 0 && (
-                  <span className="ml-1 text-slate-400 font-normal">({availableDestinoMlnm.length})</span>
+                  <span className="ml-1 text-muted-foreground font-normal">({availableDestinoMlnm.length})</span>
                 )}
               </label>
               <div className="w-[220px]">
@@ -648,10 +554,10 @@ export default function PreparacionPedidos() {
 
             {/* Familia */}
             <div className="grid gap-1.5">
-              <label className="text-xs font-semibold text-gray-700">
+              <label className="text-xs font-semibold text-secondary-foreground">
                 Familia
                 {availableFamilia.length > 0 && (
-                  <span className="ml-1 text-slate-400 font-normal">({availableFamilia.length})</span>
+                  <span className="ml-1 text-muted-foreground font-normal">({availableFamilia.length})</span>
                 )}
               </label>
               <div className="w-[220px]">
@@ -669,12 +575,12 @@ export default function PreparacionPedidos() {
 
           {/* Sección 3: Fechas */}
           <div>
-            <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">Fechas</p>
+            <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2">Fechas</p>
             <div className="flex flex-wrap items-end gap-4">
 
               {/* Fecha Carga */}
               <div className="grid gap-1.5">
-                <label className="text-xs font-semibold text-gray-500 uppercase tracking-wider flex items-center gap-1">
+                <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider flex items-center gap-1">
                   <Calendar className="h-3 w-3" /> Carga
                 </label>
                 <div className="flex items-center gap-1.5">
@@ -683,7 +589,7 @@ export default function PreparacionPedidos() {
                     onChange={v => setFilters({ ...filters, startDate: v })}
                     className="w-[140px]"
                   />
-                  <span className="text-xs text-gray-400 font-medium select-none">→</span>
+                  <span className="text-xs text-muted-foreground font-medium select-none">→</span>
                   <DatePicker
                     value={filters.endDate}
                     onChange={v => setFilters({ ...filters, endDate: v })}
@@ -694,7 +600,7 @@ export default function PreparacionPedidos() {
 
               {/* Fecha Entrega */}
               <div className="grid gap-1.5">
-                <label className="text-xs font-semibold text-gray-500 uppercase tracking-wider flex items-center gap-1">
+                <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider flex items-center gap-1">
                   <Calendar className="h-3 w-3" /> Entrega
                 </label>
                 <div className="flex items-center gap-1.5">
@@ -703,7 +609,7 @@ export default function PreparacionPedidos() {
                     onChange={v => setFilters({ ...filters, deliveryStartDate: v })}
                     className="w-[140px]"
                   />
-                  <span className="text-xs text-gray-400 font-medium select-none">→</span>
+                  <span className="text-xs text-muted-foreground font-medium select-none">→</span>
                   <DatePicker
                     value={filters.deliveryEndDate}
                     onChange={v => setFilters({ ...filters, deliveryEndDate: v })}
@@ -715,23 +621,20 @@ export default function PreparacionPedidos() {
             </div>
           </div>
 
-          <div className="border-t border-gray-100" />
+          <div className="border-t border-border" />
 
           {/* Acciones */}
           <div className="flex flex-wrap items-center gap-3 justify-end">
             {dateError && (
-              <p className="text-xs text-red-600 font-medium flex-1 text-right">{dateError}</p>
+              <p role="alert" className="text-xs text-destructive font-medium flex-1 text-right">{dateError}</p>
             )}
             <Button
               id="ped-filtrar"
               onClick={applyFilters}
               disabled={loading}
-              className="text-white font-semibold"
-              style={{ backgroundColor: '#D30B15' }}
-              onMouseEnter={e => (e.currentTarget.style.backgroundColor = '#b00a12')}
-              onMouseLeave={e => (e.currentTarget.style.backgroundColor = '#D30B15')}
+              className="font-semibold"
             >
-              {loading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Search className="mr-2 h-4 w-4" />}
+              {loading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" aria-hidden="true" /> : <Search className="mr-2 h-4 w-4" aria-hidden="true" />}
               Filtrar
             </Button>
             <Button
@@ -740,32 +643,20 @@ export default function PreparacionPedidos() {
               disabled={deferredOrders.length === 0}
               className="border-green-600 text-green-700 hover:bg-green-50"
             >
-              <Download className="mr-2 h-4 w-4" />
+              <Download className="mr-2 h-4 w-4" aria-hidden="true" />
               Excel
             </Button>
-            <Button onClick={clearFilters} variant="outline" className="border-gray-400 text-gray-600 hover:bg-gray-50">
-              <X className="mr-2 h-4 w-4" />
+            <Button onClick={clearFilters} variant="outline" className="text-secondary-foreground">
+              <X className="mr-2 h-4 w-4" aria-hidden="true" />
               Limpiar
             </Button>
 
             {/* Presets (solo si logueado) */}
             {sessionUser && (
               <>
-                {presets.length > 0 && (
-                  <div className="grid gap-1.5">
-                    <label className="text-xs font-semibold text-gray-700">Cargar preset</label>
-                    <select
-                      onChange={e => { const p = presets.find(p => p.id === Number(e.target.value)); if (p) loadPreset(p); e.target.value = '' }}
-                      defaultValue=""
-                      className="flex h-9 w-[160px] rounded-md border border-gray-300 bg-white px-3 py-1 text-sm shadow-sm"
-                    >
-                      <option value="" disabled>Seleccionar...</option>
-                      {presets.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
-                    </select>
-                  </div>
-                )}
-                <Button variant="outline" className="border-blue-500 text-blue-600 hover:bg-blue-50" onClick={() => setShowPresets(true)}>
-                  <Save className="mr-2 h-4 w-4" />
+                <PresetQuickSelect presets={presets} onSelect={(p) => applyPresetFilters(JSON.parse(p.filters))} />
+                <Button variant="outline" className="border-info/50 text-info hover:bg-blue-50" onClick={() => setShowPresets(true)}>
+                  <Save className="mr-2 h-4 w-4" aria-hidden="true" />
                   Guardar
                 </Button>
               </>
@@ -774,80 +665,53 @@ export default function PreparacionPedidos() {
         </div>
 
         {/* --- TARJETAS KPI --- */}
-        <div className="grid gap-4 md:grid-cols-4">
-          <Card className="border-gray-200 shadow-sm overflow-hidden" style={{ borderTop: '3px solid #D30B15' }}>
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-bold text-gray-700">Total Pedidos</CardTitle>
-              <Package className="h-4 w-4" style={{ color: '#D30B15' }} />
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-black text-gray-900">{displaySummary.totalOrders}</div>
-              <p className="text-xs text-gray-500 font-medium">Pedidos en el rango</p>
-            </CardContent>
-          </Card>
+        <div className="grid gap-4 sm:grid-cols-2 md:grid-cols-4">
+          <KpiCard title="Total Pedidos" icon={Package} value={displaySummary.totalOrders} caption="Pedidos en el rango" />
 
-          <Card className="border-gray-200 shadow-sm overflow-hidden" style={{ borderTop: '3px solid #D30B15' }}>
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-bold text-gray-700">Completados</CardTitle>
-              <CheckCircle2 className="h-4 w-4 text-green-500" />
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-black text-green-600">{displaySummary.completados}</div>
-              <p className="text-xs text-gray-500 font-medium">100% asignado</p>
-            </CardContent>
-          </Card>
+          <KpiCard title="Completados" icon={CheckCircle2} iconClassName="text-green-500">
+            <div className="text-2xl font-black text-green-600">{displaySummary.completados}</div>
+            <p className="mt-1 text-xs font-medium text-muted-foreground">100% asignado</p>
+          </KpiCard>
 
-          <Card className="border-gray-200 shadow-sm overflow-hidden" style={{ borderTop: '3px solid #D30B15' }}>
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-bold text-gray-700">En Progreso</CardTitle>
-              <Clock className="h-4 w-4 text-amber-500" />
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-black text-amber-600">{displaySummary.enProgreso}</div>
-              <p className="text-xs text-gray-500 font-medium">Parcialmente asignado</p>
-            </CardContent>
-          </Card>
+          <KpiCard title="En Progreso" icon={Clock} iconClassName="text-amber-500">
+            <div className="text-2xl font-black text-amber-600">{displaySummary.enProgreso}</div>
+            <p className="mt-1 text-xs font-medium text-muted-foreground">Parcialmente asignado</p>
+          </KpiCard>
 
-          <Card className="border-gray-200 shadow-sm overflow-hidden" style={{ borderTop: '3px solid #D30B15' }}>
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-bold text-gray-700">Pendientes</CardTitle>
-              <AlertCircle className="h-4 w-4 text-gray-400" />
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-black text-gray-400">{displaySummary.pendientes}</div>
-              <p className="text-xs text-gray-500 font-medium">Sin asignar</p>
-            </CardContent>
-          </Card>
+          <KpiCard title="Pendientes" icon={AlertCircle} iconClassName="text-muted-foreground">
+            <div className="text-2xl font-black text-muted-foreground">{displaySummary.pendientes}</div>
+            <p className="mt-1 text-xs font-medium text-muted-foreground">Sin asignar</p>
+          </KpiCard>
         </div>
 
         {/* --- TABLA DE PEDIDOS --- */}
-        <Card className="border-gray-200 shadow-sm overflow-hidden" style={{ borderTop: '3px solid #D30B15' }}>
+        <Card accent className="shadow-sm">
           <CardHeader>
-            <CardTitle className="text-lg font-bold text-gray-800">Pedidos</CardTitle>
+            <CardTitle className="text-lg font-bold text-foreground">Pedidos</CardTitle>
           </CardHeader>
           <CardContent>
             <Table>
               <TableHeader>
-                <TableRow className="border-gray-200 hover:bg-transparent">
+                <TableRow className="border-border hover:bg-transparent">
                   <TableHead className="w-8"></TableHead>
-                  <TableHead className="font-bold text-gray-700">
+                  <TableHead className="font-bold text-secondary-foreground">
                     <div className="leading-tight">
                       <div>Nº Pedido</div>
-                      <div className="text-[11px] font-normal text-gray-400">Ref. Cliente</div>
+                      <div className="text-xs font-normal text-muted-foreground">Ref. Cliente</div>
                     </div>
                   </TableHead>
-                  <TableHead className="font-bold text-gray-700">
+                  <TableHead className="font-bold text-secondary-foreground">
                     <div className="leading-tight">
                       <div>Destino</div>
-                      <div className="text-[11px] font-normal text-gray-400">Cliente</div>
+                      <div className="text-xs font-normal text-muted-foreground">Cliente</div>
                     </div>
                   </TableHead>
-                  <TableHead className="font-bold text-gray-700">Fecha Carga</TableHead>
-                  <TableHead className="font-bold text-gray-700">Fecha Entrega</TableHead>
-                  <TableHead className="font-bold text-gray-700">Planta</TableHead>
-                  <TableHead className="font-bold text-gray-700">Arts.</TableHead>
-                  <TableHead className="font-bold text-gray-700 w-[200px]">Progreso</TableHead>
-                  <TableHead className="font-bold text-gray-700">Estado</TableHead>
+                  <TableHead className="font-bold text-secondary-foreground">Fecha Carga</TableHead>
+                  <TableHead className="font-bold text-secondary-foreground">Fecha Entrega</TableHead>
+                  <TableHead className="font-bold text-secondary-foreground">Planta</TableHead>
+                  <TableHead className="font-bold text-secondary-foreground">Arts.</TableHead>
+                  <TableHead className="font-bold text-secondary-foreground w-[200px]">Progreso</TableHead>
+                  <TableHead className="font-bold text-secondary-foreground">Estado</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -855,54 +719,54 @@ export default function PreparacionPedidos() {
                   <React.Fragment key={order.orderNumber}>
                     {/* Fila resumen del pedido */}
                     <TableRow
-                      className="hover:bg-slate-50 border-gray-100 cursor-pointer"
+                      className="hover:bg-muted/50 border-border cursor-pointer"
                       onClick={() => toggleExpand(order.orderNumber)}
                     >
                       <TableCell className="w-8 px-2">
                         {expandedOrders.has(order.orderNumber)
-                          ? <ChevronDown className="h-4 w-4 text-gray-400" />
-                          : <ChevronRight className="h-4 w-4 text-gray-400" />}
+                          ? <ChevronDown className="h-4 w-4 text-muted-foreground" />
+                          : <ChevronRight className="h-4 w-4 text-muted-foreground" />}
                       </TableCell>
-                      <TableCell className="font-bold text-gray-900">
+                      <TableCell className="font-bold text-foreground">
                         <div className="leading-tight">
                           <div>{order.orderNumber}</div>
                           {order.customerRef && (
-                            <div className="text-[11px] font-normal text-gray-400 font-mono">{order.customerRef}</div>
+                            <div className="text-xs font-normal text-muted-foreground font-mono">{order.customerRef}</div>
                           )}
                         </div>
                       </TableCell>
-                      <TableCell className="font-bold text-gray-900">
+                      <TableCell className="font-bold text-foreground">
                         <div className="leading-tight">
                           <div>{order.shipToDesc || '—'}</div>
                           {order.shipToMlnm && (
-                            <div className="text-[11px] font-normal text-gray-400 font-mono">{order.shipToMlnm}</div>
+                            <div className="text-xs font-normal text-muted-foreground font-mono">{order.shipToMlnm}</div>
                           )}
                           {order.shipToNum && (
-                            <div className="text-[11px] font-normal text-gray-400 font-mono">{order.shipToNum}</div>
+                            <div className="text-xs font-normal text-muted-foreground font-mono">{order.shipToNum}</div>
                           )}
                         </div>
                       </TableCell>
-                      <TableCell className="font-medium text-gray-900">
+                      <TableCell className="font-medium text-foreground">
                         {order.loadDate ? new Date(order.loadDate).toLocaleDateString('es-ES') : ''}
                       </TableCell>
-                      <TableCell className="font-medium text-gray-900">
+                      <TableCell className="font-medium text-foreground">
                         {order.deliveryDate ? new Date(order.deliveryDate).toLocaleDateString('es-ES') : ''}
                       </TableCell>
-                      <TableCell className="text-gray-700">{order.plantName}</TableCell>
-                      <TableCell className="text-gray-600">{order.totalArticles}</TableCell>
+                      <TableCell className="text-secondary-foreground">{order.plantName}</TableCell>
+                      <TableCell className="text-secondary-foreground">{order.totalArticles}</TableCell>
                       <TableCell>
                         <div className="flex items-center gap-2">
-                          <div className="flex-1 h-2.5 bg-gray-200 rounded-full overflow-hidden">
+                          <div className="flex-1 h-2.5 bg-muted rounded-full overflow-hidden">
                             <div
                               className={`h-full rounded-full transition-all ${
                                 order.overallProgress >= 100 ? 'bg-green-500'
                                 : order.overallProgress > 0  ? 'bg-amber-500'
-                                : 'bg-gray-300'
+                                : 'bg-muted-foreground/30'
                               }`}
                               style={{ width: `${Math.min(order.overallProgress, 100)}%` }}
                             />
                           </div>
-                          <span className="text-xs font-bold text-gray-600 w-[40px] text-right">
+                          <span className="text-xs font-bold text-secondary-foreground w-[40px] text-right">
                             {order.overallProgress.toFixed(0)}%
                           </span>
                         </div>
@@ -919,7 +783,7 @@ export default function PreparacionPedidos() {
                           </span>
                         )}
                         {order.status === 'pendiente' && (
-                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-bold bg-gray-100 text-gray-500">
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-bold bg-muted text-muted-foreground">
                             <AlertCircle className="h-3 w-3" /> PENDIENTE
                           </span>
                         )}
@@ -928,12 +792,12 @@ export default function PreparacionPedidos() {
 
                     {/* Detalle expandido — Nivel 1: Artículos agrupados */}
                     {expandedOrders.has(order.orderNumber) && (
-                      <TableRow className="bg-gray-50/80 hover:bg-gray-50/80">
+                      <TableRow className="bg-muted/50 hover:bg-muted/50">
                         <TableCell colSpan={9} className="p-0">
                           <div className="px-4 py-4">
                             <table className="w-full text-sm">
                               <thead>
-                                <tr className="text-xs font-bold text-gray-500 uppercase tracking-wider border-b border-gray-200">
+                                <tr className="text-xs font-bold text-muted-foreground uppercase tracking-wider border-b border-border">
                                   <th className="w-6"></th>
                                   <th className="text-left py-2 px-2">Artículo</th>
                                   <th className="text-left py-2 px-2">Descripción</th>
@@ -952,60 +816,60 @@ export default function PreparacionPedidos() {
                                     <React.Fragment key={article.itemNumber}>
                                       {/* Fila artículo agrupado */}
                                       <tr
-                                        className="border-b border-gray-200 cursor-pointer hover:bg-gray-100/60"
+                                        className="border-b border-border cursor-pointer hover:bg-muted/60"
                                         onClick={() => toggleArticle(order.orderNumber, article.itemNumber)}
                                       >
                                         <td className="py-2 px-1">
                                           {isArticleExpanded
-                                            ? <ChevronDown className="h-3.5 w-3.5 text-gray-400" />
-                                            : <ChevronRight className="h-3.5 w-3.5 text-gray-400" />}
+                                            ? <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" />
+                                            : <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" />}
                                         </td>
-                                        <td className="py-2 px-2 font-mono text-xs text-gray-700 font-bold">{article.itemNumber}</td>
-                                        <td className="py-2 px-2 text-gray-600 uppercase text-xs font-semibold">{article.description}</td>
+                                        <td className="py-2 px-2 font-mono text-xs text-secondary-foreground font-bold">{article.itemNumber}</td>
+                                        <td className="py-2 px-2 text-secondary-foreground uppercase text-xs font-semibold">{article.description}</td>
                                         <td className="py-2 px-2 text-right font-bold">{article.totalOrdered.toLocaleString('es-ES', { minimumFractionDigits: 2 })}</td>
                                         <td className="py-2 px-2 text-right font-semibold text-green-700">{article.totalAssigned.toLocaleString('es-ES', { minimumFractionDigits: 2 })}</td>
                                         <td className="py-2 px-2 text-right text-amber-600">{article.totalPending.toLocaleString('es-ES', { minimumFractionDigits: 2 })}</td>
                                         <td className="py-2 px-2">
                                           <div className="flex items-center gap-1.5">
-                                            <div className="flex-1 h-2 bg-gray-200 rounded-full overflow-hidden">
+                                            <div className="flex-1 h-2 bg-muted rounded-full overflow-hidden">
                                               <div
                                                 className={`h-full rounded-full ${
                                                   article.progress >= 100 ? 'bg-green-500'
                                                   : article.progress > 0  ? 'bg-blue-500'
-                                                  : 'bg-gray-300'
+                                                  : 'bg-muted-foreground/30'
                                                 }`}
                                                 style={{ width: `${Math.min(article.progress, 100)}%` }}
                                               />
                                             </div>
-                                            <span className="text-[10px] font-bold text-gray-500 w-[32px] text-right">
+                                            <span className="text-xs font-bold text-muted-foreground w-[32px] text-right">
                                               {article.progress.toFixed(0)}%
                                             </span>
                                           </div>
                                         </td>
-                                        <td className="py-2 px-2 text-center text-xs text-gray-500 font-mono">{article.uom}</td>
+                                        <td className="py-2 px-2 text-center text-xs text-muted-foreground font-mono">{article.uom}</td>
                                       </tr>
 
                                       {/* Nivel 2: Lotes/líneas individuales */}
                                       {isArticleExpanded && article.lots.map((lot, lotIdx) => (
-                                        <tr key={lotIdx} className={`border-b border-gray-50 ${lot.assigned ? 'bg-green-50/50' : 'bg-amber-50/30'}`}>
+                                        <tr key={lotIdx} className={`border-b border-border ${lot.assigned ? 'bg-green-50/50' : 'bg-amber-50/30'}`}>
                                           <td></td>
                                           <td className="py-1.5 px-2 pl-5">
-                                            <span className="inline-flex items-center gap-1 font-mono text-[11px] font-semibold text-gray-600">
-                                              <span className="text-gray-300">↳</span>
-                                              {lot.lot || <span className="italic text-gray-400">Sin lote</span>}
+                                            <span className="inline-flex items-center gap-1 font-mono text-xs font-semibold text-secondary-foreground">
+                                              <span className="text-muted-foreground/40">↳</span>
+                                              {lot.lot || <span className="italic text-muted-foreground">Sin lote</span>}
                                             </span>
                                           </td>
                                           <td className="py-1.5 px-2">
                                             {lot.assigned
-                                              ? <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] font-bold bg-green-100 text-green-700">✓ ASIGNADO</span>
-                                              : <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-100 text-amber-700">⏳ PENDIENTE</span>
+                                              ? <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-xs font-bold bg-green-100 text-green-700">✓ ASIGNADO</span>
+                                              : <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-xs font-bold bg-amber-100 text-amber-700">⏳ PENDIENTE</span>
                                             }
                                           </td>
-                                          <td className="py-1.5 px-2 text-right text-[11px] text-gray-600 font-medium">{lot.qtyOrdered.toLocaleString('es-ES', { minimumFractionDigits: 2 })}</td>
-                                          <td className={`py-1.5 px-2 text-right text-[11px] ${lot.assigned ? 'text-green-600 font-semibold' : 'text-gray-300'}`}>
+                                          <td className="py-1.5 px-2 text-right text-xs text-secondary-foreground font-medium">{lot.qtyOrdered.toLocaleString('es-ES', { minimumFractionDigits: 2 })}</td>
+                                          <td className={`py-1.5 px-2 text-right text-xs ${lot.assigned ? 'text-green-600 font-semibold' : 'text-muted-foreground/40'}`}>
                                             {lot.assigned ? lot.qtyOrdered.toLocaleString('es-ES', { minimumFractionDigits: 2 }) : '—'}
                                           </td>
-                                          <td className={`py-1.5 px-2 text-right text-[11px] ${!lot.assigned ? 'text-amber-600 font-semibold' : 'text-gray-300'}`}>
+                                          <td className={`py-1.5 px-2 text-right text-xs ${!lot.assigned ? 'text-amber-600 font-semibold' : 'text-muted-foreground/40'}`}>
                                             {!lot.assigned ? lot.qtyOrdered.toLocaleString('es-ES', { minimumFractionDigits: 2 }) : '—'}
                                           </td>
                                           <td></td>
@@ -1025,17 +889,21 @@ export default function PreparacionPedidos() {
                 ))}
 
                 {loading && (
-                  <TableRow>
-                    <TableCell colSpan={9} className="text-center py-10">
-                      <Loader2 className="h-6 w-6 animate-spin mx-auto text-slate-800" />
+                  <TableRow className="hover:bg-transparent">
+                    <TableCell colSpan={9}>
+                      <Spinner label="Cargando pedidos..." className="py-10" />
                     </TableCell>
                   </TableRow>
                 )}
 
                 {!loading && deferredOrders.length === 0 && (
-                  <TableRow>
-                    <TableCell colSpan={9} className="text-center py-10 text-gray-500 font-medium">
-                      No se encontraron pedidos para los filtros seleccionados.
+                  <TableRow className="hover:bg-transparent">
+                    <TableCell colSpan={9}>
+                      <EmptyState
+                        icon={SearchX}
+                        title="Sin resultados"
+                        description="No se encontraron pedidos para los filtros seleccionados."
+                      />
                     </TableCell>
                   </TableRow>
                 )}
@@ -1044,7 +912,6 @@ export default function PreparacionPedidos() {
           </CardContent>
         </Card>
 
-      </div>
-    </div>
+    </AppShell>
   )
 }

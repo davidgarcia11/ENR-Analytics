@@ -54,14 +54,19 @@ lib/
   auth.ts                     # JWT, bcrypt, verifySession, cookieOptions
   utils.ts                    # parseJdeDate, parseWasOqs, cn()
 components/
+  AppShell.tsx                # AppShell (contenedor de página + Navbar) y PageHeader — punto de entrada de todo panel
+  KpiCard.tsx                 # Tarjeta KPI reutilizable (icono + valor + caption, o children para casos custom)
+  PresetPanel.tsx             # Sistema de presets compartido: usePresets(screen) hook + PresetPanel (panel completo) + PresetQuickSelect (desplegable rápido)
   Navbar.tsx                  # Barra de navegación compartida por todos los paneles (dropdown "Paneles ▾")
   FilterPanel.tsx             # Panel de filtros del dashboard de producción (incluye presets)
   ArticleMultiSelect.tsx      # Desplegable multi-selección con búsqueda (usado en FilterPanel)
   MermaBreakdown.tsx          # Desglose de merma agrupado Q=Etiquetado / P=Pasteurizado (card global + popover en /produccion)
   MermaCellPopover.tsx        # Popover por fila al pulsar celda Merma en /produccion
-  ui/                         # button, card, input, table, popover (estilo shadcn)
+  ui/                         # button, card (prop `accent`), input, table, popover, badge, skeleton,
+                               # spinner, empty-state, dialog (Dialog/ConfirmDialog), toast (useToast), tabs
 middleware.ts                 # Protege /api/admin/* (JWT + role admin)
 docs/                         # Documentación específica por panel
+  design-system.md            # SISTEMA DE DISEÑO — leer antes de tocar UI de cualquier panel (obligatorio)
   produccion.md               # Dashboard de producción — completo para juniors
   control-pedidos.md          # Panel de pedidos
   palets-caducados.md         # Panel de caducados
@@ -99,16 +104,25 @@ docs/                         # Documentación específica por panel
 - Logging de consultas nunca bloquea la respuesta (try/catch independiente)
 
 ### Estilo visual
-- Color corporativo: `#D30B15` (borde superior tarjetas, botón Filtrar, iconos KPI)
-- Fuente: Geist (via next/font)
-- Componentes UI base en `components/ui/` (estilo shadcn simplificado)
-- Dark mode definido en CSS pero no activamente usado en componentes
+- **Sistema de diseño completo:** [`docs/design-system.md`](docs/design-system.md) — léelo antes de escribir o tocar JSX/CSS de cualquier panel. Es de lectura obligatoria, no opcional.
+- Todos los colores son **tokens Tailwind 4** definidos en `@theme inline` dentro de `app/globals.css` (no hay `tailwind.config.js`). Color corporativo: `bg-primary`/`text-primary` (`#D30B15`). **Nunca** un hex hardcodeado ni `style={{color/backgroundColor/borderTop}}` fuera de props SVG de recharts.
+- Fuente: Geist (via next/font), única en toda la app
+- Componentes UI base en `components/ui/` (estilo shadcn simplificado): button, card (prop `accent` = borde superior rojo), input, table, popover, badge, skeleton, spinner, empty-state, dialog/ConfirmDialog, toast (`useToast`), tabs
+- Toda página de panel se monta con `<AppShell>` (`components/AppShell.tsx`) — no se repite `<main>`/`max-w-*`/`<Navbar>` sueltos
+- No hay dark mode (se quitó deliberadamente; ver `DECISIONS.md`)
 
 ### TypeScript
 - `tsconfig.json`: target ES2017, strict: true, moduleResolution: bundler
 - `next.config.ts`: `serverExternalPackages: ['better-sqlite3']` (necesario para build producción)
 
 ## Patrones importantes
+
+### Crear o tocar la UI de un panel (nuevo o existente)
+1. Lee **[`docs/design-system.md`](docs/design-system.md)** primero — tokens de color, componentes base y checklist paso a paso para un panel nuevo
+2. Todo panel se monta con `<AppShell navbar={{...}} title="..." description="...">` (`components/AppShell.tsx`)
+3. Presets → `usePresets(screen)` + `<PresetPanel>` + `<PresetQuickSelect>` (`components/PresetPanel.tsx`), nunca un panel de presets escrito a mano — ver `docs/design-system.md` §5
+4. `alert()`/`confirm()` → `useToast()` / `<ConfirmDialog>` (`components/ui/toast.tsx`, `components/ui/dialog.tsx`)
+5. KPIs → `<KpiCard>` (`components/KpiCard.tsx`); tarjetas con borde superior de marca → `<Card accent>`
 
 ### Añadir nuevo filtro de categoría (dashboard de producción)
 1. `api/categories/route.ts` → añadir entrada al `FIELD_MAP`
@@ -144,6 +158,7 @@ docs/                         # Documentación específica por panel
 
 ### Después de hacer cambios
 - **Documentación — dónde actualizar:**
+  - Cambios en tokens de color, componentes de `components/ui/`, `AppShell`, `KpiCard` o `PresetPanel` → `docs/design-system.md`
   - Cambios en auth, admin, logs, presets, lib/, stack o estructura general → `DOCUMENTACION.md`
   - Cambios en el panel de producción (`/produccion`, `FilterPanel`, `api/production`, `api/categories`, `api/production-lines`) → `docs/produccion.md`
   - Cambios en el panel de pedidos → `docs/control-pedidos.md`

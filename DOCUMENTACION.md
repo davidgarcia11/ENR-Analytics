@@ -1,7 +1,7 @@
 # Documentación Técnica — Dashboard de Producción
 
 > **Audiencia:** Desarrolladores que se incorporan al proyecto.
-> **Última actualización:** Junio 2026
+> **Última actualización:** Julio 2026
 
 ---
 
@@ -476,18 +476,17 @@ if (mine && !mine.is_public) {
 
 **Diseño (Notion/Linear style):**
 - Estética minimalista y plana: sin gradientes, sin sombras decorativas
-- Tipografía Inter (Google Fonts) + Geist como fallback. Solo pesos 400 y 500
-- Fondo `#F7F7F6` (blanco hueso), tarjetas blancas, bordes `1px solid #E5E5E5`
-- Todos los estilos definidos con CSS-in-JSX (`<style>`) usando clases prefijadas `hp-*`
+- Tipografía Geist (la única de la app — antes cargaba Inter de Google Fonts aparte, se unificó)
+- Estilos con tokens del sistema de diseño (`bg-background`, `bg-card`, `border-border`...), no CSS-in-JSX. Ver [`docs/design-system.md`](docs/design-system.md)
 
-**Sección "Acceso público"** (badge verde pill):
+**Sección "Acceso público"** (`Badge variant="success"`):
 - Muestra los paneles con `is_public = true`
 - Tarjetas con icono ámbar, nombre, descripción y flecha. Al hacer clic → acceso directo al panel
 - Grid `auto-fit, minmax(280px, 1fr)`
 
-**Sección "Requiere inicio de sesión"** (badge gris con candado):
+**Sección "Requiere inicio de sesión"** (`Badge` variante por defecto, con candado):
 - Muestra los paneles con `is_public = false`
-- Tarjetas atenuadas (fondo `#F4F4F4`), icono gris, candado en esquina superior derecha
+- Tarjetas atenuadas (`bg-muted`), icono atenuado, candado en esquina superior derecha
 - Al hacer clic → redirige a `/login?redirect=<href-del-panel>`
 - Grid `auto-fit, minmax(160px, 1fr)` (más compacto que el público)
 
@@ -570,11 +569,13 @@ El JSON varía según el panel. Ejemplos:
 
 ### UI de presets
 
-Tres formas de interactuar (los 4 paneles tienen al menos una de ellas):
+Tres formas de interactuar, disponibles en los **4 paneles por igual** (ver `docs/design-system.md` — es una regla explícita del sistema de diseño, no una opción por panel):
 
-1. **Panel expandible (botón "Guardar" en la barra de filtros):** Lista completa de presets con opción de guardar, editar y eliminar — en `produccion`, `pedidos` y `caducados`. En `comparativa-seres` no hay botón inline en los filtros.
-2. **Acceso rápido en la barra de acciones:** Dropdown "Cargar preset" para carga inmediata — solo en `produccion` y `caducados`.
-3. **Botón "Presets" en la Navbar superior:** Disponible en los 4 paneles. Cada `page.tsx` incrementa una señal `presetsSignal` que un `useEffect` observa para hacer `setShowPresets(true)`. Es la única forma de abrir el panel en `comparativa-seres`.
+1. **Panel expandible (botón "Guardar"/"Presets" en la barra de filtros):** Lista completa de presets con opción de guardar, editar y eliminar.
+2. **Acceso rápido en la barra de acciones:** `<PresetQuickSelect>` — dropdown "Cargar preset" para carga inmediata sin abrir el panel.
+3. **Botón "Presets" en la Navbar superior:** Cada `page.tsx` incrementa una señal `presetsSignal` que un `useEffect` observa para hacer `setShowPresets(true)`.
+
+`produccion` implementa las tres dentro de `FilterPanel` (con su propio estado, no usa el componente `PresetPanel` compartido). `caducados`, `pedidos` y `comparativa-seres` usan `usePresets` + `PresetPanel` + `PresetQuickSelect` de `components/PresetPanel.tsx`.
 
 ### APIs de presets
 
@@ -791,6 +792,40 @@ Endpoint diseñado para ser consumido desde herramientas externas (artefactos Cl
 
 ## 10. Componentes reutilizables (`components/`)
 
+> **Sistema de diseño:** para tokens de color, reglas de estilo y el checklist de cómo montar un panel nuevo, ver [`docs/design-system.md`](docs/design-system.md) — es la referencia obligatoria, esta sección solo documenta la API de cada componente.
+
+### `AppShell.tsx` — `AppShell` y `PageHeader`
+
+Contenedor de página unificado. Sustituye al `<main className="min-h-screen bg-gray-100 p-8">` + `<div className="mx-auto max-w-7xl">` que antes repetía cada panel con su propio ancho máximo (`max-w-7xl`/`5xl`/`4xl` según la página).
+
+**Props de `AppShell`:**
+
+| Prop | Tipo | Descripción |
+|---|---|---|
+| `navbar` | Props de `<Navbar>` | Se reenvían tal cual (`currentPanel`, `user`, `onLogout`, `onPresetsClick?`) |
+| `title` | `string` (opcional) | Si se pasa, renderiza `<PageHeader>` con el título de la sección |
+| `description` | `string` (opcional) | Subtítulo bajo el título |
+| `actions` | `ReactNode` (opcional) | Nodo a la derecha del título (ej. un botón) |
+| `width` | `"default" \| "narrow"` | `"default"` = `max-w-7xl` (paneles de datos), `"narrow"` = `max-w-4xl` (formularios/admin) |
+
+`PageHeader` se exporta también de forma independiente para casos donde no se use `AppShell` completo.
+
+### `KpiCard.tsx`
+
+Tarjeta de métrica (borde superior rojo corporativo vía `Card accent`, icono, valor y caption). Sustituye a las cards KPI repetidas inline en cada panel.
+
+**Props:** `title`, `icon?` (componente de lucide-react), `iconClassName?` (color del icono; por defecto `text-primary` — usar para iconos con semántica de estado, ej. verde/ámbar), `value?`, `caption?`, `children?` (para cuerpos con más de una línea o color condicional — sustituye a `value`/`caption`).
+
+### `PresetPanel.tsx` — `PresetPanel`, `PresetQuickSelect`, `usePresets`
+
+Sistema de presets compartido por todos los paneles con presets (`caducados`, `preparacion-pedidos`, `comparativa-seres`; `produccion` mantiene su propia variante integrada en `FilterPanel`). Antes estaba duplicado (con pequeñas divergencias que eran bugs latentes) en cada página.
+
+- **`usePresets(screen)`** — hook que hace el `fetch('/api/presets?screen=...')` y expone `{ presets, reload }`. Se llama **una vez por página** y su resultado se reparte a los otros dos componentes, para que ambos vean siempre la misma lista sin fetches duplicados ni desincronización tras guardar/borrar.
+- **`PresetPanel`** — panel "Mis Presets de Filtros" (guardar/editar/listar/borrar). Props: `screen`, `presets`, `onReload` (del hook), `open`, `onClose`, `getFilters()` (serializa el estado de filtros actual), `applyFilters(filters)` (restaura cada filtro con sus defaults), `hint?`. Gestiona guardar/editar (`toast` de éxito/error) y borrado con `ConfirmDialog` de confirmación (antes era un borrado inmediato sin confirmar); llama a `onReload()` tras cada cambio.
+- **`PresetQuickSelect`** — desplegable de carga inmediata en la barra de acciones (junto a Filtrar/Excel/Limpiar), para cargar un preset sin abrir el panel completo. Props: `presets`, `onSelect(preset)`. No renderiza nada si no hay presets guardados.
+
+Cada panel debe montar los tres juntos — ver el checklist de [`docs/design-system.md`](docs/design-system.md#5-componentes-de-panel-components) para el patrón completo.
+
 ### `Navbar.tsx`
 
 Barra de navegación compartida por todos los paneles. Reemplaza el top bar duplicado que había en cada página.
@@ -799,7 +834,7 @@ Barra de navegación compartida por todos los paneles. Reemplaza el top bar dupl
 
 | Prop | Tipo | Descripción |
 |---|---|---|
-| `currentPanel` | `'produccion' \| 'pedidos' \| 'caducados' \| 'comparativa'` | Panel activo (se marca con punto rojo en el dropdown) |
+| `currentPanel` | `'produccion' \| 'pedidos' \| 'caducados' \| 'comparativa'` (opcional) | Panel activo (se marca con punto rojo en el dropdown). Se omite en páginas que usan `Navbar`/`AppShell` pero no son uno de los 4 paneles reales (ej. `/admin/logs`) — así no marcan ninguno como activo |
 | `user` | `SessionUser \| null` | Usuario de sesión. Si es null, muestra botón "Iniciar sesión" |
 | `onLogout` | `() => void` | Callback para cerrar sesión |
 | `onPresetsClick` | `() => void` (opcional) | Si se pasa, aparece el botón "Presets". Lo wirean los 4 paneles (`/produccion`, `/preparacion-pedidos`, `/caducados`, `/comparativa-seres`) sólo con sesión activa |
@@ -867,10 +902,17 @@ Variante de `ArticleMultiSelect` para selección única. Mismo estilo visual (bu
 | Componente | Descripción |
 |---|---|
 | `button.tsx` | Botón con variantes (default, outline, ghost, destructive, secondary, link) |
-| `card.tsx` | Card, CardHeader, CardTitle, CardContent |
+| `card.tsx` | Card, CardHeader, CardTitle, CardContent. `Card` acepta la prop `accent` (borde superior de 3px en `primary` + `overflow-hidden`) — reemplaza al `style={{borderTop:'3px solid #D30B15'}}` que se repetía en cada tarjeta |
 | `input.tsx` | Input estilizado |
 | `popover.tsx` | Popover / PopoverTrigger / PopoverContent (Radix UI con Portal) |
 | `table.tsx` | Table, TableHeader, TableBody, TableRow, TableHead, TableCell |
+| `badge.tsx` | Badge — etiqueta de estado/categoría. Variantes: `default`, `primary`, `success`, `warning`, `destructive`, `info`, `outline` |
+| `skeleton.tsx` | Bloque de carga con pulso, para contenido que no es tabla |
+| `spinner.tsx` | Indicador de carga unificado (`<Spinner label="..." />`), sustituye a `<Loader2 className="animate-spin">` suelto |
+| `empty-state.tsx` | Estado vacío unificado (`icon`, `title`, `description`, `action?`) para tablas y paneles sin resultados |
+| `dialog.tsx` | `Dialog` (modal sobre `<dialog>` nativo, sin dependencias nuevas) y `ConfirmDialog` (confirmación de acciones destructivas — sustituye a `confirm()` nativo) |
+| `toast.tsx` | `ToastProvider` (montado una vez en `app/layout.tsx`) y el hook `useToast()` — sustituye a `alert()` en toda la app |
+| `tabs.tsx` | `Tabs` — barra de pestañas accesible (ARIA, navegación con flechas, contador opcional). Usada en `/admin` y `/comparativa-seres` |
 
 ---
 
@@ -961,11 +1003,12 @@ Los componentes compartidos y páginas siguen estas convenciones para pasar la a
 
 - **`ArticleMultiSelect`:** el `<Button>` combobox lleva `aria-label="Filtrar por {label}"`. El input de búsqueda lleva `aria-label="Buscar {label}"`. Los botones de acción ("Sel. todos", "Ninguno") llevan `type="button"` y `aria-label` explícito.
 - **`FilterPanel`:** todos los `<Input>` y `<select>` llevan `id` con prefijo `filter-` y el `<label>` correspondiente usa `htmlFor`. Los botones icono (cerrar presets, editar/eliminar preset) llevan `aria-label` dinámico.
-- **Páginas (`/produccion`, `/caducados`):** el elemento raíz del contenido es `<main>` (no `<div>`). Todos los botones de navegación llevan `type="button"`. El botón "Salir" usa `text-gray-500` (no `text-gray-400`) para cumplir el ratio de contraste WCAG AA.
+- **Páginas de panel:** el elemento raíz del contenido es `<main>` (lo aporta `AppShell`, no un `<div>` suelto). Todos los botones de navegación llevan `type="button"`. Iconos decorativos llevan `aria-hidden="true"`.
+- **Color de texto secundario:** el token `text-muted-foreground` (`#6B7280`) cumple el ratio de contraste WCAG AA sobre `bg-background`/`bg-card` — es el que hay que usar para texto atenuado, nunca un gris más claro suelto.
 
-### Color corporativo `#D30B15`
+### Sistema de tokens de color
 
-Se usa en: borde superior de tarjetas KPI/filtros/tabla, botón Filtrar, iconos KPI.
+Todos los colores (incluido el corporativo `#D30B15` → token `primary`) viven en `@theme inline` dentro de `app/globals.css`, no hardcodeados en cada página. Ver [`docs/design-system.md`](docs/design-system.md) para la tabla completa de tokens y las reglas de uso.
 
 ### Cookie `secure` en LAN
 

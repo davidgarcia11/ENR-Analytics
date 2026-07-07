@@ -17,7 +17,7 @@ Panel para controlar el progreso de asignación de palets/lotes a pedidos de ven
 
 **Acceso configurable** — público por defecto. Cualquier usuario puede consultar sin sesión activa. El administrador puede restringirlo a roles específicos desde `/admin` → pestaña Pantallas. Si hay sesión activa, se muestran los botones de Admin/Logs y el nombre del usuario.
 
-**Navegación:** dropdown "Paneles ▾" en la barra superior (componente `Navbar`). Ver todos los paneles disponibles en [DOCUMENTACION.md](../DOCUMENTACION.md) sección 10.
+**Navegación:** dropdown "Paneles ▾" en la barra superior (componente `Navbar`, integrado en `AppShell`). Ver todos los paneles disponibles en [DOCUMENTACION.md](../DOCUMENTACION.md) sección 10.
 
 ---
 
@@ -169,8 +169,10 @@ showStatus{}             → (filtro cliente, instantáneo, sin Filtrar)
 
 #### Layout visual
 
+La página se renderiza dentro de `<AppShell navbar={{...}} title="Control de pedidos" description="...">` (ver `components/AppShell.tsx`), que ya incluye el `Navbar` y la cabecera de página. El contenido propio del panel es:
+
 ```
-┌─ Panel de Filtros ──────────────────────────────────────────────────┐
+┌─ Panel de Filtros (Card con accent) ─────────────────────────────────┐
 │                                                                      │
 │  ─ Filtros ──────────────────────────────────────────────────────   │
 │  Estado:   [● Pendiente] [● En Progreso] [● Completado]             │
@@ -185,16 +187,16 @@ showStatus{}             → (filtro cliente, instantáneo, sin Filtrar)
 │  F.Carga:   [dd/mm/aaaa ×] → [dd/mm/aaaa ×]  (puede dejarse vacía) │
 │  F.Entrega: [dd/mm/aaaa ×] → [dd/mm/aaaa ×]                        │
 │                                                                      │
-│  [Filtrar 🔍] [Excel ↓] [✕ Limpiar] [Presets ▾] [💾 Guardar]       │
+│  [Filtrar 🔍] [Excel ↓] [✕ Limpiar] [Cargar preset ▾] [💾 Guardar] │
 │  ⚠ "Debes rellenar al menos un rango de fechas" (si ambos vacíos)   │
 └──────────────────────────────────────────────────────────────────────┘
 
 ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐
-│  Total   │ │Completad.│ │En Progr. │ │Pendientes│
+│  Total   │ │Completad.│ │En Progr. │ │Pendientes│  ← KpiCard ×4
 │   50     │ │    10    │ │    25    │ │    15    │
 └──────────┘ └──────────┘ └──────────┘ └──────────┘
 
-┌─ Tabla de pedidos (3 niveles expandibles) ─────────────┐
+┌─ Tabla de pedidos (3 niveles expandibles, Card con accent) ─────────────┐
 │ ▶ │ 12345         │ DIST. EJEMPLO SL │ 09/03 │ 12/03 │ Funes │ 3 │ ██░ 60% │ 🟡 En Progreso │
 │   │ REF-2026-001  │ (nº 1234)        │       │       │       │   │         │               │
 │   ▼ (expandido — artículos)                                                                 │
@@ -204,6 +206,8 @@ showStatus{}             → (filtro cliente, instantáneo, sin Filtrar)
 │      │ ↳ —      ⏳ PENDIENTE │ 200 │                                                        │
 └────────────────────────────────────────────────────────────────────────────────────────────┘
 ```
+
+Las tarjetas KPI (Total Pedidos, Completados, En Progreso, Pendientes) se construyen con `<KpiCard title icon value caption>` o, cuando necesitan color condicional en el número, con `<KpiCard title icon iconClassName>` y contenido en `children`. Los colores usan tokens Tailwind (`text-green-600`, `text-amber-600`, `text-muted-foreground`, etc.) en vez de estilos manuales. El estado de carga de la tabla usa `<Spinner label="Cargando pedidos...">` y el estado sin resultados usa `<EmptyState icon title description>`.
 
 #### Columnas de la tabla de pedidos (9 columnas)
 
@@ -292,13 +296,22 @@ Las tarjetas de resumen (`displaySummary`) se calculan también por `useMemo` a 
 
 #### Presets
 
-Sistema idéntico a producción y caducados. Usa `screen='pedidos'` para aislar los presets de este panel.
+Usa el sistema de presets **compartido** de `components/PresetPanel.tsx` (mismo componente que producción, caducados y comparativa SERES), parametrizado con `screen='pedidos'` para aislar los presets de este panel. El contrato de la API `/api/presets` no cambia: sigue guardando `{ name, filters, screen }` y devolviendo la lista de presets del panel.
 
-**Cómo se abre el panel de presets:**
+**Piezas del sistema compartido:**
+- `usePresets('pedidos')` — hook que hace `fetch('/api/presets?screen=pedidos')` una vez al montar y expone `{ presets, reload }`. Se declara una sola vez en la página y se pasa a los dos componentes de abajo para que ambos vean siempre la misma lista.
+- `<PresetPanel screen="pedidos" presets={presets} onReload={reloadPresets} open={showPresets} onClose={...} getFilters={getPresetFilters} applyFilters={applyPresetFilters} hint="..." />` — panel completo de guardar / editar / listar / borrar presets. Sustituye al estado y los `fetch` que antes estaban escritos a mano en `page.tsx`. El borrado de un preset ahora pide confirmación con `<ConfirmDialog>` (antes era inmediato al pulsar el icono de papelera). Los mensajes de éxito/error usan `useToast()` → `toast(mensaje, 'success'|'error')` en vez de `alert()`.
+- `<PresetQuickSelect presets={presets} onSelect={p => applyPresetFilters(JSON.parse(p.filters))} />` — el desplegable "Cargar preset" en la barra de acciones (junto a Filtrar/Excel/Limpiar), ahora como componente reutilizable en vez de un `<select>` escrito a mano en la página. No se renderiza si no hay presets guardados.
+
+**Cómo se abre el panel de presets (`<PresetPanel>`):**
 - Botón **"💾 Guardar"** dentro de la sección de filtros (siempre visible con sesión)
-- Botón **"Presets"** en la Navbar superior (común a todos los paneles): incrementa una señal `presetsSignal` que un `useEffect` observa para hacer `setShowPresets(true)`
+- Botón **"Presets"** en la Navbar superior (común a todos los paneles), vía la prop `onPresetsClick` de `AppShell`/`Navbar`: incrementa una señal `presetsSignal` que un `useEffect` observa para hacer `setShowPresets(true)`
 
-**Filtros que se guardan en un preset de pedidos:**
+La página solo aporta la serialización de sus propios filtros a través de dos funciones que pasa como props a `<PresetPanel>`:
+- `getPresetFilters()` — construye el objeto de filtros actuales a partir del estado de la página (mismo shape que antes).
+- `applyPresetFilters(raw)` — recibe el objeto ya parseado (`JSON.parse(preset.filters)`) y actualiza el estado de la página con los mismos valores por defecto que tenía la carga de presets original.
+
+**Filtros que se guardan en un preset de pedidos** (shape JSON sin cambios):
 ```json
 {
   "filters": {
