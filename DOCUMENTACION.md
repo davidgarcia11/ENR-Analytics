@@ -761,6 +761,7 @@ Cada panel tiene su documentación específica en la carpeta `docs/`:
 | Dashboard de producción | `/produccion` | [docs/produccion.md](docs/produccion.md) |
 | Control de pedidos | `/preparacion-pedidos` | [docs/control-pedidos.md](docs/control-pedidos.md) |
 | Palets caducados/obsoletos/bloqueados | `/caducados` | [docs/palets-caducados.md](docs/palets-caducados.md) |
+| Loteadora (en desarrollo) | `/loteadora` | [docs/loteadora.md](docs/loteadora.md) |
 
 ### API externa — `GET /api/jde-orders`
 
