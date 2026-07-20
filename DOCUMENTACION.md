@@ -28,6 +28,7 @@ Esta aplicación es un **panel de control (dashboard) de producción** para la e
 | **Tailwind CSS** | 4 | Estilos utilitarios (clases CSS) |
 | **oracledb** | 6 | Driver para conectar con Oracle desde Node.js |
 | **better-sqlite3** | — | Base de datos local para usuarios y presets |
+| **mssql** | 12 | Driver para conectar con SQL Server (Reflex) desde Node.js — JS puro sobre `tedious`, sin binarios nativos |
 | **jose** | — | Firma/verificación de JWT para sesiones |
 | **bcryptjs** | — | Hash de contraseñas |
 | **xlsx** | 0.18 | Generar archivos Excel (.xlsx) |
@@ -55,7 +56,8 @@ dashboard/
 │   ├── middleware.test.ts        ← JWT forgery, expiración, bypass de rol
 │   ├── sanitization.test.ts      ← SQL injection, XSS en entradas de usuario
 │   ├── permissions.test.ts       ← requireScreenAccess con DB en memoria
-│   └── admin-guards.test.ts      ← Protección del rol/pantalla admin, inyección
+│   ├── admin-guards.test.ts      ← Protección del rol/pantalla admin, inyección
+│   └── gs1.test.ts               ← Parser de códigos de barras GS1-128 (lib/gs1.ts)
 │
 ├── data/
 │   └── app.db                    ← Base de datos SQLite (usuarios, presets, logs — NO se sube a Git)
@@ -68,7 +70,9 @@ dashboard/
 │   ├── sqlite.ts                 ← Conexión a SQLite (usuarios, presets, migraciones, roles, pantallas)
 │   ├── auth.ts                   ← JWT, bcrypt, SessionUser, cookieOptions
 │   ├── permissions.ts            ← Control de acceso por pantalla (getAllScreensConfig, requireScreenAccess)
-│   └── utils.ts                  ← Funciones auxiliares (fechas, cantidades, clases CSS)
+│   ├── utils.ts                  ← Funciones auxiliares (fechas, cantidades, clases CSS)
+│   ├── reflex.ts                 ← Conexión a SQL Server (Reflex), análoga a db.ts para Oracle
+│   └── gs1.ts                    ← Parser de códigos de barras GS1-128 (EAN/lote/cantidad/SSCC/fechas)
 │
 ├── components/                   ← Componentes React reutilizables
 │   ├── ArticleMultiSelect.tsx    ← Desplegable multi-selección con búsqueda
@@ -152,6 +156,11 @@ ORACLE_PORT=1521
 ORACLE_SERVICE=<nombre_servicio_oracle>
 JWT_SECRET=<clave_secreta_para_firmar_jwt>
 SERES_API_KEY=<clave_para_endpoint_externo_jde_orders>
+REFLEX_HOST=<ip_servidor_sql_server_reflex>
+REFLEX_PORT=1433
+REFLEX_DATABASE=<nombre_base_datos_reflex>
+REFLEX_USER=<usuario_reflex>
+REFLEX_PASSWORD=<contraseña_reflex>
 ```
 
 > **IMPORTANTE:** Este archivo NUNCA se sube al repositorio. Está en `.gitignore`.
@@ -750,6 +759,18 @@ Divide entre 100 (JDE almacena cantidades ×100).
 
 Devuelve el día del año (1-366) para una `Date`. Equivalente nativo a `getDayOfYear` de `date-fns`, sin dependencia externa. Usado en las rutas API que construyen fechas JDE para filtrar consultas Oracle.
 
+### `lib/reflex.ts` — Conexión a SQL Server (Reflex)
+
+**Qué hace:** Exporta `getReflexConnection()`, análoga a `getDbConnection()` de `lib/db.ts` pero para la BD externa de almacén **Reflex** (SQL Server, vía driver `mssql`). Credenciales `REFLEX_*` desde `.env.local`; lanza error claro si falta alguna. Misma regla de oro: `try/finally` para cerrar la conexión (`conn.close()`).
+
+Única fuente de datos del proyecto que no es Oracle/JDE. Usada solo por el panel `/consulta-stock-pda` — esquema de tablas y JOINs documentado en [docs/consulta-stock-pda.md](docs/consulta-stock-pda.md).
+
+### `lib/gs1.ts` — Parser de códigos de barras GS1-128
+
+**Qué hace:** Exporta `parseGs1(rawInput)`, que separa un código de barras de palet (GS1-128) en sus campos logísticos (EAN, lote, cantidad, SSCC, fechas). Soporta formato crudo (con separador FNC1) y formato legible entre paréntesis, además de EAN-13/DUN-14 sueltos sin envoltorio de AIs.
+
+Usado solo por `/consulta-stock-pda`. Detalle de los Application Identifiers soportados y casos límite en [docs/consulta-stock-pda.md](docs/consulta-stock-pda.md); tests en `__tests__/gs1.test.ts`.
+
 ---
 
 ## 9. Paneles de la aplicación
@@ -761,6 +782,8 @@ Cada panel tiene su documentación específica en la carpeta `docs/`:
 | Dashboard de producción | `/produccion` | [docs/produccion.md](docs/produccion.md) |
 | Control de pedidos | `/preparacion-pedidos` | [docs/control-pedidos.md](docs/control-pedidos.md) |
 | Palets caducados/obsoletos/bloqueados | `/caducados` | [docs/palets-caducados.md](docs/palets-caducados.md) |
+| Comparativa SERES vs JDE | `/comparativa-seres` | [docs/seres-jde-comparativa.md](docs/seres-jde-comparativa.md) |
+| Consulta de stock por escaneo (FEFO, Reflex) | `/consulta-stock-pda` | [docs/consulta-stock-pda.md](docs/consulta-stock-pda.md) |
 
 ### API externa — `GET /api/jde-orders`
 
