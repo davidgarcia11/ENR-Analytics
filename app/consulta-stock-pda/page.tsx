@@ -10,7 +10,7 @@ import { Badge } from "@/components/ui/badge"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Spinner } from "@/components/ui/spinner"
 import { EmptyState } from "@/components/ui/empty-state"
-import { ScanBarcode, Camera, AlertTriangle, PackageSearch, X } from "lucide-react"
+import { ScanBarcode, Camera, AlertTriangle, CheckCircle2, PackageSearch, X } from "lucide-react"
 import { parseGs1, type Gs1Fields } from "@/lib/gs1"
 
 interface SessionUser { id: number; username: string; role: string; name: string; surname: string }
@@ -22,6 +22,19 @@ interface LoteStock {
     fechaCaducidad: string | null
     ubicacion: string | null
     planta: string | null
+}
+
+interface ValidacionSscc {
+    estado: 'correcto' | 'incorrecto' | 'no_encontrado' | 'sin_fecha'
+    mensaje: string
+}
+
+// Código de depósito físico (Reflex) -> nombre de planta, igual que en app/api/consulta-stock-pda/route.ts
+const PLANTAS: Record<string, string> = {
+    '001': 'Aguilar',
+    '002': 'Corella',
+    '004': 'Funes',
+    '006': 'Tudefrigo',
 }
 
 // Soporte de cámara: BarcodeDetector es API nativa del navegador (Chrome/Android),
@@ -59,7 +72,10 @@ export default function ConsultaStockPdaPage() {
     const [inputValue, setInputValue] = useState("")
     const [parsed, setParsed] = useState<Gs1Fields | null>(null)
     const [articulo, setArticulo] = useState<string | null>(null)
+    const [descripcion, setDescripcion] = useState<string | null>(null)
     const [lotes, setLotes] = useState<LoteStock[]>([])
+    const [validacionSscc, setValidacionSscc] = useState<ValidacionSscc | null>(null)
+    const [planta, setPlanta] = useState("")
     const [loading, setLoading] = useState(false)
     const [error, setError] = useState<string | null>(null)
     const [cameraOpen, setCameraOpen] = useState(false)
@@ -105,36 +121,48 @@ export default function ConsultaStockPdaPage() {
         setSessionUser(null)
     }
 
-    const fetchStock = useCallback(async (ean: string) => {
+    const fetchStock = useCallback(async (ean: string | undefined, sscc?: string) => {
         setLoading(true)
         setError(null)
         setArticulo(null)
+        setDescripcion(null)
         setLotes([])
+        setValidacionSscc(null)
         setSearched(true)
         try {
-            const res = await fetch(`/api/consulta-stock-pda?ean=${encodeURIComponent(ean)}`)
+            const params = new URLSearchParams()
+            if (ean) params.set('ean', ean)
+            if (planta) params.set('planta', planta)
+            if (sscc) params.set('sscc', sscc)
+            const res = await fetch(`/api/consulta-stock-pda?${params}`)
             const data = await res.json()
             if (!res.ok) throw new Error(data.error || `Error ${res.status}`)
             setArticulo(data.articulo)
+            setDescripcion(data.descripcion)
             setLotes(data.lotes || [])
+            setValidacionSscc(data.validacionSscc || null)
         } catch (err) {
             setError(err instanceof Error ? err.message : 'Error desconocido')
         } finally {
             setLoading(false)
         }
-    }, [])
+    }, [planta])
 
     // Procesa un código escaneado (da igual si viene del input HID o de la cámara):
-    // lo parsea como GS1-128 y, si trae EAN, consulta el stock.
+    // lo parsea como GS1-128 y consulta el stock por EAN. Si además trae SSCC (palet completo,
+    // no solo el EAN "pelado" del artículo), la API valida si es correcto FEFO. Algunas etiquetas
+    // no traen EAN en absoluto (o viene a ceros) — en ese caso se busca directamente por SSCC.
     const handleScan = useCallback((raw: string) => {
         const code = raw.trim()
         if (!code) return
         const fields = parseGs1(code)
         setParsed(fields)
         if (fields.ean) {
-            fetchStock(fields.ean)
+            fetchStock(fields.ean, fields.sscc)
+        } else if (fields.sscc) {
+            fetchStock(undefined, fields.sscc)
         } else {
-            setError('No se ha podido identificar el EAN en el código escaneado')
+            setError('No se ha podido identificar el EAN ni el SSCC en el código escaneado')
             setArticulo(null)
             setLotes([])
         }
@@ -150,7 +178,9 @@ export default function ConsultaStockPdaPage() {
     const clearAll = () => {
         setParsed(null)
         setArticulo(null)
+        setDescripcion(null)
         setLotes([])
+        setValidacionSscc(null)
         setError(null)
         setSearched(false)
         setInputValue('')
@@ -228,6 +258,22 @@ export default function ConsultaStockPdaPage() {
                             className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm font-mono shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
                         />
                     </div>
+                    <div className="grid gap-1.5">
+                        <label htmlFor="planta-select" className="text-xs font-semibold text-secondary-foreground">
+                            Planta
+                        </label>
+                        <select
+                            id="planta-select"
+                            value={planta}
+                            onChange={(e) => setPlanta(e.target.value)}
+                            className="flex h-10 w-[160px] rounded-md border border-input bg-background px-3 py-2 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                        >
+                            <option value="">Todas</option>
+                            {Object.entries(PLANTAS).map(([codigo, nombre]) => (
+                                <option key={codigo} value={codigo}>{nombre}</option>
+                            ))}
+                        </select>
+                    </div>
                     <div className="flex gap-2">
                         {cameraSupported && !cameraOpen && (
                             <Button type="button" variant="outline" onClick={startCamera}>
@@ -269,12 +315,29 @@ export default function ConsultaStockPdaPage() {
                 </div>
             )}
 
+            {validacionSscc && (
+                <div className={`flex items-center gap-3 rounded-lg border px-4 py-3 ${validacionSscc.estado === 'correcto'
+                    ? 'bg-green-50 border-green-200 text-green-700'
+                    : validacionSscc.estado === 'sin_fecha'
+                        ? 'bg-amber-50 border-amber-200 text-amber-700'
+                        : 'bg-red-50 border-red-200 text-red-700'
+                    }`}>
+                    {validacionSscc.estado === 'correcto'
+                        ? <CheckCircle2 className="h-5 w-5 flex-shrink-0" aria-hidden="true" />
+                        : <AlertTriangle className="h-5 w-5 flex-shrink-0" aria-hidden="true" />}
+                    <span className="text-sm font-medium">{validacionSscc.mensaje}</span>
+                </div>
+            )}
+
             {loading && <Spinner label="Consultando stock en Reflex..." className="py-10" />}
 
             {!loading && articulo && (
                 <Card accent className="overflow-hidden">
                     <CardHeader>
-                        <CardTitle className="text-base">{articulo}</CardTitle>
+                        <CardTitle className="text-base">
+                            {articulo}
+                            {descripcion && <span className="ml-2 font-normal text-secondary-foreground">{descripcion}</span>}
+                        </CardTitle>
                     </CardHeader>
                     <CardContent>
                         <div className="overflow-x-auto">
