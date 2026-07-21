@@ -66,6 +66,14 @@ function filaCaducidadClassName(fecha: string | null): string {
     return ""
 }
 
+// La caducidad manda si hay aviso; si no, resalta en tono de marca la fila del SSCC escaneado
+function filaClassName(lote: LoteStock, ssccEscaneado: string | null | undefined): string {
+    const porCaducidad = filaCaducidadClassName(lote.fechaCaducidad)
+    if (porCaducidad) return porCaducidad
+    if (ssccEscaneado && lote.sscc === ssccEscaneado) return "bg-primary/10 hover:bg-primary/15"
+    return ""
+}
+
 export default function ConsultaStockPdaPage() {
     const router = useRouter()
     const [sessionUser, setSessionUser] = useState<SessionUser | null>(null)
@@ -360,9 +368,14 @@ export default function ConsultaStockPdaPage() {
                                         </TableRow>
                                     ) : (
                                         lotes.map((l, i) => (
-                                            <TableRow key={`${l.sscc || l.lote}-${i}`} className={filaCaducidadClassName(l.fechaCaducidad)}>
+                                            <TableRow key={`${l.sscc || l.lote}-${i}`} className={filaClassName(l, parsed?.sscc)}>
                                                 <TableCell className="font-mono text-sm">{l.lote}</TableCell>
-                                                <TableCell className="font-mono text-sm text-secondary-foreground">{l.sscc ? l.sscc.slice(-6) : '-'}</TableCell>
+                                                <TableCell className="font-mono text-sm text-secondary-foreground">
+                                                    {l.sscc ? l.sscc.slice(-6) : '-'}
+                                                    {parsed?.sscc && l.sscc === parsed.sscc && (
+                                                        <Badge variant="primary" className="ml-2">Escaneado</Badge>
+                                                    )}
+                                                </TableCell>
                                                 <TableCell className="text-sm">{l.cantidad}</TableCell>
                                                 <TableCell className="text-sm">
                                                     {formatFecha(l.fechaCaducidad)}

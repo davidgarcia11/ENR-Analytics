@@ -280,6 +280,12 @@ se resalta en la tabla con el badge "Primero en caducar".
 `DIAS_AVISO_CADUCIDAD` es una constante en el propio archivo — cambiar ahí el umbral de 5 días si
 el almacén pide otro valor.
 
+Además, la fila cuyo `sscc` coincide con el SSCC recién escaneado (`parsed.sscc`) siempre lleva un
+badge **"Escaneado"** junto al SSCC, sea cual sea el color de fondo de la fila. Si esa fila no
+tiene ya aviso de caducidad (rojo/ámbar manda, por ser más urgente), además se tiñe en tono de
+marca (`bg-primary/10`) para localizarla de un vistazo en listados largos —
+`filaClassName()` en `page.tsx` decide esta prioridad.
+
 ### 7.2 Validación FEFO por SSCC
 
 Cuando el código escaneado trae SSCC (AI `00` de GS1-128 — es decir, es la etiqueta del **palet**,
