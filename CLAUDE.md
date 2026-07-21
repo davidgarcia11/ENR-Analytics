@@ -9,6 +9,7 @@ Dashboard de producción para Elaborados Naturales. Conecta con Oracle JDE y mue
 - **Runtime/Package Manager:** Bun (no npm/node)
 - **BD Oracle:** oracledb 6 (driver nativo, requiere `try/finally` para cerrar conexiones SIEMPRE)
 - **BD Local:** better-sqlite3 (usuarios, presets, logs) en `data/app.db`
+- **BD Reflex (SQL Server):** mssql 12 (driver JS puro sobre `tedious`, sin binarios nativos), usado solo por el panel de consulta de stock por escaneo
 - **Auth:** JWT (jose) + bcryptjs, cookie httpOnly
 - **Excel:** xlsx 0.18
 - **Gráficos:** recharts
@@ -31,6 +32,7 @@ app/                          # Rutas Next.js (App Router)
   preparacion-pedidos/        # Panel control de pedidos
   caducados/                  # Panel palets caducados/obsoletos/bloqueados
   comparativa-seres/          # Panel comparativa SERES vs JDE
+  consulta-stock-pda/         # Panel consulta de stock por escaneo (FEFO, Reflex/SQL Server)
   admin/page.tsx              # Panel de administración de usuarios
   admin/logs/page.tsx         # Logs de consultas (solo admin)
   login/page.tsx              # Login
@@ -45,6 +47,7 @@ app/                          # Rutas Next.js (App Router)
     caducados/                # GET palets caducados/obsoletos/bloqueados
     jde-orders/               # GET órdenes JDE (API externa, usada por herramientas externas)
     comparativa-seres/        # GET comparativa SERES vs JDE
+    consulta-stock-pda/       # GET stock FEFO por EAN escaneado (Reflex/SQL Server)
     auth/                     # login, logout, me, change-password
     admin/                    # users CRUD, logs
     presets/                  # CRUD presets de filtros
@@ -53,6 +56,8 @@ lib/
   sqlite.ts                   # Conexión SQLite + migraciones + seed admin
   auth.ts                     # JWT, bcrypt, verifySession, cookieOptions
   utils.ts                    # parseJdeDate, parseWasOqs, cn()
+  reflex.ts                   # Conexión SQL Server (Reflex), análoga a db.ts para Oracle
+  gs1.ts                      # Parser de códigos de barras GS1-128 (EAN/lote/cantidad/SSCC/fechas)
 components/
   AppShell.tsx                # AppShell (contenedor de página + Navbar) y PageHeader — punto de entrada de todo panel
   KpiCard.tsx                 # Tarjeta KPI reutilizable (icono + valor + caption, o children para casos custom)
@@ -71,6 +76,7 @@ docs/                         # Documentación específica por panel
   control-pedidos.md          # Panel de pedidos
   palets-caducados.md         # Panel de caducados
   seres-jde-comparativa.md    # Panel comparativa SERES vs JDE
+  consulta-stock-pda.md       # Panel consulta de stock por escaneo (FEFO, Reflex)
 ```
 
 ## Convenciones de código
@@ -97,11 +103,23 @@ docs/                         # Documentación específica por panel
 - `data/app.db` está en `.gitignore`, no se pierde con git pull/build
 - Usuario admin por defecto: `admin` / `admin123`
 
+### Reflex / SQL Server (`lib/reflex.ts`)
+- Única integración del proyecto que no es Oracle/JDE — BD externa de almacén, usada solo por `/consulta-stock-pda`
+- Credenciales `REFLEX_*` en `.env.local` (host, puerto, database, user, password)
+- `getReflexConnection()` sigue el mismo patrón que `getDbConnection()`: **SIEMPRE** cerrar con `try/finally` (`conn.close()`)
+- Códigos de barras de palet (GS1-128) se parsean con `lib/gs1.ts`, no a mano
+- Esquema completo (4 tablas encadenadas) documentado en `docs/consulta-stock-pda.md`
+
 ### Autenticación
 - JWT firmado HS256, expira 7 días, cookie `session` httpOnly
 - `cookieOptions(req)` detecta HTTPS desde URL real (no NODE_ENV) para funcionar en LAN
 - `middleware.ts` protege rutas `/api/admin/*`
 - Logging de consultas nunca bloquea la respuesta (try/catch independiente)
+
+### Seguridad
+- Secretos (credenciales Oracle, `JWT_SECRET`) viven en `.env.local`, nunca en código. `.env*` está en `.gitignore` — jamás commitear un archivo `.env` con valores reales
+- `login/route.ts` no tiene rate limiting ni bloqueo por intentos fallidos — tenerlo en cuenta si se toca ese endpoint o si aparece abuso
+- Cualquier valor que llegue del cliente a una API route se valida/sanitiza antes de usarlo (ver `__tests__/sanitization.test.ts`), no solo en las queries Oracle
 
 ### Estilo visual
 - **Sistema de diseño completo:** [`docs/design-system.md`](docs/design-system.md) — léelo antes de escribir o tocar JSX/CSS de cualquier panel. Es de lectura obligatoria, no opcional.
@@ -135,6 +153,12 @@ docs/                         # Documentación específica por panel
 1. Añadir INSERT en la ruta API con `source: 'nombre_panel'`
 2. Añadir etiqueta en `SOURCE_LABELS` en `admin/logs/page.tsx`
 
+### Añadir integración con una nueva fuente de datos externa (ej. otra BD SQL Server)
+1. `lib/nombre.ts` → función de conexión análoga a `lib/db.ts`/`lib/reflex.ts`: credenciales desde `.env.local`, error claro si falta alguna, `try/finally` en quien la usa
+2. Documentar el esquema (tablas, JOINs, campos) en `docs/nombre-panel.md` — no en `CLAUDE.md`/`DOCUMENTACION.md`, que solo enlazan a él
+3. Añadir variables `NOMBRE_*` al bloque `.env.local` de `DOCUMENTACION.md` sección 3
+4. Ver `lib/reflex.ts` + `docs/consulta-stock-pda.md` como ejemplo de referencia
+
 ### Merma
 - Movimientos `IS` con códigos razón `P01-P05`, `Q01-Q10`
 - Valor negativo de Oracle
@@ -147,6 +171,7 @@ docs/                         # Documentación específica por panel
 - Ofrecer plan detallado y esperar confirmación antes de ejecutar si el cambio afecta a más de 2 archivos
 - Lee los archivos afectados antes de modificarlos
 - Si tocas `api/production/route.ts`, ten especial cuidado: es el endpoint más complejo
+- Al implementar una función o endpoint nuevo: si hay ambigüedad (nombre de campo, comportamiento en casos límite, dónde vive el código, forma de la respuesta), preguntar antes de asumir, o presentar 2-3 opciones concretas con su trade-off. No decidir en silencio ni avanzar sobre un supuesto no confirmado.
 
 ### Al escribir código
 - Respeta el patrón existente de manejo de errores (try/catch/finally)
@@ -169,6 +194,7 @@ docs/                         # Documentación específica por panel
 
 ### Testing
 - Verificar compilación con `bun run build` después de cambios significativos
+- Hay tests con `bun test` en `__tests__/` (admin-guards, middleware, permissions, sanitization) — correrlos (`bun test`) tras tocar auth, permisos o sanitización, y añadir un test ahí si el cambio afecta a esa lógica
 
 ### Git — Flujo de trabajo
 ```
