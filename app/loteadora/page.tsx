@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
-import { Tag, CheckCircle2, XCircle, Loader2, Send, AlertTriangle, Calendar } from "lucide-react"
+import { Tag, CheckCircle2, XCircle, Loader2, Send, AlertTriangle, Calendar, Printer, PowerOff, Upload } from "lucide-react"
 import Navbar from "@/components/Navbar"
 import { SingleSelect } from "@/components/SingleSelect"
 import { useRouter } from "next/navigation"
@@ -11,6 +11,16 @@ import { useRouter } from "next/navigation"
 interface SessionUser { id: number; username: string; role: string; name: string; surname: string }
 interface Marca { id: string; descripcion: string }
 interface Articulo { id: string; descripcion: string; diasCaducidad: number }
+interface Loteadora { id: number; name: string }
+type EstadoLoteadoraValor = 'activa' | 'en_error' | 'standby' | 'apagada'
+interface EstadoLoteadora { id: number; name: string; state: EstadoLoteadoraValor }
+
+const ESTADO_INFO: Record<EstadoLoteadoraValor, { label: string; className: string; icon: typeof CheckCircle2 }> = {
+  activa: { label: 'Activa', className: 'bg-green-50 text-green-700 border-green-200', icon: CheckCircle2 },
+  en_error: { label: 'En error', className: 'bg-red-50 text-red-700 border-red-200', icon: XCircle },
+  standby: { label: 'Conectada (sin imprimir)', className: 'bg-amber-50 text-amber-700 border-amber-200', icon: AlertTriangle },
+  apagada: { label: 'Sin conexión', className: 'bg-gray-100 text-gray-500 border-gray-200', icon: PowerOff },
+}
 
 // --- Utilidades de cálculo ---
 function toJulianDay(date: Date): number {
@@ -67,14 +77,40 @@ export default function LoteadoraPage() {
   // Estado JDE
   const [jdeOnline, setJdeOnline] = useState(true)
 
+  // Loteadora de destino
+  const [loteadoras, setLoteadoras] = useState<Loteadora[]>([])
+  const [selectedLoteadora, setSelectedLoteadora] = useState('')
+  const [estadoLoteadoras, setEstadoLoteadoras] = useState<EstadoLoteadora[]>([])
+  const [loadingEstado, setLoadingEstado] = useState(false)
+
+  // Plantilla (mensaje) a cargar en la loteadora seleccionada
+  const [mensajes, setMensajes] = useState<string[]>([])
+  const [selectedMensaje, setSelectedMensaje] = useState('')
+  const [loadingMensajes, setLoadingMensajes] = useState(false)
+  const [cargandoMensaje, setCargandoMensaje] = useState(false)
+  const [mensajeError, setMensajeError] = useState<string | null>(null)
+  const [mensajeSuccess, setMensajeSuccess] = useState(false)
+
   // Envío
   const [sending, setSending] = useState(false)
   const [enviado, setEnviado] = useState(false)
+  const [sendError, setSendError] = useState<string | null>(null)
 
   useEffect(() => { checkSession() }, [])
 
   useEffect(() => {
     fetchMarcas()
+    fetchLoteadoras()
+    fetchEstadoLoteadoras()
+
+    // Estado en vivo: JDE y loteadoras se refrescan solos cada 60s mientras
+    // el panel esté abierto (cada comprobación de loteadora abre y cierra
+    // una conexión TCP breve — protocolo TIJ, comando 14).
+    const interval = setInterval(() => {
+      fetchMarcas()
+      fetchEstadoLoteadoras()
+    }, 60000)
+    return () => clearInterval(interval)
   }, [])
 
   useEffect(() => {
@@ -86,10 +122,20 @@ export default function LoteadoraPage() {
     fetchArticulos(selectedMarca)
   }, [selectedMarca])
 
+  useEffect(() => {
+    setMensajeError(null)
+    if (!selectedLoteadora) {
+      setMensajes([])
+      setSelectedMensaje('')
+      return
+    }
+    fetchMensajes(selectedLoteadora)
+  }, [selectedLoteadora])
+
   const checkSession = async () => {
     try {
       const res = await fetch('/api/auth/me')
-      if (res.ok) setSessionUser((await res.json()).user)
+      if (res.ok) setSessionUser(await res.json())
       else router.push('/login')
     } catch { router.push('/login') }
   }
@@ -129,6 +175,67 @@ export default function LoteadoraPage() {
     }
   }
 
+  const fetchLoteadoras = async () => {
+    try {
+      const res = await fetch('/api/loteadora/impresoras')
+      if (!res.ok) throw new Error()
+      setLoteadoras(await res.json())
+    } catch {
+      setLoteadoras([])
+    }
+  }
+
+  const fetchEstadoLoteadoras = async () => {
+    setLoadingEstado(true)
+    try {
+      const res = await fetch('/api/loteadora/estado')
+      if (!res.ok) throw new Error()
+      setEstadoLoteadoras(await res.json())
+    } catch {
+      setEstadoLoteadoras([])
+    } finally {
+      setLoadingEstado(false)
+    }
+  }
+
+  const fetchMensajes = async (loteadoraId: string) => {
+    setLoadingMensajes(true)
+    try {
+      const res = await fetch(`/api/loteadora/mensajes?loteadoraId=${loteadoraId}`)
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error || 'Error al listar las plantillas de la loteadora')
+      setMensajes(data.messages)
+      setSelectedMensaje(data.messages.includes(data.current) ? data.current : (data.messages[0] || ''))
+    } catch (err: any) {
+      setMensajes([])
+      setSelectedMensaje('')
+      setMensajeError(err.message || 'Error al listar las plantillas de la loteadora')
+    } finally {
+      setLoadingMensajes(false)
+    }
+  }
+
+  const handleCargarMensaje = async () => {
+    if (!selectedLoteadora || !selectedMensaje || cargandoMensaje) return
+    setCargandoMensaje(true)
+    setMensajeError(null)
+    try {
+      const res = await fetch('/api/loteadora/cargar-mensaje', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ loteadoraId: Number(selectedLoteadora), messageName: selectedMensaje }),
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error || 'Error al cargar la plantilla')
+      setMensajeSuccess(true)
+      setTimeout(() => setMensajeSuccess(false), 3000)
+    } catch (err: any) {
+      setMensajeError(err.message || 'Error al cargar la plantilla')
+    } finally {
+      setCargandoMensaje(false)
+    }
+  }
+
   const handleArticuloChange = (id: string) => {
     const art = articulos.find(a => a.id === id) ?? null
     setSelectedArticulo(art)
@@ -154,13 +261,25 @@ export default function LoteadoraPage() {
   }
 
   const handleEnviar = async () => {
-    if (!canSend) return
+    if (!canSend || !fechaCaducidad) return
     setSending(true)
+    setSendError(null)
     try {
-      // TODO: conectar con el endpoint de la loteadora
-      await new Promise(r => setTimeout(r, 600))
+      const res = await fetch('/api/loteadora/enviar', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          loteadoraId: Number(selectedLoteadora),
+          lote,
+          fechaCaducidad: formatDateES(fechaCaducidad),
+        }),
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error || 'Error al enviar a la loteadora')
       setEnviado(true)
       setTimeout(() => setEnviado(false), 3000)
+    } catch (err: any) {
+      setSendError(err.message || 'Error al enviar a la loteadora')
     } finally {
       setSending(false)
     }
@@ -171,8 +290,10 @@ export default function LoteadoraPage() {
   const diasNum = parseInt(diasCad, 10)
   const lote = fabDate ? toLote(fabDate) : null
   const fechaCaducidad = (fabDate && !isNaN(diasNum) && diasNum > 0) ? addDays(fabDate, diasNum) : null
-  const canSend = !!lote && !!fechaCaducidad && !!selectedArticulo && !sending
+  const canSend = !!lote && !!fechaCaducidad && !!selectedArticulo && !!selectedLoteadora && !sending
   const diasReadonly = !modoManual && jdeOnline && diasDesdeJde !== null
+  const loteadoraImprimiendo = estadoLoteadoras.find(e => String(e.id) === selectedLoteadora)?.state === 'activa'
+  const canCargarMensaje = !!selectedLoteadora && !!selectedMensaje && !cargandoMensaje && !loteadoraImprimiendo
 
   return (
     <main className="min-h-screen bg-gray-100 p-8 font-sans text-gray-900">
@@ -316,6 +437,71 @@ export default function LoteadoraPage() {
                   </button>
                 )}
               </div>
+
+              {/* Loteadora de destino */}
+              <div className="grid gap-1.5">
+                <label htmlFor="loteadora" className="text-xs font-semibold text-gray-700">Loteadora</label>
+                <SingleSelect
+                  label="loteadora"
+                  allLabel={loteadoras.length === 0 ? 'Sin loteadoras configuradas' : 'Seleccionar loteadora…'}
+                  value={selectedLoteadora || 'all'}
+                  onChange={id => setSelectedLoteadora(id === 'all' ? '' : id)}
+                  options={loteadoras.map(l => ({ id: String(l.id), description: l.name }))}
+                />
+              </div>
+
+              {/* Plantilla (mensaje) a cargar en la loteadora seleccionada */}
+              {selectedLoteadora && (
+                <div className="grid gap-1.5">
+                  <label htmlFor="mensaje" className="text-xs font-semibold text-gray-700">
+                    Plantilla
+                    {loadingMensajes && <Loader2 className="inline h-3 w-3 animate-spin ml-1.5 text-gray-400" />}
+                  </label>
+                  <div className="flex gap-2">
+                    <div className="flex-1">
+                      <SingleSelect
+                        label="plantilla"
+                        allLabel={mensajes.length === 0 ? 'Sin plantillas disponibles' : 'Seleccionar plantilla…'}
+                        value={selectedMensaje || 'all'}
+                        onChange={id => setSelectedMensaje(id === 'all' ? '' : id)}
+                        options={mensajes.map(m => ({ id: m, description: m }))}
+                      />
+                    </div>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={handleCargarMensaje}
+                      disabled={!canCargarMensaje}
+                      className="text-xs text-gray-600 whitespace-nowrap"
+                      title={loteadoraImprimiendo ? 'La loteadora está imprimiendo — detenla en su pantalla antes de cambiar de plantilla' : undefined}
+                    >
+                      {cargandoMensaje
+                        ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                        : <Upload className="h-3.5 w-3.5" />}
+                      Cargar plantilla
+                    </Button>
+                  </div>
+                  {loteadoraImprimiendo && (
+                    <p className="text-xs text-amber-700 flex items-center gap-1">
+                      <AlertTriangle className="h-3 w-3" />
+                      La loteadora está imprimiendo — detenla en su pantalla para poder cambiar de plantilla.
+                    </p>
+                  )}
+                  {mensajeSuccess && (
+                    <p className="text-xs text-green-700 flex items-center gap-1">
+                      <CheckCircle2 className="h-3 w-3" />
+                      Plantilla cargada correctamente
+                    </p>
+                  )}
+                  {mensajeError && (
+                    <p className="text-xs text-red-700 flex items-center gap-1">
+                      <XCircle className="h-3 w-3" />
+                      {mensajeError}
+                    </p>
+                  )}
+                </div>
+              )}
             </div>
 
             {/* ── Columna derecha: preview + envío ── */}
@@ -365,6 +551,13 @@ export default function LoteadoraPage() {
                 </div>
               )}
 
+              {sendError && (
+                <div className="flex items-center gap-2 bg-red-50 border border-red-200 rounded-lg px-4 py-3 text-sm text-red-700 font-medium">
+                  <XCircle className="h-4 w-4 flex-shrink-0" />
+                  {sendError}
+                </div>
+              )}
+
               <Button
                 onClick={handleEnviar}
                 disabled={!canSend}
@@ -377,6 +570,38 @@ export default function LoteadoraPage() {
               </Button>
             </div>
 
+          </div>
+        </div>
+
+        {/* Estado de las loteadoras (en vivo, se refresca solo cada 60s) */}
+        <div className="bg-white rounded-xl shadow-sm border border-gray-200" style={{ borderTop: '3px solid #D30B15' }}>
+          <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
+            <h2 className="text-base font-bold text-gray-800 flex items-center gap-2">
+              <Printer className="h-4 w-4" style={{ color: '#D30B15' }} />
+              Estado de las loteadoras
+              {loadingEstado && <Loader2 className="h-3.5 w-3.5 animate-spin text-gray-400" />}
+            </h2>
+          </div>
+          <div className="p-6">
+            {estadoLoteadoras.length === 0 ? (
+              <p className="text-sm text-gray-400">No hay loteadoras habilitadas configuradas en /admin.</p>
+            ) : (
+              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                {estadoLoteadoras.map(l => {
+                  const info = ESTADO_INFO[l.state]
+                  const Icon = info.icon
+                  return (
+                    <div key={l.id} className="flex items-center justify-between gap-2 border border-gray-200 rounded-lg px-4 py-2.5">
+                      <span className="text-sm font-medium text-gray-800 truncate">{l.name}</span>
+                      <span className={`flex items-center gap-1.5 text-xs font-medium px-2.5 py-1 rounded-full border whitespace-nowrap ${info.className}`}>
+                        <Icon className="h-3.5 w-3.5" />
+                        {info.label}
+                      </span>
+                    </div>
+                  )
+                })}
+              </div>
+            )}
           </div>
         </div>
       </div>

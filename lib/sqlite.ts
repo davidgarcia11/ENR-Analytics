@@ -77,6 +77,23 @@ export function getDb(): Database.Database {
       description TEXT NOT NULL,
       updated_at TEXT DEFAULT (datetime('now'))
     );
+
+    -- Impresoras loteadoras (TIJ, protocolo TCP) gestionadas desde /admin.
+    -- Cada fila es una máquina física con su mensaje/plantilla ya configurado
+    -- en pantalla con dos Field Module (Fuente de datos = Puerto serial):
+    -- uno para el lote y otro para la fecha de caducidad. Ver docs/loteadora.md.
+    CREATE TABLE IF NOT EXISTS loteadoras (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL UNIQUE,
+      ip TEXT NOT NULL,
+      port INTEGER NOT NULL,
+      slave_address INTEGER NOT NULL DEFAULT 0,
+      message_name TEXT NOT NULL,
+      lot_field_id INTEGER NOT NULL,
+      expiry_field_id INTEGER NOT NULL,
+      enabled INTEGER NOT NULL DEFAULT 1,
+      created_at TEXT DEFAULT (datetime('now'))
+    );
   `);
 
   // Migración: añadir columna must_change_password si no existe (para BDs creadas antes de esta versión)

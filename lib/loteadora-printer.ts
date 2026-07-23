@@ -1,0 +1,241 @@
+import net from 'net';
+
+// Envío/consulta por TCP a una impresora loteadora usando el protocolo TIJ
+// (TIJ_Protocol 6.7.pdf). Mismo espíritu que lib/reflex.ts/lib/db.ts: sin
+// dependencias nuevas (módulo nativo `net` de Node), config validada antes
+// de conectar, mensajes de error claros. Cada llamada abre una conexión
+// breve y la cierra al terminar (el protocolo solo admite un cliente a la vez).
+
+const ESC = 0x1b;
+const STX = 0x02;
+const ETX = 0x03;
+const ACK = 0x06;
+const NAK = 0x15;
+const CMD_UPDATE_PRINT_CONTENTS = 0x01;
+const CMD_DOWNLOAD_REMOTE_FIELD = 0x1d;
+const CMD_LOAD_PRINT_MESSAGE = 0x1e;
+const CMD_REQUEST_MESSAGE_NAMES = 0x1f;
+const CMD_REQUEST_PRINTER_STATUS = 0x14;
+
+export interface RemoteField {
+  /** Field ID configurado en la máquina con "Insertar Campo" (0-255) */
+  id: number;
+  /** Texto ASCII a imprimir en ese campo */
+  text: string;
+}
+
+export interface LoteadoraConfig {
+  ip: string;
+  port: number;
+  /** Slave Address configurada en la máquina, normalmente 0 */
+  slaveAddress: number;
+}
+
+export type PrinterState = 'activa' | 'en_error' | 'standby' | 'apagada';
+
+// Checknum = complemento a 2 de la suma módulo-256 de todos los bytes de la trama (protocolo §2.4)
+function checknum(bytes: number[]): number {
+  const sum = bytes.reduce((acc, b) => (acc + b) & 0xff, 0);
+  return (0x100 - sum) & 0xff;
+}
+
+// Construye la trama del comando 1D (Download Remote Field Data) — protocolo §3.5.18.
+export function buildRemoteFieldFrame(slaveAddress: number, fields: RemoteField[]): Buffer {
+  if (fields.length < 1 || fields.length > 255) {
+    throw new Error('Número de campos inválido (debe haber entre 1 y 255)');
+  }
+
+  const bytes: number[] = [ESC, STX, slaveAddress & 0xff, CMD_DOWNLOAD_REMOTE_FIELD, fields.length];
+  for (const field of fields) {
+    const textBytes = Buffer.from(field.text, 'ascii');
+    if (textBytes.length < 1 || textBytes.length > 255) {
+      throw new Error(`El texto del campo ${field.id} debe tener entre 1 y 255 caracteres`);
+    }
+    bytes.push(field.id & 0xff, textBytes.length, ...textBytes);
+  }
+  bytes.push(ESC, ETX);
+  bytes.push(checknum(bytes));
+
+  return Buffer.from(bytes);
+}
+
+// Construye la trama de un comando sin datos (14 Request Printer Status,
+// 1F Request Message Names, 01 Update Print contents...).
+function buildNoDataFrame(slaveAddress: number, cmdId: number): Buffer {
+  const bytes: number[] = [ESC, STX, slaveAddress & 0xff, cmdId, ESC, ETX];
+  bytes.push(checknum(bytes));
+  return Buffer.from(bytes);
+}
+
+// Construye la trama del comando 1E (Load Print Message) — protocolo §3.5.19.
+function buildLoadMessageFrame(slaveAddress: number, messageName: string): Buffer {
+  const nameBytes = Buffer.from(messageName, 'ascii');
+  if (nameBytes.length < 1 || nameBytes.length > 255) {
+    throw new Error('El nombre de la plantilla debe tener entre 1 y 255 caracteres');
+  }
+  const bytes: number[] = [ESC, STX, slaveAddress & 0xff, CMD_LOAD_PRINT_MESSAGE, nameBytes.length, ...nameBytes, ESC, ETX];
+  bytes.push(checknum(bytes));
+  return Buffer.from(bytes);
+}
+
+// Códigos relevantes del capítulo 4 del manual (P_Status de la respuesta ACK a 1D).
+// "12" aparece con mucha frecuencia en el manual: la máquina exige tener la
+// impresión iniciada en pantalla para aceptar casi cualquier comando.
+const P_STATUS_MESSAGES: Record<number, string> = {
+  0x01: 'La impresora tiene uno o más errores activos',
+  0x10: 'Esa plantilla no existe en la impresora',
+  0x12: 'La impresora no tiene la impresión iniciada — pulsa "Iniciar" en la pantalla de la máquina antes de enviar',
+  0x42: 'El buffer de campos remotos se acaba de llenar',
+  0x43: 'El buffer de campos remotos sigue lleno, el dato no se ha guardado',
+};
+
+// C_Status de una respuesta NAK (comando rechazado antes de ejecutarse).
+const C_STATUS_MESSAGES: Record<number, string> = {
+  0x06: 'Inicio de comando inválido',
+  0x07: 'Fin de comando inválido',
+  0x08: 'Checknum inválido',
+  0x09: 'Número de campos inválido',
+  0x0a: 'Tipo de módulo inválido',
+  0x11: 'Command ID inválido',
+};
+
+function describeStatus(map: Record<number, string>, code: number): string {
+  return map[code] ?? `código 0x${code.toString(16).padStart(2, '0').toUpperCase()}`;
+}
+
+interface CommandResult {
+  kind: 'ack' | 'nak';
+  /** P_Status (ack) o C_Status (nak) de la respuesta */
+  status: number;
+  /** Trama completa recibida, para comandos con datos de vuelta (ej. 1F) */
+  data: Buffer;
+}
+
+// Abre una conexión TCP breve, envía una trama y resuelve con el ACK/NAK
+// recibido. Rechaza solo por problemas de conexión/timeout/formato — el
+// contenido del P_Status/C_Status se interpreta en quien llama.
+//
+// La respuesta puede llegar troceada en varios paquetes TCP (ej. 1F con
+// muchos nombres de mensaje), así que se acumulan los `data` hasta detectar
+// el cierre de trama (ESC ETX + 1 byte de checknum) en vez de resolver con
+// el primer evento `data`.
+function sendCommand(config: LoteadoraConfig, frame: Buffer, timeoutMs: number): Promise<CommandResult> {
+  if (!config.ip || !config.port) {
+    return Promise.reject(new Error('Falta la IP o el puerto de la loteadora'));
+  }
+
+  return new Promise((resolve, reject) => {
+    const socket = new net.Socket();
+    let settled = false;
+    let buffer = Buffer.alloc(0);
+
+    const finish = (result?: CommandResult, err?: Error) => {
+      if (settled) return;
+      settled = true;
+      socket.destroy();
+      if (err) reject(err);
+      else resolve(result!);
+    };
+
+    socket.setTimeout(timeoutMs);
+    socket.on('timeout', () => finish(undefined, new Error('Tiempo de espera agotado conectando con la loteadora')));
+    socket.on('error', (err) => finish(undefined, new Error(`Error de conexión con la loteadora: ${err.message}`)));
+
+    socket.connect(config.port, config.ip, () => socket.write(frame));
+
+    socket.on('data', (chunk) => {
+      buffer = Buffer.concat([buffer, chunk]);
+
+      if (buffer[0] !== ESC) {
+        finish(undefined, new Error('Respuesta de la loteadora con formato inesperado'));
+        return;
+      }
+      // Aún no ha llegado ni la cabecera completa, o la trama no ha cerrado todavía.
+      if (buffer.length < 4) return;
+      if (!(buffer[buffer.length - 3] === ESC && buffer[buffer.length - 2] === ETX)) return;
+
+      if (buffer[1] === ACK) { finish({ kind: 'ack', status: buffer[3], data: buffer }); return; }
+      if (buffer[1] === NAK) { finish({ kind: 'nak', status: buffer[3], data: buffer }); return; }
+      finish(undefined, new Error('Respuesta de la loteadora con formato inesperado'));
+    });
+  });
+}
+
+// Envía los campos remotos (lote/caducidad) a una loteadora por TCP (comando 1D).
+export async function sendRemoteFields(config: LoteadoraConfig, fields: RemoteField[]): Promise<void> {
+  const frame = buildRemoteFieldFrame(config.slaveAddress, fields);
+  const result = await sendCommand(config, frame, 5000);
+
+  if (result.kind === 'nak') {
+    throw new Error(`Comando rechazado por la loteadora: ${describeStatus(C_STATUS_MESSAGES, result.status)}`);
+  }
+  if (result.status !== 0x00) {
+    throw new Error(`La loteadora rechazó el envío: ${describeStatus(P_STATUS_MESSAGES, result.status)}`);
+  }
+}
+
+// Consulta el estado real de una loteadora (comando 14 — Request Printer
+// Status). Nunca lanza: cualquier fallo de conexión se traduce en "apagada".
+export async function getPrinterStatus(config: LoteadoraConfig): Promise<PrinterState> {
+  try {
+    const frame = buildNoDataFrame(config.slaveAddress, CMD_REQUEST_PRINTER_STATUS);
+    const result = await sendCommand(config, frame, 3000);
+
+    if (result.kind === 'nak') return 'en_error';
+    if (result.status === 0x00) return 'activa';
+    if (result.status === 0x12) return 'standby';
+    return 'en_error';
+  } catch {
+    return 'apagada';
+  }
+}
+
+// Lista los nombres de mensaje guardados en la impresora (comando 1F).
+export async function listMessageNames(config: LoteadoraConfig): Promise<string[]> {
+  const frame = buildNoDataFrame(config.slaveAddress, CMD_REQUEST_MESSAGE_NAMES);
+  const result = await sendCommand(config, frame, 5000);
+
+  if (result.kind === 'nak') {
+    throw new Error(`Comando rechazado por la loteadora: ${describeStatus(C_STATUS_MESSAGES, result.status)}`);
+  }
+  if (result.status !== 0x00) {
+    throw new Error(`No se pudo listar las plantillas: ${describeStatus(P_STATUS_MESSAGES, result.status)}`);
+  }
+
+  // Cabecera: ESC ACK Slave P_Status CmdID [NumFicheros] {[Len][Nombre]}... ESC ETX Checknum
+  const data = result.data;
+  const names: string[] = [];
+  let offset = 5;
+  const numFiles = data[offset]; offset += 1;
+  for (let i = 0; i < numFiles && offset < data.length; i++) {
+    const len = data[offset]; offset += 1;
+    names.push(data.subarray(offset, offset + len).toString('ascii'));
+    offset += len;
+  }
+  return names;
+}
+
+// Carga una plantilla existente en la impresora y la aplica (comandos 1E + 01).
+// No comprueba si la impresora está imprimiendo — esa guarda vive en la ruta
+// API, que consulta getPrinterStatus() antes de llamar a esta función.
+export async function loadPrintMessage(config: LoteadoraConfig, messageName: string): Promise<void> {
+  const loadFrame = buildLoadMessageFrame(config.slaveAddress, messageName);
+  const loadResult = await sendCommand(config, loadFrame, 5000);
+
+  if (loadResult.kind === 'nak') {
+    throw new Error(`Comando rechazado por la loteadora: ${describeStatus(C_STATUS_MESSAGES, loadResult.status)}`);
+  }
+  if (loadResult.status !== 0x00) {
+    throw new Error(`No se pudo cargar la plantilla "${messageName}": ${describeStatus(P_STATUS_MESSAGES, loadResult.status)}`);
+  }
+
+  const updateFrame = buildNoDataFrame(config.slaveAddress, CMD_UPDATE_PRINT_CONTENTS);
+  const updateResult = await sendCommand(config, updateFrame, 5000);
+
+  if (updateResult.kind === 'nak') {
+    throw new Error(`Comando rechazado por la loteadora al aplicar la plantilla: ${describeStatus(C_STATUS_MESSAGES, updateResult.status)}`);
+  }
+  if (updateResult.status !== 0x00) {
+    throw new Error(`La plantilla se cargó pero no se pudo aplicar: ${describeStatus(P_STATUS_MESSAGES, updateResult.status)}`);
+  }
+}

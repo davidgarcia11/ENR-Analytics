@@ -11,7 +11,7 @@ import { Badge } from "@/components/ui/badge"
 import { Spinner } from "@/components/ui/spinner"
 import { ConfirmDialog } from "@/components/ui/dialog"
 import { useToast } from "@/components/ui/toast"
-import { Loader2, Trash2, UserPlus, ArrowLeft, KeyRound, Pencil, FileText, ShieldCheck, Tag } from "lucide-react"
+import { Loader2, Trash2, UserPlus, ArrowLeft, KeyRound, Pencil, FileText, ShieldCheck, Tag, Printer } from "lucide-react"
 import Image from "next/image"
 
 interface User {
@@ -42,12 +42,34 @@ interface Screen {
   config: ScreenConfig
 }
 
-type Tab = 'usuarios' | 'roles' | 'pantallas' | 'estados-jde'
+type Tab = 'usuarios' | 'roles' | 'pantallas' | 'estados-jde' | 'loteadoras'
 
 interface JdeStatus {
   code: string
   description: string
   updated_at?: string
+}
+
+interface Loteadora {
+  id: number
+  name: string
+  ip: string
+  port: number
+  slave_address: number
+  message_name: string
+  lot_field_id: number
+  expiry_field_id: number
+  enabled: number
+  created_at: string
+}
+
+type EstadoLoteadoraValor = 'activa' | 'en_error' | 'standby' | 'apagada'
+
+const ESTADO_LOTEADORA_INFO: Record<EstadoLoteadoraValor, { label: string; variant: 'success' | 'destructive' | 'warning' | 'default' }> = {
+  activa: { label: 'Activa', variant: 'success' },
+  en_error: { label: 'En error', variant: 'destructive' },
+  standby: { label: 'Sin imprimir', variant: 'warning' },
+  apagada: { label: 'Sin conexión', variant: 'default' },
 }
 
 const SCREEN_KEYS: { key: string; label: string }[] = [
@@ -111,7 +133,34 @@ export default function AdminPage() {
   const [jdeStatusSuccess, setJdeStatusSuccess] = useState("")
   const [jdeStatusError, setJdeStatusError] = useState("")
 
+  // ─── Loteadoras ────────────────────────────────────────────────────────────
+  const [loteadoras, setLoteadoras] = useState<Loteadora[]>([])
+  const [loadingLoteadoras, setLoadingLoteadoras] = useState(false)
+  const [newLoteadoraName, setNewLoteadoraName] = useState("")
+  const [newLoteadoraIp, setNewLoteadoraIp] = useState("")
+  const [newLoteadoraPort, setNewLoteadoraPort] = useState("8010")
+  const [newLoteadoraSlave, setNewLoteadoraSlave] = useState("0")
+  const [newLoteadoraMessage, setNewLoteadoraMessage] = useState("")
+  const [newLoteadoraLotField, setNewLoteadoraLotField] = useState("1")
+  const [newLoteadoraExpiryField, setNewLoteadoraExpiryField] = useState("2")
+  const [loteadoraError, setLoteadoraError] = useState("")
+  const [loteadoraSuccess, setLoteadoraSuccess] = useState("")
+  const [creatingLoteadora, setCreatingLoteadora] = useState(false)
+  const [editLoteadoraId, setEditLoteadoraId] = useState<number | null>(null)
+  const [editLoteadora, setEditLoteadora] = useState({ name: "", ip: "", port: "", slaveAddress: "", messageName: "", lotFieldId: "", expiryFieldId: "", enabled: true })
+  const [editLoteadoraError, setEditLoteadoraError] = useState("")
+  const [loteadoraLiveStatus, setLoteadoraLiveStatus] = useState<Record<number, EstadoLoteadoraValor>>({})
+
   useEffect(() => { checkAuth() }, [])
+
+  // Estado en vivo de las loteadoras: solo se comprueba mientras la pestaña
+  // está activa (cada comprobación abre una conexión TCP breve a cada máquina).
+  useEffect(() => {
+    if (activeTab !== 'loteadoras') return
+    loadLoteadoraLiveStatus()
+    const interval = setInterval(loadLoteadoraLiveStatus, 60000)
+    return () => clearInterval(interval)
+  }, [activeTab])
 
   const checkAuth = async () => {
     try {
@@ -124,6 +173,7 @@ export default function AdminPage() {
       loadRoles()
       loadScreens()
       loadJdeStatuses()
+      loadLoteadoras()
     } catch {
       router.push("/login")
     }
@@ -191,6 +241,95 @@ export default function AdminPage() {
     } finally {
       setSavingJdeStatus(null)
     }
+  }
+
+  const loadLoteadoras = async () => {
+    setLoadingLoteadoras(true)
+    try {
+      const res = await fetch("/api/admin/loteadoras")
+      if (res.ok) setLoteadoras(await res.json())
+    } finally { setLoadingLoteadoras(false) }
+  }
+
+  const loadLoteadoraLiveStatus = async () => {
+    try {
+      const res = await fetch("/api/admin/loteadoras/estado")
+      if (!res.ok) return
+      const data: { id: number; state: EstadoLoteadoraValor }[] = await res.json()
+      setLoteadoraLiveStatus(Object.fromEntries(data.map(d => [d.id, d.state])))
+    } catch { /* se reintenta en el siguiente ciclo de 60s */ }
+  }
+
+  // ─── Acciones de loteadoras ───────────────────────────────────────────────────
+
+  const createLoteadora = async (e: React.FormEvent) => {
+    e.preventDefault()
+    setLoteadoraError(""); setLoteadoraSuccess(""); setCreatingLoteadora(true)
+    try {
+      const res = await fetch("/api/admin/loteadoras", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: newLoteadoraName, ip: newLoteadoraIp, port: Number(newLoteadoraPort),
+          slaveAddress: Number(newLoteadoraSlave), messageName: newLoteadoraMessage,
+          lotFieldId: Number(newLoteadoraLotField), expiryFieldId: Number(newLoteadoraExpiryField),
+        }),
+      })
+      const data = await res.json()
+      if (!res.ok) { setLoteadoraError(data.error); return }
+      setLoteadoraSuccess(`Loteadora "${newLoteadoraName}" creada`)
+      setNewLoteadoraName(""); setNewLoteadoraIp(""); setNewLoteadoraPort("8010")
+      setNewLoteadoraSlave("0"); setNewLoteadoraMessage(""); setNewLoteadoraLotField("1"); setNewLoteadoraExpiryField("2")
+      loadLoteadoras()
+    } catch { setLoteadoraError("Error de conexión") } finally { setCreatingLoteadora(false) }
+  }
+
+  const startEditLoteadora = (l: Loteadora) => {
+    setEditLoteadoraId(l.id)
+    setEditLoteadora({
+      name: l.name, ip: l.ip, port: String(l.port), slaveAddress: String(l.slave_address),
+      messageName: l.message_name, lotFieldId: String(l.lot_field_id), expiryFieldId: String(l.expiry_field_id),
+      enabled: !!l.enabled,
+    })
+    setEditLoteadoraError("")
+  }
+
+  const saveEditLoteadora = async () => {
+    if (!editLoteadoraId) return
+    setEditLoteadoraError("")
+    try {
+      const res = await fetch(`/api/admin/loteadoras/${editLoteadoraId}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: editLoteadora.name, ip: editLoteadora.ip, port: Number(editLoteadora.port),
+          slaveAddress: Number(editLoteadora.slaveAddress), messageName: editLoteadora.messageName,
+          lotFieldId: Number(editLoteadora.lotFieldId), expiryFieldId: Number(editLoteadora.expiryFieldId),
+          enabled: editLoteadora.enabled,
+        }),
+      })
+      const data = await res.json()
+      if (!res.ok) { setEditLoteadoraError(data.error || "Error al guardar"); return }
+      setEditLoteadoraId(null)
+      loadLoteadoras()
+      toast(`Loteadora "${editLoteadora.name}" actualizada`, "success")
+    } catch { setEditLoteadoraError("Error de conexión") }
+  }
+
+  const deleteLoteadora = (id: number, name: string) => {
+    setConfirmState({
+      title: "Eliminar loteadora",
+      description: `Se eliminará la loteadora "${name}". Esta acción no se puede deshacer.`,
+      onConfirm: async () => {
+        try {
+          const res = await fetch(`/api/admin/loteadoras/${id}`, { method: "DELETE" })
+          const data = await res.json()
+          if (!res.ok) { toast(data.error || "Error al eliminar", "error"); return }
+          loadLoteadoras()
+          toast(`Loteadora "${name}" eliminada`, "success")
+        } catch { toast("Error al eliminar", "error") }
+      },
+    })
   }
 
   // ─── Acciones de usuarios ────────────────────────────────────────────────────
@@ -371,6 +510,7 @@ export default function AdminPage() {
             { value: 'roles', label: 'Roles' },
             { value: 'pantallas', label: 'Pantallas' },
             { value: 'estados-jde', label: 'Estados JDE' },
+            { value: 'loteadoras', label: 'Loteadoras' },
           ]}
         />
 
@@ -747,6 +887,137 @@ export default function AdminPage() {
               </CardContent>
             </Card>
           </div>
+        )}
+
+        {/* ── Pestaña Loteadoras ───────────────────────────────────────────────── */}
+        {activeTab === 'loteadoras' && (
+          <>
+            <Card accent>
+              <CardHeader>
+                <CardTitle className="text-sm font-bold text-secondary-foreground flex items-center gap-2">
+                  <Printer className="h-4 w-4 text-primary" aria-hidden="true" />
+                  Añadir Loteadora
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <form onSubmit={createLoteadora} className="flex flex-wrap items-end gap-4">
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-semibold text-secondary-foreground">Nombre</label>
+                    <Input value={newLoteadoraName} onChange={e => setNewLoteadoraName(e.target.value)} placeholder="Loteadora línea 1" required className="w-[180px]" />
+                  </div>
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-semibold text-secondary-foreground">IP</label>
+                    <Input value={newLoteadoraIp} onChange={e => setNewLoteadoraIp(e.target.value)} placeholder="192.168.1.10" required className="w-[140px]" />
+                  </div>
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-semibold text-secondary-foreground">Puerto</label>
+                    <Input type="number" value={newLoteadoraPort} onChange={e => setNewLoteadoraPort(e.target.value)} required className="w-[90px]" />
+                  </div>
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-semibold text-secondary-foreground">Slave Address</label>
+                    <Input type="number" value={newLoteadoraSlave} onChange={e => setNewLoteadoraSlave(e.target.value)} className="w-[90px]" />
+                  </div>
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-semibold text-secondary-foreground">Mensaje/plantilla</label>
+                    <Input value={newLoteadoraMessage} onChange={e => setNewLoteadoraMessage(e.target.value)} placeholder="pruebaDavid.msg" required className="w-[160px]" />
+                  </div>
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-semibold text-secondary-foreground">ID campo lote</label>
+                    <Input type="number" value={newLoteadoraLotField} onChange={e => setNewLoteadoraLotField(e.target.value)} className="w-[110px]" />
+                  </div>
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-semibold text-secondary-foreground">ID campo caducidad</label>
+                    <Input type="number" value={newLoteadoraExpiryField} onChange={e => setNewLoteadoraExpiryField(e.target.value)} className="w-[110px]" />
+                  </div>
+                  <Button type="submit" disabled={creatingLoteadora} className="font-semibold">
+                    {creatingLoteadora ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Printer className="mr-2 h-4 w-4" />}
+                    Añadir
+                  </Button>
+                </form>
+                {loteadoraError && <p className="text-sm text-red-600 font-medium mt-3">{loteadoraError}</p>}
+                {loteadoraSuccess && <p className="text-sm text-green-600 font-medium mt-3">{loteadoraSuccess}</p>}
+              </CardContent>
+            </Card>
+
+            <Card accent>
+              <CardHeader>
+                <CardTitle className="text-sm font-bold text-secondary-foreground">Loteadoras Registradas</CardTitle>
+              </CardHeader>
+              <CardContent>
+                {loadingLoteadoras ? (
+                  <Spinner label="Cargando..." className="py-8" />
+                ) : (
+                  <Table>
+                    <TableHeader>
+                      <TableRow className="hover:bg-transparent">
+                        <TableHead className="font-bold text-secondary-foreground">Nombre</TableHead>
+                        <TableHead className="font-bold text-secondary-foreground">IP:Puerto</TableHead>
+                        <TableHead className="font-bold text-secondary-foreground">Mensaje</TableHead>
+                        <TableHead className="font-bold text-secondary-foreground">Campos (lote/cad.)</TableHead>
+                        <TableHead className="font-bold text-secondary-foreground">Estado</TableHead>
+                        <TableHead className="font-bold text-secondary-foreground text-right">Acciones</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {loteadoras.map(l => (
+                        editLoteadoraId === l.id ? (
+                          <TableRow key={l.id} className="bg-blue-50 border-blue-200">
+                            <TableCell colSpan={6}>
+                              <div className="flex flex-wrap items-end gap-3">
+                                <Input value={editLoteadora.name} onChange={e => setEditLoteadora(s => ({ ...s, name: e.target.value }))} placeholder="Nombre" className="h-8 w-[140px] text-sm" autoFocus />
+                                <Input value={editLoteadora.ip} onChange={e => setEditLoteadora(s => ({ ...s, ip: e.target.value }))} placeholder="IP" className="h-8 w-[120px] text-sm" />
+                                <Input type="number" value={editLoteadora.port} onChange={e => setEditLoteadora(s => ({ ...s, port: e.target.value }))} placeholder="Puerto" className="h-8 w-[80px] text-sm" />
+                                <Input type="number" value={editLoteadora.slaveAddress} onChange={e => setEditLoteadora(s => ({ ...s, slaveAddress: e.target.value }))} placeholder="Slave" className="h-8 w-[70px] text-sm" />
+                                <Input value={editLoteadora.messageName} onChange={e => setEditLoteadora(s => ({ ...s, messageName: e.target.value }))} placeholder="Mensaje" className="h-8 w-[140px] text-sm" />
+                                <Input type="number" value={editLoteadora.lotFieldId} onChange={e => setEditLoteadora(s => ({ ...s, lotFieldId: e.target.value }))} placeholder="ID lote" className="h-8 w-[80px] text-sm" />
+                                <Input type="number" value={editLoteadora.expiryFieldId} onChange={e => setEditLoteadora(s => ({ ...s, expiryFieldId: e.target.value }))} placeholder="ID cad." className="h-8 w-[80px] text-sm" />
+                                <label className="flex items-center gap-1.5 text-xs font-medium text-secondary-foreground">
+                                  <input type="checkbox" checked={editLoteadora.enabled} onChange={e => setEditLoteadora(s => ({ ...s, enabled: e.target.checked }))} />
+                                  Habilitada
+                                </label>
+                                <Button size="sm" onClick={saveEditLoteadora} className="text-xs font-semibold h-8">Guardar</Button>
+                                <Button size="sm" variant="ghost" onClick={() => setEditLoteadoraId(null)} className="text-muted-foreground h-8 text-xs">Cancelar</Button>
+                                {editLoteadoraError && <span className="text-xs text-red-600 font-medium">{editLoteadoraError}</span>}
+                              </div>
+                            </TableCell>
+                          </TableRow>
+                        ) : (
+                          <TableRow key={l.id} className="hover:bg-muted/50 border-border">
+                            <TableCell className="font-medium">{l.name}</TableCell>
+                            <TableCell className="text-muted-foreground text-sm">{l.ip}:{l.port}</TableCell>
+                            <TableCell className="text-sm">
+                              <code className="text-xs bg-muted px-1.5 py-0.5 rounded">{l.message_name}</code>
+                            </TableCell>
+                            <TableCell className="text-muted-foreground text-sm">{l.lot_field_id} / {l.expiry_field_id}</TableCell>
+                            <TableCell>
+                              <div className="flex flex-wrap gap-1.5">
+                                <Badge variant={l.enabled ? 'success' : 'default'}>{l.enabled ? 'Habilitada' : 'Deshabilitada'}</Badge>
+                                {loteadoraLiveStatus[l.id] ? (
+                                  <Badge variant={ESTADO_LOTEADORA_INFO[loteadoraLiveStatus[l.id]].variant}>
+                                    {ESTADO_LOTEADORA_INFO[loteadoraLiveStatus[l.id]].label}
+                                  </Badge>
+                                ) : (
+                                  <Badge variant="outline">Comprobando…</Badge>
+                                )}
+                              </div>
+                            </TableCell>
+                            <TableCell className="text-right">
+                              <Button variant="ghost" size="sm" onClick={() => startEditLoteadora(l)} className="text-blue-500 hover:text-blue-700 hover:bg-blue-50" title="Editar loteadora">
+                                <Pencil className="h-4 w-4" />
+                              </Button>
+                              <Button variant="ghost" size="sm" onClick={() => deleteLoteadora(l.id, l.name)} className="text-red-500 hover:text-red-700 hover:bg-red-50" title="Eliminar loteadora">
+                                <Trash2 className="h-4 w-4" />
+                              </Button>
+                            </TableCell>
+                          </TableRow>
+                        )
+                      ))}
+                    </TableBody>
+                  </Table>
+                )}
+              </CardContent>
+            </Card>
+          </>
         )}
 
       </div>
