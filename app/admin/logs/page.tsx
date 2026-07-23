@@ -32,6 +32,7 @@ const SOURCE_LABELS: Record<string, string> = {
   'login': 'Login',
   'caducados_obsoletos': 'Palets Caducados',
   'comparativa_seres': 'Comparativa SERES',
+  'consulta_stock_pda': 'Consulta Stock PDA',
 }
 
 // Umbral en ms para marcar consultas lentas

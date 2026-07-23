@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation"
 import { useState, useEffect } from "react"
 import {
   User, LogOut, Settings, FileText, ChevronDown,
-  Factory, Package, AlertTriangle, ArrowLeftRight, BookmarkCheck, Tag
+  Factory, Package, AlertTriangle, ArrowLeftRight, BookmarkCheck, Tag, ScanBarcode
 } from "lucide-react"
 
 interface SessionUser { id: number; username: string; role: string; name: string; surname: string }
@@ -16,6 +16,7 @@ const PANELS = [
   { key: 'pedidos',     label: 'Pedidos',           href: '/preparacion-pedidos', Icon: Package },
   { key: 'caducados',   label: 'Caducados',         href: '/caducados',           Icon: AlertTriangle },
   { key: 'comparativa', label: 'Comparativa SERES', href: '/comparativa-seres',   Icon: ArrowLeftRight },
+  { key: 'consulta_stock_pda', label: 'Consulta stock PDA', href: '/consulta-stock-pda', Icon: ScanBarcode },
   { key: 'loteadora',   label: 'Loteadora',         href: '/loteadora',           Icon: Tag },
 ] as const
 
