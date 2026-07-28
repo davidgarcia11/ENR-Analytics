@@ -117,7 +117,9 @@ El botón "Enviar a loteadora" llama a `POST /api/loteadora/enviar` con `{ lotea
 1. Exige sesión (`verifySession()`) — es el único punto del panel que sí valida sesión en servidor, porque dispara una acción física real (imprime una etiqueta). El resto del panel sigue con el gap descrito en §1.
 2. Carga la fila de `loteadoras` (`id`, `enabled = 1`) desde SQLite.
 3. Llama a `sendRemoteFields()` (`lib/loteadora-printer.ts`) con dos campos: `lot_field_id` → lote, `expiry_field_id` → fecha de caducidad (formateada `dd/mm/aaaa`, `formatDateES`).
-4. Si falla (timeout, conexión rechazada, NAK, o `P_Status` ≠ 0), devuelve 502 con el mensaje de error, que `page.tsx` muestra inline (estado `sendError`).
+4. Si falla de verdad (timeout, conexión rechazada, NAK, o un `P_Status` que no sea de éxito), devuelve 502 con el mensaje de error y, si se pudo, el detalle en crudo (`detail`, ver §7 "ver más"), que `page.tsx` muestra inline (estado `sendError`/`sendErrorDetail`).
+
+**`P_Status` 42/43 no son fallos** — el manual documenta que `42` ("Remote buffer now full") ocurre precisamente porque *este* envío ha ocupado la última plaza libre del buffer de campos remotos (hasta 10 en cola); `43` ("still full") es ambiguo (según la configuración de la máquina, sustituye al más antiguo de la cola o descarta el nuevo envío). `sendRemoteFields()` trata ambos como **éxito con aviso** (`{ warning }`), no como error — `page.tsx` lo muestra en ámbar en vez de en rojo. Solo se lanza error de verdad para el resto de códigos (`01`, `12`, NAK...).
 
 `canSend` exige además: lote calculado, fecha de caducidad calculada, artículo seleccionado, **loteadora seleccionada** y que no haya un envío en curso.
 
@@ -192,6 +194,8 @@ Tanto `/loteadora` como la pestaña **Loteadoras** de `/admin` muestran el estad
 
 Cada comprobación abre y cierra una conexión TCP breve por loteadora (el protocolo solo admite un cliente a la vez) — no se mantiene ninguna conexión persistente.
 
+**Ojo con la frescura del dato:** el aviso "La loteadora está imprimiendo" del selector de plantilla (§11) usa este mismo estado de 60s. Para que no se desincronice con el check en vivo que hace `fetchMensajes()` (comando `1F`, que también puede devolver "impresión no iniciada"), al seleccionar una loteadora se fuerza un refresco inmediato de `estadoLoteadoras` en vez de esperar al siguiente ciclo — aun así, al ser dos llamadas TCP independientes, un cambio de estado justo entre medias seguiría pudiendo dar mensajes que no cuadren (poco probable, pero es una limitación conocida, no un bug pendiente).
+
 ---
 
 ## 11. Elegir y cargar la plantilla (mensaje) en remoto
@@ -204,3 +208,13 @@ Al seleccionar una loteadora en `/loteadora` aparece un desplegable **"Plantilla
 **Decisión explícita de alcance:** no hay ninguna acción remota de Parar/Iniciar impresión (comandos `12`/`11`) — parar la máquina para poder cambiar de plantilla sigue siendo una acción física, en la pantalla de la máquina. Se descartó automatizarlo también porque pararía una impresión real sin que quien está delante de la línea lo vea venir en el momento.
 
 El comando `1D` (envío de lote/caducidad) sigue actuando igual que antes: sobre lo que esté cargado en ese momento, se haya cambiado de plantilla desde el dashboard o no.
+
+---
+
+## 12. Limpiar el buffer de campos remotos
+
+El botón **"Limpiar buffer"** de `/loteadora` llama a `POST /api/loteadora/limpiar-buffer` (`{loteadoraId}`), que ejecuta `clearRemoteFieldBuffer()` (comando `21` — Clear Buffers of 1D). Equivale a pulsar el botón "Clear" de **Ajustes de comunicación → Buffer** en la propia máquina: vacía la cola de envíos `1D` pendientes sin imprimir nada ni cambiar ningún valor.
+
+**Por qué hace falta:** el campo remoto solo se actualiza cuando la impresora consume la cola al disparar una impresión real (paso por la célula fotoeléctrica). Si se hacen varios envíos de prueba sin que la máquina llegue a imprimir, la cola (hasta 10 según el "Number" configurado en Buffer Setting) se llena y no se vacía sola — los envíos siguientes devuelven aviso de buffer lleno (`42`/`43`, ver §6) y el valor mostrado en pantalla puede quedarse desactualizado (`Null Null` hasta el primer disparo real). Este botón permite desatascarlo desde el dashboard sin ir a la máquina.
+
+Se descartó automatizar el disparo de impresión en sí (comando `13`, Trigger Print) porque dispara una impresión física real cada vez — limpiar el buffer no imprime nada, así que es una acción segura de repetir.

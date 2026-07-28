@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
-import { Tag, CheckCircle2, XCircle, Loader2, Send, AlertTriangle, Calendar, Printer, PowerOff, Upload } from "lucide-react"
+import { Tag, CheckCircle2, XCircle, Loader2, Send, AlertTriangle, Calendar, Printer, PowerOff, Upload, Eraser } from "lucide-react"
 import Navbar from "@/components/Navbar"
 import { SingleSelect } from "@/components/SingleSelect"
 import { useRouter } from "next/navigation"
@@ -82,6 +82,8 @@ export default function LoteadoraPage() {
   const [selectedLoteadora, setSelectedLoteadora] = useState('')
   const [estadoLoteadoras, setEstadoLoteadoras] = useState<EstadoLoteadora[]>([])
   const [loadingEstado, setLoadingEstado] = useState(false)
+  const [limpiandoBuffer, setLimpiandoBuffer] = useState(false)
+  const [bufferMensaje, setBufferMensaje] = useState<{ tipo: 'success' | 'error'; texto: string } | null>(null)
 
   // Plantilla (mensaje) a cargar en la loteadora seleccionada
   const [mensajes, setMensajes] = useState<string[]>([])
@@ -94,7 +96,10 @@ export default function LoteadoraPage() {
   // Envío
   const [sending, setSending] = useState(false)
   const [enviado, setEnviado] = useState(false)
+  const [sendWarning, setSendWarning] = useState<string | null>(null)
   const [sendError, setSendError] = useState<string | null>(null)
+  const [sendErrorDetail, setSendErrorDetail] = useState<string | null>(null)
+  const [showSendErrorDetail, setShowSendErrorDetail] = useState(false)
 
   useEffect(() => { checkSession() }, [])
 
@@ -129,6 +134,10 @@ export default function LoteadoraPage() {
       setSelectedMensaje('')
       return
     }
+    // Se refresca el estado en vivo justo aquí (no solo cada 60s) para que el
+    // aviso de "está imprimiendo" no vaya desacompasado del check real que
+    // hace fetchMensajes en este mismo instante (protocolo §3.5.15 vs §3.5.20).
+    fetchEstadoLoteadoras()
     fetchMensajes(selectedLoteadora)
   }, [selectedLoteadora])
 
@@ -236,6 +245,27 @@ export default function LoteadoraPage() {
     }
   }
 
+  const handleLimpiarBuffer = async () => {
+    if (!selectedLoteadora || limpiandoBuffer) return
+    setLimpiandoBuffer(true)
+    setBufferMensaje(null)
+    try {
+      const res = await fetch('/api/loteadora/limpiar-buffer', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ loteadoraId: Number(selectedLoteadora) }),
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error || 'Error al limpiar el buffer')
+      setBufferMensaje({ tipo: 'success', texto: 'Buffer de campos remotos vaciado' })
+    } catch (err: any) {
+      setBufferMensaje({ tipo: 'error', texto: err.message || 'Error al limpiar el buffer' })
+    } finally {
+      setLimpiandoBuffer(false)
+      setTimeout(() => setBufferMensaje(null), 5000)
+    }
+  }
+
   const handleArticuloChange = (id: string) => {
     const art = articulos.find(a => a.id === id) ?? null
     setSelectedArticulo(art)
@@ -264,6 +294,9 @@ export default function LoteadoraPage() {
     if (!canSend || !fechaCaducidad) return
     setSending(true)
     setSendError(null)
+    setSendErrorDetail(null)
+    setShowSendErrorDetail(false)
+    setSendWarning(null)
     try {
       const res = await fetch('/api/loteadora/enviar', {
         method: 'POST',
@@ -275,9 +308,14 @@ export default function LoteadoraPage() {
         }),
       })
       const data = await res.json()
-      if (!res.ok) throw new Error(data.error || 'Error al enviar a la loteadora')
+      if (!res.ok) {
+        setSendError(data.error || 'Error al enviar a la loteadora')
+        setSendErrorDetail(data.detail || null)
+        return
+      }
       setEnviado(true)
-      setTimeout(() => setEnviado(false), 3000)
+      setSendWarning(data.warning || null)
+      setTimeout(() => { setEnviado(false); setSendWarning(null) }, data.warning ? 8000 : 3000)
     } catch (err: any) {
       setSendError(err.message || 'Error al enviar a la loteadora')
     } finally {
@@ -450,6 +488,32 @@ export default function LoteadoraPage() {
                 />
               </div>
 
+              {/* Limpiar buffer de campos remotos pendientes (comando 21) */}
+              {selectedLoteadora && (
+                <div className="grid gap-1.5">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={handleLimpiarBuffer}
+                    disabled={limpiandoBuffer}
+                    className="text-xs text-gray-600 whitespace-nowrap w-fit"
+                    title="Vacía la cola de campos remotos pendientes (equivale a pulsar Clear en Ajustes de comunicación > Buffer en la máquina). No imprime nada."
+                  >
+                    {limpiandoBuffer
+                      ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                      : <Eraser className="h-3.5 w-3.5" />}
+                    Limpiar buffer
+                  </Button>
+                  {bufferMensaje && (
+                    <p className={`text-xs flex items-center gap-1 ${bufferMensaje.tipo === 'success' ? 'text-green-700' : 'text-red-700'}`}>
+                      {bufferMensaje.tipo === 'success' ? <CheckCircle2 className="h-3 w-3" /> : <XCircle className="h-3 w-3" />}
+                      {bufferMensaje.texto}
+                    </p>
+                  )}
+                </div>
+              )}
+
               {/* Plantilla (mensaje) a cargar en la loteadora seleccionada */}
               {selectedLoteadora && (
                 <div className="grid gap-1.5">
@@ -544,17 +608,42 @@ export default function LoteadoraPage() {
 
               <div className="flex-1" />
 
-              {enviado && (
+              {enviado && !sendWarning && (
                 <div className="flex items-center gap-2 bg-green-50 border border-green-200 rounded-lg px-4 py-3 text-sm text-green-700 font-medium">
                   <CheckCircle2 className="h-4 w-4 flex-shrink-0" />
                   Mensaje enviado correctamente
                 </div>
               )}
 
+              {enviado && sendWarning && (
+                <div className="flex items-center gap-2 bg-amber-50 border border-amber-200 rounded-lg px-4 py-3 text-sm text-amber-800 font-medium">
+                  <AlertTriangle className="h-4 w-4 flex-shrink-0" />
+                  Enviado, pero con aviso: {sendWarning}
+                </div>
+              )}
+
               {sendError && (
-                <div className="flex items-center gap-2 bg-red-50 border border-red-200 rounded-lg px-4 py-3 text-sm text-red-700 font-medium">
-                  <XCircle className="h-4 w-4 flex-shrink-0" />
-                  {sendError}
+                <div className="bg-red-50 border border-red-200 rounded-lg px-4 py-3 text-sm text-red-700 font-medium space-y-1">
+                  <div className="flex items-center gap-2">
+                    <XCircle className="h-4 w-4 flex-shrink-0" />
+                    {sendError}
+                  </div>
+                  {sendErrorDetail && (
+                    <div className="pl-6">
+                      <button
+                        type="button"
+                        onClick={() => setShowSendErrorDetail(v => !v)}
+                        className="text-xs font-normal underline text-red-600 hover:text-red-800"
+                      >
+                        {showSendErrorDetail ? 'Ocultar detalle' : 'Ver más'}
+                      </button>
+                      {showSendErrorDetail && (
+                        <p className="text-xs font-normal font-mono text-red-600 mt-1">
+                          Código de estado de la máquina: {sendErrorDetail}
+                        </p>
+                      )}
+                    </div>
+                  )}
                 </div>
               )}
 

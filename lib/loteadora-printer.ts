@@ -16,6 +16,7 @@ const CMD_DOWNLOAD_REMOTE_FIELD = 0x1d;
 const CMD_LOAD_PRINT_MESSAGE = 0x1e;
 const CMD_REQUEST_MESSAGE_NAMES = 0x1f;
 const CMD_REQUEST_PRINTER_STATUS = 0x14;
+const CMD_CLEAR_REMOTE_FIELD_BUFFER = 0x21;
 
 export interface RemoteField {
   /** Field ID configurado en la máquina con "Insertar Campo" (0-255) */
@@ -161,33 +162,99 @@ function sendCommand(config: LoteadoraConfig, frame: Buffer, timeoutMs: number):
   });
 }
 
-// Envía los campos remotos (lote/caducidad) a una loteadora por TCP (comando 1D).
-export async function sendRemoteFields(config: LoteadoraConfig, fields: RemoteField[]): Promise<void> {
+// P_Status que el manual documenta como "el envío sí se ha aceptado", aunque
+// no sea el 00 limpio — llenar la última plaza del buffer no es un fallo.
+// Ver protocolo §3.5.18: "42: Remote buffer now full" ocurre precisamente
+// cuando ESTE comando ha entrado y ha dejado el buffer lleno.
+const P_STATUS_ACCEPTED_WITH_WARNING: Record<number, string> = {
+  0x42: 'Se ha enviado, pero el buffer de campos remotos de la impresora se acaba de llenar (máximo 10 en cola) — deja que imprima antes de enviar más cambios.',
+  // "43: sigue lleno" es ambiguo (según la configuración de la máquina, o se
+  // descarta el más antiguo de la cola, o se descarta este envío) — se avisa
+  // en vez de darlo por fallido sin más, porque puede que sí se haya guardado.
+  0x43: 'El buffer de campos remotos ya estaba lleno. Según la configuración de la impresora puede haber sustituido al envío más antiguo en cola, o haberse descartado — revisa la impresora si tienes dudas.',
+};
+
+// Envía los campos remotos (lote/caducidad) a una loteadora por TCP (comando
+// 1D). Devuelve un aviso (no un error) cuando el comando se aceptó pero con
+// una condición a tener en cuenta (buffer lleno) — solo lanza cuando el envío
+// realmente no se ha aceptado.
+export async function sendRemoteFields(config: LoteadoraConfig, fields: RemoteField[]): Promise<{ warning: string | null }> {
   const frame = buildRemoteFieldFrame(config.slaveAddress, fields);
   const result = await sendCommand(config, frame, 5000);
 
   if (result.kind === 'nak') {
     throw new Error(`Comando rechazado por la loteadora: ${describeStatus(C_STATUS_MESSAGES, result.status)}`);
   }
+  if (result.status === 0x00) {
+    return { warning: null };
+  }
+  if (result.status in P_STATUS_ACCEPTED_WITH_WARNING) {
+    return { warning: P_STATUS_ACCEPTED_WITH_WARNING[result.status] };
+  }
+  throw new Error(`La loteadora rechazó el envío: ${describeStatus(P_STATUS_MESSAGES, result.status)}`);
+}
+
+// Vacía la cola de campos remotos pendientes (comando 21 — Clear Buffers of
+// 1D). Equivale a pulsar el botón "Clear" de Ajustes de comunicación >
+// Buffer en la propia máquina. No imprime ni cambia ningún valor, solo
+// descarta los envíos en cola que aún no se hayan consumido.
+export async function clearRemoteFieldBuffer(config: LoteadoraConfig): Promise<void> {
+  const frame = buildNoDataFrame(config.slaveAddress, CMD_CLEAR_REMOTE_FIELD_BUFFER);
+  const result = await sendCommand(config, frame, 5000);
+
+  if (result.kind === 'nak') {
+    throw new Error(`Comando rechazado por la loteadora: ${describeStatus(C_STATUS_MESSAGES, result.status)}`);
+  }
   if (result.status !== 0x00) {
-    throw new Error(`La loteadora rechazó el envío: ${describeStatus(P_STATUS_MESSAGES, result.status)}`);
+    throw new Error(`No se pudo limpiar el buffer: ${describeStatus(P_STATUS_MESSAGES, result.status)}`);
+  }
+}
+
+export interface PrinterStatusDetail {
+  state: PrinterState;
+  /**
+   * Bytes de estado en crudo del comando 14 (ej. "50 02 00 04"), tal cual los
+   * devuelve la máquina — sin traducir. La tabla de significado por bit
+   * (Chart 3-1 del manual) tiene ~90 avisos repartidos en 3 variantes de
+   * firmware (4/5/12 bytes) y no se puede reconstruir de forma fiable desde
+   * el PDF, así que de momento se expone el dato crudo en vez de adivinar
+   * una traducción que podría ser incorrecta. `null` si no se pudo consultar
+   * o la máquina no devolvió datos.
+   */
+  rawBytes: string | null;
+}
+
+async function queryPrinterStatus(config: LoteadoraConfig): Promise<PrinterStatusDetail> {
+  try {
+    const frame = buildNoDataFrame(config.slaveAddress, CMD_REQUEST_PRINTER_STATUS);
+    const result = await sendCommand(config, frame, 3000);
+
+    if (result.kind === 'nak') return { state: 'en_error', rawBytes: null };
+
+    // Cabecera: ESC ACK Slave P_Status CmdID [Printer Status data...] ESC ETX Checknum
+    const statusBytes = result.data.subarray(5, result.data.length - 3);
+    const rawBytes = statusBytes.length > 0
+      ? Array.from(statusBytes).map(b => b.toString(16).padStart(2, '0').toUpperCase()).join(' ')
+      : null;
+
+    if (result.status === 0x00) return { state: 'activa', rawBytes };
+    if (result.status === 0x12) return { state: 'standby', rawBytes };
+    return { state: 'en_error', rawBytes };
+  } catch {
+    return { state: 'apagada', rawBytes: null };
   }
 }
 
 // Consulta el estado real de una loteadora (comando 14 — Request Printer
 // Status). Nunca lanza: cualquier fallo de conexión se traduce en "apagada".
 export async function getPrinterStatus(config: LoteadoraConfig): Promise<PrinterState> {
-  try {
-    const frame = buildNoDataFrame(config.slaveAddress, CMD_REQUEST_PRINTER_STATUS);
-    const result = await sendCommand(config, frame, 3000);
+  return (await queryPrinterStatus(config)).state;
+}
 
-    if (result.kind === 'nak') return 'en_error';
-    if (result.status === 0x00) return 'activa';
-    if (result.status === 0x12) return 'standby';
-    return 'en_error';
-  } catch {
-    return 'apagada';
-  }
+// Como getPrinterStatus, pero además incluye los bytes de estado en crudo
+// (sin traducir) para poder mostrarlos como detalle de un error.
+export async function getPrinterStatusDetail(config: LoteadoraConfig): Promise<PrinterStatusDetail> {
+  return queryPrinterStatus(config);
 }
 
 // Lista los nombres de mensaje guardados en la impresora (comando 1F).
