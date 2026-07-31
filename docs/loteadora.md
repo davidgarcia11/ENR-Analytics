@@ -7,7 +7,7 @@
 
 ## 1. Estado actual
 
-**El envío a la loteadora ya es real** (comando `1D` del protocolo TIJ por TCP, ver §6-9). La UI (selección de artículo, cálculo de lote/caducidad, vista previa) sigue igual que antes.
+**El envío a la loteadora ya es real** (comando `1D` del protocolo TIJ por TCP, ver §6-9). La selección de artículo es directa (búsqueda por código o descripción, sin marca — ver §3); el cálculo de lote/caducidad y la vista previa siguen igual que antes.
 
 Rama: `feature/loteadora`. Creada antes del rediseño UI/UX (PR #53), por lo que **no usa `AppShell`/tokens** como el resto de paneles — usa maquetación y colores hardcodeados heredados del diseño anterior.
 
@@ -19,9 +19,8 @@ Rama: `feature/loteadora`. Creada antes del rediseño UI/UX (PR #53), por lo que
 
 | Archivo | Descripción |
 |---|---|
-| `app/loteadora/page.tsx` | Página cliente: selección marca/artículo, formulario, cálculo y vista previa |
-| `app/api/loteadora/marcas/route.ts` | GET — lista de marcas desde `prodctl.F0005` (`DRSY='41'`, `DRRT='S4'`) |
-| `app/api/loteadora/articulos/route.ts` | GET — artículos de una marca desde `F4101`, incluye días de caducidad |
+| `app/loteadora/page.tsx` | Página cliente: búsqueda de artículo, formulario, cálculo y vista previa |
+| `app/api/loteadora/articulos/route.ts` | GET — artículos utilizables en la loteadora desde `F4101` (sin marca), incluye días de caducidad |
 | `app/api/loteadora/impresoras/route.ts` | GET público — loteadoras habilitadas (`id`, `name`) para el desplegable del panel |
 | `app/api/loteadora/enviar/route.ts` | POST — envía lote/caducidad a la loteadora seleccionada (requiere sesión) |
 | `app/api/loteadora/estado/route.ts` | GET público — estado en vivo (`activa`/`en_error`/`standby`/`apagada`) de las loteadoras habilitadas |
@@ -36,38 +35,31 @@ Rama: `feature/loteadora`. Creada antes del rediseño UI/UX (PR #53), por lo que
 
 ---
 
-## 3. Selección en cascada Marca → Artículo
+## 3. Selección de artículo
 
-1. Al montar la página se cargan las **marcas** (`GET /api/loteadora/marcas`).
-2. Al elegir una marca, se cargan sus **artículos** (`GET /api/loteadora/articulos?marca=...`), incluyendo el campo `diasCaducidad` de cada uno.
-3. Cambiar de marca resetea el artículo seleccionado y vuelve a pedir la lista de artículos.
+Al montar la página (y en cada refresco de 60s del estado en vivo, ver §10) se cargan **todos** los artículos utilizables en la loteadora de una vez (`GET /api/loteadora/articulos`, sin parámetro de marca) y se pasan al mismo `<SingleSelect showId>` de siempre, que ya trae buscador integrado y filtra en cliente por **código o descripción** a la vez. No hay paso previo de marca — se busca el artículo directamente.
 
-Ambos desplegables usan `<SingleSelect>` con buscador integrado.
+El código y la descripción del artículo elegido se muestran en una cabecera, justo encima del lote/fecha de caducidad en la vista previa, para que quede claro para qué artículo se está calculando/enviando.
 
-### Consultas Oracle
+### Consulta Oracle
 
-**Marcas** (`prodctl.F0005`):
-```sql
-SELECT TRIM(DRKY) AS id, TRIM(DRDL01) AS descripcion
-FROM prodctl.f0005
-WHERE TRIM(DRSY) = '41'
-  AND TRIM(DRRT) = 'S4'
-  AND TRIM(DRKY) IS NOT NULL
-ORDER BY TRIM(DRKY)
-```
-
-**Artículos de una marca** (`F4101`, filtrados también por `IMSRP1='12'`):
+**Artículos** (`F4101`):
 ```sql
 SELECT TRIM(IMLITM) AS id, TRIM(IMDSC1) AS descripcion, NVL(IMSLD, 0) AS diasCaducidad
 FROM F4101
-WHERE TRIM(IMSRP4) = :marca
-  AND TRIM(IMSRP1) = '12'
+WHERE TRIM(IMSRP1) = '12'
+  AND TRIM(IMSRP6) = 'Y'
+  AND TRIM(IMSTKT) NOT IN ('O', 'U')
   AND TRIM(IMLITM) IS NOT NULL
 ORDER BY TRIM(IMDSC1)
 ```
 
-- `IMSRP4` = marca del artículo (campo de categoría usado como marca en este panel)
+- `IMSRP1='12'` = categoría de artículo ya usada para restringir a los que aplican a loteadora
+- `IMSRP6='Y'` = indicador de artículo elegible para loteadora (no confundir con marca comercial, que ya no se usa como filtro)
+- `IMSTKT NOT IN ('O','U')` = excluye artículos obsoletos/de baja (códigos de tipo de stock)
 - `IMSLD` = días de caducidad del artículo en JDE (`NVL` a 0 si viene nulo)
+
+Si en el futuro este listado resultara demasiado grande para cargarlo entero de una vez (hoy se asume un volumen similar al de las ~130 marcas que se cargaban antes), la alternativa sería una búsqueda contra el servidor con parámetro `q` y límite de resultados, en vez de traer todo el catálogo — no implementado porque no hacía falta.
 
 ### Estado JDE caído
 
@@ -164,13 +156,12 @@ Como puede haber varias impresoras físicas, la configuración de cada una vive 
 | `name` | Nombre identificativo (único) |
 | `ip` / `port` | IP y puerto Ethernet de la máquina |
 | `slave_address` | Slave Address configurada en la máquina (por defecto `0`) |
-| `message_name` | Plantilla por defecto/sugerida (con los Field Module ya creados) — preseleccionada en el desplegable de `/loteadora`, pero el operador puede elegir y cargar cualquier otra plantilla guardada en la máquina (ver §11) |
 | `lot_field_id` / `expiry_field_id` | ID de datos de cada Field Module (§7) |
 | `enabled` | Si aparece en el desplegable de `/loteadora` |
 
 CRUD en `app/api/admin/loteadoras/route.ts` (GET/POST) y `[id]/route.ts` (PUT/DELETE), protegido por `middleware.ts` (`/api/admin/:path*`). Lectura pública (solo `id`/`name`, solo habilitadas) en `app/api/loteadora/impresoras/route.ts`, consumida por el desplegable "Loteadora" del panel.
 
-Ejemplo real configurado durante el desarrollo de esta función: mensaje `pruebaDavid.msg`, IP `192.168.111.119:8010`, Slave Address `0`, campo lote ID `1`, campo caducidad ID `2`.
+Ejemplo real configurado durante el desarrollo de esta función: IP `192.168.111.119:8010`, Slave Address `0`, campo lote ID `1`, campo caducidad ID `2` (plantilla de prueba en la máquina: `pruebaDavid.msg`, elegida en vivo desde `/loteadora`, no guardada en el admin — ver §11).
 
 ---
 
@@ -189,23 +180,22 @@ Ejemplo real configurado durante el desarrollo de esta función: mensaje `prueba
 
 Tanto `/loteadora` como la pestaña **Loteadoras** de `/admin` muestran el estado real de cada máquina, refrescado automáticamente cada 60 segundos mientras la página/pestaña está abierta (`setInterval`, limpiado al desmontar o al cambiar de pestaña):
 
-- `/loteadora`: sección "Estado de las loteadoras" (`GET /api/loteadora/estado`, solo habilitadas) + el propio badge "JDE conectado" se refresca en el mismo ciclo (reintenta `fetchMarcas()`).
+- `/loteadora`: sección "Estado de las loteadoras" (`GET /api/loteadora/estado`, solo habilitadas) + el propio badge "JDE conectado" se refresca en el mismo ciclo (reintenta `fetchArticulos()`, que hace de comprobación de vida de JDE ahora que ya no hay marcas).
 - `/admin` → Loteadoras: badge adicional junto a "Habilitada/Deshabilitada" (`GET /api/admin/loteadoras/estado`, todas, se comprueba solo mientras esa pestaña está activa).
 
 Cada comprobación abre y cierra una conexión TCP breve por loteadora (el protocolo solo admite un cliente a la vez) — no se mantiene ninguna conexión persistente.
 
-**Ojo con la frescura del dato:** el aviso "La loteadora está imprimiendo" del selector de plantilla (§11) usa este mismo estado de 60s. Para que no se desincronice con el check en vivo que hace `fetchMensajes()` (comando `1F`, que también puede devolver "impresión no iniciada"), al seleccionar una loteadora se fuerza un refresco inmediato de `estadoLoteadoras` en vez de esperar al siguiente ciclo — aun así, al ser dos llamadas TCP independientes, un cambio de estado justo entre medias seguiría pudiendo dar mensajes que no cuadren (poco probable, pero es una limitación conocida, no un bug pendiente).
+Al seleccionar una loteadora se fuerza además un refresco inmediato de `estadoLoteadoras` (no solo esperar al ciclo de 60s), para que la sección de estado no vaya desacompasada del check en vivo que hace `fetchMensajes()` al abrir el selector de plantilla (§11).
 
 ---
 
 ## 11. Elegir y cargar la plantilla (mensaje) en remoto
 
-Al seleccionar una loteadora en `/loteadora` aparece un desplegable **"Plantilla"** con los mensajes guardados en esa máquina (`GET /api/loteadora/mensajes?loteadoraId=...`, comando `1F`), preseleccionando `message_name` si está en la lista. El botón **"Cargar plantilla"** llama a `POST /api/loteadora/cargar-mensaje` (`{loteadoraId, messageName}`), que:
+Al seleccionar una loteadora en `/loteadora` aparece un desplegable **"Plantilla"** con los mensajes guardados en esa máquina (`GET /api/loteadora/mensajes?loteadoraId=...`, comando `1F`), sin preseleccionar ninguno — el operador elige cada vez. El botón **"Cargar plantilla"** llama a `POST /api/loteadora/cargar-mensaje` (`{loteadoraId, messageName}`), que ejecuta `loadPrintMessage()` (`1E` + `01`) directamente, sin comprobar el estado de impresión antes.
 
-1. Comprueba el estado real con `getPrinterStatus()` — si es `'activa'` (imprimiendo), devuelve **409** sin intentar nada más: *"La loteadora está imprimiendo. Detén la impresión en la pantalla de la máquina antes de cambiar de plantilla."* El front repite la misma comprobación en cliente (deshabilita el botón) usando el estado ya cargado en `estadoLoteadoras`.
-2. Si no está imprimiendo, llama a `loadPrintMessage()` (`1E` + `01`).
+**`loteadoras` ya no guarda ningún nombre de plantilla** (columna `message_name` eliminada, migración `DROP COLUMN` en `lib/sqlite.ts`) — no tenía función real (el envío `1D` nunca la usaba) más allá de preseleccionar un valor por defecto, y con el selector en vivo ya no hacía falta.
 
-**Decisión explícita de alcance:** no hay ninguna acción remota de Parar/Iniciar impresión (comandos `12`/`11`) — parar la máquina para poder cambiar de plantilla sigue siendo una acción física, en la pantalla de la máquina. Se descartó automatizarlo también porque pararía una impresión real sin que quien está delante de la línea lo vea venir en el momento.
+**Corrección importante (probado en planta):** la primera versión de esto bloqueaba la carga si la impresora estaba imprimiendo, pensando que cambiar de plantilla en caliente interrumpiría un trabajo real. Eso creaba una contradicción imposible de resolver: **tanto `1F` (listar) como `1E` (cargar) exigen la impresión iniciada** para funcionar (`P_Status=12` "impresión no iniciada" si no) — con el bloqueo puesto, para poder listar plantillas había que iniciar, pero para cargarlas había que pararla. Además, el manual documenta explícitamente que en el firmware **T1/T2** (la variante de 5 bytes que ya confirmamos que usa esta máquina, ver §9) **está permitido actualizar el contenido con la impresión iniciada** — es el comportamiento que el propio fabricante espera, no un riesgo a evitar. Se quitó el bloqueo por completo.
 
 El comando `1D` (envío de lote/caducidad) sigue actuando igual que antes: sobre lo que esté cargado en ese momento, se haya cambiado de plantilla desde el dashboard o no.
 

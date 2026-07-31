@@ -56,7 +56,6 @@ interface Loteadora {
   ip: string
   port: number
   slave_address: number
-  message_name: string
   lot_field_id: number
   expiry_field_id: number
   enabled: number
@@ -140,14 +139,13 @@ export default function AdminPage() {
   const [newLoteadoraIp, setNewLoteadoraIp] = useState("")
   const [newLoteadoraPort, setNewLoteadoraPort] = useState("8010")
   const [newLoteadoraSlave, setNewLoteadoraSlave] = useState("0")
-  const [newLoteadoraMessage, setNewLoteadoraMessage] = useState("")
   const [newLoteadoraLotField, setNewLoteadoraLotField] = useState("1")
   const [newLoteadoraExpiryField, setNewLoteadoraExpiryField] = useState("2")
   const [loteadoraError, setLoteadoraError] = useState("")
   const [loteadoraSuccess, setLoteadoraSuccess] = useState("")
   const [creatingLoteadora, setCreatingLoteadora] = useState(false)
   const [editLoteadoraId, setEditLoteadoraId] = useState<number | null>(null)
-  const [editLoteadora, setEditLoteadora] = useState({ name: "", ip: "", port: "", slaveAddress: "", messageName: "", lotFieldId: "", expiryFieldId: "", enabled: true })
+  const [editLoteadora, setEditLoteadora] = useState({ name: "", ip: "", port: "", slaveAddress: "", lotFieldId: "", expiryFieldId: "", enabled: true })
   const [editLoteadoraError, setEditLoteadoraError] = useState("")
   const [loteadoraLiveStatus, setLoteadoraLiveStatus] = useState<Record<number, EstadoLoteadoraValor>>({})
 
@@ -271,7 +269,7 @@ export default function AdminPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           name: newLoteadoraName, ip: newLoteadoraIp, port: Number(newLoteadoraPort),
-          slaveAddress: Number(newLoteadoraSlave), messageName: newLoteadoraMessage,
+          slaveAddress: Number(newLoteadoraSlave),
           lotFieldId: Number(newLoteadoraLotField), expiryFieldId: Number(newLoteadoraExpiryField),
         }),
       })
@@ -279,7 +277,7 @@ export default function AdminPage() {
       if (!res.ok) { setLoteadoraError(data.error); return }
       setLoteadoraSuccess(`Loteadora "${newLoteadoraName}" creada`)
       setNewLoteadoraName(""); setNewLoteadoraIp(""); setNewLoteadoraPort("8010")
-      setNewLoteadoraSlave("0"); setNewLoteadoraMessage(""); setNewLoteadoraLotField("1"); setNewLoteadoraExpiryField("2")
+      setNewLoteadoraSlave("0"); setNewLoteadoraLotField("1"); setNewLoteadoraExpiryField("2")
       loadLoteadoras()
     } catch { setLoteadoraError("Error de conexión") } finally { setCreatingLoteadora(false) }
   }
@@ -288,7 +286,7 @@ export default function AdminPage() {
     setEditLoteadoraId(l.id)
     setEditLoteadora({
       name: l.name, ip: l.ip, port: String(l.port), slaveAddress: String(l.slave_address),
-      messageName: l.message_name, lotFieldId: String(l.lot_field_id), expiryFieldId: String(l.expiry_field_id),
+      lotFieldId: String(l.lot_field_id), expiryFieldId: String(l.expiry_field_id),
       enabled: !!l.enabled,
     })
     setEditLoteadoraError("")
@@ -303,7 +301,7 @@ export default function AdminPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           name: editLoteadora.name, ip: editLoteadora.ip, port: Number(editLoteadora.port),
-          slaveAddress: Number(editLoteadora.slaveAddress), messageName: editLoteadora.messageName,
+          slaveAddress: Number(editLoteadora.slaveAddress),
           lotFieldId: Number(editLoteadora.lotFieldId), expiryFieldId: Number(editLoteadora.expiryFieldId),
           enabled: editLoteadora.enabled,
         }),
@@ -918,10 +916,6 @@ export default function AdminPage() {
                     <Input type="number" value={newLoteadoraSlave} onChange={e => setNewLoteadoraSlave(e.target.value)} className="w-[90px]" />
                   </div>
                   <div className="space-y-1.5">
-                    <label className="text-xs font-semibold text-secondary-foreground">Mensaje/plantilla</label>
-                    <Input value={newLoteadoraMessage} onChange={e => setNewLoteadoraMessage(e.target.value)} placeholder="pruebaDavid.msg" required className="w-[160px]" />
-                  </div>
-                  <div className="space-y-1.5">
                     <label className="text-xs font-semibold text-secondary-foreground">ID campo lote</label>
                     <Input type="number" value={newLoteadoraLotField} onChange={e => setNewLoteadoraLotField(e.target.value)} className="w-[110px]" />
                   </div>
@@ -952,7 +946,6 @@ export default function AdminPage() {
                       <TableRow className="hover:bg-transparent">
                         <TableHead className="font-bold text-secondary-foreground">Nombre</TableHead>
                         <TableHead className="font-bold text-secondary-foreground">IP:Puerto</TableHead>
-                        <TableHead className="font-bold text-secondary-foreground">Mensaje</TableHead>
                         <TableHead className="font-bold text-secondary-foreground">Campos (lote/cad.)</TableHead>
                         <TableHead className="font-bold text-secondary-foreground">Estado</TableHead>
                         <TableHead className="font-bold text-secondary-foreground text-right">Acciones</TableHead>
@@ -962,13 +955,12 @@ export default function AdminPage() {
                       {loteadoras.map(l => (
                         editLoteadoraId === l.id ? (
                           <TableRow key={l.id} className="bg-blue-50 border-blue-200">
-                            <TableCell colSpan={6}>
+                            <TableCell colSpan={5}>
                               <div className="flex flex-wrap items-end gap-3">
                                 <Input value={editLoteadora.name} onChange={e => setEditLoteadora(s => ({ ...s, name: e.target.value }))} placeholder="Nombre" className="h-8 w-[140px] text-sm" autoFocus />
                                 <Input value={editLoteadora.ip} onChange={e => setEditLoteadora(s => ({ ...s, ip: e.target.value }))} placeholder="IP" className="h-8 w-[120px] text-sm" />
                                 <Input type="number" value={editLoteadora.port} onChange={e => setEditLoteadora(s => ({ ...s, port: e.target.value }))} placeholder="Puerto" className="h-8 w-[80px] text-sm" />
                                 <Input type="number" value={editLoteadora.slaveAddress} onChange={e => setEditLoteadora(s => ({ ...s, slaveAddress: e.target.value }))} placeholder="Slave" className="h-8 w-[70px] text-sm" />
-                                <Input value={editLoteadora.messageName} onChange={e => setEditLoteadora(s => ({ ...s, messageName: e.target.value }))} placeholder="Mensaje" className="h-8 w-[140px] text-sm" />
                                 <Input type="number" value={editLoteadora.lotFieldId} onChange={e => setEditLoteadora(s => ({ ...s, lotFieldId: e.target.value }))} placeholder="ID lote" className="h-8 w-[80px] text-sm" />
                                 <Input type="number" value={editLoteadora.expiryFieldId} onChange={e => setEditLoteadora(s => ({ ...s, expiryFieldId: e.target.value }))} placeholder="ID cad." className="h-8 w-[80px] text-sm" />
                                 <label className="flex items-center gap-1.5 text-xs font-medium text-secondary-foreground">
@@ -985,9 +977,6 @@ export default function AdminPage() {
                           <TableRow key={l.id} className="hover:bg-muted/50 border-border">
                             <TableCell className="font-medium">{l.name}</TableCell>
                             <TableCell className="text-muted-foreground text-sm">{l.ip}:{l.port}</TableCell>
-                            <TableCell className="text-sm">
-                              <code className="text-xs bg-muted px-1.5 py-0.5 rounded">{l.message_name}</code>
-                            </TableCell>
                             <TableCell className="text-muted-foreground text-sm">{l.lot_field_id} / {l.expiry_field_id}</TableCell>
                             <TableCell>
                               <div className="flex flex-wrap gap-1.5">

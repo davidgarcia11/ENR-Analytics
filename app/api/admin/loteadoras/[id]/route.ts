@@ -16,7 +16,7 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
   if ('error' in parsed) {
     return NextResponse.json({ error: parsed.error }, { status: 400 });
   }
-  const { name, ip, port, slaveAddress, messageName, lotFieldId, expiryFieldId, enabled } = parsed.value;
+  const { name, ip, port, slaveAddress, lotFieldId, expiryFieldId, enabled } = parsed.value;
 
   const db = getDb();
 
@@ -26,9 +26,9 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
   }
 
   const result = db.prepare(
-    `UPDATE loteadoras SET name = ?, ip = ?, port = ?, slave_address = ?, message_name = ?, lot_field_id = ?, expiry_field_id = ?, enabled = ?
+    `UPDATE loteadoras SET name = ?, ip = ?, port = ?, slave_address = ?, lot_field_id = ?, expiry_field_id = ?, enabled = ?
      WHERE id = ?`
-  ).run(name, ip, port, slaveAddress, messageName, lotFieldId, expiryFieldId, enabled, loteadoraId);
+  ).run(name, ip, port, slaveAddress, lotFieldId, expiryFieldId, enabled, loteadoraId);
 
   if (result.changes === 0) {
     return NextResponse.json({ error: 'Loteadora no encontrada' }, { status: 404 });

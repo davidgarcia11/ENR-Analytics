@@ -9,7 +9,6 @@ import { SingleSelect } from "@/components/SingleSelect"
 import { useRouter } from "next/navigation"
 
 interface SessionUser { id: number; username: string; role: string; name: string; surname: string }
-interface Marca { id: string; descripcion: string }
 interface Articulo { id: string; descripcion: string; diasCaducidad: number }
 interface Loteadora { id: number; name: string }
 type EstadoLoteadoraValor = 'activa' | 'en_error' | 'standby' | 'apagada'
@@ -60,12 +59,9 @@ export default function LoteadoraPage() {
   const router = useRouter()
   const [sessionUser, setSessionUser] = useState<SessionUser | null>(null)
 
-  // Selección en cascada
-  const [marcas, setMarcas] = useState<Marca[]>([])
-  const [selectedMarca, setSelectedMarca] = useState('')
+  // Selección de artículo (búsqueda directa, sin marca)
   const [articulos, setArticulos] = useState<Articulo[]>([])
   const [selectedArticulo, setSelectedArticulo] = useState<Articulo | null>(null)
-  const [loadingMarcas, setLoadingMarcas] = useState(false)
   const [loadingArticulos, setLoadingArticulos] = useState(false)
 
   // Formulario
@@ -104,7 +100,7 @@ export default function LoteadoraPage() {
   useEffect(() => { checkSession() }, [])
 
   useEffect(() => {
-    fetchMarcas()
+    fetchArticulos()
     fetchLoteadoras()
     fetchEstadoLoteadoras()
 
@@ -112,20 +108,11 @@ export default function LoteadoraPage() {
     // el panel esté abierto (cada comprobación de loteadora abre y cierra
     // una conexión TCP breve — protocolo TIJ, comando 14).
     const interval = setInterval(() => {
-      fetchMarcas()
+      fetchArticulos()
       fetchEstadoLoteadoras()
     }, 60000)
     return () => clearInterval(interval)
   }, [])
-
-  useEffect(() => {
-    if (!selectedMarca) {
-      setArticulos([])
-      setSelectedArticulo(null)
-      return
-    }
-    fetchArticulos(selectedMarca)
-  }, [selectedMarca])
 
   useEffect(() => {
     setMensajeError(null)
@@ -154,25 +141,13 @@ export default function LoteadoraPage() {
     router.push('/login')
   }
 
-  const fetchMarcas = async () => {
-    setLoadingMarcas(true)
-    try {
-      const res = await fetch('/api/loteadora/marcas')
-      if (!res.ok) throw new Error()
-      setMarcas(await res.json())
-      setJdeOnline(true)
-    } catch {
-      setJdeOnline(false)
-    } finally {
-      setLoadingMarcas(false)
-    }
-  }
-
-  const fetchArticulos = async (marca: string) => {
+  // También sirve como comprobación de vida de JDE (badge "JDE conectado"),
+  // por eso se repite cada 60s junto al resto del estado en vivo — no toca la
+  // selección de artículo ya hecha, solo refresca la lista disponible.
+  const fetchArticulos = async () => {
     setLoadingArticulos(true)
-    setSelectedArticulo(null)
     try {
-      const res = await fetch(`/api/loteadora/articulos?marca=${encodeURIComponent(marca)}`)
+      const res = await fetch('/api/loteadora/articulos')
       if (!res.ok) throw new Error()
       setArticulos(await res.json())
       setJdeOnline(true)
@@ -214,7 +189,7 @@ export default function LoteadoraPage() {
       const data = await res.json()
       if (!res.ok) throw new Error(data.error || 'Error al listar las plantillas de la loteadora')
       setMensajes(data.messages)
-      setSelectedMensaje(data.messages.includes(data.current) ? data.current : (data.messages[0] || ''))
+      setSelectedMensaje('')
     } catch (err: any) {
       setMensajes([])
       setSelectedMensaje('')
@@ -282,9 +257,7 @@ export default function LoteadoraPage() {
   }
 
   const limpiar = () => {
-    setSelectedMarca('')
     setSelectedArticulo(null)
-    setArticulos([])
     setDiasDesdeJde(null)
     setDiasCad('')
     setModoManual(false)
@@ -330,8 +303,7 @@ export default function LoteadoraPage() {
   const fechaCaducidad = (fabDate && !isNaN(diasNum) && diasNum > 0) ? addDays(fabDate, diasNum) : null
   const canSend = !!lote && !!fechaCaducidad && !!selectedArticulo && !!selectedLoteadora && !sending
   const diasReadonly = !modoManual && jdeOnline && diasDesdeJde !== null
-  const loteadoraImprimiendo = estadoLoteadoras.find(e => String(e.id) === selectedLoteadora)?.state === 'activa'
-  const canCargarMensaje = !!selectedLoteadora && !!selectedMensaje && !cargandoMensaje && !loteadoraImprimiendo
+  const canCargarMensaje = !!selectedLoteadora && !!selectedMensaje && !cargandoMensaje
 
   return (
     <main className="min-h-screen bg-gray-100 p-8 font-sans text-gray-900">
@@ -361,41 +333,22 @@ export default function LoteadoraPage() {
             <div className="p-6 space-y-5">
               <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Datos del artículo</p>
 
-              {/* Marca */}
-              <div className="grid gap-1.5">
-                <label htmlFor="marca" className="text-xs font-semibold text-gray-700">
-                  Marca
-                  {loadingMarcas && <Loader2 className="inline h-3 w-3 animate-spin ml-1.5 text-gray-400" />}
-                </label>
-                <div className={!jdeOnline ? 'opacity-50 pointer-events-none' : ''}>
-                  <SingleSelect
-                    label="marca"
-                    allLabel="Seleccionar marca…"
-                    value={selectedMarca || 'all'}
-                    onChange={id => setSelectedMarca(id === 'all' ? '' : id)}
-                    options={marcas.map(m => ({ id: m.id, description: m.descripcion || m.id }))}
-                  />
-                </div>
-              </div>
-
               {/* Artículo */}
               <div className="grid gap-1.5">
                 <label htmlFor="articulo" className="text-xs font-semibold text-gray-700">
                   Artículo
                   {loadingArticulos && <Loader2 className="inline h-3 w-3 animate-spin ml-1.5 text-gray-400" />}
                 </label>
-                <div className={(!selectedMarca || loadingArticulos || articulos.length === 0) ? 'opacity-50 pointer-events-none' : ''}>
+                <div className={(!jdeOnline || loadingArticulos) ? 'opacity-50 pointer-events-none' : ''}>
                   <SingleSelect
                     label="artículo"
                     showId
                     allLabel={
-                      !selectedMarca
-                        ? 'Primero selecciona una marca'
-                        : loadingArticulos
-                          ? 'Cargando…'
-                          : articulos.length === 0
-                            ? 'Sin artículos para esta marca'
-                            : 'Seleccionar artículo…'
+                      loadingArticulos
+                        ? 'Cargando…'
+                        : articulos.length === 0
+                          ? 'Sin artículos disponibles'
+                          : 'Buscar por código o descripción…'
                     }
                     value={selectedArticulo?.id || 'all'}
                     onChange={id => id === 'all' ? setSelectedArticulo(null) : handleArticuloChange(id)}
@@ -404,7 +357,7 @@ export default function LoteadoraPage() {
                 </div>
               </div>
 
-              {(selectedMarca || selectedArticulo) && (
+              {selectedArticulo && (
                 <button
                   type="button"
                   onClick={limpiar}
@@ -538,7 +491,6 @@ export default function LoteadoraPage() {
                       onClick={handleCargarMensaje}
                       disabled={!canCargarMensaje}
                       className="text-xs text-gray-600 whitespace-nowrap"
-                      title={loteadoraImprimiendo ? 'La loteadora está imprimiendo — detenla en su pantalla antes de cambiar de plantilla' : undefined}
                     >
                       {cargandoMensaje
                         ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
@@ -546,12 +498,6 @@ export default function LoteadoraPage() {
                       Cargar plantilla
                     </Button>
                   </div>
-                  {loteadoraImprimiendo && (
-                    <p className="text-xs text-amber-700 flex items-center gap-1">
-                      <AlertTriangle className="h-3 w-3" />
-                      La loteadora está imprimiendo — detenla en su pantalla para poder cambiar de plantilla.
-                    </p>
-                  )}
                   {mensajeSuccess && (
                     <p className="text-xs text-green-700 flex items-center gap-1">
                       <CheckCircle2 className="h-3 w-3" />
@@ -576,6 +522,18 @@ export default function LoteadoraPage() {
                 className="rounded-lg border border-gray-200 bg-gray-50 p-5 space-y-4"
                 style={{ borderLeft: '3px solid #D30B15', borderRadius: '0 8px 8px 0' }}
               >
+                <div className="pb-3 border-b border-gray-200">
+                  {selectedArticulo ? (
+                    <div className="flex items-baseline gap-2 flex-wrap">
+                      <span className="font-mono text-sm font-bold text-gray-900 bg-gray-200 px-2 py-0.5 rounded">
+                        {selectedArticulo.id}
+                      </span>
+                      <span className="text-sm font-semibold text-gray-800">{selectedArticulo.descripcion}</span>
+                    </div>
+                  ) : (
+                    <span className="text-sm text-gray-400">Ningún artículo seleccionado</span>
+                  )}
+                </div>
                 <div className="flex items-baseline gap-4">
                   <span className="text-xs text-gray-500 w-16 flex-shrink-0 font-semibold uppercase tracking-wide">Lote</span>
                   <span className={`font-mono text-3xl font-bold tracking-widest ${lote ? 'text-gray-900' : 'text-gray-200'}`}>

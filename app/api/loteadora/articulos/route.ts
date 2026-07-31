@@ -1,22 +1,22 @@
-import { NextRequest, NextResponse } from 'next/server'
+import { NextResponse } from 'next/server'
 import { getDbConnection } from '@/lib/db'
 
-// Devuelve artículos de una marca (IMSRP4) con su código, descripción y días de caducidad (IMSLD).
-export async function GET(req: NextRequest) {
-  const marca = new URL(req.url).searchParams.get('marca')
-  if (!marca) return NextResponse.json({ error: 'Falta parámetro marca' }, { status: 400 })
-
+// Devuelve los artículos utilizables en la loteadora, con su código,
+// descripción y días de caducidad (IMSLD). Ya no se filtra por marca: se
+// busca directamente en toda la F4101 (IMSRP1='12', IMSRP6='Y' y IMSTKT
+// distinto de 'O'/'U').
+export async function GET() {
   let conn
   try {
     conn = await getDbConnection()
     const result = await conn.execute(
       `SELECT TRIM(IMLITM) AS id, TRIM(IMDSC1) AS descripcion, NVL(IMSLD, 0) AS diasCaducidad
        FROM F4101
-       WHERE TRIM(IMSRP4) = :marca
-         AND TRIM(IMSRP1) = '12'
+       WHERE TRIM(IMSRP1) = '12'
+         AND TRIM(IMSRP6) = 'Y'
+         AND TRIM(IMSTKT) NOT IN ('O', 'U')
          AND TRIM(IMLITM) IS NOT NULL
-       ORDER BY TRIM(IMDSC1)`,
-      { marca }
+       ORDER BY TRIM(IMDSC1)`
     )
     const rows = (result.rows as any[])
       .map(r => ({

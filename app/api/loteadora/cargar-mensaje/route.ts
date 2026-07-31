@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getDb } from '@/lib/sqlite';
 import { verifySession } from '@/lib/auth';
-import { getPrinterStatus, loadPrintMessage } from '@/lib/loteadora-printer';
+import { loadPrintMessage } from '@/lib/loteadora-printer';
 
 interface LoteadoraRow {
   ip: string;
@@ -9,9 +9,11 @@ interface LoteadoraRow {
   slave_address: number;
 }
 
-// Carga una plantilla existente en la loteadora (comandos 1E + 01). Antes de
-// intentarlo, comprueba que la impresora no esté imprimiendo — cambiar de
-// plantilla en remoto mientras imprime interrumpiría un trabajo real.
+// Carga una plantilla existente en la loteadora (comandos 1E + 01). No se
+// comprueba el estado de impresión: el protocolo exige la impresión iniciada
+// para aceptar 1F/1E (P_Status=12 si no), y en el firmware T1/T2 de esta
+// máquina está explícitamente permitido actualizar el contenido con la
+// impresión iniciada — no hace falta pararla (ver docs/loteadora.md §11).
 export async function POST(req: NextRequest) {
   const user = await verifySession();
   if (!user) {
@@ -33,14 +35,6 @@ export async function POST(req: NextRequest) {
   }
 
   const config = { ip: loteadora.ip, port: loteadora.port, slaveAddress: loteadora.slave_address };
-
-  const estado = await getPrinterStatus(config);
-  if (estado === 'activa') {
-    return NextResponse.json(
-      { error: 'La loteadora está imprimiendo. Detén la impresión en la pantalla de la máquina antes de cambiar de plantilla.' },
-      { status: 409 }
-    );
-  }
 
   try {
     await loadPrintMessage(config, String(messageName));

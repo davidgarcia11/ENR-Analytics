@@ -7,7 +7,6 @@ interface LoteadoraRow {
   ip: string;
   port: number;
   slave_address: number;
-  message_name: string;
 }
 
 // Lista las plantillas guardadas en una loteadora (comando 1F), para el
@@ -25,7 +24,7 @@ export async function GET(req: NextRequest) {
 
   const db = getDb();
   const loteadora = db.prepare(
-    'SELECT ip, port, slave_address, message_name FROM loteadoras WHERE id = ? AND enabled = 1'
+    'SELECT ip, port, slave_address FROM loteadoras WHERE id = ? AND enabled = 1'
   ).get(loteadoraId) as LoteadoraRow | undefined;
 
   if (!loteadora) {
@@ -34,7 +33,7 @@ export async function GET(req: NextRequest) {
 
   try {
     const messages = await listMessageNames({ ip: loteadora.ip, port: loteadora.port, slaveAddress: loteadora.slave_address });
-    return NextResponse.json({ messages, current: loteadora.message_name });
+    return NextResponse.json({ messages });
   } catch (err: any) {
     console.error('Listar plantillas de loteadora error:', err);
     return NextResponse.json({ error: err.message }, { status: 502 });
