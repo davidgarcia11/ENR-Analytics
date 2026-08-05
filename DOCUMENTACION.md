@@ -34,7 +34,7 @@ Esta aplicación es un **panel de control (dashboard) de producción** para la e
 | **xlsx** | 0.18 | Generar archivos Excel (.xlsx) |
 | **recharts** | — | Gráficos de líneas para estadísticas de logs |
 | **lucide-react** | 0.563 | Iconos SVG (Search, Factory, Download...) |
-| **@radix-ui/react-popover** | — | Popover posicionado con Portal (usado por `DatePicker` y `MermaCellPopover`) |
+| **@radix-ui/react-popover** | — | Popover posicionado con Portal (usado por `MermaCellPopover` y `app/compras/page.tsx`) |
 | **Bun** | — | Gestor de paquetes y runtime (alternativa a npm/node) |
 
 ---
@@ -903,7 +903,7 @@ Wrapper fino sobre `<input type="date">` nativo del navegador. Devuelve y recibe
 
 ### `components/ui/popover.tsx`
 
-Componente `Popover` / `PopoverTrigger` / `PopoverContent` estilo shadcn/ui basado en `@radix-ui/react-popover`. `PopoverContent` renderiza en Portal para garantizar z-index correcto sobre cualquier elemento. Lo usan `DatePicker` y `MermaCellPopover`.
+Componente `Popover` / `PopoverTrigger` / `PopoverContent` estilo shadcn/ui basado en `@radix-ui/react-popover`. `PopoverContent` renderiza en Portal para garantizar z-index correcto sobre cualquier elemento. Lo usan `MermaCellPopover` y la tarjeta KPI de Kg en `app/compras/page.tsx` (lista de artículos sin gramaje, ver `docs/compras.md` §13.1).
 
 ### `ArticleMultiSelect.tsx`
 

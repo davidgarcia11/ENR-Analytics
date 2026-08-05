@@ -225,6 +225,7 @@ Respuesta (resumida, ver también `app/api/compras/route.ts`):
     {
       "item": "12345", "descripcion": "...", "familia": "COCIDOS",
       "anio": 2026, "mes": 7, "mesLabel": "2026-07",
+      "gramaje": 500,
       "previsto": { "cantidad": 5000, "precioUnitario": 3.42, "importe": 17100, "kg": 2500 },
       "real": { "cantidad": 4820, "precioUnitario": 3.55, "importe": 17111, "kg": 2410 },
       "desviacion": {
@@ -243,10 +244,15 @@ Respuesta (resumida, ver también `app/api/compras/route.ts`):
     "precioMedioPrevisto": 3.90, "precioMedioReal": 3.92, "desviacionPrecioPct": 0.51,
     "porMes": [
       { "mesLabel": "2026-01", "importePrevisto": 98000, "importeReal": 91000, "cantidadPrevisto": 25000, "cantidadReal": 23400, "kgPrevisto": 12500, "kgReal": 11700, "precioPrevisto": 3.92, "precioReal": 3.89 }
-    ]
+    ],
+    "articulosSinGramaje": ["1210100014", "1210100059"]
   }
 }
 ```
+
+`gramaje` (en cada fila) y `resumen.articulosSinGramaje` alimentan el popover de la tarjeta KPI de
+Kg descrito en §13.1 — `gramaje` es `null` cuando el artículo no tiene fila en `F554101` o `AAZE03`
+no es un número válido (`> 0`).
 
 ---
 
