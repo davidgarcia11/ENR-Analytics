@@ -33,6 +33,7 @@ app/                          # Rutas Next.js (App Router)
   caducados/                  # Panel palets caducados/obsoletos/bloqueados
   comparativa-seres/          # Panel comparativa SERES vs JDE
   consulta-stock-pda/         # Panel consulta de stock por escaneo (FEFO, Reflex/SQL Server)
+  compras/                    # Panel comparativa previsión de ventas vs. venta real (director de compras)
   admin/page.tsx              # Panel de administración de usuarios
   admin/logs/page.tsx         # Logs de consultas (solo admin)
   login/page.tsx              # Login
@@ -48,6 +49,7 @@ app/                          # Rutas Next.js (App Router)
     jde-orders/               # GET órdenes JDE (API externa, usada por herramientas externas)
     comparativa-seres/        # GET comparativa SERES vs JDE
     consulta-stock-pda/       # GET stock FEFO por EAN escaneado (Reflex/SQL Server)
+    compras/                  # GET previsión (F3460) vs venta real (F4211), coste (F4105), gramaje (F554101)
     auth/                     # login, logout, me, change-password
     admin/                    # users CRUD, logs
     presets/                  # CRUD presets de filtros
@@ -77,6 +79,7 @@ docs/                         # Documentación específica por panel
   palets-caducados.md         # Panel de caducados
   seres-jde-comparativa.md    # Panel comparativa SERES vs JDE
   consulta-stock-pda.md       # Panel consulta de stock por escaneo (FEFO, Reflex)
+  compras.md                  # Panel comparativa previsión de ventas vs. venta real
 ```
 
 ## Convenciones de código
@@ -189,6 +192,8 @@ docs/                         # Documentación específica por panel
   - Cambios en el panel de pedidos → `docs/control-pedidos.md`
   - Cambios en el panel de caducados → `docs/palets-caducados.md`
   - Cambios en el panel comparativa SERES vs JDE → `docs/seres-jde-comparativa.md`
+  - Cambios en el panel de consulta de stock por escaneo → `docs/consulta-stock-pda.md`
+  - Cambios en el panel de compras (`/compras`, `api/compras`) → `docs/compras.md`
   - Nuevo panel → crear `docs/nombre-panel.md` y añadir referencia en `DOCUMENTACION.md` sección 9
 - Sugerir commit con mensaje siguiendo el estilo del proyecto (conventional + español)
 
