@@ -9,7 +9,8 @@ import { SingleSelect } from "@/components/SingleSelect"
 import { useRouter } from "next/navigation"
 
 interface SessionUser { id: number; username: string; role: string; name: string; surname: string }
-interface Articulo { id: string; descripcion: string; diasCaducidad: number }
+interface PlantillaArticulo { messageName: string; lotFieldId: number; cocidaFieldId: number; expiryFieldId: number }
+interface Articulo { id: string; descripcion: string; diasCaducidad: number; plantilla: PlantillaArticulo | null }
 interface Loteadora { id: number; name: string }
 type EstadoLoteadoraValor = 'activa' | 'en_error' | 'standby' | 'apagada'
 interface EstadoLoteadora { id: number; name: string; state: EstadoLoteadoraValor }
@@ -66,6 +67,7 @@ export default function LoteadoraPage() {
 
   // Formulario
   const [fechaFab, setFechaFab] = useState(todayISO())
+  const [fechaCocida, setFechaCocida] = useState(todayISO())
   const [diasCad, setDiasCad] = useState('')
   const [diasDesdeJde, setDiasDesdeJde] = useState<number | null>(null)
   const [modoManual, setModoManual] = useState(false)
@@ -127,6 +129,14 @@ export default function LoteadoraPage() {
     fetchEstadoLoteadoras()
     fetchMensajes(selectedLoteadora)
   }, [selectedLoteadora])
+
+  // Autocarga de plantilla: si el artículo elegido tiene una plantilla
+  // asociada (configurada en /admin), se carga sola en la loteadora sin
+  // pedir confirmación — sustituye a la selección manual para ese caso.
+  useEffect(() => {
+    if (!selectedLoteadora || !selectedArticulo?.plantilla) return
+    cargarMensaje(selectedArticulo.plantilla.messageName)
+  }, [selectedArticulo, selectedLoteadora])
 
   const checkSession = async () => {
     try {
@@ -199,15 +209,16 @@ export default function LoteadoraPage() {
     }
   }
 
-  const handleCargarMensaje = async () => {
-    if (!selectedLoteadora || !selectedMensaje || cargandoMensaje) return
+  const cargarMensaje = async (messageName: string) => {
+    if (!selectedLoteadora || !messageName || cargandoMensaje) return
+    setSelectedMensaje(messageName)
     setCargandoMensaje(true)
     setMensajeError(null)
     try {
       const res = await fetch('/api/loteadora/cargar-mensaje', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ loteadoraId: Number(selectedLoteadora), messageName: selectedMensaje }),
+        body: JSON.stringify({ loteadoraId: Number(selectedLoteadora), messageName }),
       })
       const data = await res.json()
       if (!res.ok) throw new Error(data.error || 'Error al cargar la plantilla')
@@ -219,6 +230,8 @@ export default function LoteadoraPage() {
       setCargandoMensaje(false)
     }
   }
+
+  const handleCargarMensaje = () => cargarMensaje(selectedMensaje)
 
   const handleLimpiarBuffer = async () => {
     if (!selectedLoteadora || limpiandoBuffer) return
@@ -276,7 +289,9 @@ export default function LoteadoraPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           loteadoraId: Number(selectedLoteadora),
+          articuloId: selectedArticulo?.id,
           lote,
+          fechaCocida: cocida,
           fechaCaducidad: formatDateES(fechaCaducidad),
         }),
       })
@@ -298,10 +313,12 @@ export default function LoteadoraPage() {
 
   // Cálculos derivados
   const fabDate = parseFecha(fechaFab)
+  const cocidaDate = parseFecha(fechaCocida)
   const diasNum = parseInt(diasCad, 10)
   const lote = fabDate ? toLote(fabDate) : null
-  const fechaCaducidad = (fabDate && !isNaN(diasNum) && diasNum > 0) ? addDays(fabDate, diasNum) : null
-  const canSend = !!lote && !!fechaCaducidad && !!selectedArticulo && !!selectedLoteadora && !sending
+  const cocida = cocidaDate ? toLote(cocidaDate) : null
+  const fechaCaducidad = (cocidaDate && !isNaN(diasNum) && diasNum > 0) ? addDays(cocidaDate, diasNum) : null
+  const canSend = !!lote && !!cocida && !!fechaCaducidad && !!selectedArticulo?.plantilla && !!selectedLoteadora && !sending
   const diasReadonly = !modoManual && jdeOnline && diasDesdeJde !== null
   const canCargarMensaje = !!selectedLoteadora && !!selectedMensaje && !cargandoMensaje
 
@@ -367,6 +384,13 @@ export default function LoteadoraPage() {
                 </button>
               )}
 
+              {selectedArticulo && !selectedArticulo.plantilla && (
+                <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-md px-3 py-2 flex items-center gap-1.5">
+                  <AlertTriangle className="h-3.5 w-3.5 flex-shrink-0" />
+                  Este artículo no tiene una plantilla asociada — configúralo en /admin antes de poder enviar.
+                </p>
+              )}
+
               {/* Fecha de fabricación */}
               <div className="grid gap-1.5">
                 <label htmlFor="fechaFab" className="text-xs font-semibold text-gray-700">Fecha de fabricación</label>
@@ -383,6 +407,30 @@ export default function LoteadoraPage() {
                     variant="outline"
                     size="sm"
                     onClick={() => setFechaFab(todayISO())}
+                    className="text-xs text-gray-600 whitespace-nowrap"
+                  >
+                    <Calendar className="h-3.5 w-3.5" />
+                    Hoy
+                  </Button>
+                </div>
+              </div>
+
+              {/* Fecha de cocida (la caducidad se calcula a partir de esta, no de fabricación) */}
+              <div className="grid gap-1.5">
+                <label htmlFor="fechaCocida" className="text-xs font-semibold text-gray-700">Fecha de cocida</label>
+                <div className="flex gap-2">
+                  <Input
+                    id="fechaCocida"
+                    type="date"
+                    value={fechaCocida}
+                    onChange={e => setFechaCocida(e.target.value)}
+                    className="flex-1"
+                  />
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setFechaCocida(todayISO())}
                     className="text-xs text-gray-600 whitespace-nowrap"
                   >
                     <Calendar className="h-3.5 w-3.5" />
@@ -541,6 +589,12 @@ export default function LoteadoraPage() {
                   </span>
                 </div>
                 <div className="flex items-baseline gap-4">
+                  <span className="text-xs text-gray-500 w-16 flex-shrink-0 font-semibold uppercase tracking-wide">Cocida</span>
+                  <span className={`font-mono text-3xl font-bold tracking-widest ${cocida ? 'text-gray-900' : 'text-gray-200'}`}>
+                    {cocida ?? '——'}
+                  </span>
+                </div>
+                <div className="flex items-baseline gap-4">
                   <span className="text-xs text-gray-500 w-16 flex-shrink-0 font-semibold uppercase tracking-wide">F. Cad.</span>
                   <span className={`font-mono text-3xl font-bold tracking-widest ${fechaCaducidad ? 'text-gray-900' : 'text-gray-200'}`}>
                     {fechaCaducidad ? formatDateES(fechaCaducidad) : '——'}
@@ -551,14 +605,16 @@ export default function LoteadoraPage() {
               {fabDate && (
                 <div className="flex flex-wrap gap-2">
                   <span className="text-xs bg-gray-100 text-gray-600 px-2.5 py-1 rounded-full">
-                    Año: {String(fabDate.getFullYear()).slice(-2)}
+                    Lote — Año: {String(fabDate.getFullYear()).slice(-2)} · Día juliano: {toJulianDay(fabDate)}
                   </span>
-                  <span className="text-xs bg-gray-100 text-gray-600 px-2.5 py-1 rounded-full">
-                    Día juliano: {toJulianDay(fabDate)}
-                  </span>
-                  {fechaCaducidad && (
+                  {cocidaDate && (
                     <span className="text-xs bg-gray-100 text-gray-600 px-2.5 py-1 rounded-full">
-                      {formatDateES(fabDate)} + {diasNum} días
+                      Cocida — Año: {String(cocidaDate.getFullYear()).slice(-2)} · Día juliano: {toJulianDay(cocidaDate)}
+                    </span>
+                  )}
+                  {cocidaDate && fechaCaducidad && (
+                    <span className="text-xs bg-gray-100 text-gray-600 px-2.5 py-1 rounded-full">
+                      {formatDateES(cocidaDate)} + {diasNum} días
                     </span>
                   )}
                 </div>

@@ -1,10 +1,14 @@
 import { NextResponse } from 'next/server'
 import { getDbConnection } from '@/lib/db'
+import { getDb } from '@/lib/sqlite'
 
 // Devuelve los artículos utilizables en la loteadora, con su código,
 // descripción y días de caducidad (IMSLD). Ya no se filtra por marca: se
 // busca directamente en toda la F4101 (IMSRP1='12', IMSRP6='Y' y IMSTKT
-// distinto de 'O'/'U').
+// distinto de 'O'/'U'). A cada artículo, si tiene plantilla asociada
+// (loteadora_articulo_mensajes), se le adjunta el nombre de mensaje y los
+// IDs de campo (lote/cocida/caducidad) para que /loteadora pueda autocargarla
+// sin otra llamada.
 export async function GET() {
   let conn
   try {
@@ -25,7 +29,21 @@ export async function GET() {
         diasCaducidad: Number(r.DIASCADUCIDAD ?? 0),
       }))
       .filter(r => r.id)
-    return NextResponse.json(rows)
+
+    const db = getDb()
+    const asociaciones = db.prepare(
+      `SELECT am.articulo_id, m.name AS messageName, m.lot_field_id AS lotFieldId,
+              m.cocida_field_id AS cocidaFieldId, m.expiry_field_id AS expiryFieldId
+       FROM loteadora_articulo_mensajes am
+       JOIN loteadora_mensajes m ON m.id = am.mensaje_id`
+    ).all() as { articulo_id: string; messageName: string; lotFieldId: number; cocidaFieldId: number; expiryFieldId: number }[]
+    const plantillaPorArticulo = new Map(asociaciones.map(a => [a.articulo_id, {
+      messageName: a.messageName, lotFieldId: a.lotFieldId, cocidaFieldId: a.cocidaFieldId, expiryFieldId: a.expiryFieldId,
+    }]))
+
+    const rowsConPlantilla = rows.map(r => ({ ...r, plantilla: plantillaPorArticulo.get(r.id) ?? null }))
+
+    return NextResponse.json(rowsConPlantilla)
   } catch (err: any) {
     console.error('Loteadora/articulos error:', err)
     return NextResponse.json({ error: err.message }, { status: 500 })

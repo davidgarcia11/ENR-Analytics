@@ -1,0 +1,72 @@
+import { NextRequest, NextResponse } from 'next/server';
+import { getDb } from '@/lib/sqlite';
+import { verifySession } from '@/lib/auth';
+
+// Valida y normaliza el body de alta/edición de un mensaje (plantilla).
+export function parseMensajeInput(body: any) {
+  const name = String(body.name ?? '').trim();
+  const lotFieldId = Number(body.lotFieldId);
+  const cocidaFieldId = Number(body.cocidaFieldId);
+  const expiryFieldId = Number(body.expiryFieldId);
+
+  if (!name) return { error: 'El nombre es obligatorio' };
+
+  for (const [label, value] of [
+    ['ID de campo del lote', lotFieldId],
+    ['ID de campo de la cocida', cocidaFieldId],
+    ['ID de campo de la caducidad', expiryFieldId],
+  ] as const) {
+    if (!Number.isInteger(value) || value < 0 || value > 255) {
+      return { error: `${label} debe ser un entero entre 0 y 255` };
+    }
+  }
+
+  if (lotFieldId === cocidaFieldId || lotFieldId === expiryFieldId || cocidaFieldId === expiryFieldId) {
+    return { error: 'Los IDs de campo de lote, cocida y caducidad deben ser distintos entre sí' };
+  }
+
+  return { value: { name, lotFieldId, cocidaFieldId, expiryFieldId } };
+}
+
+export async function GET() {
+  const user = await verifySession();
+  if (!user || user.role !== 'admin') {
+    return NextResponse.json({ error: 'No autorizado' }, { status: 403 });
+  }
+
+  const db = getDb();
+  const mensajes = db.prepare(
+    'SELECT id, name, lot_field_id, cocida_field_id, expiry_field_id, created_at FROM loteadora_mensajes ORDER BY name'
+  ).all();
+  return NextResponse.json(mensajes);
+}
+
+export async function POST(req: NextRequest) {
+  const user = await verifySession();
+  if (!user || user.role !== 'admin') {
+    return NextResponse.json({ error: 'No autorizado' }, { status: 403 });
+  }
+
+  const body = await req.json();
+  const parsed = parseMensajeInput(body);
+  if ('error' in parsed) {
+    return NextResponse.json({ error: parsed.error }, { status: 400 });
+  }
+  const { name, lotFieldId, cocidaFieldId, expiryFieldId } = parsed.value;
+
+  const db = getDb();
+  try {
+    const result = db.prepare(
+      `INSERT INTO loteadora_mensajes (name, lot_field_id, cocida_field_id, expiry_field_id)
+       VALUES (?, ?, ?, ?)`
+    ).run(name, lotFieldId, cocidaFieldId, expiryFieldId);
+    const created = db.prepare('SELECT id, name, lot_field_id, cocida_field_id, expiry_field_id, created_at FROM loteadora_mensajes WHERE id = ?').get(result.lastInsertRowid);
+    return NextResponse.json(created, { status: 201 });
+  } catch (err: any) {
+    if (err.message?.includes('UNIQUE')) {
+      return NextResponse.json({ error: 'Ya existe una plantilla con ese nombre' }, { status: 409 });
+    }
+    console.error('Create loteadora_mensaje error:', err);
+    return NextResponse.json({ error: err.message }, { status: 500 });
+  }
+}

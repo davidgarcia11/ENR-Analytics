@@ -79,19 +79,36 @@ export function getDb(): Database.Database {
     );
 
     -- Impresoras loteadoras (TIJ, protocolo TCP) gestionadas desde /admin.
-    -- Cada fila es una máquina física con dos Field Module ya configurados en
-    -- pantalla (Fuente de datos = Puerto serial): uno para el lote y otro para
-    -- la fecha de caducidad. La plantilla/mensaje se elige en vivo desde
-    -- /loteadora (comandos 1F/1E), no se guarda aquí. Ver docs/loteadora.md.
+    -- Los Field Module (lote/cocida/caducidad) ya no se configuran aquí por
+    -- máquina: viven por mensaje (loteadora_mensajes), porque cada plantilla
+    -- puede tener los campos en IDs distintos. Ver docs/loteadora.md.
     CREATE TABLE IF NOT EXISTS loteadoras (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       name TEXT NOT NULL UNIQUE,
       ip TEXT NOT NULL,
       port INTEGER NOT NULL,
       slave_address INTEGER NOT NULL DEFAULT 0,
-      lot_field_id INTEGER NOT NULL,
-      expiry_field_id INTEGER NOT NULL,
       enabled INTEGER NOT NULL DEFAULT 1,
+      created_at TEXT DEFAULT (datetime('now'))
+    );
+
+    -- Plantillas/mensajes configurados en las loteadoras (nombre global, debe
+    -- coincidir exacto con el mensaje creado en la máquina) y los IDs de los
+    -- tres Field Module que trae: lote, fecha de cocida y caducidad.
+    CREATE TABLE IF NOT EXISTS loteadora_mensajes (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL UNIQUE,
+      lot_field_id INTEGER NOT NULL,
+      cocida_field_id INTEGER NOT NULL,
+      expiry_field_id INTEGER NOT NULL,
+      created_at TEXT DEFAULT (datetime('now'))
+    );
+
+    -- Asociación artículo (F4101.IMLITM) -> plantilla. Global: el mismo
+    -- artículo usa siempre el mismo mensaje, sea cual sea la loteadora.
+    CREATE TABLE IF NOT EXISTS loteadora_articulo_mensajes (
+      articulo_id TEXT PRIMARY KEY,
+      mensaje_id INTEGER NOT NULL REFERENCES loteadora_mensajes(id) ON DELETE CASCADE,
       created_at TEXT DEFAULT (datetime('now'))
     );
   `);
@@ -125,6 +142,16 @@ export function getDb(): Database.Database {
   const loteadoraColumns = _db.prepare("PRAGMA table_info(loteadoras)").all() as { name: string }[];
   if (loteadoraColumns.some(c => c.name === 'message_name')) {
     _db.exec("ALTER TABLE loteadoras DROP COLUMN message_name");
+  }
+
+  // Migración: quitar lot_field_id/expiry_field_id de loteadoras si existen
+  // (BDs creadas antes de que los IDs de campo pasaran a vivir por mensaje,
+  // ver loteadora_mensajes)
+  if (loteadoraColumns.some(c => c.name === 'lot_field_id')) {
+    _db.exec("ALTER TABLE loteadoras DROP COLUMN lot_field_id");
+  }
+  if (loteadoraColumns.some(c => c.name === 'expiry_field_id')) {
+    _db.exec("ALTER TABLE loteadoras DROP COLUMN expiry_field_id");
   }
 
   // Seed roles base (idempotente)

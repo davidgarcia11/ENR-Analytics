@@ -11,8 +11,9 @@ import { Badge } from "@/components/ui/badge"
 import { Spinner } from "@/components/ui/spinner"
 import { ConfirmDialog } from "@/components/ui/dialog"
 import { useToast } from "@/components/ui/toast"
-import { Loader2, Trash2, UserPlus, ArrowLeft, KeyRound, Pencil, FileText, ShieldCheck, Tag, Printer } from "lucide-react"
+import { Loader2, Trash2, UserPlus, ArrowLeft, KeyRound, Pencil, FileText, ShieldCheck, Tag, Printer, FileCode, Link2 } from "lucide-react"
 import Image from "next/image"
+import { SingleSelect } from "@/components/SingleSelect"
 
 interface User {
   id: number
@@ -42,7 +43,7 @@ interface Screen {
   config: ScreenConfig
 }
 
-type Tab = 'usuarios' | 'roles' | 'pantallas' | 'estados-jde' | 'loteadoras'
+type Tab = 'usuarios' | 'roles' | 'pantallas' | 'estados-jde' | 'loteadoras' | 'plantillas' | 'articulos-plantilla'
 
 interface JdeStatus {
   code: string
@@ -56,8 +57,6 @@ interface Loteadora {
   ip: string
   port: number
   slave_address: number
-  lot_field_id: number
-  expiry_field_id: number
   enabled: number
   created_at: string
 }
@@ -69,6 +68,27 @@ const ESTADO_LOTEADORA_INFO: Record<EstadoLoteadoraValor, { label: string; varia
   en_error: { label: 'En error', variant: 'destructive' },
   standby: { label: 'Sin imprimir', variant: 'warning' },
   apagada: { label: 'Sin conexión', variant: 'default' },
+}
+
+interface LoteadoraMensaje {
+  id: number
+  name: string
+  lot_field_id: number
+  cocida_field_id: number
+  expiry_field_id: number
+  created_at: string
+}
+
+interface ArticuloMensajeAsociacion {
+  articulo_id: string
+  mensaje_id: number
+  mensaje_name: string
+  created_at: string
+}
+
+interface ArticuloLoteadora {
+  id: string
+  descripcion: string
 }
 
 const SCREEN_KEYS: { key: string; label: string }[] = [
@@ -139,15 +159,38 @@ export default function AdminPage() {
   const [newLoteadoraIp, setNewLoteadoraIp] = useState("")
   const [newLoteadoraPort, setNewLoteadoraPort] = useState("8010")
   const [newLoteadoraSlave, setNewLoteadoraSlave] = useState("0")
-  const [newLoteadoraLotField, setNewLoteadoraLotField] = useState("1")
-  const [newLoteadoraExpiryField, setNewLoteadoraExpiryField] = useState("2")
   const [loteadoraError, setLoteadoraError] = useState("")
   const [loteadoraSuccess, setLoteadoraSuccess] = useState("")
   const [creatingLoteadora, setCreatingLoteadora] = useState(false)
   const [editLoteadoraId, setEditLoteadoraId] = useState<number | null>(null)
-  const [editLoteadora, setEditLoteadora] = useState({ name: "", ip: "", port: "", slaveAddress: "", lotFieldId: "", expiryFieldId: "", enabled: true })
+  const [editLoteadora, setEditLoteadora] = useState({ name: "", ip: "", port: "", slaveAddress: "", enabled: true })
   const [editLoteadoraError, setEditLoteadoraError] = useState("")
   const [loteadoraLiveStatus, setLoteadoraLiveStatus] = useState<Record<number, EstadoLoteadoraValor>>({})
+
+  // ─── Plantillas (loteadora_mensajes) ──────────────────────────────────────────
+  const [mensajes, setMensajes] = useState<LoteadoraMensaje[]>([])
+  const [loadingMensajes, setLoadingMensajes] = useState(false)
+  const [newMensajeName, setNewMensajeName] = useState("")
+  const [newMensajeLotField, setNewMensajeLotField] = useState("1")
+  const [newMensajeCocidaField, setNewMensajeCocidaField] = useState("2")
+  const [newMensajeExpiryField, setNewMensajeExpiryField] = useState("3")
+  const [mensajeError, setMensajeError] = useState("")
+  const [mensajeSuccess, setMensajeSuccess] = useState("")
+  const [creatingMensaje, setCreatingMensaje] = useState(false)
+  const [editMensajeId, setEditMensajeId] = useState<number | null>(null)
+  const [editMensaje, setEditMensaje] = useState({ name: "", lotFieldId: "", cocidaFieldId: "", expiryFieldId: "" })
+  const [editMensajeError, setEditMensajeError] = useState("")
+
+  // ─── Artículos → Plantilla (loteadora_articulo_mensajes) ──────────────────────
+  const [articulosLoteadora, setArticulosLoteadora] = useState<ArticuloLoteadora[]>([])
+  const [loadingArticulosLoteadora, setLoadingArticulosLoteadora] = useState(false)
+  const [asociaciones, setAsociaciones] = useState<ArticuloMensajeAsociacion[]>([])
+  const [loadingAsociaciones, setLoadingAsociaciones] = useState(false)
+  const [nuevaAsociacionArticulo, setNuevaAsociacionArticulo] = useState("")
+  const [nuevaAsociacionMensaje, setNuevaAsociacionMensaje] = useState("")
+  const [asociacionError, setAsociacionError] = useState("")
+  const [asociacionSuccess, setAsociacionSuccess] = useState("")
+  const [creandoAsociacion, setCreandoAsociacion] = useState(false)
 
   useEffect(() => { checkAuth() }, [])
 
@@ -172,6 +215,9 @@ export default function AdminPage() {
       loadScreens()
       loadJdeStatuses()
       loadLoteadoras()
+      loadMensajes()
+      loadAsociaciones()
+      loadArticulosLoteadora()
     } catch {
       router.push("/login")
     }
@@ -270,14 +316,13 @@ export default function AdminPage() {
         body: JSON.stringify({
           name: newLoteadoraName, ip: newLoteadoraIp, port: Number(newLoteadoraPort),
           slaveAddress: Number(newLoteadoraSlave),
-          lotFieldId: Number(newLoteadoraLotField), expiryFieldId: Number(newLoteadoraExpiryField),
         }),
       })
       const data = await res.json()
       if (!res.ok) { setLoteadoraError(data.error); return }
       setLoteadoraSuccess(`Loteadora "${newLoteadoraName}" creada`)
       setNewLoteadoraName(""); setNewLoteadoraIp(""); setNewLoteadoraPort("8010")
-      setNewLoteadoraSlave("0"); setNewLoteadoraLotField("1"); setNewLoteadoraExpiryField("2")
+      setNewLoteadoraSlave("0")
       loadLoteadoras()
     } catch { setLoteadoraError("Error de conexión") } finally { setCreatingLoteadora(false) }
   }
@@ -286,7 +331,6 @@ export default function AdminPage() {
     setEditLoteadoraId(l.id)
     setEditLoteadora({
       name: l.name, ip: l.ip, port: String(l.port), slaveAddress: String(l.slave_address),
-      lotFieldId: String(l.lot_field_id), expiryFieldId: String(l.expiry_field_id),
       enabled: !!l.enabled,
     })
     setEditLoteadoraError("")
@@ -302,7 +346,6 @@ export default function AdminPage() {
         body: JSON.stringify({
           name: editLoteadora.name, ip: editLoteadora.ip, port: Number(editLoteadora.port),
           slaveAddress: Number(editLoteadora.slaveAddress),
-          lotFieldId: Number(editLoteadora.lotFieldId), expiryFieldId: Number(editLoteadora.expiryFieldId),
           enabled: editLoteadora.enabled,
         }),
       })
@@ -312,6 +355,133 @@ export default function AdminPage() {
       loadLoteadoras()
       toast(`Loteadora "${editLoteadora.name}" actualizada`, "success")
     } catch { setEditLoteadoraError("Error de conexión") }
+  }
+
+  // ─── Carga de plantillas y asociaciones ──────────────────────────────────────
+
+  const loadMensajes = async () => {
+    setLoadingMensajes(true)
+    try {
+      const res = await fetch("/api/admin/loteadora-mensajes")
+      if (res.ok) setMensajes(await res.json())
+    } finally { setLoadingMensajes(false) }
+  }
+
+  const loadAsociaciones = async () => {
+    setLoadingAsociaciones(true)
+    try {
+      const res = await fetch("/api/admin/loteadora-articulos")
+      if (res.ok) setAsociaciones(await res.json())
+    } finally { setLoadingAsociaciones(false) }
+  }
+
+  const loadArticulosLoteadora = async () => {
+    setLoadingArticulosLoteadora(true)
+    try {
+      const res = await fetch("/api/loteadora/articulos")
+      if (res.ok) setArticulosLoteadora(await res.json())
+    } finally { setLoadingArticulosLoteadora(false) }
+  }
+
+  // ─── Acciones de plantillas ───────────────────────────────────────────────────
+
+  const createMensaje = async (e: React.FormEvent) => {
+    e.preventDefault()
+    setMensajeError(""); setMensajeSuccess(""); setCreatingMensaje(true)
+    try {
+      const res = await fetch("/api/admin/loteadora-mensajes", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: newMensajeName,
+          lotFieldId: Number(newMensajeLotField), cocidaFieldId: Number(newMensajeCocidaField), expiryFieldId: Number(newMensajeExpiryField),
+        }),
+      })
+      const data = await res.json()
+      if (!res.ok) { setMensajeError(data.error); return }
+      setMensajeSuccess(`Plantilla "${newMensajeName}" creada`)
+      setNewMensajeName(""); setNewMensajeLotField("1"); setNewMensajeCocidaField("2"); setNewMensajeExpiryField("3")
+      loadMensajes()
+    } catch { setMensajeError("Error de conexión") } finally { setCreatingMensaje(false) }
+  }
+
+  const startEditMensaje = (m: LoteadoraMensaje) => {
+    setEditMensajeId(m.id)
+    setEditMensaje({
+      name: m.name, lotFieldId: String(m.lot_field_id), cocidaFieldId: String(m.cocida_field_id), expiryFieldId: String(m.expiry_field_id),
+    })
+    setEditMensajeError("")
+  }
+
+  const saveEditMensaje = async () => {
+    if (!editMensajeId) return
+    setEditMensajeError("")
+    try {
+      const res = await fetch(`/api/admin/loteadora-mensajes/${editMensajeId}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: editMensaje.name,
+          lotFieldId: Number(editMensaje.lotFieldId), cocidaFieldId: Number(editMensaje.cocidaFieldId), expiryFieldId: Number(editMensaje.expiryFieldId),
+        }),
+      })
+      const data = await res.json()
+      if (!res.ok) { setEditMensajeError(data.error || "Error al guardar"); return }
+      setEditMensajeId(null)
+      loadMensajes()
+      toast(`Plantilla "${editMensaje.name}" actualizada`, "success")
+    } catch { setEditMensajeError("Error de conexión") }
+  }
+
+  const deleteMensaje = (id: number, name: string) => {
+    setConfirmState({
+      title: "Eliminar plantilla",
+      description: `Se eliminará la plantilla "${name}" y las asociaciones de artículos que la usen. Esta acción no se puede deshacer.`,
+      onConfirm: async () => {
+        try {
+          const res = await fetch(`/api/admin/loteadora-mensajes/${id}`, { method: "DELETE" })
+          const data = await res.json()
+          if (!res.ok) { toast(data.error || "Error al eliminar", "error"); return }
+          loadMensajes(); loadAsociaciones()
+          toast(`Plantilla "${name}" eliminada`, "success")
+        } catch { toast("Error al eliminar", "error") }
+      },
+    })
+  }
+
+  // ─── Acciones de asociaciones artículo → plantilla ────────────────────────────
+
+  const createAsociacion = async (e: React.FormEvent) => {
+    e.preventDefault()
+    setAsociacionError(""); setAsociacionSuccess(""); setCreandoAsociacion(true)
+    try {
+      const res = await fetch("/api/admin/loteadora-articulos", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ articuloId: nuevaAsociacionArticulo, mensajeId: Number(nuevaAsociacionMensaje) }),
+      })
+      const data = await res.json()
+      if (!res.ok) { setAsociacionError(data.error); return }
+      setAsociacionSuccess(`Artículo "${nuevaAsociacionArticulo}" asociado`)
+      setNuevaAsociacionArticulo(""); setNuevaAsociacionMensaje("")
+      loadAsociaciones()
+    } catch { setAsociacionError("Error de conexión") } finally { setCreandoAsociacion(false) }
+  }
+
+  const deleteAsociacion = (articuloId: string) => {
+    setConfirmState({
+      title: "Quitar asociación",
+      description: `Se quitará la plantilla asociada al artículo "${articuloId}".`,
+      onConfirm: async () => {
+        try {
+          const res = await fetch(`/api/admin/loteadora-articulos/${articuloId}`, { method: "DELETE" })
+          const data = await res.json()
+          if (!res.ok) { toast(data.error || "Error al eliminar", "error"); return }
+          loadAsociaciones()
+          toast(`Asociación de "${articuloId}" eliminada`, "success")
+        } catch { toast("Error al eliminar", "error") }
+      },
+    })
   }
 
   const deleteLoteadora = (id: number, name: string) => {
@@ -509,6 +679,8 @@ export default function AdminPage() {
             { value: 'pantallas', label: 'Pantallas' },
             { value: 'estados-jde', label: 'Estados JDE' },
             { value: 'loteadoras', label: 'Loteadoras' },
+            { value: 'plantillas', label: 'Plantillas' },
+            { value: 'articulos-plantilla', label: 'Artículos → Plantilla' },
           ]}
         />
 
@@ -915,14 +1087,6 @@ export default function AdminPage() {
                     <label className="text-xs font-semibold text-secondary-foreground">Slave Address</label>
                     <Input type="number" value={newLoteadoraSlave} onChange={e => setNewLoteadoraSlave(e.target.value)} className="w-[90px]" />
                   </div>
-                  <div className="space-y-1.5">
-                    <label className="text-xs font-semibold text-secondary-foreground">ID campo lote</label>
-                    <Input type="number" value={newLoteadoraLotField} onChange={e => setNewLoteadoraLotField(e.target.value)} className="w-[110px]" />
-                  </div>
-                  <div className="space-y-1.5">
-                    <label className="text-xs font-semibold text-secondary-foreground">ID campo caducidad</label>
-                    <Input type="number" value={newLoteadoraExpiryField} onChange={e => setNewLoteadoraExpiryField(e.target.value)} className="w-[110px]" />
-                  </div>
                   <Button type="submit" disabled={creatingLoteadora} className="font-semibold">
                     {creatingLoteadora ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Printer className="mr-2 h-4 w-4" />}
                     Añadir
@@ -946,7 +1110,6 @@ export default function AdminPage() {
                       <TableRow className="hover:bg-transparent">
                         <TableHead className="font-bold text-secondary-foreground">Nombre</TableHead>
                         <TableHead className="font-bold text-secondary-foreground">IP:Puerto</TableHead>
-                        <TableHead className="font-bold text-secondary-foreground">Campos (lote/cad.)</TableHead>
                         <TableHead className="font-bold text-secondary-foreground">Estado</TableHead>
                         <TableHead className="font-bold text-secondary-foreground text-right">Acciones</TableHead>
                       </TableRow>
@@ -955,14 +1118,12 @@ export default function AdminPage() {
                       {loteadoras.map(l => (
                         editLoteadoraId === l.id ? (
                           <TableRow key={l.id} className="bg-blue-50 border-blue-200">
-                            <TableCell colSpan={5}>
+                            <TableCell colSpan={4}>
                               <div className="flex flex-wrap items-end gap-3">
                                 <Input value={editLoteadora.name} onChange={e => setEditLoteadora(s => ({ ...s, name: e.target.value }))} placeholder="Nombre" className="h-8 w-[140px] text-sm" autoFocus />
                                 <Input value={editLoteadora.ip} onChange={e => setEditLoteadora(s => ({ ...s, ip: e.target.value }))} placeholder="IP" className="h-8 w-[120px] text-sm" />
                                 <Input type="number" value={editLoteadora.port} onChange={e => setEditLoteadora(s => ({ ...s, port: e.target.value }))} placeholder="Puerto" className="h-8 w-[80px] text-sm" />
                                 <Input type="number" value={editLoteadora.slaveAddress} onChange={e => setEditLoteadora(s => ({ ...s, slaveAddress: e.target.value }))} placeholder="Slave" className="h-8 w-[70px] text-sm" />
-                                <Input type="number" value={editLoteadora.lotFieldId} onChange={e => setEditLoteadora(s => ({ ...s, lotFieldId: e.target.value }))} placeholder="ID lote" className="h-8 w-[80px] text-sm" />
-                                <Input type="number" value={editLoteadora.expiryFieldId} onChange={e => setEditLoteadora(s => ({ ...s, expiryFieldId: e.target.value }))} placeholder="ID cad." className="h-8 w-[80px] text-sm" />
                                 <label className="flex items-center gap-1.5 text-xs font-medium text-secondary-foreground">
                                   <input type="checkbox" checked={editLoteadora.enabled} onChange={e => setEditLoteadora(s => ({ ...s, enabled: e.target.checked }))} />
                                   Habilitada
@@ -977,7 +1138,6 @@ export default function AdminPage() {
                           <TableRow key={l.id} className="hover:bg-muted/50 border-border">
                             <TableCell className="font-medium">{l.name}</TableCell>
                             <TableCell className="text-muted-foreground text-sm">{l.ip}:{l.port}</TableCell>
-                            <TableCell className="text-muted-foreground text-sm">{l.lot_field_id} / {l.expiry_field_id}</TableCell>
                             <TableCell>
                               <div className="flex flex-wrap gap-1.5">
                                 <Badge variant={l.enabled ? 'success' : 'default'}>{l.enabled ? 'Habilitada' : 'Deshabilitada'}</Badge>
@@ -1000,6 +1160,200 @@ export default function AdminPage() {
                             </TableCell>
                           </TableRow>
                         )
+                      ))}
+                    </TableBody>
+                  </Table>
+                )}
+              </CardContent>
+            </Card>
+          </>
+        )}
+
+        {/* ── Pestaña Plantillas (loteadora_mensajes) ─────────────────────────── */}
+        {activeTab === 'plantillas' && (
+          <>
+            <Card accent>
+              <CardHeader>
+                <CardTitle className="text-sm font-bold text-secondary-foreground flex items-center gap-2">
+                  <FileCode className="h-4 w-4 text-primary" aria-hidden="true" />
+                  Añadir Plantilla
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <form onSubmit={createMensaje} className="flex flex-wrap items-end gap-4">
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-semibold text-secondary-foreground">
+                      Nombre <span className="font-normal text-muted-foreground">(igual que en la máquina)</span>
+                    </label>
+                    <Input value={newMensajeName} onChange={e => setNewMensajeName(e.target.value)} placeholder="pruebaDavid.msg" required className="w-[180px]" />
+                  </div>
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-semibold text-secondary-foreground">ID campo lote</label>
+                    <Input type="number" value={newMensajeLotField} onChange={e => setNewMensajeLotField(e.target.value)} className="w-[110px]" />
+                  </div>
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-semibold text-secondary-foreground">ID campo cocida</label>
+                    <Input type="number" value={newMensajeCocidaField} onChange={e => setNewMensajeCocidaField(e.target.value)} className="w-[110px]" />
+                  </div>
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-semibold text-secondary-foreground">ID campo caducidad</label>
+                    <Input type="number" value={newMensajeExpiryField} onChange={e => setNewMensajeExpiryField(e.target.value)} className="w-[110px]" />
+                  </div>
+                  <Button type="submit" disabled={creatingMensaje} className="font-semibold">
+                    {creatingMensaje ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <FileCode className="mr-2 h-4 w-4" />}
+                    Añadir
+                  </Button>
+                </form>
+                {mensajeError && <p className="text-sm text-red-600 font-medium mt-3">{mensajeError}</p>}
+                {mensajeSuccess && <p className="text-sm text-green-600 font-medium mt-3">{mensajeSuccess}</p>}
+              </CardContent>
+            </Card>
+
+            <Card accent>
+              <CardHeader>
+                <CardTitle className="text-sm font-bold text-secondary-foreground">Plantillas Registradas</CardTitle>
+              </CardHeader>
+              <CardContent>
+                {loadingMensajes ? (
+                  <Spinner label="Cargando..." className="py-8" />
+                ) : (
+                  <Table>
+                    <TableHeader>
+                      <TableRow className="hover:bg-transparent">
+                        <TableHead className="font-bold text-secondary-foreground">Nombre</TableHead>
+                        <TableHead className="font-bold text-secondary-foreground">ID lote</TableHead>
+                        <TableHead className="font-bold text-secondary-foreground">ID cocida</TableHead>
+                        <TableHead className="font-bold text-secondary-foreground">ID caducidad</TableHead>
+                        <TableHead className="font-bold text-secondary-foreground text-right">Acciones</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {mensajes.map(m => (
+                        editMensajeId === m.id ? (
+                          <TableRow key={m.id} className="bg-blue-50 border-blue-200">
+                            <TableCell colSpan={5}>
+                              <div className="flex flex-wrap items-end gap-3">
+                                <Input value={editMensaje.name} onChange={e => setEditMensaje(s => ({ ...s, name: e.target.value }))} placeholder="Nombre" className="h-8 w-[160px] text-sm" autoFocus />
+                                <Input type="number" value={editMensaje.lotFieldId} onChange={e => setEditMensaje(s => ({ ...s, lotFieldId: e.target.value }))} placeholder="ID lote" className="h-8 w-[90px] text-sm" />
+                                <Input type="number" value={editMensaje.cocidaFieldId} onChange={e => setEditMensaje(s => ({ ...s, cocidaFieldId: e.target.value }))} placeholder="ID cocida" className="h-8 w-[90px] text-sm" />
+                                <Input type="number" value={editMensaje.expiryFieldId} onChange={e => setEditMensaje(s => ({ ...s, expiryFieldId: e.target.value }))} placeholder="ID cad." className="h-8 w-[90px] text-sm" />
+                                <Button size="sm" onClick={saveEditMensaje} className="text-xs font-semibold h-8">Guardar</Button>
+                                <Button size="sm" variant="ghost" onClick={() => setEditMensajeId(null)} className="text-muted-foreground h-8 text-xs">Cancelar</Button>
+                                {editMensajeError && <span className="text-xs text-red-600 font-medium">{editMensajeError}</span>}
+                              </div>
+                            </TableCell>
+                          </TableRow>
+                        ) : (
+                          <TableRow key={m.id} className="hover:bg-muted/50 border-border">
+                            <TableCell className="font-medium">
+                              <code className="text-xs bg-muted px-1.5 py-0.5 rounded">{m.name}</code>
+                            </TableCell>
+                            <TableCell className="text-muted-foreground text-sm">{m.lot_field_id}</TableCell>
+                            <TableCell className="text-muted-foreground text-sm">{m.cocida_field_id}</TableCell>
+                            <TableCell className="text-muted-foreground text-sm">{m.expiry_field_id}</TableCell>
+                            <TableCell className="text-right">
+                              <Button variant="ghost" size="sm" onClick={() => startEditMensaje(m)} className="text-blue-500 hover:text-blue-700 hover:bg-blue-50" title="Editar plantilla">
+                                <Pencil className="h-4 w-4" />
+                              </Button>
+                              <Button variant="ghost" size="sm" onClick={() => deleteMensaje(m.id, m.name)} className="text-red-500 hover:text-red-700 hover:bg-red-50" title="Eliminar plantilla">
+                                <Trash2 className="h-4 w-4" />
+                              </Button>
+                            </TableCell>
+                          </TableRow>
+                        )
+                      ))}
+                    </TableBody>
+                  </Table>
+                )}
+              </CardContent>
+            </Card>
+          </>
+        )}
+
+        {/* ── Pestaña Artículos → Plantilla (loteadora_articulo_mensajes) ─────── */}
+        {activeTab === 'articulos-plantilla' && (
+          <>
+            <Card accent>
+              <CardHeader>
+                <CardTitle className="text-sm font-bold text-secondary-foreground flex items-center gap-2">
+                  <Link2 className="h-4 w-4 text-primary" aria-hidden="true" />
+                  Asociar Artículo a Plantilla
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <form onSubmit={createAsociacion} className="flex flex-wrap items-end gap-4">
+                  <div className="space-y-1.5 w-[280px]">
+                    <label className="text-xs font-semibold text-secondary-foreground">
+                      Artículo
+                      {loadingArticulosLoteadora && <Loader2 className="inline h-3 w-3 animate-spin ml-1.5 text-muted-foreground" />}
+                    </label>
+                    <SingleSelect
+                      label="artículo"
+                      showId
+                      allLabel="Buscar por código o descripción…"
+                      value={nuevaAsociacionArticulo || 'all'}
+                      onChange={id => setNuevaAsociacionArticulo(id === 'all' ? '' : id)}
+                      options={articulosLoteadora.map(a => ({ id: a.id, description: a.descripcion }))}
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-semibold text-secondary-foreground">Plantilla</label>
+                    <select
+                      value={nuevaAsociacionMensaje}
+                      onChange={e => setNuevaAsociacionMensaje(e.target.value)}
+                      required
+                      className="flex h-9 w-[180px] rounded-md border border-input bg-card px-3 py-1 text-sm shadow-sm"
+                    >
+                      <option value="" disabled>Seleccionar…</option>
+                      {mensajes.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
+                    </select>
+                  </div>
+                  <Button type="submit" disabled={creandoAsociacion || !nuevaAsociacionArticulo} className="font-semibold">
+                    {creandoAsociacion ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Link2 className="mr-2 h-4 w-4" />}
+                    Asociar
+                  </Button>
+                </form>
+                {asociacionError && <p className="text-sm text-red-600 font-medium mt-3">{asociacionError}</p>}
+                {asociacionSuccess && <p className="text-sm text-green-600 font-medium mt-3">{asociacionSuccess}</p>}
+                <p className="text-xs text-muted-foreground mt-3">
+                  Si el artículo ya tiene una plantilla asociada, volver a asociarlo sustituye la anterior.
+                </p>
+              </CardContent>
+            </Card>
+
+            <Card accent>
+              <CardHeader>
+                <CardTitle className="text-sm font-bold text-secondary-foreground">Asociaciones Registradas</CardTitle>
+              </CardHeader>
+              <CardContent>
+                {loadingAsociaciones ? (
+                  <Spinner label="Cargando..." className="py-8" />
+                ) : (
+                  <Table>
+                    <TableHeader>
+                      <TableRow className="hover:bg-transparent">
+                        <TableHead className="font-bold text-secondary-foreground">Artículo</TableHead>
+                        <TableHead className="font-bold text-secondary-foreground">Descripción</TableHead>
+                        <TableHead className="font-bold text-secondary-foreground">Plantilla</TableHead>
+                        <TableHead className="font-bold text-secondary-foreground text-right">Acciones</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {asociaciones.map(a => (
+                        <TableRow key={a.articulo_id} className="hover:bg-muted/50 border-border">
+                          <TableCell className="font-medium">
+                            <code className="text-xs bg-muted px-1.5 py-0.5 rounded">{a.articulo_id}</code>
+                          </TableCell>
+                          <TableCell className="text-muted-foreground text-sm">
+                            {articulosLoteadora.find(art => art.id === a.articulo_id)?.descripcion ?? '—'}
+                          </TableCell>
+                          <TableCell className="text-sm">{a.mensaje_name}</TableCell>
+                          <TableCell className="text-right">
+                            <Button variant="ghost" size="sm" onClick={() => deleteAsociacion(a.articulo_id)} className="text-red-500 hover:text-red-700 hover:bg-red-50" title="Quitar asociación">
+                              <Trash2 className="h-4 w-4" />
+                            </Button>
+                          </TableCell>
+                        </TableRow>
                       ))}
                     </TableBody>
                   </Table>

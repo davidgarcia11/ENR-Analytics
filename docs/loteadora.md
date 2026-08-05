@@ -7,7 +7,9 @@
 
 ## 1. Estado actual
 
-**El envío a la loteadora ya es real** (comando `1D` del protocolo TIJ por TCP, ver §6-9). La selección de artículo es directa (búsqueda por código o descripción, sin marca — ver §3); el cálculo de lote/caducidad y la vista previa siguen igual que antes.
+**El envío a la loteadora ya es real** (comando `1D` del protocolo TIJ por TCP, ver §6-9). La selección de artículo es directa (búsqueda por código o descripción, sin marca — ver §3).
+
+**Cada artículo tiene una plantilla (mensaje) asociada de forma global** (§13): al elegirlo en `/loteadora`, si tiene plantilla, se carga sola en la loteadora seleccionada, sin botón. Los IDs de campo (lote/cocida/caducidad) ya no son fijos por loteadora — viven en la plantilla, así que máquinas distintas pueden usar Field Module en IDs distintos para el mismo artículo/mensaje. Además de la fecha de fabricación (solo para el lote), hay una **fecha de cocida** independiente, de la que se calcula la caducidad (§5).
 
 Rama: `feature/loteadora`. Creada antes del rediseño UI/UX (PR #53), por lo que **no usa `AppShell`/tokens** como el resto de paneles — usa maquetación y colores hardcodeados heredados del diseño anterior.
 
@@ -19,15 +21,17 @@ Rama: `feature/loteadora`. Creada antes del rediseño UI/UX (PR #53), por lo que
 
 | Archivo | Descripción |
 |---|---|
-| `app/loteadora/page.tsx` | Página cliente: búsqueda de artículo, formulario, cálculo y vista previa |
-| `app/api/loteadora/articulos/route.ts` | GET — artículos utilizables en la loteadora desde `F4101` (sin marca), incluye días de caducidad |
+| `app/loteadora/page.tsx` | Página cliente: búsqueda de artículo, formulario (fabricación/cocida/caducidad), cálculo, autocarga de plantilla y vista previa |
+| `app/api/loteadora/articulos/route.ts` | GET — artículos utilizables en la loteadora desde `F4101` (sin marca), incluye días de caducidad y, si tiene, la plantilla asociada (`plantilla: {messageName, lotFieldId, cocidaFieldId, expiryFieldId}`) |
 | `app/api/loteadora/impresoras/route.ts` | GET público — loteadoras habilitadas (`id`, `name`) para el desplegable del panel |
-| `app/api/loteadora/enviar/route.ts` | POST — envía lote/caducidad a la loteadora seleccionada (requiere sesión) |
+| `app/api/loteadora/enviar/route.ts` | POST — envía lote/cocida/caducidad a la loteadora seleccionada, resolviendo la plantilla del artículo en servidor (requiere sesión) |
 | `app/api/loteadora/estado/route.ts` | GET público — estado en vivo (`activa`/`en_error`/`standby`/`apagada`) de las loteadoras habilitadas |
 | `app/api/loteadora/mensajes/route.ts` | GET — lista las plantillas guardadas en una loteadora (requiere sesión) |
-| `app/api/loteadora/cargar-mensaje/route.ts` | POST — carga/aplica una plantilla en la loteadora (requiere sesión, bloquea si está imprimiendo) |
-| `app/api/admin/loteadoras/route.ts` y `[id]/route.ts` | CRUD de loteadoras desde `/admin` (solo admin) |
+| `app/api/loteadora/cargar-mensaje/route.ts` | POST — carga/aplica una plantilla en la loteadora (requiere sesión, sin bloqueo por estado de impresión) |
+| `app/api/admin/loteadoras/route.ts` y `[id]/route.ts` | CRUD de loteadoras (IP/puerto/slave) desde `/admin` (solo admin) |
 | `app/api/admin/loteadoras/estado/route.ts` | GET admin — estado en vivo de **todas** las loteadoras (habilitadas o no) |
+| `app/api/admin/loteadora-mensajes/route.ts` y `[id]/route.ts` | CRUD de plantillas (`loteadora_mensajes`: nombre + IDs de campo lote/cocida/caducidad) desde `/admin` → Plantillas |
+| `app/api/admin/loteadora-articulos/route.ts` y `[articuloId]/route.ts` | CRUD de asociaciones artículo→plantilla (`loteadora_articulo_mensajes`) desde `/admin` → Artículos → Plantilla |
 | `lib/loteadora-printer.ts` | Construye las tramas del protocolo TIJ y las envía por TCP (`buildRemoteFieldFrame`, `sendRemoteFields`, `getPrinterStatus`, `listMessageNames`, `loadPrintMessage`) |
 | `components/SingleSelect.tsx` | Desplegable de selección única con buscador (reutilizado de otros paneles) |
 | `lib/utils.ts` | `isoToJulian()` — convierte fecha ISO a formato Julian JDE (no usada aún por `page.tsx`, que tiene su propia función local `toJulianDay()`) |
@@ -77,7 +81,7 @@ En ambos casos el usuario puede forzar el modo manual con el enlace "Introducir 
 
 ---
 
-## 5. Cálculo de lote y fecha de caducidad
+## 5. Cálculo de lote, cocida y fecha de caducidad
 
 Todo el cálculo es local en el cliente (`app/loteadora/page.tsx`), sin llamada a Oracle:
 
@@ -94,26 +98,27 @@ function toLote(date: Date): string {
 }
 ```
 
-- **Lote** = año (2 dígitos) + día juliano de la **fecha de fabricación**, con padding a 3 dígitos.
-- **Fecha de caducidad** = fecha de fabricación + días de caducidad (JDE o manual).
-- La fecha de fabricación por defecto es la de hoy (botón "Hoy" para restablecerla).
+- **Lote** = año (2 dígitos) + día juliano de la **fecha de fabricación**, con padding a 3 dígitos (`AAJJJ`).
+- **Cocida** = mismo formato `AAJJJ`, pero sobre la **fecha de cocida** — es un campo independiente de fabricación, con su propio selector y botón "Hoy".
+- **Fecha de caducidad** = **fecha de cocida** + días de caducidad (JDE o manual) — ya **no** se calcula desde fabricación. Fabricación solo interviene en el lote.
 
-Ambos valores se muestran en una vista previa tipo etiqueta (lote y fecha en grande) antes de enviar.
+Los tres valores (lote, cocida, fecha de caducidad formateada) se muestran en una vista previa tipo etiqueta antes de enviar.
 
 ---
 
 ## 6. Envío a la loteadora
 
-El botón "Enviar a loteadora" llama a `POST /api/loteadora/enviar` con `{ loteadoraId, lote, fechaCaducidad }`. La ruta:
+El botón "Enviar a loteadora" llama a `POST /api/loteadora/enviar` con `{ loteadoraId, articuloId, lote, fechaCocida, fechaCaducidad }` — **ya no manda IDs de campo**, el cliente nunca decide a qué Field Module va cada valor. La ruta:
 
 1. Exige sesión (`verifySession()`) — es el único punto del panel que sí valida sesión en servidor, porque dispara una acción física real (imprime una etiqueta). El resto del panel sigue con el gap descrito en §1.
-2. Carga la fila de `loteadoras` (`id`, `enabled = 1`) desde SQLite.
-3. Llama a `sendRemoteFields()` (`lib/loteadora-printer.ts`) con dos campos: `lot_field_id` → lote, `expiry_field_id` → fecha de caducidad (formateada `dd/mm/aaaa`, `formatDateES`).
-4. Si falla de verdad (timeout, conexión rechazada, NAK, o un `P_Status` que no sea de éxito), devuelve 502 con el mensaje de error y, si se pudo, el detalle en crudo (`detail`, ver §7 "ver más"), que `page.tsx` muestra inline (estado `sendError`/`sendErrorDetail`).
+2. Carga la fila de `loteadoras` (`id`, `enabled = 1`) desde SQLite (solo `ip`/`port`/`slave_address` — ya no guarda IDs de campo, ver §8).
+3. Resuelve la plantilla del **artículo** en SQLite (`loteadora_articulo_mensajes` JOIN `loteadora_mensajes`, ver §13) para obtener `lotFieldId`/`cocidaFieldId`/`expiryFieldId`. Si el artículo no tiene plantilla asociada, responde 404 con un mensaje claro pidiendo configurarla en `/admin` — nunca hay un ID de campo "por defecto".
+4. Llama a `sendRemoteFields()` (`lib/loteadora-printer.ts`) con **tres campos**: `lotFieldId` → lote, `cocidaFieldId` → fecha de cocida (`AAJJJ`), `expiryFieldId` → fecha de caducidad (formateada `dd/mm/aaaa`, `formatDateES`).
+5. Si falla de verdad (timeout, conexión rechazada, NAK, o un `P_Status` que no sea de éxito), devuelve 502 con el mensaje de error y, si se pudo, el detalle en crudo (`detail`, ver §7 "ver más"), que `page.tsx` muestra inline (estado `sendError`/`sendErrorDetail`).
 
 **`P_Status` 42/43 no son fallos** — el manual documenta que `42` ("Remote buffer now full") ocurre precisamente porque *este* envío ha ocupado la última plaza libre del buffer de campos remotos (hasta 10 en cola); `43` ("still full") es ambiguo (según la configuración de la máquina, sustituye al más antiguo de la cola o descarta el nuevo envío). `sendRemoteFields()` trata ambos como **éxito con aviso** (`{ warning }`), no como error — `page.tsx` lo muestra en ámbar en vez de en rojo. Solo se lanza error de verdad para el resto de códigos (`01`, `12`, NAK...).
 
-`canSend` exige además: lote calculado, fecha de caducidad calculada, artículo seleccionado, **loteadora seleccionada** y que no haya un envío en curso.
+`canSend` exige además: lote calculado, cocida calculada, fecha de caducidad calculada, artículo seleccionado **con plantilla asociada**, loteadora seleccionada y que no haya un envío en curso. Si el artículo no tiene plantilla, se muestra un aviso ámbar bajo el selector de artículo y el botón queda deshabilitado.
 
 ---
 
@@ -156,12 +161,13 @@ Como puede haber varias impresoras físicas, la configuración de cada una vive 
 | `name` | Nombre identificativo (único) |
 | `ip` / `port` | IP y puerto Ethernet de la máquina |
 | `slave_address` | Slave Address configurada en la máquina (por defecto `0`) |
-| `lot_field_id` / `expiry_field_id` | ID de datos de cada Field Module (§7) |
 | `enabled` | Si aparece en el desplegable de `/loteadora` |
+
+**Ya no guarda IDs de campo** (`lot_field_id`/`expiry_field_id` se eliminaron con `ALTER TABLE ... DROP COLUMN` en `lib/sqlite.ts`) — desde que la plantilla decide esos IDs (§13), tenerlos también aquí era una segunda fuente de configuración redundante. Cuidado si se toca `app/api/admin/loteadoras/route.ts`/`[id]/route.ts`: no deben volver a referenciar esas columnas (motivo real de un bug ya corregido — el `SELECT`/`INSERT`/`UPDATE` seguía nombrándolas después de la migración, y el `GET` fallaba en silencio dejando la pestaña Loteadoras vacía en `/admin`).
 
 CRUD en `app/api/admin/loteadoras/route.ts` (GET/POST) y `[id]/route.ts` (PUT/DELETE), protegido por `middleware.ts` (`/api/admin/:path*`). Lectura pública (solo `id`/`name`, solo habilitadas) en `app/api/loteadora/impresoras/route.ts`, consumida por el desplegable "Loteadora" del panel.
 
-Ejemplo real configurado durante el desarrollo de esta función: IP `192.168.111.119:8010`, Slave Address `0`, campo lote ID `1`, campo caducidad ID `2` (plantilla de prueba en la máquina: `pruebaDavid.msg`, elegida en vivo desde `/loteadora`, no guardada en el admin — ver §11).
+Ejemplo real configurado durante el desarrollo de esta función: IP `192.168.111.119:8010`, Slave Address `0` (los IDs de campo lote/cocida/caducidad de la plantilla de prueba `pruebaDavid.msg` viven ahora en `loteadora_mensajes`, ver §13).
 
 ---
 
@@ -191,7 +197,9 @@ Al seleccionar una loteadora se fuerza además un refresco inmediato de `estadoL
 
 ## 11. Elegir y cargar la plantilla (mensaje) en remoto
 
-Al seleccionar una loteadora en `/loteadora` aparece un desplegable **"Plantilla"** con los mensajes guardados en esa máquina (`GET /api/loteadora/mensajes?loteadoraId=...`, comando `1F`), sin preseleccionar ninguno — el operador elige cada vez. El botón **"Cargar plantilla"** llama a `POST /api/loteadora/cargar-mensaje` (`{loteadoraId, messageName}`), que ejecuta `loadPrintMessage()` (`1E` + `01`) directamente, sin comprobar el estado de impresión antes.
+Al seleccionar una loteadora en `/loteadora` aparece un desplegable **"Plantilla"** con los mensajes guardados en esa máquina (`GET /api/loteadora/mensajes?loteadoraId=...`, comando `1F`), sin preseleccionar ninguno. El botón **"Cargar plantilla"** llama a `POST /api/loteadora/cargar-mensaje` (`{loteadoraId, messageName}`), que ejecuta `loadPrintMessage()` (`1E` + `01`) directamente, sin comprobar el estado de impresión antes. Este desplegable manual sigue existiendo como *fallback*: reintentar a mano, o cubrir un artículo sin plantilla asociada todavía.
+
+**Autocarga automática por artículo (§13):** si el artículo elegido tiene una plantilla asociada en `loteadora_articulo_mensajes`, en cuanto hay loteadora + artículo seleccionados se llama sola a `cargar-mensaje` con el `messageName` de esa plantilla (mismo código que el botón manual, extraído a la función `cargarMensaje()`) — sin pedir confirmación. El nombre de la plantilla debe coincidir **exactamente** con el mensaje creado a mano en la máquina.
 
 **`loteadoras` ya no guarda ningún nombre de plantilla** (columna `message_name` eliminada, migración `DROP COLUMN` en `lib/sqlite.ts`) — no tenía función real (el envío `1D` nunca la usaba) más allá de preseleccionar un valor por defecto, y con el selector en vivo ya no hacía falta.
 
@@ -208,3 +216,50 @@ El botón **"Limpiar buffer"** de `/loteadora` llama a `POST /api/loteadora/limp
 **Por qué hace falta:** el campo remoto solo se actualiza cuando la impresora consume la cola al disparar una impresión real (paso por la célula fotoeléctrica). Si se hacen varios envíos de prueba sin que la máquina llegue a imprimir, la cola (hasta 10 según el "Number" configurado en Buffer Setting) se llena y no se vacía sola — los envíos siguientes devuelven aviso de buffer lleno (`42`/`43`, ver §6) y el valor mostrado en pantalla puede quedarse desactualizado (`Null Null` hasta el primer disparo real). Este botón permite desatascarlo desde el dashboard sin ir a la máquina.
 
 Se descartó automatizar el disparo de impresión en sí (comando `13`, Trigger Print) porque dispara una impresión física real cada vez — limpiar el buffer no imprime nada, así que es una acción segura de repetir.
+
+---
+
+## 13. Plantillas por artículo (`loteadora_mensajes` + `loteadora_articulo_mensajes`)
+
+Antes de esta función, cada loteadora tenía un único par de IDs de campo fijos, y la plantilla se elegía a mano cada vez. Con varias plantillas configuradas en la máquina (cada una con sus propios Field Module, no necesariamente en los mismos IDs), hacía falta que **el artículo determine automáticamente qué plantilla se carga**. La asociación es **global**: un artículo siempre apunta al mismo nombre de plantilla, sin importar en qué loteadora se imprima.
+
+### Esquema (`lib/sqlite.ts`)
+
+```sql
+CREATE TABLE loteadora_mensajes (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT NOT NULL UNIQUE,           -- debe coincidir exacto con el nombre creado en la máquina
+  lot_field_id INTEGER NOT NULL,
+  cocida_field_id INTEGER NOT NULL,
+  expiry_field_id INTEGER NOT NULL,
+  created_at TEXT DEFAULT (datetime('now'))
+);
+
+CREATE TABLE loteadora_articulo_mensajes (
+  articulo_id TEXT PRIMARY KEY,        -- código de artículo (F4101.IMLITM)
+  mensaje_id INTEGER NOT NULL REFERENCES loteadora_mensajes(id) ON DELETE CASCADE,
+  created_at TEXT DEFAULT (datetime('now'))
+);
+```
+
+Un artículo solo puede tener una plantilla a la vez (`articulo_id` es clave primaria) — asociar de nuevo sustituye la anterior. Borrar una plantilla borra en cascada sus asociaciones.
+
+### Admin — pestaña "Plantillas"
+
+CRUD de `loteadora_mensajes` en `app/api/admin/loteadora-mensajes/route.ts` (GET/POST) y `[id]/route.ts` (PUT/DELETE). Valida: nombre no vacío y único, los tres IDs de campo enteros 0-255 y **distintos entre sí** (misma idea que la validación de `loteadoras`, extendida a 3 campos).
+
+### Admin — pestaña "Artículos → Plantilla"
+
+CRUD de `loteadora_articulo_mensajes` en `app/api/admin/loteadora-articulos/route.ts` (GET/POST, upsert por `articulo_id`) y `[articuloId]/route.ts` (DELETE). El buscador de artículo reutiliza `GET /api/loteadora/articulos` (el mismo catálogo que ya usa `/loteadora`, con `<SingleSelect showId>`); `POST` valida `articuloId` con el regex ya usado en el proyecto (`/^\d{10}$/`) y que `mensajeId` exista.
+
+### Cómo llega a `/loteadora`
+
+`GET /api/loteadora/articulos` hace, además de la consulta a Oracle, una consulta a SQLite (`loteadora_articulo_mensajes` JOIN `loteadora_mensajes`) y adjunta a cada artículo, si tiene mapeo, `{ messageName, lotFieldId, cocidaFieldId, expiryFieldId }` — así `/loteadora` ya tiene todo lo necesario para autocargar la plantilla (§11) y resolver el envío sin otra llamada al elegir artículo.
+
+### Flujo de configuración (a cargo del usuario en la máquina)
+
+1. Crear el mensaje en la loteadora con sus Field Module (lote/cocida/caducidad) — igual que se hacía antes para una única plantilla, ver §7.
+2. Registrar esa misma plantilla en `/admin` → Plantillas, con el nombre **exacto** y los mismos IDs de campo.
+3. Asociar el artículo correspondiente en `/admin` → Artículos → Plantilla.
+
+Sin este último paso, `/loteadora` muestra un aviso ámbar en el selector de artículo y bloquea el envío (§6) — no hay plantilla "por defecto".

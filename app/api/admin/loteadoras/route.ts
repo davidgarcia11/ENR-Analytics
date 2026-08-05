@@ -11,8 +11,6 @@ export function parseLoteadoraInput(body: any) {
   const ip = String(body.ip ?? '').trim();
   const port = Number(body.port);
   const slaveAddress = body.slaveAddress === undefined || body.slaveAddress === '' ? 0 : Number(body.slaveAddress);
-  const lotFieldId = Number(body.lotFieldId);
-  const expiryFieldId = Number(body.expiryFieldId);
   const enabled = body.enabled === undefined ? true : Boolean(body.enabled);
 
   if (!name) return { error: 'El nombre es obligatorio' };
@@ -25,17 +23,8 @@ export function parseLoteadoraInput(body: any) {
   if (!Number.isInteger(slaveAddress) || slaveAddress < 0 || slaveAddress > 255) {
     return { error: 'La Slave Address debe ser un entero entre 0 y 255' };
   }
-  if (!Number.isInteger(lotFieldId) || lotFieldId < 0 || lotFieldId > 255) {
-    return { error: 'El ID de campo del lote debe ser un entero entre 0 y 255' };
-  }
-  if (!Number.isInteger(expiryFieldId) || expiryFieldId < 0 || expiryFieldId > 255) {
-    return { error: 'El ID de campo de la caducidad debe ser un entero entre 0 y 255' };
-  }
-  if (lotFieldId === expiryFieldId) {
-    return { error: 'El campo del lote y el de la caducidad no pueden tener el mismo ID' };
-  }
 
-  return { value: { name, ip, port, slaveAddress, lotFieldId, expiryFieldId, enabled: enabled ? 1 : 0 } };
+  return { value: { name, ip, port, slaveAddress, enabled: enabled ? 1 : 0 } };
 }
 
 export async function GET() {
@@ -46,7 +35,7 @@ export async function GET() {
 
   const db = getDb();
   const loteadoras = db.prepare(
-    'SELECT id, name, ip, port, slave_address, lot_field_id, expiry_field_id, enabled, created_at FROM loteadoras ORDER BY id'
+    'SELECT id, name, ip, port, slave_address, enabled, created_at FROM loteadoras ORDER BY id'
   ).all();
   return NextResponse.json(loteadoras);
 }
@@ -62,15 +51,15 @@ export async function POST(req: NextRequest) {
   if ('error' in parsed) {
     return NextResponse.json({ error: parsed.error }, { status: 400 });
   }
-  const { name, ip, port, slaveAddress, lotFieldId, expiryFieldId, enabled } = parsed.value;
+  const { name, ip, port, slaveAddress, enabled } = parsed.value;
 
   const db = getDb();
   try {
     const result = db.prepare(
-      `INSERT INTO loteadoras (name, ip, port, slave_address, lot_field_id, expiry_field_id, enabled)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`
-    ).run(name, ip, port, slaveAddress, lotFieldId, expiryFieldId, enabled);
-    const created = db.prepare('SELECT id, name, ip, port, slave_address, lot_field_id, expiry_field_id, enabled, created_at FROM loteadoras WHERE id = ?').get(result.lastInsertRowid);
+      `INSERT INTO loteadoras (name, ip, port, slave_address, enabled)
+       VALUES (?, ?, ?, ?, ?)`
+    ).run(name, ip, port, slaveAddress, enabled);
+    const created = db.prepare('SELECT id, name, ip, port, slave_address, enabled, created_at FROM loteadoras WHERE id = ?').get(result.lastInsertRowid);
     return NextResponse.json(created, { status: 201 });
   } catch (err: any) {
     if (err.message?.includes('UNIQUE')) {
