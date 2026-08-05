@@ -116,6 +116,7 @@ export function getDb(): Database.Database {
     INSERT OR IGNORE INTO screens (key, label, path, is_public) VALUES ('caducados',   'Caducados',        '/caducados',           1);
     INSERT OR IGNORE INTO screens (key, label, path, is_public) VALUES ('comparativa', 'Comparativa SERES','/comparativa-seres',   1);
     INSERT OR IGNORE INTO screens (key, label, path, is_public) VALUES ('consulta_stock_pda', 'Consulta stock PDA', '/consulta-stock-pda', 1);
+    INSERT OR IGNORE INTO screens (key, label, path, is_public) VALUES ('compras',     'Compras',          '/compras',             1);
     INSERT OR IGNORE INTO screens (key, label, path, is_public) VALUES ('admin',       'Administración',   '/admin',               0);
   `);
 
