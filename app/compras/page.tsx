@@ -348,7 +348,9 @@ export default function ComprasPage() {
                 />
             )}
 
-            <Card accent className="p-4 space-y-4" ref={filtersRef}>
+            {/* overflow-visible: Card accent trae overflow-hidden (para la barra superior redondeada),
+                pero eso recortaba el desplegable absolute de ArticleMultiSelect. */}
+            <Card accent className="overflow-visible p-4 space-y-4" ref={filtersRef}>
                 <div className="flex flex-wrap items-end gap-3">
                     <div className="grid gap-1.5">
                         <label className="text-xs font-semibold text-secondary-foreground">Desde</label>
