@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation"
 import Image from "next/image"
 import Link from "next/link"
 import {
-  Factory, Package, AlertTriangle, ArrowLeftRight,
+  Factory, Package, AlertTriangle, ArrowLeftRight, ScanBarcode, ShoppingCart,
   Loader2, Lock, ArrowRight,
 } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
@@ -41,6 +41,20 @@ const PANELS = [
     href: '/comparativa-seres',
     Icon: ArrowLeftRight,
     description: 'Comparativa de pedidos EDI SERES vs JDE',
+  },
+  {
+    key: 'consulta_stock_pda',
+    label: 'Consulta Stock PDA',
+    href: '/consulta-stock-pda',
+    Icon: ScanBarcode,
+    description: 'Consulta de stock FEFO por escaneo de palet',
+  },
+  {
+    key: 'compras',
+    label: 'Compras',
+    href: '/compras',
+    Icon: ShoppingCart,
+    description: 'Previsión de ventas vs. venta real, por artículo y mes',
   },
 ]
 

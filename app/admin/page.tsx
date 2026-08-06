@@ -55,6 +55,8 @@ const SCREEN_KEYS: { key: string; label: string }[] = [
   { key: 'pedidos',     label: 'Pedidos' },
   { key: 'caducados',   label: 'Caducados' },
   { key: 'comparativa', label: 'Comparativa SERES' },
+  { key: 'consulta_stock_pda', label: 'Consulta Stock PDA' },
+  { key: 'compras',     label: 'Compras' },
 ]
 
 export default function AdminPage() {
