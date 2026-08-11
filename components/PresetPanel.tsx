@@ -1,7 +1,7 @@
 "use client"
 
 import * as React from "react"
-import { BookmarkCheck, Pencil, Save, Trash2, X } from "lucide-react"
+import { BookmarkCheck, Calendar, Pencil, Save, Trash2, X } from "lucide-react"
 import { Card } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -91,9 +91,14 @@ export function PresetQuickSelect({
  * Mejoras sobre el original (comportamiento funcional idéntico):
  * errores por toast en vez de alert() y confirmación antes de borrar.
  *
- * @param screen Identificador del panel en la API (ej. "caducados").
- * @param open   Visibilidad controlada por la página (botón Presets del Navbar).
- * @param hint   Texto de ayuda bajo el guardado (qué campos incluye el preset).
+ * @param screen     Identificador del panel en la API (ej. "caducados").
+ * @param open       Visibilidad controlada por la página (botón Presets del Navbar).
+ * @param hint       Texto de ayuda bajo el guardado (qué campos incluye el preset).
+ * @param dateFields Nombres de campos de fecha en `getFilters()` (ej. `['startDate','endDate']`).
+ *                   Si se pasa, aparece el checkbox "Incluir fechas" (igual que en producción/FilterPanel):
+ *                   desmarcado por defecto, así el preset sirve para cualquier día salvo que se marque
+ *                   explícitamente. Al editar un preset que ya tenía fechas, se premarca solo. Si no se
+ *                   pasa (paneles sin fechas, ej. caducados), no cambia nada del comportamiento anterior.
  *
  * @example
  * const { presets, reload } = usePresets("caducados")
@@ -117,6 +122,7 @@ export function PresetPanel({
     getFilters,
     applyFilters,
     hint,
+    dateFields,
 }: {
     screen: string
     presets: Preset[]
@@ -126,16 +132,30 @@ export function PresetPanel({
     getFilters: () => Record<string, unknown>
     applyFilters: (filters: Record<string, unknown>) => void
     hint?: string
+    dateFields?: string[]
 }) {
     const { toast } = useToast()
     const [presetName, setPresetName] = React.useState("")
     const [saving, setSaving] = React.useState(false)
     const [editingId, setEditingId] = React.useState<number | null>(null)
     const [deleteTarget, setDeleteTarget] = React.useState<Preset | null>(null)
+    const [includeDates, setIncludeDates] = React.useState(false)
+
+    const hasDateFields = !!dateFields && dateFields.length > 0
+    const presetHasDates = (preset: Preset) => {
+        if (!hasDateFields) return false
+        try {
+            const f = JSON.parse(preset.filters)
+            return dateFields!.some((k) => f[k] != null && f[k] !== "")
+        } catch {
+            return false
+        }
+    }
 
     const cancelEdit = () => {
         setEditingId(null)
         setPresetName("")
+        setIncludeDates(false)
     }
 
     const savePreset = async () => {
@@ -144,10 +164,14 @@ export function PresetPanel({
         setSaving(true)
         try {
             const isEditing = editingId !== null
+            const filters = getFilters()
+            if (hasDateFields && !includeDates) {
+                for (const k of dateFields!) delete filters[k]
+            }
             const res = await fetch(isEditing ? `/api/presets/${editingId}` : "/api/presets", {
                 method: isEditing ? "PUT" : "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ name, filters: getFilters(), screen }),
+                body: JSON.stringify({ name, filters, screen }),
             })
             if (res.ok) {
                 cancelEdit()
@@ -170,6 +194,7 @@ export function PresetPanel({
     const startEdit = (preset: Preset) => {
         setPresetName(preset.name)
         setEditingId(preset.id)
+        setIncludeDates(presetHasDates(preset))
         applyFilters(JSON.parse(preset.filters))
     }
 
@@ -213,6 +238,17 @@ export function PresetPanel({
                         className="h-9 max-w-[220px] bg-card text-sm"
                         onKeyDown={(e) => e.key === "Enter" && savePreset()}
                     />
+                    {hasDateFields && (
+                        <label className="flex cursor-pointer select-none items-center gap-1.5 whitespace-nowrap text-xs text-secondary-foreground">
+                            <input
+                                type="checkbox"
+                                checked={includeDates}
+                                onChange={(e) => setIncludeDates(e.target.checked)}
+                                className="rounded border-input"
+                            />
+                            Incluir fechas
+                        </label>
+                    )}
                     <Button
                         onClick={savePreset}
                         disabled={saving || !presetName.trim()}
@@ -252,11 +288,12 @@ export function PresetPanel({
                             <button
                                 type="button"
                                 onClick={() => loadPreset(p)}
-                                className="font-medium text-secondary-foreground hover:text-foreground"
+                                className="flex items-center gap-1.5 font-medium text-secondary-foreground hover:text-foreground"
                                 title="Cargar preset"
                                 aria-label={`Cargar preset ${p.name}`}
                             >
                                 {p.name}
+                                {presetHasDates(p) && <Calendar className="h-3 w-3 text-muted-foreground/50" aria-hidden="true" />}
                             </button>
                             <button
                                 type="button"

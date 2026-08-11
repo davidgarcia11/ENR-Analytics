@@ -206,6 +206,14 @@ No se creó ningún componente nuevo en `components/ui/` para esto — todo vive
 `app/compras/page.tsx` (`DesviacionCard`, `PeriodPresetSelect`), reutilizando `Card`/`CardHeader`/
 `CardTitle`/`CardContent`/`Badge` ya existentes.
 
+### 6.1 Presets — fechas opcionales
+
+`<PresetPanel>` se usa con `dateFields={['startDate', 'endDate']}` (ver `docs/design-system.md` §5):
+al guardar un preset aparece el checkbox "Incluir fechas" (desmarcado por defecto, igual que en
+producción); si no se marca, el preset guarda solo los artículos seleccionados, sin fechas. Al cargar
+un preset sin fechas, `applyPresetFilters` mantiene el rango de fechas ya puesto en pantalla en vez
+de vaciarlo.
+
 ---
 
 ## 7. API — `GET /api/compras`
