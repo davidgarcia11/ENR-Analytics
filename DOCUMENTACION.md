@@ -70,6 +70,7 @@ dashboard/
 │   ├── sqlite.ts                 ← Conexión a SQLite (usuarios, presets, migraciones, roles, pantallas)
 │   ├── auth.ts                   ← JWT, bcrypt, SessionUser, cookieOptions
 │   ├── permissions.ts            ← Control de acceso por pantalla (getAllScreensConfig, requireScreenAccess)
+│   ├── panels.ts                 ← Fuente única de los paneles reales (clave, label, href, icono, descripción)
 │   ├── utils.ts                  ← Funciones auxiliares (fechas, cantidades, clases CSS)
 │   ├── reflex.ts                 ← Conexión a SQL Server (Reflex), análoga a db.ts para Oracle
 │   └── gs1.ts                    ← Parser de códigos de barras GS1-128 (EAN/lote/cantidad/SSCC/fechas)
@@ -858,21 +859,21 @@ Barra de navegación compartida por todos los paneles. Reemplaza el top bar dupl
 
 | Prop | Tipo | Descripción |
 |---|---|---|
-| `currentPanel` | `'produccion' \| 'pedidos' \| 'caducados' \| 'comparativa'` (opcional) | Panel activo (se marca con punto rojo en el dropdown). Se omite en páginas que usan `Navbar`/`AppShell` pero no son uno de los 4 paneles reales (ej. `/admin/logs`) — así no marcan ninguno como activo |
+| `currentPanel` | `PanelKey` (de `lib/panels.ts`, opcional) | Panel activo (se marca con punto rojo en el dropdown). Se omite en páginas que usan `Navbar`/`AppShell` pero no son uno de los paneles reales (ej. `/admin/logs`) — así no marcan ninguno como activo |
 | `user` | `SessionUser \| null` | Usuario de sesión. Si es null, muestra botón "Iniciar sesión" |
 | `onLogout` | `() => void` | Callback para cerrar sesión |
-| `onPresetsClick` | `() => void` (opcional) | Si se pasa, aparece el botón "Presets". Lo wirean los 4 paneles (`/produccion`, `/preparacion-pedidos`, `/caducados`, `/comparativa-seres`) sólo con sesión activa |
+| `onPresetsClick` | `() => void` (opcional) | Si se pasa, aparece el botón "Presets". Lo wirean los paneles con presets (`/produccion`, `/preparacion-pedidos`, `/caducados`, `/comparativa-seres`, `/compras`) sólo con sesión activa |
 
 **Comportamiento:**
 - Logo a la izquierda
 - Botón **"Paneles ▾"** con dropdown filtrado según permisos: solo muestra los paneles a los que el usuario actual tiene acceso. Si no hay ninguno accesible, el botón se oculta.
-- Botón "Presets" visible en los 4 paneles cuando hay sesión. Al pulsarlo, cada panel incrementa una señal interna (`presetsSignal`) que abre su propio panel/modal de presets. Los presets están aislados por `screen` (`produccion`, `pedidos`, `caducados`, `comparativa`)
+- Botón "Presets" visible en los paneles con presets cuando hay sesión. Al pulsarlo, cada panel incrementa una señal interna (`presetsSignal`) que abre su propio panel/modal de presets. Los presets están aislados por `screen` (`produccion`, `pedidos`, `caducados`, `comparativa`, `compras`)
 - Con sesión: nombre del usuario, botones Admin y Logs (solo si `role === 'admin'`), botón Salir
 - Sin sesión: enlace "Iniciar sesión"
 
 La Navbar obtiene la configuración de pantallas de `GET /api/screen-permissions` en un `useEffect` al montarse. Usa la misma función `canAccessPanel()` que las páginas para decidir qué mostrar.
 
-**Añadir un nuevo panel al dropdown:** añadir una entrada al array `PANELS` en `components/Navbar.tsx` y usar la nueva clave en `currentPanel`.
+**Añadir un nuevo panel al dropdown:** añadir una entrada a `PANELS` en `lib/panels.ts` — **no** en `Navbar.tsx` directamente. Es la fuente única que también usan la portada (`app/page.tsx`), el login (`app/login/page.tsx`) y `SCREEN_KEYS` de `app/admin/page.tsx`; ver `docs/design-system.md` §5.1 para el porqué (dos bugs reales salieron de tener esta lista copiada en cada sitio).
 
 ### `FilterPanel.tsx`
 

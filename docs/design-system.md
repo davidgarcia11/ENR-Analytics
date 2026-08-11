@@ -165,9 +165,34 @@ Si tu panel no tiene filtro de fechas (ej. caducados) o usa un filtro relativo q
 
 Todo lo demás (guardar, editar, listar, `ConfirmDialog` al borrar, toasts de éxito/error) lo gestiona `PresetPanel`. La página sigue necesitando su propio estado `showPresets` (booleano) y `presetsSignal` (para que el botón "Presets" del Navbar lo abra) — eso no cambia.
 
+### `lib/panels.ts` — fuente única de paneles (§5.1)
+
+**Nunca vuelvas a declarar una lista de paneles a mano.** Hasta que existía este archivo, la
+misma lista (clave, label, href, icono) estaba copiada en 4 sitios — `Navbar.tsx`, la portada
+(`app/page.tsx`), el login (`app/login/page.tsx`) y `SCREEN_KEYS` de `app/admin/page.tsx` — y
+añadir un panel nuevo significaba acordarse de actualizar los 4 a mano. Dos bugs reales salieron
+de esto: un panel aparecía en unos sitios sí y en otros no (logs, permisos, portada), y en el
+peor caso un usuario con acceso real a un panel **no podía ni iniciar sesión** porque
+`login/page.tsx` no lo reconocía en su copia de la lista.
+
+```ts
+// lib/panels.ts
+export const PANELS = [
+  { key: 'mi_panel', label: 'Mi Panel', href: '/mi-panel', Icon: MiIcono, description: '...' },
+  ...
+] as const
+
+export type PanelKey = typeof PANELS[number]['key']
+```
+
+`Navbar.tsx`, `app/page.tsx` y `app/login/page.tsx` importan `PANELS` directamente; `SCREEN_KEYS`
+de `app/admin/page.tsx` se deriva con `PANELS.map(({ key, label }) => ({ key, label }))`. Añadir
+un panel nuevo es **una sola línea en un solo archivo** — los 4 consumidores se actualizan solos.
+
 ### `Navbar` (`components/Navbar.tsx`)
 
-No se toca su API al añadir un panel nuevo salvo un paso: añadir la entrada al array `PANELS` (clave, label, href, icono) — ver `DOCUMENTACION.md` sección 10.
+No se toca su API al añadir un panel nuevo — importa `PANELS` de `lib/panels.ts` (ver §5.1). Solo
+gestiona el dropdown, la sesión y el filtrado por permisos (`canAccessPanel`).
 
 ### `FilterPanel` (`components/FilterPanel.tsx`)
 
@@ -194,7 +219,7 @@ Estas cuatro reglas sustituyeron comportamientos concretos que existían en el c
 Sigue este orden; cada paso da por hecho que el anterior está hecho.
 
 1. **Página** (`app/mi-panel/page.tsx`, `"use client"`): monta `<AppShell navbar={{...}} title="..." description="...">` como contenedor raíz. No repitas `<main>`/`max-w-*`/`<Navbar>` sueltos.
-2. **Navbar**: añade tu panel al array `PANELS` en `components/Navbar.tsx` (clave, label, href, icono de lucide-react). Si el panel debe poder restringirse por rol, añade su `key` a `SCREEN_KEYS` en `app/admin/page.tsx` para que aparezca en la pestaña "Pantallas".
+2. **Registrar el panel**: añade una entrada a `PANELS` en `lib/panels.ts` (clave, label, href, icono de lucide-react, descripción) — **y solo ahí** (ver §5.1). `Navbar.tsx`, la portada (`app/page.tsx`), el login (`app/login/page.tsx`) y `SCREEN_KEYS` de `app/admin/page.tsx` lo importan automáticamente, no hay que tocarlos.
 3. **Filtros**: bloque propio en un `<Card accent>` siguiendo el patrón del punto 5 (FilterPanel). Usa `Input`, `DatePicker`, `ArticleMultiSelect`/`SingleSelect` según el tipo de filtro.
 4. **Presets** (si el panel los necesita): estado `showPresets`/`presetsSignal` + `const { presets, reload } = usePresets('mi_panel')` + `<PresetPanel .../>` **y** `<PresetQuickSelect .../>` en la barra de acciones — ver punto 5. Recuerda pasar `onPresetsClick` al `navbar` del `AppShell`.
 5. **KPIs** (si aplica): `<KpiCard>` en un grid `sm:grid-cols-2 md:grid-cols-N`.

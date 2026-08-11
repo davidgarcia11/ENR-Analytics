@@ -13,6 +13,7 @@ import { ConfirmDialog } from "@/components/ui/dialog"
 import { useToast } from "@/components/ui/toast"
 import { Loader2, Trash2, UserPlus, ArrowLeft, KeyRound, Pencil, FileText, ShieldCheck, Tag } from "lucide-react"
 import Image from "next/image"
+import { PANELS } from "@/lib/panels"
 
 interface User {
   id: number
@@ -50,14 +51,8 @@ interface JdeStatus {
   updated_at?: string
 }
 
-const SCREEN_KEYS: { key: string; label: string }[] = [
-  { key: 'produccion',  label: 'Producción' },
-  { key: 'pedidos',     label: 'Pedidos' },
-  { key: 'caducados',   label: 'Caducados' },
-  { key: 'comparativa', label: 'Comparativa SERES' },
-  { key: 'consulta_stock_pda', label: 'Consulta Stock PDA' },
-  { key: 'compras',     label: 'Compras' },
-]
+// Derivado de la fuente única de paneles — nunca declarar esta lista a mano aquí.
+const SCREEN_KEYS = PANELS.map(({ key, label }) => ({ key, label }))
 
 export default function AdminPage() {
   const router = useRouter()

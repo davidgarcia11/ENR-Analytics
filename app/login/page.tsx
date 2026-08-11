@@ -7,6 +7,7 @@ import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 import { Loader2 } from "lucide-react"
 import Image from "next/image"
+import { PANELS } from "@/lib/panels"
 
 export default function LoginPage() {
   const router = useRouter()
@@ -40,14 +41,6 @@ export default function LoginPage() {
       }
 
       // Buscar el primer panel al que tiene acceso según permisos configurados
-      const PANELS = [
-        { key: 'produccion',  path: '/produccion' },
-        { key: 'pedidos',     path: '/preparacion-pedidos' },
-        { key: 'caducados',   path: '/caducados' },
-        { key: 'comparativa', path: '/comparativa-seres' },
-        { key: 'consulta_stock_pda', path: '/consulta-stock-pda' },
-        { key: 'compras',     path: '/compras' },
-      ]
       try {
         const screensRes = await fetch('/api/screen-permissions')
         if (screensRes.ok) {
@@ -57,7 +50,7 @@ export default function LoginPage() {
             if (!cfg) return true
             return cfg.is_public || data.role === 'admin' || cfg.allowed_roles.includes(data.role)
           })
-          if (first) { router.push(first.path); return }
+          if (first) { router.push(first.href); return }
           setError("No tienes acceso a ningún panel. Contacta con el administrador.")
           return
         }
