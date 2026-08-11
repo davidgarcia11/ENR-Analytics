@@ -350,16 +350,17 @@ export default function ConsultaStockPdaPage() {
                                 <TableHeader>
                                     <TableRow className="hover:bg-transparent">
                                         <TableHead className="font-bold text-secondary-foreground">Lote</TableHead>
+                                        <TableHead className="font-bold text-secondary-foreground">Caducidad</TableHead>
                                         <TableHead className="font-bold text-secondary-foreground">SSCC</TableHead>
                                         <TableHead className="font-bold text-secondary-foreground">Cantidad</TableHead>
-                                        <TableHead className="font-bold text-secondary-foreground">Caducidad</TableHead>
                                         <TableHead className="font-bold text-secondary-foreground">Ubicación</TableHead>
+                                        <TableHead className="font-bold text-secondary-foreground">Planta</TableHead>
                                     </TableRow>
                                 </TableHeader>
                                 <TableBody>
                                     {lotes.length === 0 ? (
                                         <TableRow className="hover:bg-transparent">
-                                            <TableCell colSpan={5}>
+                                            <TableCell colSpan={6}>
                                                 <EmptyState icon={PackageSearch} title="Sin stock" description="No hay lotes en stock para este artículo." />
                                             </TableCell>
                                         </TableRow>
@@ -367,6 +368,12 @@ export default function ConsultaStockPdaPage() {
                                         lotes.map((l, i) => (
                                             <TableRow key={`${l.sscc || l.lote}-${i}`} className={filaClassName(l, parsed?.sscc)}>
                                                 <TableCell className="font-mono text-sm">{l.lote}</TableCell>
+                                                <TableCell className="text-sm">
+                                                    {formatFecha(l.fechaCaducidad)}
+                                                    {l.fechaCaducidad === primerCaduca && (
+                                                        <Badge variant="warning" className="ml-2">Primero en caducar</Badge>
+                                                    )}
+                                                </TableCell>
                                                 <TableCell className="font-mono text-sm text-secondary-foreground">
                                                     {l.sscc ? l.sscc.slice(-6) : '-'}
                                                     {parsed?.sscc && l.sscc === parsed.sscc && (
@@ -374,13 +381,8 @@ export default function ConsultaStockPdaPage() {
                                                     )}
                                                 </TableCell>
                                                 <TableCell className="text-sm">{l.cantidad}</TableCell>
-                                                <TableCell className="text-sm">
-                                                    {formatFecha(l.fechaCaducidad)}
-                                                    {l.fechaCaducidad === primerCaduca && (
-                                                        <Badge variant="warning" className="ml-2">Primero en caducar</Badge>
-                                                    )}
-                                                </TableCell>
                                                 <TableCell className="text-sm text-secondary-foreground">{l.ubicacion || '-'}</TableCell>
+                                                <TableCell className="text-sm text-secondary-foreground">{l.planta || '-'}</TableCell>
                                             </TableRow>
                                         ))
                                     )}
