@@ -1,26 +1,53 @@
 @import "tailwindcss";
 
-:root {
-  --background: #ffffff;
-  --foreground: #171717;
-}
-
+/*
+ * Tokens de diseño — Elaborados Naturales
+ * Única fuente de verdad para colores, tipografía y semántica visual.
+ * Todos los valores provienen de la paleta ya existente en el código
+ * (auditoría redesign/ui-ux-v2); no se ha inventado ningún color.
+ *
+ * Uso: clases Tailwind generadas automáticamente a partir de cada token,
+ * p. ej. `bg-primary`, `text-muted-foreground`, `border-border`, `ring-ring`.
+ */
 @theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-}
+  /* ── Marca ─────────────────────────────────────────────── */
+  --color-primary: #d30b15;            /* rojo corporativo */
+  --color-primary-hover: #b00a12;      /* hover/pressed del rojo corporativo */
+  --color-primary-foreground: #ffffff; /* texto sobre rojo */
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+  /* ── Superficies ───────────────────────────────────────── */
+  --color-background: #f7f7f6;         /* fondo general de la app */
+  --color-foreground: #171717;         /* texto principal */
+  --color-card: #ffffff;               /* tarjetas y paneles */
+  --color-card-foreground: #171717;
+  --color-popover: #ffffff;            /* popovers, dropdowns, menús */
+  --color-popover-foreground: #171717;
+
+  /* ── Neutros ───────────────────────────────────────────── */
+  --color-muted: #f4f4f4;              /* fondos sutiles (cabeceras de tabla, hover) */
+  --color-muted-foreground: #6b7280;   /* texto secundario */
+  --color-border: #e5e7eb;             /* bordes y separadores */
+  --color-input: #e5e7eb;              /* borde de inputs */
+  --color-ring: #d30b15;               /* anillo de foco (accesibilidad) */
+
+  /* ── Acciones secundarias ──────────────────────────────── */
+  --color-secondary: #f4f4f4;
+  --color-secondary-foreground: #374151;
+  --color-accent: #f4f4f4;             /* hover de botones ghost/outline */
+  --color-accent-foreground: #171717;
+
+  /* ── Semánticos ────────────────────────────────────────── */
+  --color-destructive: #ef4444;        /* acciones destructivas / error */
+  --color-destructive-foreground: #ffffff;
+  --color-success: #22c55e;            /* estados correctos */
+  --color-warning: #f59e0b;            /* avisos */
+  --color-info: #2563eb;               /* informativo / modo edición */
+
+  /* ── Tipografía ────────────────────────────────────────── */
+  --font-sans: var(--font-geist-sans), system-ui, sans-serif;
+  --font-mono: var(--font-geist-mono), ui-monospace, monospace;
 }
 
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  @apply bg-background text-foreground font-sans antialiased;
 }

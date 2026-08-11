@@ -87,3 +87,9 @@ export function parseWasOqs(val: number | string): number {
     if (typeof val === 'number') return val / 100; // Si ya es número, dividimos
     return parseFloat(val.toString()) / 100; // Si es texto, convertimos a decimal y dividimos
 }
+
+// Equivalente nativo a getDayOfYear de date-fns
+// Devuelve el día del año (1-366) para una fecha dada
+export function getDayOfYear(date: Date): number {
+    return Math.floor((date.getTime() - new Date(date.getFullYear(), 0, 0).getTime()) / 86400000);
+}

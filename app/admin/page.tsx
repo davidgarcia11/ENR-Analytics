@@ -6,7 +6,12 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
-import { Loader2, Trash2, UserPlus, ArrowLeft, KeyRound, Pencil, FileText, ShieldCheck, LayoutGrid, Tag } from "lucide-react"
+import { Tabs } from "@/components/ui/tabs"
+import { Badge } from "@/components/ui/badge"
+import { Spinner } from "@/components/ui/spinner"
+import { ConfirmDialog } from "@/components/ui/dialog"
+import { useToast } from "@/components/ui/toast"
+import { Loader2, Trash2, UserPlus, ArrowLeft, KeyRound, Pencil, FileText, ShieldCheck, Tag } from "lucide-react"
 import Image from "next/image"
 
 interface User {
@@ -50,12 +55,18 @@ const SCREEN_KEYS: { key: string; label: string }[] = [
   { key: 'pedidos',     label: 'Pedidos' },
   { key: 'caducados',   label: 'Caducados' },
   { key: 'comparativa', label: 'Comparativa SERES' },
+  { key: 'consulta_stock_pda', label: 'Consulta Stock PDA' },
+  { key: 'compras',     label: 'Compras' },
 ]
 
 export default function AdminPage() {
   const router = useRouter()
+  const { toast } = useToast()
   const [activeTab, setActiveTab] = useState<Tab>('usuarios')
   const [authorized, setAuthorized] = useState(false)
+
+  // Confirmación de borrado (sustituye a confirm() nativo): guarda la acción pendiente
+  const [confirmState, setConfirmState] = useState<{ title: string; description: string; onConfirm: () => void } | null>(null)
 
   // ─── Usuarios ───────────────────────────────────────────────────────────────
   const [users, setUsers] = useState<User[]>([])
@@ -203,18 +214,25 @@ export default function AdminPage() {
     } catch { setUserError("Error de conexión") } finally { setCreating(false) }
   }
 
-  const deleteUser = async (id: number, username: string) => {
-    if (!confirm(`¿Eliminar usuario "${username}"?`)) return
-    try {
-      const res = await fetch(`/api/admin/users/${id}`, { method: "DELETE" })
-      const data = await res.json()
-      if (!res.ok) { alert(data.error); return }
-      loadUsers()
-    } catch { alert("Error al eliminar") }
+  // Lanza la confirmación; el borrado real corre al confirmar en el ConfirmDialog
+  const deleteUser = (id: number, username: string) => {
+    setConfirmState({
+      title: "Eliminar usuario",
+      description: `Se eliminará el usuario "${username}". Esta acción no se puede deshacer.`,
+      onConfirm: async () => {
+        try {
+          const res = await fetch(`/api/admin/users/${id}`, { method: "DELETE" })
+          const data = await res.json()
+          if (!res.ok) { toast(data.error || "Error al eliminar", "error"); return }
+          loadUsers()
+          toast(`Usuario "${username}" eliminado`, "success")
+        } catch { toast("Error al eliminar", "error") }
+      },
+    })
   }
 
   const resetUserPassword = async (id: number) => {
-    if (!resetPassword || resetPassword.length < 4) { alert("La contraseña debe tener al menos 4 caracteres"); return }
+    if (!resetPassword || resetPassword.length < 4) { toast("La contraseña debe tener al menos 4 caracteres", "error"); return }
     try {
       const res = await fetch(`/api/admin/users/${id}`, {
         method: "PATCH",
@@ -222,10 +240,10 @@ export default function AdminPage() {
         body: JSON.stringify({ password: resetPassword }),
       })
       const data = await res.json()
-      if (!res.ok) { alert(data.error); return }
+      if (!res.ok) { toast(data.error || "Error al resetear", "error"); return }
       setResetUserId(null); setResetPassword("")
-      alert("Contraseña reseteada. El usuario deberá cambiarla al iniciar sesión.")
-    } catch { alert("Error al resetear") }
+      toast("Contraseña reseteada. El usuario deberá cambiarla al iniciar sesión.", "success")
+    } catch { toast("Error al resetear", "error") }
   }
 
   const startEdit = (u: User) => {
@@ -267,14 +285,20 @@ export default function AdminPage() {
     } catch { setRoleError("Error de conexión") } finally { setCreatingRole(false) }
   }
 
-  const deleteRole = async (id: number, name: string, label: string) => {
-    if (!confirm(`¿Eliminar el rol "${label}"? Los usuarios con ese rol pasarán a "user".`)) return
-    try {
-      const res = await fetch(`/api/admin/roles/${id}`, { method: "DELETE" })
-      const data = await res.json()
-      if (!res.ok) { alert(data.error); return }
-      loadRoles(); loadUsers()
-    } catch { alert("Error al eliminar el rol") }
+  const deleteRole = (id: number, name: string, label: string) => {
+    setConfirmState({
+      title: "Eliminar rol",
+      description: `Se eliminará el rol "${label}". Los usuarios con ese rol pasarán a "user".`,
+      onConfirm: async () => {
+        try {
+          const res = await fetch(`/api/admin/roles/${id}`, { method: "DELETE" })
+          const data = await res.json()
+          if (!res.ok) { toast(data.error || "Error al eliminar el rol", "error"); return }
+          loadRoles(); loadUsers()
+          toast(`Rol "${label}" eliminado`, "success")
+        } catch { toast("Error al eliminar el rol", "error") }
+      },
+    })
   }
 
   // ─── Acciones de pantallas ───────────────────────────────────────────────────
@@ -301,77 +325,65 @@ export default function AdminPage() {
         body: JSON.stringify({ is_public: config.is_public, allowed_roles: config.allowed_roles }),
       })
       const data = await res.json()
-      if (!res.ok) { alert(data.error); return }
+      if (!res.ok) { toast(data.error || "Error al guardar", "error"); return }
       setScreenSuccess(`Pantalla guardada correctamente`)
       setTimeout(() => setScreenSuccess(""), 3000)
-    } catch { alert("Error al guardar") } finally { setSavingScreen(null) }
+    } catch { toast("Error al guardar", "error") } finally { setSavingScreen(null) }
   }
 
   if (!authorized) {
     return (
-      <div className="min-h-screen bg-gray-100 flex items-center justify-center">
-        <Loader2 className="h-8 w-8 animate-spin text-gray-400" />
+      <div className="min-h-screen bg-background flex items-center justify-center">
+        <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" aria-hidden="true" />
       </div>
     )
   }
 
   return (
-    <div className="min-h-screen bg-gray-100 p-8 font-sans text-gray-900">
-      <div className="mx-auto max-w-4xl space-y-6">
+    <div className="min-h-screen bg-background p-4 md:p-8">
+      <div className="mx-auto max-w-5xl space-y-6">
 
         {/* Header */}
-        <div className="flex items-center justify-between">
+        <div className="flex flex-wrap items-center justify-between gap-3">
           <div className="flex items-center gap-4">
             <Image src="/logo.png" alt="Elaborados Naturales" width={120} height={42} priority />
             <div>
-              <h1 className="text-xl font-semibold text-gray-800">Panel de Administración</h1>
-              <p className="text-sm text-gray-500">Gestión de usuarios, roles y accesos</p>
+              <h1 className="text-xl font-semibold tracking-tight text-foreground">Panel de Administración</h1>
+              <p className="text-sm text-muted-foreground">Gestión de usuarios, roles y accesos</p>
             </div>
           </div>
           <div className="flex gap-2">
-            <Button variant="outline" onClick={() => router.push("/admin/logs")} className="text-gray-600">
-              <FileText className="mr-2 h-4 w-4" />
+            <Button variant="outline" onClick={() => router.push("/admin/logs")} className="text-secondary-foreground">
+              <FileText className="mr-2 h-4 w-4" aria-hidden="true" />
               Logs
             </Button>
-            <Button variant="outline" onClick={() => router.push("/produccion")} className="text-gray-600">
-              <ArrowLeft className="mr-2 h-4 w-4" />
+            <Button variant="outline" onClick={() => router.push("/produccion")} className="text-secondary-foreground">
+              <ArrowLeft className="mr-2 h-4 w-4" aria-hidden="true" />
               Dashboard
             </Button>
           </div>
         </div>
 
         {/* Pestañas */}
-        <div className="flex gap-1 border-b border-gray-200">
-          {([
-            { key: 'usuarios', label: 'Usuarios', Icon: UserPlus },
-            { key: 'roles',    label: 'Roles',    Icon: ShieldCheck },
-            { key: 'pantallas', label: 'Pantallas', Icon: LayoutGrid },
-            { key: 'estados-jde', label: 'Estados JDE', Icon: Tag },
-          ] as const).map(({ key, label, Icon }) => (
-            <button
-              key={key}
-              type="button"
-              onClick={() => setActiveTab(key)}
-              className={`flex items-center gap-1.5 px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors ${
-                activeTab === key
-                  ? 'border-[#D30B15] text-[#D30B15]'
-                  : 'border-transparent text-gray-500 hover:text-gray-700'
-              }`}
-            >
-              <Icon className="h-4 w-4" />
-              {label}
-            </button>
-          ))}
-        </div>
+        <Tabs
+          value={activeTab}
+          onValueChange={(v) => setActiveTab(v as Tab)}
+          tabs={[
+            { value: 'usuarios', label: 'Usuarios' },
+            { value: 'roles', label: 'Roles' },
+            { value: 'pantallas', label: 'Pantallas' },
+            { value: 'estados-jde', label: 'Estados JDE' },
+          ]}
+        />
 
         {/* ── Pestaña Usuarios ─────────────────────────────────────────────────── */}
         {activeTab === 'usuarios' && (
           <>
             {/* Crear usuario */}
-            <Card className="overflow-hidden" style={{ borderTop: '3px solid #D30B15' }}>
+            <Card accent>
               <CardHeader>
-                <CardTitle className="text-sm font-bold text-gray-700 flex items-center gap-2">
-                  <UserPlus className="h-4 w-4" style={{ color: '#D30B15' }} />
+                <CardTitle className="text-sm font-bold text-secondary-foreground flex items-center gap-2">
+                  <UserPlus className="h-4 w-4 text-primary" aria-hidden="true" />
                   Crear Usuario
                 </CardTitle>
               </CardHeader>
@@ -379,35 +391,35 @@ export default function AdminPage() {
                 <form onSubmit={createUser} className="space-y-4">
                   <div className="flex flex-wrap items-end gap-4">
                     <div className="space-y-1.5">
-                      <label className="text-xs font-semibold text-gray-700">Nombre</label>
+                      <label className="text-xs font-semibold text-secondary-foreground">Nombre</label>
                       <Input value={newName} onChange={e => setNewName(e.target.value)} placeholder="Juan" className="w-[150px]" />
                     </div>
                     <div className="space-y-1.5">
-                      <label className="text-xs font-semibold text-gray-700">Apellido</label>
+                      <label className="text-xs font-semibold text-secondary-foreground">Apellido</label>
                       <Input value={newSurname} onChange={e => setNewSurname(e.target.value)} placeholder="García" className="w-[150px]" />
                     </div>
                     <div className="space-y-1.5">
-                      <label className="text-xs font-semibold text-gray-700">Usuario</label>
+                      <label className="text-xs font-semibold text-secondary-foreground">Usuario</label>
                       <Input value={newUsername} onChange={e => setNewUsername(e.target.value)} placeholder="jgarcia" required className="w-[150px]" />
                     </div>
                     <div className="space-y-1.5">
-                      <label className="text-xs font-semibold text-gray-700">Contraseña</label>
+                      <label className="text-xs font-semibold text-secondary-foreground">Contraseña</label>
                       <Input type="password" value={newPassword} onChange={e => setNewPassword(e.target.value)} placeholder="••••••" required className="w-[150px]" />
                     </div>
                     <div className="space-y-1.5">
-                      <label className="text-xs font-semibold text-gray-700">Rol</label>
-                      <select value={newRole} onChange={e => setNewRole(e.target.value)} className="flex h-9 w-[140px] rounded-md border border-gray-300 bg-white px-3 py-1 text-sm shadow-sm">
+                      <label className="text-xs font-semibold text-secondary-foreground">Rol</label>
+                      <select value={newRole} onChange={e => setNewRole(e.target.value)} className="flex h-9 w-[140px] rounded-md border border-input bg-card px-3 py-1 text-sm shadow-sm">
                         {roles.map(r => <option key={r.name} value={r.name}>{r.label}</option>)}
                       </select>
                     </div>
-                    <Button type="submit" disabled={creating} className="text-white font-semibold" style={{ backgroundColor: '#D30B15' }}>
+                    <Button type="submit" disabled={creating} className="font-semibold">
                       {creating ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <UserPlus className="mr-2 h-4 w-4" />}
                       Crear
                     </Button>
                   </div>
                   <label className="flex items-center gap-2 cursor-pointer">
-                    <input type="checkbox" checked={forceChange} onChange={e => setForceChange(e.target.checked)} className="h-4 w-4 rounded border-gray-300 accent-red-600" />
-                    <span className="text-sm text-gray-600">Forzar cambio de contraseña en el primer inicio de sesión</span>
+                    <input type="checkbox" checked={forceChange} onChange={e => setForceChange(e.target.checked)} className="h-4 w-4 rounded border-input accent-primary" />
+                    <span className="text-sm text-secondary-foreground">Forzar cambio de contraseña en el primer inicio de sesión</span>
                   </label>
                 </form>
                 {userError && <p className="text-sm text-red-600 font-medium mt-3">{userError}</p>}
@@ -416,30 +428,30 @@ export default function AdminPage() {
             </Card>
 
             {/* Lista de usuarios */}
-            <Card className="overflow-hidden" style={{ borderTop: '3px solid #D30B15' }}>
+            <Card accent>
               <CardHeader>
-                <CardTitle className="text-sm font-bold text-gray-700">Usuarios Registrados</CardTitle>
+                <CardTitle className="text-sm font-bold text-secondary-foreground">Usuarios Registrados</CardTitle>
               </CardHeader>
               <CardContent>
                 {loadingUsers ? (
-                  <div className="flex justify-center py-8"><Loader2 className="h-6 w-6 animate-spin text-gray-400" /></div>
+                  <Spinner label="Cargando..." className="py-8" />
                 ) : (
                   <Table>
                     <TableHeader>
-                      <TableRow className="border-gray-200 hover:bg-transparent">
-                        <TableHead className="font-bold text-gray-700">ID</TableHead>
-                        <TableHead className="font-bold text-gray-700">Nombre</TableHead>
-                        <TableHead className="font-bold text-gray-700">Usuario</TableHead>
-                        <TableHead className="font-bold text-gray-700">Rol</TableHead>
-                        <TableHead className="font-bold text-gray-700">Creado</TableHead>
-                        <TableHead className="font-bold text-gray-700 text-right">Acciones</TableHead>
+                      <TableRow className="hover:bg-transparent">
+                        <TableHead className="font-bold text-secondary-foreground">ID</TableHead>
+                        <TableHead className="font-bold text-secondary-foreground">Nombre</TableHead>
+                        <TableHead className="font-bold text-secondary-foreground">Usuario</TableHead>
+                        <TableHead className="font-bold text-secondary-foreground">Rol</TableHead>
+                        <TableHead className="font-bold text-secondary-foreground">Creado</TableHead>
+                        <TableHead className="font-bold text-secondary-foreground text-right">Acciones</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
                       {users.map(u => (
                         editUserId === u.id ? (
                           <TableRow key={u.id} className="bg-blue-50 border-blue-200">
-                            <TableCell className="text-gray-500">{u.id}</TableCell>
+                            <TableCell className="text-muted-foreground">{u.id}</TableCell>
                             <TableCell>
                               <div className="flex gap-1.5">
                                 <Input value={editName} onChange={e => setEditName(e.target.value)} placeholder="Nombre" className="h-8 w-[100px] text-sm" autoFocus />
@@ -450,29 +462,29 @@ export default function AdminPage() {
                               <Input value={editUsername} onChange={e => setEditUsername(e.target.value)} placeholder="Usuario" className="h-8 w-[120px] text-sm" onKeyDown={e => e.key === 'Enter' && saveEdit()} />
                             </TableCell>
                             <TableCell>
-                              <select value={editRole} onChange={e => setEditRole(e.target.value)} className="h-8 rounded-md border border-gray-300 bg-white px-2 text-sm">
+                              <select value={editRole} onChange={e => setEditRole(e.target.value)} className="h-8 rounded-md border border-input bg-card px-2 text-sm">
                                 {roles.map(r => <option key={r.name} value={r.name}>{r.label}</option>)}
                               </select>
                             </TableCell>
                             <TableCell colSpan={2}>
                               <div className="flex items-center gap-2">
-                                <Button size="sm" onClick={saveEdit} className="text-white text-xs font-semibold h-8" style={{ backgroundColor: '#D30B15' }}>Guardar</Button>
-                                <Button size="sm" variant="ghost" onClick={() => setEditUserId(null)} className="text-gray-400 h-8 text-xs">Cancelar</Button>
+                                <Button size="sm" onClick={saveEdit} className="text-xs font-semibold h-8">Guardar</Button>
+                                <Button size="sm" variant="ghost" onClick={() => setEditUserId(null)} className="text-muted-foreground h-8 text-xs">Cancelar</Button>
                                 {editError && <span className="text-xs text-red-600 font-medium">{editError}</span>}
                               </div>
                             </TableCell>
                           </TableRow>
                         ) : (
-                          <TableRow key={u.id} className="hover:bg-slate-50 border-gray-100">
-                            <TableCell className="text-gray-500">{u.id}</TableCell>
+                          <TableRow key={u.id} className="hover:bg-muted/50 border-border">
+                            <TableCell className="text-muted-foreground">{u.id}</TableCell>
                             <TableCell className="font-medium">{u.name || u.surname ? `${u.name} ${u.surname}`.trim() : '—'}</TableCell>
                             <TableCell className="font-medium">{u.username}</TableCell>
                             <TableCell>
-                              <span className={`text-xs font-semibold px-2 py-0.5 rounded ${u.role === 'admin' ? 'bg-red-100 text-red-700' : 'bg-gray-100 text-gray-600'}`}>
+                              <Badge variant={u.role === 'admin' ? 'primary' : 'default'}>
                                 {roles.find(r => r.name === u.role)?.label ?? u.role}
-                              </span>
+                              </Badge>
                             </TableCell>
-                            <TableCell className="text-gray-500 text-sm">{new Date(u.created_at).toLocaleDateString('es-ES')}</TableCell>
+                            <TableCell className="text-muted-foreground text-sm">{new Date(u.created_at).toLocaleDateString('es-ES')}</TableCell>
                             <TableCell className="text-right space-x-1">
                               <Button variant="ghost" size="sm" onClick={() => startEdit(u)} className="text-blue-500 hover:text-blue-700 hover:bg-blue-50" title="Editar usuario">
                                 <Pencil className="h-4 w-4" />
@@ -493,8 +505,8 @@ export default function AdminPage() {
                             <div className="flex items-center gap-3">
                               <span className="text-sm font-medium text-amber-700">Nueva contraseña para &quot;{users.find(u => u.id === resetUserId)?.username}&quot;:</span>
                               <Input type="password" value={resetPassword} onChange={e => setResetPassword(e.target.value)} placeholder="Nueva contraseña" className="h-8 w-[200px] text-sm" autoFocus onKeyDown={e => e.key === 'Enter' && resetUserPassword(resetUserId)} />
-                              <Button size="sm" onClick={() => resetUserPassword(resetUserId)} className="text-white text-xs font-semibold h-8" style={{ backgroundColor: '#D30B15' }}>Resetear</Button>
-                              <Button size="sm" variant="ghost" onClick={() => { setResetUserId(null); setResetPassword("") }} className="text-gray-400 h-8 text-xs">Cancelar</Button>
+                              <Button size="sm" onClick={() => resetUserPassword(resetUserId)} className="text-xs font-semibold h-8">Resetear</Button>
+                              <Button size="sm" variant="ghost" onClick={() => { setResetUserId(null); setResetPassword("") }} className="text-muted-foreground h-8 text-xs">Cancelar</Button>
                             </div>
                             <p className="text-xs text-amber-600 mt-1">El usuario deberá cambiar la contraseña al iniciar sesión.</p>
                           </TableCell>
@@ -511,26 +523,26 @@ export default function AdminPage() {
         {/* ── Pestaña Roles ─────────────────────────────────────────────────────── */}
         {activeTab === 'roles' && (
           <>
-            <Card className="overflow-hidden" style={{ borderTop: '3px solid #D30B15' }}>
+            <Card accent>
               <CardHeader>
-                <CardTitle className="text-sm font-bold text-gray-700 flex items-center gap-2">
-                  <ShieldCheck className="h-4 w-4" style={{ color: '#D30B15' }} />
+                <CardTitle className="text-sm font-bold text-secondary-foreground flex items-center gap-2">
+                  <ShieldCheck className="h-4 w-4 text-primary" aria-hidden="true" />
                   Crear Rol
                 </CardTitle>
               </CardHeader>
               <CardContent>
                 <form onSubmit={createRole} className="flex flex-wrap items-end gap-4">
                   <div className="space-y-1.5">
-                    <label className="text-xs font-semibold text-gray-700">
-                      Nombre interno <span className="font-normal text-gray-400">(letras, números, _)</span>
+                    <label className="text-xs font-semibold text-secondary-foreground">
+                      Nombre interno <span className="font-normal text-muted-foreground">(letras, números, _)</span>
                     </label>
                     <Input value={newRoleName} onChange={e => setNewRoleName(e.target.value)} placeholder="supervisor" required className="w-[200px]" />
                   </div>
                   <div className="space-y-1.5">
-                    <label className="text-xs font-semibold text-gray-700">Etiqueta visible</label>
+                    <label className="text-xs font-semibold text-secondary-foreground">Etiqueta visible</label>
                     <Input value={newRoleLabel} onChange={e => setNewRoleLabel(e.target.value)} placeholder="Supervisor" required className="w-[160px]" />
                   </div>
-                  <Button type="submit" disabled={creatingRole} className="text-white font-semibold" style={{ backgroundColor: '#D30B15' }}>
+                  <Button type="submit" disabled={creatingRole} className="font-semibold">
                     {creatingRole ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <ShieldCheck className="mr-2 h-4 w-4" />}
                     Crear rol
                   </Button>
@@ -540,33 +552,33 @@ export default function AdminPage() {
               </CardContent>
             </Card>
 
-            <Card className="overflow-hidden" style={{ borderTop: '3px solid #D30B15' }}>
+            <Card accent>
               <CardHeader>
-                <CardTitle className="text-sm font-bold text-gray-700">Roles Registrados</CardTitle>
+                <CardTitle className="text-sm font-bold text-secondary-foreground">Roles Registrados</CardTitle>
               </CardHeader>
               <CardContent>
                 {loadingRoles ? (
-                  <div className="flex justify-center py-8"><Loader2 className="h-6 w-6 animate-spin text-gray-400" /></div>
+                  <Spinner label="Cargando..." className="py-8" />
                 ) : (
                   <Table>
                     <TableHeader>
-                      <TableRow className="border-gray-200 hover:bg-transparent">
-                        <TableHead className="font-bold text-gray-700">ID</TableHead>
-                        <TableHead className="font-bold text-gray-700">Nombre interno</TableHead>
-                        <TableHead className="font-bold text-gray-700">Etiqueta</TableHead>
-                        <TableHead className="font-bold text-gray-700">Creado</TableHead>
-                        <TableHead className="font-bold text-gray-700 text-right">Acciones</TableHead>
+                      <TableRow className="hover:bg-transparent">
+                        <TableHead className="font-bold text-secondary-foreground">ID</TableHead>
+                        <TableHead className="font-bold text-secondary-foreground">Nombre interno</TableHead>
+                        <TableHead className="font-bold text-secondary-foreground">Etiqueta</TableHead>
+                        <TableHead className="font-bold text-secondary-foreground">Creado</TableHead>
+                        <TableHead className="font-bold text-secondary-foreground text-right">Acciones</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
                       {roles.map(r => (
-                        <TableRow key={r.id} className="hover:bg-slate-50 border-gray-100">
-                          <TableCell className="text-gray-500">{r.id}</TableCell>
+                        <TableRow key={r.id} className="hover:bg-muted/50 border-border">
+                          <TableCell className="text-muted-foreground">{r.id}</TableCell>
                           <TableCell>
-                            <code className="text-xs bg-gray-100 px-1.5 py-0.5 rounded">{r.name}</code>
+                            <code className="text-xs bg-muted px-1.5 py-0.5 rounded">{r.name}</code>
                           </TableCell>
                           <TableCell className="font-medium">{r.label}</TableCell>
-                          <TableCell className="text-gray-500 text-sm">{new Date(r.created_at).toLocaleDateString('es-ES')}</TableCell>
+                          <TableCell className="text-muted-foreground text-sm">{new Date(r.created_at).toLocaleDateString('es-ES')}</TableCell>
                           <TableCell className="text-right">
                             <Button
                               variant="ghost" size="sm"
@@ -596,17 +608,17 @@ export default function AdminPage() {
             )}
 
             {loadingScreens ? (
-              <div className="flex justify-center py-12"><Loader2 className="h-6 w-6 animate-spin text-gray-400" /></div>
+              <Spinner label="Cargando..." className="py-12" />
             ) : (
               SCREEN_KEYS.map(({ key, label }) => {
                 const config = screens[key]
                 if (!config) return null
                 return (
-                  <Card key={key} className="overflow-hidden" style={{ borderTop: '3px solid #D30B15' }}>
+                  <Card key={key} accent>
                     <CardContent className="pt-5">
                       <div className="flex flex-wrap items-start gap-6">
                         <div className="min-w-[140px]">
-                          <p className="text-sm font-semibold text-gray-800 mb-3">{label}</p>
+                          <p className="text-sm font-semibold text-foreground mb-3">{label}</p>
                           <div className="flex flex-col gap-2">
                             <label className="flex items-center gap-2 cursor-pointer text-sm">
                               <input
@@ -633,7 +645,7 @@ export default function AdminPage() {
 
                         {!config.is_public && (
                           <div className="flex-1">
-                            <p className="text-xs font-semibold text-gray-600 mb-2">Roles con acceso:</p>
+                            <p className="text-xs font-semibold text-secondary-foreground mb-2">Roles con acceso:</p>
                             <div className="flex flex-wrap gap-3">
                               {roles.map(role => (
                                 <label key={role.name} className="flex items-center gap-1.5 cursor-pointer text-sm">
@@ -642,11 +654,11 @@ export default function AdminPage() {
                                     checked={config.allowed_roles.includes(role.name)}
                                     disabled={role.name === 'admin'}
                                     onChange={e => toggleScreenRole(key, role.name, e.target.checked)}
-                                    className="h-4 w-4 rounded border-gray-300 accent-red-600 disabled:opacity-50"
+                                    className="h-4 w-4 rounded border-input accent-primary disabled:opacity-50"
                                   />
-                                  <span className={role.name === 'admin' ? 'text-gray-400' : 'text-gray-700'}>
+                                  <span className={role.name === 'admin' ? 'text-muted-foreground' : 'text-secondary-foreground'}>
                                     {role.label}
-                                    {role.name === 'admin' && <span className="text-xs text-gray-400 ml-1">(siempre)</span>}
+                                    {role.name === 'admin' && <span className="text-xs text-muted-foreground ml-1">(siempre)</span>}
                                   </span>
                                 </label>
                               ))}
@@ -658,8 +670,7 @@ export default function AdminPage() {
                           size="sm"
                           onClick={() => saveScreen(key)}
                           disabled={savingScreen === key}
-                          className="text-white font-semibold self-end"
-                          style={{ backgroundColor: '#D30B15' }}
+                          className="font-semibold self-end"
                         >
                           {savingScreen === key ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Guardar'}
                         </Button>
@@ -677,15 +688,15 @@ export default function AdminPage() {
             Se muestran en /comparativa-seres (badge tooltip, columna Descripción y Excel). */}
         {activeTab === 'estados-jde' && (
           <div className="space-y-4">
-            <Card className="overflow-hidden" style={{ borderTop: '3px solid #D30B15' }}>
+            <Card accent>
               <CardHeader>
-                <CardTitle className="text-sm font-bold text-gray-700 flex items-center gap-2">
-                  <Tag className="h-4 w-4" style={{ color: '#D30B15' }} />
+                <CardTitle className="text-sm font-bold text-secondary-foreground flex items-center gap-2">
+                  <Tag className="h-4 w-4 text-primary" aria-hidden="true" />
                   Descripciones de estados JDE (F47011.SYEDSP)
                 </CardTitle>
               </CardHeader>
               <CardContent>
-                <p className="text-xs text-gray-500 mb-4">
+                <p className="text-xs text-muted-foreground mb-4">
                   Estas descripciones aparecen en el panel <strong>Comparativa SERES</strong>: en el tooltip del badge de estado, en la columna &quot;Descripción&quot; de las pestañas con datos JDE, y en la exportación a Excel.
                 </p>
 
@@ -697,21 +708,21 @@ export default function AdminPage() {
                 )}
 
                 {loadingJdeStatuses ? (
-                  <div className="flex justify-center py-12"><Loader2 className="h-6 w-6 animate-spin text-gray-400" /></div>
+                  <Spinner label="Cargando..." className="py-12" />
                 ) : (
                   <Table>
                     <TableHeader>
-                      <TableRow className="border-gray-200 hover:bg-transparent">
-                        <TableHead className="font-bold text-gray-700 w-24 text-center">Código</TableHead>
-                        <TableHead className="font-bold text-gray-700">Descripción</TableHead>
-                        <TableHead className="font-bold text-gray-700 w-32 text-right">Acción</TableHead>
+                      <TableRow className="hover:bg-transparent">
+                        <TableHead className="font-bold text-secondary-foreground w-24 text-center">Código</TableHead>
+                        <TableHead className="font-bold text-secondary-foreground">Descripción</TableHead>
+                        <TableHead className="font-bold text-secondary-foreground w-32 text-right">Acción</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
                       {jdeStatuses.map(s => (
-                        <TableRow key={s.code} className="hover:bg-slate-50 border-gray-100">
+                        <TableRow key={s.code} className="hover:bg-muted/50 border-border">
                           <TableCell className="text-center">
-                            <span className="font-mono font-bold text-gray-800 bg-gray-100 px-2 py-1 rounded">{s.code}</span>
+                            <span className="font-mono font-bold text-foreground bg-muted px-2 py-1 rounded">{s.code}</span>
                           </TableCell>
                           <TableCell>
                             <Input
@@ -725,8 +736,7 @@ export default function AdminPage() {
                               size="sm"
                               onClick={() => saveJdeStatus(s.code)}
                               disabled={savingJdeStatus === s.code || (jdeStatusDrafts[s.code] ?? '').trim() === s.description}
-                              className="text-white font-semibold"
-                              style={{ backgroundColor: '#D30B15' }}
+                              className="font-semibold"
                             >
                               {savingJdeStatus === s.code ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Guardar'}
                             </Button>
@@ -742,6 +752,17 @@ export default function AdminPage() {
         )}
 
       </div>
+
+      {/* Confirmación de acciones destructivas (borrar usuario / rol) */}
+      <ConfirmDialog
+        open={confirmState !== null}
+        onOpenChange={o => !o && setConfirmState(null)}
+        title={confirmState?.title ?? ""}
+        description={confirmState?.description}
+        confirmLabel="Eliminar"
+        destructive
+        onConfirm={() => confirmState?.onConfirm()}
+      />
     </div>
   )
 }

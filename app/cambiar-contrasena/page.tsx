@@ -69,30 +69,31 @@ export default function ChangePasswordPage() {
 
   if (checking) {
     return (
-      <div className="min-h-screen bg-gray-100 flex items-center justify-center">
-        <Loader2 className="h-8 w-8 animate-spin text-gray-400" />
+      <div className="min-h-screen bg-background flex items-center justify-center">
+        <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" aria-hidden="true" />
       </div>
     )
   }
 
   return (
-    <div className="min-h-screen bg-gray-100 flex items-center justify-center p-4">
-      <Card className="w-full max-w-sm overflow-hidden" style={{ borderTop: '3px solid #D30B15' }}>
+    <div className="min-h-screen bg-background flex items-center justify-center p-4">
+      <Card accent className="w-full max-w-sm">
         <CardHeader className="text-center">
           <div className="flex justify-center mb-2">
             <Image src="/logo.png" alt="Elaborados Naturales" width={180} height={63} priority />
           </div>
-          <CardTitle className="text-lg font-semibold text-gray-800 flex items-center justify-center gap-2">
-            <KeyRound className="h-5 w-5" style={{ color: '#D30B15' }} />
+          <CardTitle className="text-lg font-semibold text-foreground flex items-center justify-center gap-2">
+            <KeyRound className="h-5 w-5 text-primary" aria-hidden="true" />
             Cambiar Contraseña
           </CardTitle>
-          <p className="text-sm text-gray-500 mt-1">Debes establecer una nueva contraseña para continuar.</p>
+          <p className="text-sm text-muted-foreground mt-1">Debes establecer una nueva contraseña para continuar.</p>
         </CardHeader>
         <CardContent>
           <form onSubmit={handleSubmit} className="space-y-4">
             <div className="space-y-1.5">
-              <label className="text-xs font-semibold text-gray-700">Nueva contraseña</label>
+              <label htmlFor="new-password" className="text-xs font-semibold text-secondary-foreground">Nueva contraseña</label>
               <Input
+                id="new-password"
                 type="password"
                 value={password}
                 onChange={e => setPassword(e.target.value)}
@@ -102,8 +103,9 @@ export default function ChangePasswordPage() {
               />
             </div>
             <div className="space-y-1.5">
-              <label className="text-xs font-semibold text-gray-700">Confirmar contraseña</label>
+              <label htmlFor="confirm-password" className="text-xs font-semibold text-secondary-foreground">Confirmar contraseña</label>
               <Input
+                id="confirm-password"
                 type="password"
                 value={confirmPassword}
                 onChange={e => setConfirmPassword(e.target.value)}
@@ -113,16 +115,15 @@ export default function ChangePasswordPage() {
             </div>
 
             {error && (
-              <p className="text-sm text-red-600 font-medium">{error}</p>
+              <p role="alert" className="text-sm text-destructive font-medium">{error}</p>
             )}
 
             <Button
               type="submit"
               disabled={loading}
-              className="w-full text-white font-semibold"
-              style={{ backgroundColor: '#D30B15' }}
+              className="w-full font-semibold"
             >
-              {loading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+              {loading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" aria-hidden="true" /> : null}
               Guardar y continuar
             </Button>
           </form>

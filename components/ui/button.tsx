@@ -14,7 +14,7 @@ const buttonVariants = cva(
             // Estilos según la variante (color/propósito)
             variant: {
                 default:
-                    "bg-primary text-primary-foreground shadow hover:bg-primary/90", // El botón normal (negro/azul según tema)
+                    "bg-primary text-primary-foreground shadow hover:bg-primary-hover", // El botón principal (rojo corporativo)
                 destructive:
                     "bg-destructive text-destructive-foreground shadow-sm hover:bg-destructive/90", // Botón rojo de borrar/peligro
                 outline:

@@ -457,12 +457,14 @@ El motivo: la lógica de sub-plantas de Funes depende del primer dígito de `TO5
 
 ### Señal para presets desde el header
 
-El botón "Presets" está en el header (en `page.tsx`), pero el panel de presets está dentro de `FilterPanel`. Para comunicarlos sin hacer que FilterPanel sea descendiente del header, se usa un "signal counter":
+El botón "Presets" se renderiza dentro de `<Navbar>` (montado por `AppShell`), pero el panel de presets está dentro de `FilterPanel`. Para comunicarlos sin hacer que FilterPanel sea descendiente del header, se usa un "signal counter":
 
 ```ts
-// En page.tsx: al pulsar el botón del header
-<button onClick={() => setPresetsSignal(s => s + 1)}>Presets</button>
-<FilterPanel openPresetsSignal={presetsSignal} ... />
+// En page.tsx: onPresetsClick se pasa dentro del objeto navbar de AppShell,
+// que lo reenvía a <Navbar>. Al pulsar el botón "Presets" del Navbar:
+<AppShell navbar={{ ..., onPresetsClick: () => setPresetsSignal(s => s + 1) }} ...>
+  <FilterPanel openPresetsSignal={presetsSignal} ... />
+</AppShell>
 
 // En FilterPanel: observa cambios en la señal
 useEffect(() => {

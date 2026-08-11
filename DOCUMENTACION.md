@@ -1,7 +1,7 @@
 # Documentación Técnica — Dashboard de Producción
 
 > **Audiencia:** Desarrolladores que se incorporan al proyecto.
-> **Última actualización:** Mayo 2026
+> **Última actualización:** Julio 2026
 
 ---
 
@@ -28,14 +28,13 @@ Esta aplicación es un **panel de control (dashboard) de producción** para la e
 | **Tailwind CSS** | 4 | Estilos utilitarios (clases CSS) |
 | **oracledb** | 6 | Driver para conectar con Oracle desde Node.js |
 | **better-sqlite3** | — | Base de datos local para usuarios y presets |
+| **mssql** | 12 | Driver para conectar con SQL Server (Reflex) desde Node.js — JS puro sobre `tedious`, sin binarios nativos |
 | **jose** | — | Firma/verificación de JWT para sesiones |
 | **bcryptjs** | — | Hash de contraseñas |
 | **xlsx** | 0.18 | Generar archivos Excel (.xlsx) |
 | **recharts** | — | Gráficos de líneas para estadísticas de logs |
 | **lucide-react** | 0.563 | Iconos SVG (Search, Factory, Download...) |
-| **date-fns** | 4 | Utilidades de fecha (`getDayOfYear`) |
-| **react-day-picker** | 10 | Calendario interactivo (usado por `DatePicker`) |
-| **@radix-ui/react-popover** | — | Popover posicionado con Portal (usado por `DatePicker`) |
+| **@radix-ui/react-popover** | — | Popover posicionado con Portal (usado por `MermaCellPopover` y `app/compras/page.tsx`) |
 | **Bun** | — | Gestor de paquetes y runtime (alternativa a npm/node) |
 
 ---
@@ -57,7 +56,8 @@ dashboard/
 │   ├── middleware.test.ts        ← JWT forgery, expiración, bypass de rol
 │   ├── sanitization.test.ts      ← SQL injection, XSS en entradas de usuario
 │   ├── permissions.test.ts       ← requireScreenAccess con DB en memoria
-│   └── admin-guards.test.ts      ← Protección del rol/pantalla admin, inyección
+│   ├── admin-guards.test.ts      ← Protección del rol/pantalla admin, inyección
+│   └── gs1.test.ts               ← Parser de códigos de barras GS1-128 (lib/gs1.ts)
 │
 ├── data/
 │   └── app.db                    ← Base de datos SQLite (usuarios, presets, logs — NO se sube a Git)
@@ -70,11 +70,13 @@ dashboard/
 │   ├── sqlite.ts                 ← Conexión a SQLite (usuarios, presets, migraciones, roles, pantallas)
 │   ├── auth.ts                   ← JWT, bcrypt, SessionUser, cookieOptions
 │   ├── permissions.ts            ← Control de acceso por pantalla (getAllScreensConfig, requireScreenAccess)
-│   └── utils.ts                  ← Funciones auxiliares (fechas, cantidades, clases CSS)
+│   ├── utils.ts                  ← Funciones auxiliares (fechas, cantidades, clases CSS)
+│   ├── reflex.ts                 ← Conexión a SQL Server (Reflex), análoga a db.ts para Oracle
+│   └── gs1.ts                    ← Parser de códigos de barras GS1-128 (EAN/lote/cantidad/SSCC/fechas)
 │
 ├── components/                   ← Componentes React reutilizables
 │   ├── ArticleMultiSelect.tsx    ← Desplegable multi-selección con búsqueda
-│   ├── DatePicker.tsx            ← Selector de fecha (Popover + Calendar + botón limpiar)
+│   ├── DatePicker.tsx            ← Selector de fecha (wrapper de <input type="date"> nativo)
 │   ├── FilterPanel.tsx           ← Panel de filtros del dashboard de producción
 │   ├── MermaBreakdown.tsx        ← Desglose de merma agrupado Q/P (usado en /produccion)
 │   ├── MermaCellPopover.tsx      ← Popover por fila al pulsar celda Merma en /produccion
@@ -82,7 +84,6 @@ dashboard/
 │   ├── SingleSelect.tsx          ← Variante de selección única de ArticleMultiSelect
 │   └── ui/                       ← Componentes de interfaz base (estilo shadcn)
 │       ├── button.tsx
-│       ├── calendar.tsx          ← Calendar shadcn (react-day-picker v10)
 │       ├── card.tsx
 │       ├── input.tsx
 │       ├── popover.tsx           ← Popover Radix con Portal
@@ -155,6 +156,11 @@ ORACLE_PORT=1521
 ORACLE_SERVICE=<nombre_servicio_oracle>
 JWT_SECRET=<clave_secreta_para_firmar_jwt>
 SERES_API_KEY=<clave_para_endpoint_externo_jde_orders>
+REFLEX_HOST=<ip_servidor_sql_server_reflex>
+REFLEX_PORT=1433
+REFLEX_DATABASE=<nombre_base_datos_reflex>
+REFLEX_USER=<usuario_reflex>
+REFLEX_PASSWORD=<contraseña_reflex>
 ```
 
 > **IMPORTANTE:** Este archivo NUNCA se sube al repositorio. Está en `.gitignore`.
@@ -479,18 +485,17 @@ if (mine && !mine.is_public) {
 
 **Diseño (Notion/Linear style):**
 - Estética minimalista y plana: sin gradientes, sin sombras decorativas
-- Tipografía Inter (Google Fonts) + Geist como fallback. Solo pesos 400 y 500
-- Fondo `#F7F7F6` (blanco hueso), tarjetas blancas, bordes `1px solid #E5E5E5`
-- Todos los estilos definidos con CSS-in-JSX (`<style>`) usando clases prefijadas `hp-*`
+- Tipografía Geist (la única de la app — antes cargaba Inter de Google Fonts aparte, se unificó)
+- Estilos con tokens del sistema de diseño (`bg-background`, `bg-card`, `border-border`...), no CSS-in-JSX. Ver [`docs/design-system.md`](docs/design-system.md)
 
-**Sección "Acceso público"** (badge verde pill):
+**Sección "Acceso público"** (`Badge variant="success"`):
 - Muestra los paneles con `is_public = true`
 - Tarjetas con icono ámbar, nombre, descripción y flecha. Al hacer clic → acceso directo al panel
 - Grid `auto-fit, minmax(280px, 1fr)`
 
-**Sección "Requiere inicio de sesión"** (badge gris con candado):
+**Sección "Requiere inicio de sesión"** (`Badge` variante por defecto, con candado):
 - Muestra los paneles con `is_public = false`
-- Tarjetas atenuadas (fondo `#F4F4F4`), icono gris, candado en esquina superior derecha
+- Tarjetas atenuadas (`bg-muted`), icono atenuado, candado en esquina superior derecha
 - Al hacer clic → redirige a `/login?redirect=<href-del-panel>`
 - Grid `auto-fit, minmax(160px, 1fr)` (más compacto que el público)
 
@@ -573,11 +578,13 @@ El JSON varía según el panel. Ejemplos:
 
 ### UI de presets
 
-Tres formas de interactuar (los 4 paneles tienen al menos una de ellas):
+Tres formas de interactuar, disponibles en los **4 paneles por igual** (ver `docs/design-system.md` — es una regla explícita del sistema de diseño, no una opción por panel):
 
-1. **Panel expandible (botón "Guardar" en la barra de filtros):** Lista completa de presets con opción de guardar, editar y eliminar — en `produccion`, `pedidos` y `caducados`. En `comparativa-seres` no hay botón inline en los filtros.
-2. **Acceso rápido en la barra de acciones:** Dropdown "Cargar preset" para carga inmediata — solo en `produccion` y `caducados`.
-3. **Botón "Presets" en la Navbar superior:** Disponible en los 4 paneles. Cada `page.tsx` incrementa una señal `presetsSignal` que un `useEffect` observa para hacer `setShowPresets(true)`. Es la única forma de abrir el panel en `comparativa-seres`.
+1. **Panel expandible (botón "Guardar"/"Presets" en la barra de filtros):** Lista completa de presets con opción de guardar, editar y eliminar.
+2. **Acceso rápido en la barra de acciones:** `<PresetQuickSelect>` — dropdown "Cargar preset" para carga inmediata sin abrir el panel.
+3. **Botón "Presets" en la Navbar superior:** Cada `page.tsx` incrementa una señal `presetsSignal` que un `useEffect` observa para hacer `setShowPresets(true)`.
+
+`produccion` implementa las tres dentro de `FilterPanel` (con su propio estado, no usa el componente `PresetPanel` compartido). `caducados`, `pedidos` y `comparativa-seres` usan `usePresets` + `PresetPanel` + `PresetQuickSelect` de `components/PresetPanel.tsx`.
 
 ### APIs de presets
 
@@ -748,6 +755,22 @@ El parámetro `wamcu` personaliza los nombres de sub-línea según planta (10100
 
 Divide entre 100 (JDE almacena cantidades ×100).
 
+#### `getDayOfYear(date)` — Día del año
+
+Devuelve el día del año (1-366) para una `Date`. Equivalente nativo a `getDayOfYear` de `date-fns`, sin dependencia externa. Usado en las rutas API que construyen fechas JDE para filtrar consultas Oracle.
+
+### `lib/reflex.ts` — Conexión a SQL Server (Reflex)
+
+**Qué hace:** Exporta `getReflexConnection()`, análoga a `getDbConnection()` de `lib/db.ts` pero para la BD externa de almacén **Reflex** (SQL Server, vía driver `mssql`). Credenciales `REFLEX_*` desde `.env.local`; lanza error claro si falta alguna. Misma regla de oro: `try/finally` para cerrar la conexión (`conn.close()`).
+
+Única fuente de datos del proyecto que no es Oracle/JDE. Usada solo por el panel `/consulta-stock-pda` — esquema de tablas y JOINs documentado en [docs/consulta-stock-pda.md](docs/consulta-stock-pda.md).
+
+### `lib/gs1.ts` — Parser de códigos de barras GS1-128
+
+**Qué hace:** Exporta `parseGs1(rawInput)`, que separa un código de barras de palet (GS1-128) en sus campos logísticos (EAN, lote, cantidad, SSCC, fechas). Soporta formato crudo (con separador FNC1) y formato legible entre paréntesis, además de EAN-13/DUN-14 sueltos sin envoltorio de AIs.
+
+Usado solo por `/consulta-stock-pda`. Detalle de los Application Identifiers soportados y casos límite en [docs/consulta-stock-pda.md](docs/consulta-stock-pda.md); tests en `__tests__/gs1.test.ts`.
+
 ---
 
 ## 9. Paneles de la aplicación
@@ -759,6 +782,9 @@ Cada panel tiene su documentación específica en la carpeta `docs/`:
 | Dashboard de producción | `/produccion` | [docs/produccion.md](docs/produccion.md) |
 | Control de pedidos | `/preparacion-pedidos` | [docs/control-pedidos.md](docs/control-pedidos.md) |
 | Palets caducados/obsoletos/bloqueados | `/caducados` | [docs/palets-caducados.md](docs/palets-caducados.md) |
+| Comparativa SERES vs JDE | `/comparativa-seres` | [docs/seres-jde-comparativa.md](docs/seres-jde-comparativa.md) |
+| Consulta de stock por escaneo (FEFO, Reflex) | `/consulta-stock-pda` | [docs/consulta-stock-pda.md](docs/consulta-stock-pda.md) |
+| Compras (previsión de ventas vs. venta real) | `/compras` | [docs/compras.md](docs/compras.md) |
 
 ### API externa — `GET /api/jde-orders`
 
@@ -790,6 +816,40 @@ Endpoint diseñado para ser consumido desde herramientas externas (artefactos Cl
 
 ## 10. Componentes reutilizables (`components/`)
 
+> **Sistema de diseño:** para tokens de color, reglas de estilo y el checklist de cómo montar un panel nuevo, ver [`docs/design-system.md`](docs/design-system.md) — es la referencia obligatoria, esta sección solo documenta la API de cada componente.
+
+### `AppShell.tsx` — `AppShell` y `PageHeader`
+
+Contenedor de página unificado. Sustituye al `<main className="min-h-screen bg-gray-100 p-8">` + `<div className="mx-auto max-w-7xl">` que antes repetía cada panel con su propio ancho máximo (`max-w-7xl`/`5xl`/`4xl` según la página).
+
+**Props de `AppShell`:**
+
+| Prop | Tipo | Descripción |
+|---|---|---|
+| `navbar` | Props de `<Navbar>` | Se reenvían tal cual (`currentPanel`, `user`, `onLogout`, `onPresetsClick?`) |
+| `title` | `string` (opcional) | Si se pasa, renderiza `<PageHeader>` con el título de la sección |
+| `description` | `string` (opcional) | Subtítulo bajo el título |
+| `actions` | `ReactNode` (opcional) | Nodo a la derecha del título (ej. un botón) |
+| `width` | `"default" \| "narrow"` | `"default"` = `max-w-7xl` (paneles de datos), `"narrow"` = `max-w-4xl` (formularios/admin) |
+
+`PageHeader` se exporta también de forma independiente para casos donde no se use `AppShell` completo.
+
+### `KpiCard.tsx`
+
+Tarjeta de métrica (borde superior rojo corporativo vía `Card accent`, icono, valor y caption). Sustituye a las cards KPI repetidas inline en cada panel.
+
+**Props:** `title`, `icon?` (componente de lucide-react), `iconClassName?` (color del icono; por defecto `text-primary` — usar para iconos con semántica de estado, ej. verde/ámbar), `value?`, `caption?`, `children?` (para cuerpos con más de una línea o color condicional — sustituye a `value`/`caption`).
+
+### `PresetPanel.tsx` — `PresetPanel`, `PresetQuickSelect`, `usePresets`
+
+Sistema de presets compartido por todos los paneles con presets (`caducados`, `preparacion-pedidos`, `comparativa-seres`, `compras`; `produccion` mantiene su propia variante integrada en `FilterPanel`). Antes estaba duplicado (con pequeñas divergencias que eran bugs latentes) en cada página.
+
+- **`usePresets(screen)`** — hook que hace el `fetch('/api/presets?screen=...')` y expone `{ presets, reload }`. Se llama **una vez por página** y su resultado se reparte a los otros dos componentes, para que ambos vean siempre la misma lista sin fetches duplicados ni desincronización tras guardar/borrar.
+- **`PresetPanel`** — panel "Mis Presets de Filtros" (guardar/editar/listar/borrar). Props: `screen`, `presets`, `onReload` (del hook), `open`, `onClose`, `getFilters()` (serializa el estado de filtros actual), `applyFilters(filters)` (restaura cada filtro con sus defaults), `hint?`, `dateFields?` (nombres de campos de fecha; si se pasan, añade el checkbox "Incluir fechas" — ver `docs/design-system.md` §5). Gestiona guardar/editar (`toast` de éxito/error) y borrado con `ConfirmDialog` de confirmación (antes era un borrado inmediato sin confirmar); llama a `onReload()` tras cada cambio.
+- **`PresetQuickSelect`** — desplegable de carga inmediata en la barra de acciones (junto a Filtrar/Excel/Limpiar), para cargar un preset sin abrir el panel completo. Props: `presets`, `onSelect(preset)`. No renderiza nada si no hay presets guardados.
+
+Cada panel debe montar los tres juntos — ver el checklist de [`docs/design-system.md`](docs/design-system.md#5-componentes-de-panel-components) para el patrón completo.
+
 ### `Navbar.tsx`
 
 Barra de navegación compartida por todos los paneles. Reemplaza el top bar duplicado que había en cada página.
@@ -798,7 +858,7 @@ Barra de navegación compartida por todos los paneles. Reemplaza el top bar dupl
 
 | Prop | Tipo | Descripción |
 |---|---|---|
-| `currentPanel` | `'produccion' \| 'pedidos' \| 'caducados' \| 'comparativa'` | Panel activo (se marca con punto rojo en el dropdown) |
+| `currentPanel` | `'produccion' \| 'pedidos' \| 'caducados' \| 'comparativa'` (opcional) | Panel activo (se marca con punto rojo en el dropdown). Se omite en páginas que usan `Navbar`/`AppShell` pero no son uno de los 4 paneles reales (ej. `/admin/logs`) — así no marcan ninguno como activo |
 | `user` | `SessionUser \| null` | Usuario de sesión. Si es null, muestra botón "Iniciar sesión" |
 | `onLogout` | `() => void` | Callback para cerrar sesión |
 | `onPresetsClick` | `() => void` (opcional) | Si se pasa, aparece el botón "Presets". Lo wirean los 4 paneles (`/produccion`, `/preparacion-pedidos`, `/caducados`, `/comparativa-seres`) sólo con sesión activa |
@@ -820,39 +880,30 @@ Panel de filtros del dashboard de producción. Ver [docs/produccion.md](docs/pro
 
 ### `DatePicker.tsx`
 
-Selector de fecha con calendario emergente. Reemplaza los `<input type="date">` nativos con un calendario uniforme, en español y con botón de limpiar.
+Wrapper fino sobre `<input type="date">` nativo del navegador. Devuelve y recibe fechas en formato `YYYY-MM-DD`, que es el formato nativo del input — no se necesita ninguna conversión.
 
 **Props:**
 
 | Prop | Tipo | Descripción |
 |---|---|---|
 | `value` | `string` | Fecha seleccionada en formato `YYYY-MM-DD` (vacío = sin selección) |
-| `onChange` | `(value: string) => void` | Callback al seleccionar o limpiar fecha. Devuelve `YYYY-MM-DD` o `''` |
-| `placeholder` | `string` | Texto cuando no hay fecha (por defecto: `dd/mm/aaaa`) |
+| `onChange` | `(value: string) => void` | Callback al cambiar la fecha. Devuelve `YYYY-MM-DD` o `''` al limpiar |
+| `placeholder` | `string` | Reservado para compatibilidad de API (el input nativo no lo usa) |
 | `className` | `string` | Clases CSS adicionales (ej: `w-[150px]`) |
 
 **Comportamiento:**
-- El botón muestra la fecha en formato `DD/MM/YYYY` (español) o el placeholder si está vacío
-- Icono **×** visible cuando hay fecha seleccionada — limpiar llama a `onChange('')`
-- Usa `@radix-ui/react-popover` con Portal para posicionamiento correcto sobre tablas y modales
-- Dentro del popover renderiza el componente `Calendar` (`components/ui/calendar.tsx`)
-- El día seleccionado se resalta en rojo corporativo `#D30B15`
-- El día de hoy tiene borde gris
-
-**Dependencias internas:** `components/ui/calendar.tsx`, `components/ui/popover.tsx`
+- El navegador renderiza su propio picker nativo (varía según OS/browser)
+- Al limpiar la fecha, el input devuelve `''` y `onChange` recibe `''`
+- Sin dependencias externas de calendario
 
 **Usado en:**
 - `components/FilterPanel.tsx` — fechas inicio/fin del dashboard de producción
 - `app/preparacion-pedidos/page.tsx` — fechas carga y entrega del panel de pedidos
 - `app/admin/logs/page.tsx` — filtros de fecha en los logs de consultas
 
-### `components/ui/calendar.tsx`
-
-Componente `Calendar` estilo shadcn/ui basado en `react-day-picker` v10 con locale español. Acepta todas las props de `DayPicker`. El día seleccionado usa el color corporativo `#D30B15`. Se usa exclusivamente a través de `DatePicker`.
-
 ### `components/ui/popover.tsx`
 
-Componente `Popover` / `PopoverTrigger` / `PopoverContent` estilo shadcn/ui basado en `@radix-ui/react-popover`. `PopoverContent` renderiza en Portal para garantizar z-index correcto sobre cualquier elemento. Lo usan `DatePicker` y `MermaCellPopover`.
+Componente `Popover` / `PopoverTrigger` / `PopoverContent` estilo shadcn/ui basado en `@radix-ui/react-popover`. `PopoverContent` renderiza en Portal para garantizar z-index correcto sobre cualquier elemento. Lo usan `MermaCellPopover` y la tarjeta KPI de Kg en `app/compras/page.tsx` (lista de artículos sin gramaje, ver `docs/compras.md` §13.1).
 
 ### `ArticleMultiSelect.tsx`
 
@@ -875,9 +926,17 @@ Variante de `ArticleMultiSelect` para selección única. Mismo estilo visual (bu
 | Componente | Descripción |
 |---|---|
 | `button.tsx` | Botón con variantes (default, outline, ghost, destructive, secondary, link) |
-| `card.tsx` | Card, CardHeader, CardTitle, CardContent |
+| `card.tsx` | Card, CardHeader, CardTitle, CardContent. `Card` acepta la prop `accent` (borde superior de 3px en `primary` + `overflow-hidden`) — reemplaza al `style={{borderTop:'3px solid #D30B15'}}` que se repetía en cada tarjeta |
 | `input.tsx` | Input estilizado |
+| `popover.tsx` | Popover / PopoverTrigger / PopoverContent (Radix UI con Portal) |
 | `table.tsx` | Table, TableHeader, TableBody, TableRow, TableHead, TableCell |
+| `badge.tsx` | Badge — etiqueta de estado/categoría. Variantes: `default`, `primary`, `success`, `warning`, `destructive`, `info`, `outline` |
+| `skeleton.tsx` | Bloque de carga con pulso, para contenido que no es tabla |
+| `spinner.tsx` | Indicador de carga unificado (`<Spinner label="..." />`), sustituye a `<Loader2 className="animate-spin">` suelto |
+| `empty-state.tsx` | Estado vacío unificado (`icon`, `title`, `description`, `action?`) para tablas y paneles sin resultados |
+| `dialog.tsx` | `Dialog` (modal sobre `<dialog>` nativo, sin dependencias nuevas) y `ConfirmDialog` (confirmación de acciones destructivas — sustituye a `confirm()` nativo) |
+| `toast.tsx` | `ToastProvider` (montado una vez en `app/layout.tsx`) y el hook `useToast()` — sustituye a `alert()` en toda la app |
+| `tabs.tsx` | `Tabs` — barra de pestañas accesible (ARIA, navegación con flechas, contador opcional). Usada en `/admin` y `/comparativa-seres` |
 
 ---
 
@@ -892,7 +951,7 @@ El driver `oracledb` envía bind variables como VARCHAR2. Los campos CHAR tienen
 
 ### Fechas JDE (CYYDDD)
 
-Usar `parseJdeDate()`. Para convertir a JDE: `(year - 2000) * 1000 + getDayOfYear(date)`.
+Usar `parseJdeDate()`. Para convertir a JDE: `(year - 2000) * 1000 + getDayOfYear(date)` donde `getDayOfYear` se importa desde `@/lib/utils`.
 
 #### Conversión en TypeScript (frontend / API)
 
@@ -968,11 +1027,12 @@ Los componentes compartidos y páginas siguen estas convenciones para pasar la a
 
 - **`ArticleMultiSelect`:** el `<Button>` combobox lleva `aria-label="Filtrar por {label}"`. El input de búsqueda lleva `aria-label="Buscar {label}"`. Los botones de acción ("Sel. todos", "Ninguno") llevan `type="button"` y `aria-label` explícito.
 - **`FilterPanel`:** todos los `<Input>` y `<select>` llevan `id` con prefijo `filter-` y el `<label>` correspondiente usa `htmlFor`. Los botones icono (cerrar presets, editar/eliminar preset) llevan `aria-label` dinámico.
-- **Páginas (`/produccion`, `/caducados`):** el elemento raíz del contenido es `<main>` (no `<div>`). Todos los botones de navegación llevan `type="button"`. El botón "Salir" usa `text-gray-500` (no `text-gray-400`) para cumplir el ratio de contraste WCAG AA.
+- **Páginas de panel:** el elemento raíz del contenido es `<main>` (lo aporta `AppShell`, no un `<div>` suelto). Todos los botones de navegación llevan `type="button"`. Iconos decorativos llevan `aria-hidden="true"`.
+- **Color de texto secundario:** el token `text-muted-foreground` (`#6B7280`) cumple el ratio de contraste WCAG AA sobre `bg-background`/`bg-card` — es el que hay que usar para texto atenuado, nunca un gris más claro suelto.
 
-### Color corporativo `#D30B15`
+### Sistema de tokens de color
 
-Se usa en: borde superior de tarjetas KPI/filtros/tabla, botón Filtrar, iconos KPI.
+Todos los colores (incluido el corporativo `#D30B15` → token `primary`) viven en `@theme inline` dentro de `app/globals.css`, no hardcodeados en cada página. Ver [`docs/design-system.md`](docs/design-system.md) para la tabla completa de tokens y las reglas de uso.
 
 ### Cookie `secure` en LAN
 

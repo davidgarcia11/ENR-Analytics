@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getDbConnection } from '@/lib/db';
-import { getDayOfYear } from 'date-fns';
+import { getDayOfYear } from '@/lib/utils';
 import { parseJdeDate } from '@/lib/utils';
 
 // Cabeceras CORS para permitir llamadas desde artefactos externos (ej. Claude artifacts)

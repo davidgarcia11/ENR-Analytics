@@ -6,7 +6,7 @@
 
 Desde el **Dashboard de Producción**: pulsa el botón **"Caducados"** en la barra superior derecha.
 
-Al entrar verás el panel de filtros, las tarjetas de resumen y la tabla de palets.
+Al entrar verás el título **"Palets caducados"** con una breve descripción debajo, seguido del panel de filtros, las tarjetas de resumen y la tabla de palets.
 
 > Al abrir el panel, se carga automáticamente la consulta completa (tipo **Todos**) sin necesidad de pulsar "Filtrar".
 

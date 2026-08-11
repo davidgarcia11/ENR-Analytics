@@ -233,29 +233,35 @@ Sistema idéntico al del resto de paneles. Aislado por `screen='comparativa'` en
 }
 ```
 
-**Cómo se abre el panel de presets:**
-- Botón **"Presets"** en la Navbar superior (solo con sesión activa) → incrementa una señal `presetsSignal` que un `useEffect` observa para hacer `setShowPresets(true)`. Este panel no tiene botón "Guardar" inline en la barra de filtros como pedidos/caducados; la única entrada es desde la Navbar.
+**Dos formas de acceder a los presets** (igual que en el resto de paneles), ambas alimentadas por el hook compartido `usePresets('comparativa')` (`components/PresetPanel.tsx`), que carga la lista una sola vez con `GET /api/presets?screen=comparativa`:
+
+1. **`<PresetQuickSelect>`** — desplegable rápido "Cargar preset" en la propia barra de acciones, junto a los botones Comparar/Excel/Limpiar. Selecciona un preset y lo aplica al momento (`applyFilters(JSON.parse(p.filters))`), sin necesidad de abrir ningún panel. No se renderiza si no hay presets guardados ni si no hay sesión activa.
+2. **`<PresetPanel>`** — panel completo de gestión (guardar/editar/eliminar). Se abre con el botón **"Presets"** de la Navbar superior (solo con sesión activa), que incrementa una señal `presetsSignal` observada por un `useEffect` para hacer `setShowPresets(true)`.
 
 **Reglas:**
-- Solo visible para usuarios logueados (`sessionUser !== null`)
-- Al cargar un preset se restauran `days` y `selectedDestinoMlnm`. El panel se cierra y hay que pulsar **Comparar** para ejecutar la consulta de nuevo.
+- Ambas vías solo visibles para usuarios logueados (`sessionUser !== null`)
+- Al cargar un preset (desde cualquiera de las dos vías) se restauran `days` y `selectedDestinoMlnm` vía `applyPresetFilters`. Con el panel completo, además se cierra y hay que pulsar **Comparar** para ejecutar la consulta de nuevo; con el desplegable rápido la aplicación es inmediata pero tampoco relanza la consulta automáticamente.
 - Editar (✏) carga el preset en los controles y activa modo edición; el botón Guardar pasa a "Actualizar"
-- Eliminar (🗑) borra directamente con `DELETE /api/presets/:id`
+- Eliminar (🗑) pide confirmación con `<ConfirmDialog>` (ya no `confirm()` nativo) y borra con `DELETE /api/presets/:id`
+- Errores al guardar el preset se muestran con `useToast()` (`toast(mensaje, 'error')`), no como texto en pantalla
 
 **Endpoints reutilizados:** `GET/POST /api/presets`, `PUT/DELETE /api/presets/:id`. Documentación en `DOCUMENTACION.md` sección 6.
 
 ### Interfaz de usuario
 
-```
-┌─ Barra superior ─────────────────────────────────────┐
-│ [LOGO]             [Produccion] [Usuario] [Admin] [Salir]│
-└──────────────────────────────────────────────────────┘
+La página se envuelve en `<AppShell navbar={{...}} title="Comparativa SERES" description="...">` (`components/AppShell.tsx`), que ya incluye la barra de navegación (Navbar), el título y la descripción del panel — no hay `<main>`/`max-w-7xl` manual como en versiones anteriores. Los colores usan tokens Tailwind del sistema de diseño (`bg-primary`, `text-muted-foreground`, `border-border`, etc., ver `docs/design-system.md`) en vez de hex o clases `gray-*` hardcodeadas. La tarjeta de filtros usa `<Card accent>` (borde superior rojo).
 
-┌─ Filtros ────────────────────────────────────────────┐
+```
+┌─ AppShell: Navbar + título "Comparativa SERES" ──────┐
+│ [LOGO]  Paneles ▾   [Usuario] [Admin] [Salir]         │
+└────────────────────────────────────────────────────────┘
+
+┌─ Filtros (Card accent) ───────────────────────────────┐
 │ Periodo: [Hoy] [1 día] [3 días] [7 días] [14 días] [30 días]     │
-│                                                      │
-│ [Comparar ▶]  [Excel ↓]  [Limpiar ×]               │
-└──────────────────────────────────────────────────────┘
+│ Cliente: [multi-select]                              │
+│                                                       │
+│ [Comparar ▶]  [Excel ↓]  [Limpiar ×]  [Cargar preset ▾] │
+└───────────────────────────────────────────────────────┘
 
 ┌─ Tarjetas métricas (4) ──────────────────────────────────────────┐
 │ ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────────┐         │
@@ -271,7 +277,7 @@ Sistema idéntico al del resto de paneles. Aislado por `screen='comparativa'` en
 > resultado, lo que confundía visualmente. El detalle bruto sigue disponible
 > en `resumen.total_seres_pedidos` y `resumen.total_jde` de la respuesta JSON.
 
-┌─ Tabla con pestañas ──────────────────────────────────────────────────┐
+┌─ Tabla con pestañas (Card accent) ─────────────────────────────────────┐
 │ [Solo en SERES (4)] [Solo en JDE (2)] [En ambos (322)] [Incidencias (7)]│
 │ ──────────────────────────────────────────────────────────────────────│
 │ Aviso contextual (qué significa cada pestaña)                         │
@@ -281,6 +287,10 @@ Sistema idéntico al del resto de paneles. Aislado por `screen='comparativa'` en
 │ 01565800    │ 06/05/26  │ 4321    │ ABC     │ [E]  ← rojo             │
 └───────────────────────────────────────────────────────────────────────┘
 ```
+
+**Barra de pestañas:** se renderiza con el componente compartido `<Tabs>` (`components/ui/tabs.tsx`), pasando `value`, `onValueChange` y el array `tabs` (`{ value, label, count }` por cada una de las 4 pestañas). Ya no son botones de pestaña escritos a mano por esta página: `Tabs` se encarga del estilo, el badge con el contador y la navegación con teclado (← →). El contenido de cada pestaña lo sigue decidiendo la página con `{activeTab === 'x' && ...}`, exactamente igual que antes — lo único que cambió es el componente que dibuja la barra en sí. El aviso contextual bajo la barra y las columnas de la tabla no han cambiado de comportamiento.
+
+Estados de carga y sin resultados usan los componentes compartidos `<Spinner>` (mientras `loading` y no hay `result` previo) y `<EmptyState>` (estado inicial sin datos, y fila vacía dentro de la tabla cuando la pestaña activa no tiene registros tras el filtro de Cliente).
 
 **Columnas según pestaña activa:**
 

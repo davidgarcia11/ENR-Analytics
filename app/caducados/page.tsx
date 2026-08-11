@@ -6,10 +6,14 @@ import { Button } from "@/components/ui/button"
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from "@/components/ui/table"
-import { Search, Loader2, Download, X, AlertTriangle, Package, MapPin, Lock, Save, BookmarkCheck, Trash2, Pencil } from "lucide-react"
-import Navbar from "@/components/Navbar"
+import { Badge } from "@/components/ui/badge"
+import { Spinner } from "@/components/ui/spinner"
+import { EmptyState } from "@/components/ui/empty-state"
+import { Search, Loader2, Download, X, AlertTriangle, Package, MapPin, Lock, Save, SearchX } from "lucide-react"
+import { AppShell } from "@/components/AppShell"
+import { KpiCard } from "@/components/KpiCard"
+import { PresetPanel, PresetQuickSelect, usePresets } from "@/components/PresetPanel"
 import { ArticleMultiSelect } from "@/components/ArticleMultiSelect"
-import { Input } from "@/components/ui/input"
 import * as XLSX from 'xlsx'
 import { useRouter } from "next/navigation"
 
@@ -25,71 +29,75 @@ interface Summary {
   totalPallets: number; totalQuantity: number; caducados: number; obsoletos: number; bloqueados: number; ambos: number;
 }
 
-function getMotivoBadge(motivo: string) {
-  if (motivo.includes('Caducado') && motivo.includes('+')) return 'bg-red-100 text-red-800 border border-red-300 font-bold'
-  if (motivo === 'Caducado') return 'bg-red-50 text-red-700 border border-red-200 font-semibold'
-  if (motivo === 'Obsoleto') return 'bg-amber-50 text-amber-700 border border-amber-200 font-semibold'
-  if (motivo.includes('+')) return 'bg-purple-50 text-purple-700 border border-purple-200 font-bold'
-  if (motivo !== 'Desconocido') return 'bg-blue-50 text-blue-700 border border-blue-200 font-semibold'
-  return 'bg-gray-50 text-gray-700 border border-gray-200 font-semibold'
+// Devuelve la variante semántica del Badge según el motivo del palet
+function getMotivoBadgeProps(motivo: string): { variant: "default" | "destructive" | "warning" | "info" | "outline"; className: string } {
+  if (motivo.includes('Caducado') && motivo.includes('+')) return { variant: 'destructive', className: 'font-bold' }
+  if (motivo === 'Caducado') return { variant: 'destructive', className: 'font-semibold' }
+  if (motivo === 'Obsoleto') return { variant: 'warning', className: 'font-semibold' }
+  // Combinaciones de bloqueos (sin token semántico: se mantiene el morado original)
+  if (motivo.includes('+')) return { variant: 'outline', className: 'border-purple-200 bg-purple-50 text-purple-700 font-bold' }
+  if (motivo !== 'Desconocido') return { variant: 'info', className: 'font-semibold' }
+  return { variant: 'default', className: 'font-semibold' }
 }
 
 const CaducadosTable = memo(function CaducadosTable({ data, loading }: { data: PaletRow[]; loading: boolean }) {
   return (
     <Table>
       <TableHeader>
-        <TableRow className="border-gray-200 hover:bg-transparent">
-          <TableHead className="font-bold text-gray-700">Articulo</TableHead>
-          <TableHead className="font-bold text-gray-700">Descripcion</TableHead>
-          <TableHead className="font-bold text-gray-700">Planta</TableHead>
-          <TableHead className="font-bold text-gray-700">Ubicacion</TableHead>
-          <TableHead className="font-bold text-gray-700">Palet</TableHead>
-          <TableHead className="font-bold text-gray-700">Lote</TableHead>
-          <TableHead className="text-right font-bold text-gray-700">Cantidad</TableHead>
-          <TableHead className="font-bold text-gray-700">Fecha Cad.</TableHead>
-          <TableHead className="font-bold text-gray-700 text-center whitespace-nowrap">Motivo</TableHead>
+        <TableRow className="border-border hover:bg-transparent">
+          <TableHead className="font-bold text-secondary-foreground">Articulo</TableHead>
+          <TableHead className="font-bold text-secondary-foreground">Descripcion</TableHead>
+          <TableHead className="font-bold text-secondary-foreground">Planta</TableHead>
+          <TableHead className="font-bold text-secondary-foreground">Ubicacion</TableHead>
+          <TableHead className="font-bold text-secondary-foreground">Palet</TableHead>
+          <TableHead className="font-bold text-secondary-foreground">Lote</TableHead>
+          <TableHead className="text-right font-bold text-secondary-foreground">Cantidad</TableHead>
+          <TableHead className="font-bold text-secondary-foreground">Fecha Cad.</TableHead>
+          <TableHead className="font-bold text-secondary-foreground text-center whitespace-nowrap">Motivo</TableHead>
         </TableRow>
       </TableHeader>
       <TableBody>
         {data.map((row, i) => (
-          <TableRow key={i} className="hover:bg-slate-50 border-gray-100">
-            <TableCell className="text-gray-700 font-mono text-xs bg-gray-100 px-2 py-1 rounded w-fit">{row.articleLong}</TableCell>
-            <TableCell className="text-gray-600 uppercase text-xs font-semibold">{row.description}</TableCell>
-            <TableCell className="text-gray-700 text-sm">{row.plantName}</TableCell>
-            <TableCell className="text-gray-600 text-xs">
+          <TableRow key={i} className="hover:bg-muted/50 border-border">
+            <TableCell className="text-secondary-foreground font-mono text-xs bg-muted px-2 py-1 rounded w-fit">{row.articleLong}</TableCell>
+            <TableCell className="text-muted-foreground uppercase text-xs font-semibold">{row.description}</TableCell>
+            <TableCell className="text-secondary-foreground text-sm">{row.plantName}</TableCell>
+            <TableCell className="text-muted-foreground text-xs">
               <span className="flex items-center gap-1">
-                <MapPin className="h-3 w-3 text-gray-400" />
+                <MapPin className="h-3 w-3 text-muted-foreground" aria-hidden="true" />
                 {row.location || 'GENERICA'}
               </span>
             </TableCell>
-            <TableCell className="text-gray-600 font-mono text-xs">{row.palet}</TableCell>
-            <TableCell className="text-gray-600 font-mono text-xs">{row.lote}</TableCell>
-            <TableCell className="text-right font-bold text-slate-900">
+            <TableCell className="text-muted-foreground font-mono text-xs">{row.palet}</TableCell>
+            <TableCell className="text-muted-foreground font-mono text-xs">{row.lote}</TableCell>
+            <TableCell className="text-right font-bold text-foreground">
               {row.quantity.toLocaleString('es-ES', { minimumFractionDigits: 2 })}
             </TableCell>
-            <TableCell className="text-gray-700 text-sm">
+            <TableCell className="text-secondary-foreground text-sm">
               {row.expiryDate ? new Date(row.expiryDate).toLocaleDateString('es-ES') : '-'}
             </TableCell>
             <TableCell className="text-center whitespace-nowrap">
-              <span className={`inline-block px-2 py-0.5 rounded-full text-xs whitespace-nowrap ${getMotivoBadge(row.motivo)}`}>
-                {row.motivo}
-              </span>
+              <Badge {...getMotivoBadgeProps(row.motivo)}>{row.motivo}</Badge>
             </TableCell>
           </TableRow>
         ))}
 
         {loading && (
-          <TableRow>
-            <TableCell colSpan={9} className="text-center py-10">
-              <Loader2 className="h-6 w-6 animate-spin mx-auto text-slate-800" />
+          <TableRow className="hover:bg-transparent">
+            <TableCell colSpan={9}>
+              <Spinner label="Cargando..." className="py-10" />
             </TableCell>
           </TableRow>
         )}
 
         {!loading && data.length === 0 && (
-          <TableRow>
-            <TableCell colSpan={9} className="text-center py-10 text-gray-500 font-medium">
-              Pulsa &quot;Filtrar&quot; para buscar palets caducados u obsoletos.
+          <TableRow className="hover:bg-transparent">
+            <TableCell colSpan={9}>
+              <EmptyState
+                icon={SearchX}
+                title="Sin resultados"
+                description={'Pulsa "Filtrar" para buscar palets caducados u obsoletos.'}
+              />
             </TableCell>
           </TableRow>
         )}
@@ -121,11 +129,7 @@ export default function CaducadosPage() {
   const [selectedArticles, setSelectedArticles] = useState<string[]>([])
 
   // --- PRESETS ---
-  const [presets, setPresets] = useState<{ id: number; name: string; filters: string; created_at: string }[]>([])
   const [showPresets, setShowPresets] = useState(false)
-  const [presetName, setPresetName] = useState('')
-  const [savingPreset, setSavingPreset] = useState(false)
-  const [editingPresetId, setEditingPresetId] = useState<number | null>(null)
   // Señal que dispara la apertura del panel de presets desde el botón del Navbar
   const [presetsSignal, setPresetsSignal] = useState(0)
   useEffect(() => {
@@ -176,11 +180,6 @@ export default function CaducadosPage() {
     fetchPlants()
     fetchData()
   }, [])
-
-  useEffect(() => {
-    if (sessionUser) loadPresets()
-    else setPresets([])
-  }, [sessionUser])
 
   const fetchPlants = async () => {
     try {
@@ -280,83 +279,39 @@ export default function CaducadosPage() {
     setLoteSearch('')
     setSelectedArticles([])
     setAppliedArticles([])
-    setEditingPresetId(null)
-    setPresetName('')
     setData([])
     setSummary({ totalPallets: 0, totalQuantity: 0, caducados: 0, obsoletos: 0, bloqueados: 0, ambos: 0 })
   }
 
-  // --- FUNCIONES DE PRESETS ---
+  // --- PRESETS (serialización de filtros para PresetPanel) ---
 
-  const loadPresets = async () => {
-    try {
-      const res = await fetch('/api/presets?screen=caducados')
-      if (res.ok) setPresets(await res.json())
-    } catch { }
-  }
+  const { presets, reload: reloadPresets } = usePresets('caducados')
 
-  const savePreset = async (nameOverride?: string) => {
-    const name = nameOverride || presetName
-    if (!name.trim()) return
-    setSavingPreset(true)
-    try {
-      const filtersData = {
-        type: selectedType,
-        selectedLotStates,
-        selectedSrp1,
-        selectedSrp2,
-        selectedPlants,
-        selectedLocations,
-        paletSearch,
-        loteSearch,
-        selectedArticles,
-      }
-      const isEditing = editingPresetId !== null
-      const res = await fetch(isEditing ? `/api/presets/${editingPresetId}` : '/api/presets', {
-        method: isEditing ? 'PUT' : 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name, filters: filtersData, screen: 'caducados' }),
-      })
-      if (res.ok) {
-        setPresetName('')
-        setEditingPresetId(null)
-        loadPresets()
-      } else {
-        const data = await res.json()
-        alert(data.error || 'Error al guardar')
-      }
-    } finally { setSavingPreset(false) }
-  }
+  // Objeto de filtros que se guarda como preset (mismo formato que antes)
+  const getPresetFilters = () => ({
+    type: selectedType,
+    selectedLotStates,
+    selectedSrp1,
+    selectedSrp2,
+    selectedPlants,
+    selectedLocations,
+    paletSearch,
+    loteSearch,
+    selectedArticles,
+  })
 
-  const loadPreset = (preset: { id: number; name: string; filters: string; created_at: string }) => {
-    const f = JSON.parse(preset.filters)
-    setSelectedType(f.type || 'todos')
-    setSelectedLotStates(f.selectedLotStates || [])
-    setSelectedSrp1(f.selectedSrp1 || [])
-    setSelectedSrp2(f.selectedSrp2 || [])
-    setSelectedPlants(f.selectedPlants || [])
-    setSelectedLocations(f.selectedLocations?.length > 0 ? f.selectedLocations : ['__blank__'])
-    setPaletSearch(f.paletSearch || '')
-    setLoteSearch(f.loteSearch || '')
-    setSelectedArticles(f.selectedArticles || [])
-    setShowPresets(false)
-  }
-
-  const startEditPreset = (preset: { id: number; name: string; filters: string; created_at: string }) => {
-    setPresetName(preset.name)
-    setEditingPresetId(preset.id)
-    loadPreset(preset)
-    setShowPresets(true)
-  }
-
-  const cancelEditPreset = () => {
-    setEditingPresetId(null)
-    setPresetName('')
-  }
-
-  const deletePreset = async (id: number) => {
-    await fetch(`/api/presets/${id}`, { method: 'DELETE' })
-    loadPresets()
+  // Aplica los filtros de un preset cargado (mismo comportamiento que el antiguo loadPreset)
+  const applyPresetFilters = (f: Record<string, unknown>) => {
+    setSelectedType((f.type as 'todos' | 'caducados' | 'obsoletos' | 'bloqueados') || 'todos')
+    setSelectedLotStates((f.selectedLotStates as string[]) || [])
+    setSelectedSrp1((f.selectedSrp1 as string[]) || [])
+    setSelectedSrp2((f.selectedSrp2 as string[]) || [])
+    setSelectedPlants((f.selectedPlants as string[]) || [])
+    const locs = f.selectedLocations as string[] | undefined
+    setSelectedLocations(locs && locs.length > 0 ? locs : ['__blank__'])
+    setPaletSearch((f.paletSearch as string) || '')
+    setLoteSearch((f.loteSearch as string) || '')
+    setSelectedArticles((f.selectedArticles as string[]) || [])
   }
 
   const exportToExcel = () => {
@@ -391,322 +346,230 @@ export default function CaducadosPage() {
   ]
 
   return (
-    <main className="min-h-screen bg-gray-100 p-8 font-sans text-gray-900">
-      <div className="mx-auto max-w-7xl space-y-8">
+    <AppShell
+      navbar={{
+        currentPanel: "caducados",
+        user: sessionUser,
+        onLogout: logout,
+        onPresetsClick: () => setPresetsSignal(s => s + 1),
+      }}
+      title="Palets caducados"
+      description="Palets caducados, obsoletos y bloqueados por planta y ubicación"
+    >
 
-        <Navbar
-          currentPanel="caducados"
-          user={sessionUser}
-          onLogout={logout}
-          onPresetsClick={() => setPresetsSignal(s => s + 1)}
+      {/* --- PANEL DE PRESETS --- */}
+      {sessionUser && (
+        <PresetPanel
+          screen="caducados"
+          presets={presets}
+          onReload={reloadPresets}
+          open={showPresets}
+          onClose={() => setShowPresets(false)}
+          getFilters={getPresetFilters}
+          applyFilters={applyPresetFilters}
+          hint="Se guardarán el tipo, bloqueos, categorías, planta, ubicación y búsquedas seleccionados."
         />
+      )}
 
-        {/* --- PANEL DE PRESETS --- */}
-        {sessionUser && showPresets && (
-          <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-4" style={{ borderTop: '3px solid #D30B15' }}>
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="text-sm font-bold text-gray-700 flex items-center gap-2">
-                <BookmarkCheck className="h-4 w-4" style={{ color: '#D30B15' }} />
-                Mis Presets de Filtros
-              </h3>
-              <button type="button" aria-label="Cerrar presets" onClick={() => { setShowPresets(false); cancelEditPreset() }} className="text-gray-400 hover:text-gray-600">
-                <X className="h-4 w-4" />
-              </button>
-            </div>
+      {/* --- FILTROS --- */}
+      <Card accent className="space-y-4 p-4">
+        <div>
+          <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2">Filtros</p>
+          <div className="flex flex-wrap items-end gap-3">
 
-            {/* Guardar filtros actuales */}
-            <div className="bg-gray-50 rounded-lg p-3 mb-4 border border-gray-100">
-              <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">
-                {editingPresetId ? 'Editando preset' : 'Guardar filtros actuales como preset'}
-              </p>
-              <div className="flex items-center gap-2 flex-wrap">
-                <Input
-                  value={presetName}
-                  onChange={e => setPresetName(e.target.value)}
-                  placeholder="Escribe un nombre..."
-                  className="h-9 text-sm max-w-[220px] bg-white"
-                  onKeyDown={e => e.key === 'Enter' && savePreset()}
-                />
-                <Button
-                  onClick={() => savePreset()}
-                  disabled={savingPreset || !presetName.trim()}
-                  size="sm"
-                  className="text-white text-xs font-semibold h-9 px-4"
-                  style={{ backgroundColor: editingPresetId ? '#2563eb' : '#D30B15' }}
-                >
-                  <Save className="mr-1.5 h-3.5 w-3.5" />
-                  {editingPresetId ? 'Actualizar' : 'Guardar'}
-                </Button>
-                {editingPresetId && (
-                  <Button onClick={cancelEditPreset} variant="outline" size="sm" className="text-xs h-9 text-gray-500">
-                    Cancelar
-                  </Button>
-                )}
-              </div>
-              {!editingPresetId && (
-                <p className="text-[11px] text-gray-400 mt-1.5">Se guardarán el tipo, bloqueos, categorías, planta, ubicación y búsquedas seleccionados.</p>
-              )}
-            </div>
-
-            {/* Presets guardados */}
-            <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">Presets guardados</p>
-            {presets.length === 0 ? (
-              <p className="text-xs text-gray-400">No tienes presets guardados.</p>
-            ) : (
-              <div className="flex flex-wrap gap-2">
-                {presets.map(p => (
-                  <div key={p.id} className={`flex items-center gap-1.5 border rounded-lg px-3 py-1.5 text-sm ${editingPresetId === p.id ? 'bg-blue-50 border-blue-300' : 'bg-gray-50 border-gray-200'}`}>
-                    <button type="button" onClick={() => loadPreset(p)} className="font-medium text-gray-700 hover:text-gray-900" title="Cargar preset" aria-label={`Cargar preset ${p.name}`}>
-                      {p.name}
-                    </button>
-                    <button type="button" onClick={() => startEditPreset(p)} className="text-gray-300 hover:text-blue-500" aria-label={`Editar preset ${p.name}`}>
-                      <Pencil className="h-3 w-3" />
-                    </button>
-                    <button type="button" onClick={() => deletePreset(p.id)} className="text-gray-300 hover:text-red-500" aria-label={`Eliminar preset ${p.name}`}>
-                      <Trash2 className="h-3.5 w-3.5" />
-                    </button>
-                  </div>
+            {/* Tipo */}
+            <div className="grid gap-1.5">
+              <label className="text-xs font-semibold text-secondary-foreground">Tipo</label>
+              <div className="flex rounded-md overflow-hidden border border-input">
+                {typeButtons.map(btn => (
+                  <button
+                    type="button"
+                    key={btn.value}
+                    onClick={() => setSelectedType(btn.value)}
+                    className={`px-3 py-1.5 text-xs font-semibold transition-colors ${selectedType === btn.value ? 'bg-primary text-primary-foreground' : 'bg-card text-secondary-foreground hover:bg-muted/50'}`}
+                  >
+                    {btn.label}
+                  </button>
                 ))}
               </div>
-            )}
-          </div>
-        )}
-
-        {/* --- FILTROS --- */}
-        <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-200 space-y-4" style={{ borderTop: '3px solid #D30B15' }}>
-          <div>
-            <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">Filtros</p>
-            <div className="flex flex-wrap items-end gap-3">
-
-              {/* Tipo */}
-              <div className="grid gap-1.5">
-                <label className="text-xs font-semibold text-gray-700">Tipo</label>
-                <div className="flex rounded-md overflow-hidden border border-gray-300">
-                  {typeButtons.map(btn => (
-                    <button
-                      type="button"
-                      key={btn.value}
-                      onClick={() => setSelectedType(btn.value)}
-                      className={`px-3 py-1.5 text-xs font-semibold transition-colors ${selectedType === btn.value ? 'text-white' : 'bg-white text-gray-600 hover:bg-gray-50'}`}
-                      style={selectedType === btn.value ? { backgroundColor: '#D30B15' } : {}}
-                    >
-                      {btn.label}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              {/* Tipo de bloqueo */}
-              <div className="grid gap-1.5">
-                <label className="text-xs font-semibold text-gray-700">Tipo de bloqueo</label>
-                <div className="w-[200px]">
-                  <ArticleMultiSelect
-                    articles={availableLotStates.map(s => ({ id: s.code, description: s.description }))}
-                    selected={selectedLotStates}
-                    onChange={setSelectedLotStates}
-                    label="Tipo bloqueo"
-                    showId={true}
-                  />
-                </div>
-              </div>
-
-              {/* Categoría */}
-              <div className="grid gap-1.5">
-                <label className="text-xs font-semibold text-gray-700">Categoría</label>
-                <div className="w-[170px]">
-                  <ArticleMultiSelect articles={availableSrp1} selected={selectedSrp1} onChange={setSelectedSrp1} label="Categoría" />
-                </div>
-              </div>
-
-              {/* Familia */}
-              <div className="grid gap-1.5">
-                <label className="text-xs font-semibold text-gray-700">Familia</label>
-                <div className="w-[170px]">
-                  <ArticleMultiSelect articles={availableSrp2} selected={selectedSrp2} onChange={setSelectedSrp2} label="Familia" />
-                </div>
-              </div>
-
-              {/* Planta */}
-              <div className="grid gap-1.5">
-                <label className="text-xs font-semibold text-gray-700">Planta</label>
-                <div className="w-[180px]">
-                  <ArticleMultiSelect
-                    articles={plants}
-                    selected={selectedPlants}
-                    onChange={setSelectedPlants}
-                    label="Planta"
-                    showId={true}
-                  />
-                </div>
-              </div>
-
-              {/* Ubicacion */}
-              <div className="grid gap-1.5">
-                <label className="text-xs font-semibold text-gray-700">Ubicacion</label>
-                <div className="w-[180px]">
-                  <ArticleMultiSelect
-                    articles={[
-                      { id: '__blank__', description: 'GENERICA' },
-                      ...locations.filter(l => l !== '').map(l => ({ id: l, description: l })),
-                    ]}
-                    selected={selectedLocations}
-                    onChange={setSelectedLocations}
-                    label="Ubicacion"
-                    showId={false}
-                  />
-                </div>
-              </div>
-
             </div>
-          </div>
 
-          {/* Búsqueda por Artículo / Palet / Lote */}
-          <div className="flex flex-wrap items-end gap-3">
-            {/* Artículo — filtro cliente sobre los datos ya cargados */}
+            {/* Tipo de bloqueo */}
             <div className="grid gap-1.5">
-              <label className="text-xs font-semibold text-gray-700">
-                Artículo
-                {availableArticles.length > 0 && (
-                  <span className="ml-1 text-slate-400 font-normal">({availableArticles.length})</span>
-                )}
-              </label>
-              <div className="w-[220px]">
+              <label className="text-xs font-semibold text-secondary-foreground">Tipo de bloqueo</label>
+              <div className="w-[200px]">
                 <ArticleMultiSelect
-                  articles={availableArticles}
-                  selected={selectedArticles}
-                  onChange={setSelectedArticles}
-                  label="Artículo"
+                  articles={availableLotStates.map(s => ({ id: s.code, description: s.description }))}
+                  selected={selectedLotStates}
+                  onChange={setSelectedLotStates}
+                  label="Tipo bloqueo"
                   showId={true}
                 />
               </div>
             </div>
 
+            {/* Categoría */}
             <div className="grid gap-1.5">
-              <label htmlFor="cad-palet" className="text-xs font-semibold text-gray-700">Palet</label>
-              <input
-                id="cad-palet"
-                type="text"
-                value={paletSearch}
-                onChange={e => setPaletSearch(e.target.value)}
-                onKeyDown={e => e.key === 'Enter' && document.getElementById('cad-filtrar')?.click()}
-                placeholder="ej: *98789 ó 757585*"
-                className="flex h-9 w-[200px] rounded-md border border-slate-300 bg-white px-3 py-1 text-sm shadow-sm transition-colors focus:outline-none focus:border-slate-500 font-medium placeholder:font-normal placeholder:text-slate-400"
-              />
+              <label className="text-xs font-semibold text-secondary-foreground">Categoría</label>
+              <div className="w-[170px]">
+                <ArticleMultiSelect articles={availableSrp1} selected={selectedSrp1} onChange={setSelectedSrp1} label="Categoría" />
+              </div>
             </div>
+
+            {/* Familia */}
             <div className="grid gap-1.5">
-              <label htmlFor="cad-lote" className="text-xs font-semibold text-gray-700">Lote</label>
-              <input
-                id="cad-lote"
-                type="text"
-                value={loteSearch}
-                onChange={e => setLoteSearch(e.target.value)}
-                onKeyDown={e => e.key === 'Enter' && document.getElementById('cad-filtrar')?.click()}
-                placeholder="ej: *98789 ó 757585*"
-                className="flex h-9 w-[200px] rounded-md border border-slate-300 bg-white px-3 py-1 text-sm shadow-sm transition-colors focus:outline-none focus:border-slate-500 font-medium placeholder:font-normal placeholder:text-slate-400"
+              <label className="text-xs font-semibold text-secondary-foreground">Familia</label>
+              <div className="w-[170px]">
+                <ArticleMultiSelect articles={availableSrp2} selected={selectedSrp2} onChange={setSelectedSrp2} label="Familia" />
+              </div>
+            </div>
+
+            {/* Planta */}
+            <div className="grid gap-1.5">
+              <label className="text-xs font-semibold text-secondary-foreground">Planta</label>
+              <div className="w-[180px]">
+                <ArticleMultiSelect
+                  articles={plants}
+                  selected={selectedPlants}
+                  onChange={setSelectedPlants}
+                  label="Planta"
+                  showId={true}
+                />
+              </div>
+            </div>
+
+            {/* Ubicacion */}
+            <div className="grid gap-1.5">
+              <label className="text-xs font-semibold text-secondary-foreground">Ubicacion</label>
+              <div className="w-[180px]">
+                <ArticleMultiSelect
+                  articles={[
+                    { id: '__blank__', description: 'GENERICA' },
+                    ...locations.filter(l => l !== '').map(l => ({ id: l, description: l })),
+                  ]}
+                  selected={selectedLocations}
+                  onChange={setSelectedLocations}
+                  label="Ubicacion"
+                  showId={false}
+                />
+              </div>
+            </div>
+
+          </div>
+        </div>
+
+        {/* Búsqueda por Artículo / Palet / Lote */}
+        <div className="flex flex-wrap items-end gap-3">
+          {/* Artículo — filtro cliente sobre los datos ya cargados */}
+          <div className="grid gap-1.5">
+            <label className="text-xs font-semibold text-secondary-foreground">
+              Artículo
+              {availableArticles.length > 0 && (
+                <span className="ml-1 text-muted-foreground font-normal">({availableArticles.length})</span>
+              )}
+            </label>
+            <div className="w-[220px]">
+              <ArticleMultiSelect
+                articles={availableArticles}
+                selected={selectedArticles}
+                onChange={setSelectedArticles}
+                label="Artículo"
+                showId={true}
               />
             </div>
           </div>
 
-          <div className="border-t border-gray-100" />
-
-          {/* Acciones */}
-          <div className="flex flex-wrap items-end gap-3 justify-end">
-            <Button id="cad-filtrar" onClick={fetchData} disabled={loading} className="text-white font-semibold" style={{ backgroundColor: '#D30B15' }} onMouseEnter={e => (e.currentTarget.style.backgroundColor = '#b00a12')} onMouseLeave={e => (e.currentTarget.style.backgroundColor = '#D30B15')}>
-              {loading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Search className="mr-2 h-4 w-4" />}
-              Filtrar
-            </Button>
-            <Button onClick={exportToExcel} variant="outline" disabled={data.length === 0} className="border-green-600 text-green-700 hover:bg-green-50">
-              <Download className="mr-2 h-4 w-4" />
-              Excel
-            </Button>
-            <Button onClick={clearFilters} variant="outline" className="border-gray-400 text-gray-600 hover:bg-gray-50">
-              <X className="mr-2 h-4 w-4" />
-              Limpiar
-            </Button>
-
-            {/* Presets (solo si logueado) */}
-            {sessionUser && (
-              <>
-                {presets.length > 0 && (
-                  <div className="grid gap-1.5">
-                    <label className="text-xs font-semibold text-gray-700">Cargar preset</label>
-                    <select
-                      onChange={e => { const p = presets.find(p => p.id === Number(e.target.value)); if (p) loadPreset(p); e.target.value = '' }}
-                      defaultValue=""
-                      className="flex h-9 w-[160px] rounded-md border border-gray-300 bg-white px-3 py-1 text-sm shadow-sm"
-                    >
-                      <option value="" disabled>Seleccionar...</option>
-                      {presets.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
-                    </select>
-                  </div>
-                )}
-                <Button variant="outline" className="border-blue-500 text-blue-600 hover:bg-blue-50" onClick={() => setShowPresets(true)}>
-                  <Save className="mr-2 h-4 w-4" />
-                  Guardar
-                </Button>
-              </>
-            )}
+          <div className="grid gap-1.5">
+            <label htmlFor="cad-palet" className="text-xs font-semibold text-secondary-foreground">Palet</label>
+            <input
+              id="cad-palet"
+              type="text"
+              value={paletSearch}
+              onChange={e => setPaletSearch(e.target.value)}
+              onKeyDown={e => e.key === 'Enter' && document.getElementById('cad-filtrar')?.click()}
+              placeholder="ej: *98789 ó 757585*"
+              className="flex h-9 w-[200px] rounded-md border border-input bg-card px-3 py-1 text-sm shadow-sm transition-colors focus:outline-none focus:border-ring font-medium placeholder:font-normal placeholder:text-muted-foreground"
+            />
+          </div>
+          <div className="grid gap-1.5">
+            <label htmlFor="cad-lote" className="text-xs font-semibold text-secondary-foreground">Lote</label>
+            <input
+              id="cad-lote"
+              type="text"
+              value={loteSearch}
+              onChange={e => setLoteSearch(e.target.value)}
+              onKeyDown={e => e.key === 'Enter' && document.getElementById('cad-filtrar')?.click()}
+              placeholder="ej: *98789 ó 757585*"
+              className="flex h-9 w-[200px] rounded-md border border-input bg-card px-3 py-1 text-sm shadow-sm transition-colors focus:outline-none focus:border-ring font-medium placeholder:font-normal placeholder:text-muted-foreground"
+            />
           </div>
         </div>
 
-        {/* --- TARJETAS METRICAS --- */}
-        <div className="grid gap-4 md:grid-cols-4">
-          <Card className="border-gray-200 shadow-sm overflow-hidden" style={{ borderTop: '3px solid #D30B15' }}>
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-bold text-gray-700">Total Palets</CardTitle>
-              <Package className="h-4 w-4" style={{ color: '#D30B15' }} />
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-black text-gray-900">{displaySummary.totalPallets.toLocaleString('es-ES')}</div>
-              <p className="text-xs text-gray-500 font-medium">Registros encontrados</p>
-            </CardContent>
-          </Card>
+        <div className="border-t border-border" />
 
-          <Card className="border-gray-200 shadow-sm overflow-hidden" style={{ borderTop: '3px solid #D30B15' }}>
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-bold text-gray-700">Caducados</CardTitle>
-              <AlertTriangle className="h-4 w-4 text-red-500" />
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-black text-red-600">{displaySummary.caducados.toLocaleString('es-ES')}</div>
-              <p className="text-xs text-gray-500 font-medium">Palets con fecha vencida</p>
-            </CardContent>
-          </Card>
+        {/* Acciones */}
+        <div className="flex flex-wrap items-end gap-3 justify-end">
+          <Button id="cad-filtrar" onClick={fetchData} disabled={loading} className="font-semibold">
+            {loading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" aria-hidden="true" /> : <Search className="mr-2 h-4 w-4" aria-hidden="true" />}
+            Filtrar
+          </Button>
+          <Button onClick={exportToExcel} variant="outline" disabled={data.length === 0} className="border-success text-success hover:bg-success/10 hover:text-success">
+            <Download className="mr-2 h-4 w-4" aria-hidden="true" />
+            Excel
+          </Button>
+          <Button onClick={clearFilters} variant="outline" className="text-muted-foreground">
+            <X className="mr-2 h-4 w-4" aria-hidden="true" />
+            Limpiar
+          </Button>
 
-          <Card className="border-gray-200 shadow-sm overflow-hidden" style={{ borderTop: '3px solid #D30B15' }}>
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-bold text-gray-700">Obsoletos</CardTitle>
-              <AlertTriangle className="h-4 w-4 text-amber-500" />
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-black text-amber-600">{displaySummary.obsoletos.toLocaleString('es-ES')}</div>
-              <p className="text-xs text-gray-500 font-medium">Palets con articulo obsoleto</p>
-            </CardContent>
-          </Card>
-
-          <Card className="border-gray-200 shadow-sm overflow-hidden" style={{ borderTop: '3px solid #D30B15' }}>
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-bold text-gray-700">Bloqueados</CardTitle>
-              <Lock className="h-4 w-4 text-blue-500" />
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-black text-blue-600">{displaySummary.bloqueados.toLocaleString('es-ES')}</div>
-              <p className="text-xs text-gray-500 font-medium">Palets con estado de lote activo</p>
-            </CardContent>
-          </Card>
+          {/* Presets (solo si logueado) */}
+          {sessionUser && (
+            <>
+              <PresetQuickSelect presets={presets} onSelect={(p) => applyPresetFilters(JSON.parse(p.filters))} />
+              <Button variant="outline" className="border-info text-info hover:bg-info/10 hover:text-info" onClick={() => setShowPresets(true)}>
+                <Save className="mr-2 h-4 w-4" aria-hidden="true" />
+                Guardar
+              </Button>
+            </>
+          )}
         </div>
+      </Card>
 
-        {/* --- TABLA DE DATOS --- */}
-        <Card className="border-gray-200 shadow-sm overflow-hidden" style={{ borderTop: '3px solid #D30B15' }}>
-          <CardHeader>
-            <CardTitle className="text-lg font-bold text-gray-800">Palets Caducados y Obsoletos</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <CaducadosTable data={deferredData} loading={loading} />
-          </CardContent>
-        </Card>
+      {/* --- TARJETAS METRICAS --- */}
+      <div className="grid gap-4 sm:grid-cols-2 md:grid-cols-4">
+        <KpiCard
+          title="Total Palets"
+          icon={Package}
+          value={displaySummary.totalPallets.toLocaleString('es-ES')}
+          caption="Registros encontrados"
+        />
 
+        <KpiCard title="Caducados" icon={AlertTriangle}>
+          <div className="text-2xl font-black text-destructive">{displaySummary.caducados.toLocaleString('es-ES')}</div>
+          <p className="mt-1 text-xs font-medium text-muted-foreground">Palets con fecha vencida</p>
+        </KpiCard>
+
+        <KpiCard title="Obsoletos" icon={AlertTriangle}>
+          <div className="text-2xl font-black text-warning">{displaySummary.obsoletos.toLocaleString('es-ES')}</div>
+          <p className="mt-1 text-xs font-medium text-muted-foreground">Palets con articulo obsoleto</p>
+        </KpiCard>
+
+        <KpiCard title="Bloqueados" icon={Lock}>
+          <div className="text-2xl font-black text-info">{displaySummary.bloqueados.toLocaleString('es-ES')}</div>
+          <p className="mt-1 text-xs font-medium text-muted-foreground">Palets con estado de lote activo</p>
+        </KpiCard>
       </div>
-    </main>
+
+      {/* --- TABLA DE DATOS --- */}
+      <Card accent>
+        <CardHeader>
+          <CardTitle className="text-lg font-bold text-foreground">Palets Caducados y Obsoletos</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <CaducadosTable data={deferredData} loading={loading} />
+        </CardContent>
+      </Card>
+
+    </AppShell>
   )
 }

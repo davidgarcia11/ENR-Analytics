@@ -9,6 +9,7 @@ Dashboard de producción para Elaborados Naturales. Conecta con Oracle JDE y mue
 - **Runtime/Package Manager:** Bun (no npm/node)
 - **BD Oracle:** oracledb 6 (driver nativo, requiere `try/finally` para cerrar conexiones SIEMPRE)
 - **BD Local:** better-sqlite3 (usuarios, presets, logs) en `data/app.db`
+- **BD Reflex (SQL Server):** mssql 12 (driver JS puro sobre `tedious`, sin binarios nativos), usado solo por el panel de consulta de stock por escaneo
 - **Auth:** JWT (jose) + bcryptjs, cookie httpOnly
 - **Excel:** xlsx 0.18
 - **Gráficos:** recharts
@@ -31,6 +32,8 @@ app/                          # Rutas Next.js (App Router)
   preparacion-pedidos/        # Panel control de pedidos
   caducados/                  # Panel palets caducados/obsoletos/bloqueados
   comparativa-seres/          # Panel comparativa SERES vs JDE
+  consulta-stock-pda/         # Panel consulta de stock por escaneo (FEFO, Reflex/SQL Server)
+  compras/                    # Panel comparativa previsión de ventas vs. venta real (director de compras)
   admin/page.tsx              # Panel de administración de usuarios
   admin/logs/page.tsx         # Logs de consultas (solo admin)
   login/page.tsx              # Login
@@ -45,6 +48,8 @@ app/                          # Rutas Next.js (App Router)
     caducados/                # GET palets caducados/obsoletos/bloqueados
     jde-orders/               # GET órdenes JDE (API externa, usada por herramientas externas)
     comparativa-seres/        # GET comparativa SERES vs JDE
+    consulta-stock-pda/       # GET stock FEFO por EAN escaneado (Reflex/SQL Server)
+    compras/                  # GET previsión (F3460) vs venta real (F4211), coste (F4105), gramaje (F554101)
     auth/                     # login, logout, me, change-password
     admin/                    # users CRUD, logs
     presets/                  # CRUD presets de filtros
@@ -53,19 +58,28 @@ lib/
   sqlite.ts                   # Conexión SQLite + migraciones + seed admin
   auth.ts                     # JWT, bcrypt, verifySession, cookieOptions
   utils.ts                    # parseJdeDate, parseWasOqs, cn()
+  reflex.ts                   # Conexión SQL Server (Reflex), análoga a db.ts para Oracle
+  gs1.ts                      # Parser de códigos de barras GS1-128 (EAN/lote/cantidad/SSCC/fechas)
 components/
+  AppShell.tsx                # AppShell (contenedor de página + Navbar) y PageHeader — punto de entrada de todo panel
+  KpiCard.tsx                 # Tarjeta KPI reutilizable (icono + valor + caption, o children para casos custom)
+  PresetPanel.tsx             # Sistema de presets compartido: usePresets(screen) hook + PresetPanel (panel completo) + PresetQuickSelect (desplegable rápido)
   Navbar.tsx                  # Barra de navegación compartida por todos los paneles (dropdown "Paneles ▾")
   FilterPanel.tsx             # Panel de filtros del dashboard de producción (incluye presets)
   ArticleMultiSelect.tsx      # Desplegable multi-selección con búsqueda (usado en FilterPanel)
   MermaBreakdown.tsx          # Desglose de merma agrupado Q=Etiquetado / P=Pasteurizado (card global + popover en /produccion)
   MermaCellPopover.tsx        # Popover por fila al pulsar celda Merma en /produccion
-  ui/                         # button, card, input, table, popover (estilo shadcn)
+  ui/                         # button, card (prop `accent`), input, table, popover, badge, skeleton,
+                               # spinner, empty-state, dialog (Dialog/ConfirmDialog), toast (useToast), tabs
 middleware.ts                 # Protege /api/admin/* (JWT + role admin)
 docs/                         # Documentación específica por panel
+  design-system.md            # SISTEMA DE DISEÑO — leer antes de tocar UI de cualquier panel (obligatorio)
   produccion.md               # Dashboard de producción — completo para juniors
   control-pedidos.md          # Panel de pedidos
   palets-caducados.md         # Panel de caducados
   seres-jde-comparativa.md    # Panel comparativa SERES vs JDE
+  consulta-stock-pda.md       # Panel consulta de stock por escaneo (FEFO, Reflex)
+  compras.md                  # Panel comparativa previsión de ventas vs. venta real
 ```
 
 ## Convenciones de código
@@ -92,23 +106,44 @@ docs/                         # Documentación específica por panel
 - `data/app.db` está en `.gitignore`, no se pierde con git pull/build
 - Usuario admin por defecto: `admin` / `admin123`
 
+### Reflex / SQL Server (`lib/reflex.ts`)
+- Única integración del proyecto que no es Oracle/JDE — BD externa de almacén, usada solo por `/consulta-stock-pda`
+- Credenciales `REFLEX_*` en `.env.local` (host, puerto, database, user, password)
+- `getReflexConnection()` sigue el mismo patrón que `getDbConnection()`: **SIEMPRE** cerrar con `try/finally` (`conn.close()`)
+- Códigos de barras de palet (GS1-128) se parsean con `lib/gs1.ts`, no a mano
+- Esquema completo (4 tablas encadenadas) documentado en `docs/consulta-stock-pda.md`
+
 ### Autenticación
 - JWT firmado HS256, expira 7 días, cookie `session` httpOnly
 - `cookieOptions(req)` detecta HTTPS desde URL real (no NODE_ENV) para funcionar en LAN
 - `middleware.ts` protege rutas `/api/admin/*`
 - Logging de consultas nunca bloquea la respuesta (try/catch independiente)
 
+### Seguridad
+- Secretos (credenciales Oracle, `JWT_SECRET`) viven en `.env.local`, nunca en código. `.env*` está en `.gitignore` — jamás commitear un archivo `.env` con valores reales
+- `login/route.ts` no tiene rate limiting ni bloqueo por intentos fallidos — tenerlo en cuenta si se toca ese endpoint o si aparece abuso
+- Cualquier valor que llegue del cliente a una API route se valida/sanitiza antes de usarlo (ver `__tests__/sanitization.test.ts`), no solo en las queries Oracle
+
 ### Estilo visual
-- Color corporativo: `#D30B15` (borde superior tarjetas, botón Filtrar, iconos KPI)
-- Fuente: Geist (via next/font)
-- Componentes UI base en `components/ui/` (estilo shadcn simplificado)
-- Dark mode definido en CSS pero no activamente usado en componentes
+- **Sistema de diseño completo:** [`docs/design-system.md`](docs/design-system.md) — léelo antes de escribir o tocar JSX/CSS de cualquier panel. Es de lectura obligatoria, no opcional.
+- Todos los colores son **tokens Tailwind 4** definidos en `@theme inline` dentro de `app/globals.css` (no hay `tailwind.config.js`). Color corporativo: `bg-primary`/`text-primary` (`#D30B15`). **Nunca** un hex hardcodeado ni `style={{color/backgroundColor/borderTop}}` fuera de props SVG de recharts.
+- Fuente: Geist (via next/font), única en toda la app
+- Componentes UI base en `components/ui/` (estilo shadcn simplificado): button, card (prop `accent` = borde superior rojo), input, table, popover, badge, skeleton, spinner, empty-state, dialog/ConfirmDialog, toast (`useToast`), tabs
+- Toda página de panel se monta con `<AppShell>` (`components/AppShell.tsx`) — no se repite `<main>`/`max-w-*`/`<Navbar>` sueltos
+- No hay dark mode (se quitó deliberadamente; ver `DECISIONS.md`)
 
 ### TypeScript
 - `tsconfig.json`: target ES2017, strict: true, moduleResolution: bundler
 - `next.config.ts`: `serverExternalPackages: ['better-sqlite3']` (necesario para build producción)
 
 ## Patrones importantes
+
+### Crear o tocar la UI de un panel (nuevo o existente)
+1. Lee **[`docs/design-system.md`](docs/design-system.md)** primero — tokens de color, componentes base y checklist paso a paso para un panel nuevo
+2. Todo panel se monta con `<AppShell navbar={{...}} title="..." description="...">` (`components/AppShell.tsx`)
+3. Presets → `usePresets(screen)` + `<PresetPanel>` + `<PresetQuickSelect>` (`components/PresetPanel.tsx`), nunca un panel de presets escrito a mano — ver `docs/design-system.md` §5
+4. `alert()`/`confirm()` → `useToast()` / `<ConfirmDialog>` (`components/ui/toast.tsx`, `components/ui/dialog.tsx`)
+5. KPIs → `<KpiCard>` (`components/KpiCard.tsx`); tarjetas con borde superior de marca → `<Card accent>`
 
 ### Añadir nuevo filtro de categoría (dashboard de producción)
 1. `api/categories/route.ts` → añadir entrada al `FIELD_MAP`
@@ -120,6 +155,12 @@ docs/                         # Documentación específica por panel
 ### Añadir nuevo panel/fuente de logs
 1. Añadir INSERT en la ruta API con `source: 'nombre_panel'`
 2. Añadir etiqueta en `SOURCE_LABELS` en `admin/logs/page.tsx`
+
+### Añadir integración con una nueva fuente de datos externa (ej. otra BD SQL Server)
+1. `lib/nombre.ts` → función de conexión análoga a `lib/db.ts`/`lib/reflex.ts`: credenciales desde `.env.local`, error claro si falta alguna, `try/finally` en quien la usa
+2. Documentar el esquema (tablas, JOINs, campos) en `docs/nombre-panel.md` — no en `CLAUDE.md`/`DOCUMENTACION.md`, que solo enlazan a él
+3. Añadir variables `NOMBRE_*` al bloque `.env.local` de `DOCUMENTACION.md` sección 3
+4. Ver `lib/reflex.ts` + `docs/consulta-stock-pda.md` como ejemplo de referencia
 
 ### Merma
 - Movimientos `IS` con códigos razón `P01-P05`, `Q01-Q10`
@@ -133,6 +174,7 @@ docs/                         # Documentación específica por panel
 - Ofrecer plan detallado y esperar confirmación antes de ejecutar si el cambio afecta a más de 2 archivos
 - Lee los archivos afectados antes de modificarlos
 - Si tocas `api/production/route.ts`, ten especial cuidado: es el endpoint más complejo
+- Al implementar una función o endpoint nuevo: si hay ambigüedad (nombre de campo, comportamiento en casos límite, dónde vive el código, forma de la respuesta), preguntar antes de asumir, o presentar 2-3 opciones concretas con su trade-off. No decidir en silencio ni avanzar sobre un supuesto no confirmado.
 
 ### Al escribir código
 - Respeta el patrón existente de manejo de errores (try/catch/finally)
@@ -144,16 +186,20 @@ docs/                         # Documentación específica por panel
 
 ### Después de hacer cambios
 - **Documentación — dónde actualizar:**
+  - Cambios en tokens de color, componentes de `components/ui/`, `AppShell`, `KpiCard` o `PresetPanel` → `docs/design-system.md`
   - Cambios en auth, admin, logs, presets, lib/, stack o estructura general → `DOCUMENTACION.md`
   - Cambios en el panel de producción (`/produccion`, `FilterPanel`, `api/production`, `api/categories`, `api/production-lines`) → `docs/produccion.md`
   - Cambios en el panel de pedidos → `docs/control-pedidos.md`
   - Cambios en el panel de caducados → `docs/palets-caducados.md`
   - Cambios en el panel comparativa SERES vs JDE → `docs/seres-jde-comparativa.md`
+  - Cambios en el panel de consulta de stock por escaneo → `docs/consulta-stock-pda.md`
+  - Cambios en el panel de compras (`/compras`, `api/compras`) → `docs/compras.md`
   - Nuevo panel → crear `docs/nombre-panel.md` y añadir referencia en `DOCUMENTACION.md` sección 9
 - Sugerir commit con mensaje siguiendo el estilo del proyecto (conventional + español)
 
 ### Testing
 - Verificar compilación con `bun run build` después de cambios significativos
+- Hay tests con `bun test` en `__tests__/` (admin-guards, middleware, permissions, sanitization) — correrlos (`bun test`) tras tocar auth, permisos o sanitización, y añadir un test ahí si el cambio afecta a esa lógica
 
 ### Git — Flujo de trabajo
 ```

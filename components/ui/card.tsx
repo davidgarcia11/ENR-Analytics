@@ -3,15 +3,17 @@ import { cn } from "@/lib/utils"
 
 // Componente Card (Tarjeta): Contenedor principal con borde, sombra y fondo blanco
 // Funciona como una 'div' estilizada
+// accent: añade el borde superior rojo corporativo (sello visual de las tarjetas del dashboard)
 const Card = React.forwardRef<
     HTMLDivElement,
-    React.HTMLAttributes<HTMLDivElement>
->(({ className, ...props }, ref) => (
+    React.HTMLAttributes<HTMLDivElement> & { accent?: boolean }
+>(({ className, accent = false, ...props }, ref) => (
     <div
         ref={ref}
         className={cn(
             // Clases: bordes redondeados, borde fino, fondo blanco, sombra suave
-            "rounded-xl border bg-card text-card-foreground shadow-sm bg-white",
+            "rounded-xl border border-border bg-card text-card-foreground shadow-sm",
+            accent && "overflow-hidden border-t-[3px] border-t-primary",
             className
         )}
         {...props}

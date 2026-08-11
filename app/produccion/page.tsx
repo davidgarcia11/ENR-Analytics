@@ -13,8 +13,11 @@ import {
   TableRow,
 } from "@/components/ui/table"
 // Iconos de la librería lucide-react para dar estilo visual
-import { Loader2, Factory, Calendar, ChevronDown, ChevronsDown, ChevronRight } from "lucide-react"
-import Navbar from "@/components/Navbar"
+import { Factory, Calendar, ChevronDown, ChevronsDown, ChevronRight, SearchX } from "lucide-react"
+import { AppShell } from "@/components/AppShell"
+import { KpiCard } from "@/components/KpiCard"
+import { Spinner } from "@/components/ui/spinner"
+import { EmptyState } from "@/components/ui/empty-state"
 import * as XLSX from 'xlsx'; // Librería 'xlsx' para generar archivos Excel
 import { useRouter } from "next/navigation"
 import { FilterPanel, AppliedFilters } from "@/components/FilterPanel"
@@ -45,55 +48,81 @@ function buildProductionParams(filtersArg: AppliedFilters): URLSearchParams {
 
 interface SessionUser { id: number; username: string; role: string; name: string; surname: string }
 
+// Fila de producción tal como la devuelve GET /api/production (fecha ya serializada a ISO string)
+interface ProductionRow {
+  order: string
+  date: string | null
+  productionDateRaw: number | string
+  description: string
+  quantity: number
+  merma: number
+  plantCode: string
+  article: string
+  subLine: string
+  subLineCode?: string
+  unit: string
+}
+
+// Fila agregada (agrupada por artículo+fecha o solo por artículo) con el % de merma ya calculado
+interface DisplayRow extends ProductionRow {
+  mermaPercent: number
+}
+
+// Fila del desglose de merma en modo "matrix" (GET /api/production/merma-breakdown?mode=matrix)
+interface MermaMatrixItem {
+  article: string; articleDesc: string
+  group: string; code: string; description: string; qty: number
+}
+
 // Tabla de producción extraída como componente memoizado para evitar re-renders
 // cuando el usuario edita filtros sin haber pulsado "Filtrar" todavía.
 // React.memo compara las props por referencia: como displayData solo cambia cuando
 // cambia deferredData (no al editar filtros), la tabla no se re-renderiza al escribir.
 const ProductionTable = memo(({ displayData, mermaP75, groupByArticle, loading, dataLength, hasMore, onLoadMore, onLoadAll, appliedFilters }: {
-  displayData: any[]; mermaP75: number; groupByArticle: boolean;
+  displayData: DisplayRow[]; mermaP75: number; groupByArticle: boolean;
   loading: boolean; dataLength: number; hasMore: boolean;
   onLoadMore: () => void; onLoadAll: () => void;
   appliedFilters: AppliedFilters;
 }) => {
   const getMermaColor = (percent: number) => {
-    if (percent === 0) return 'text-gray-400';
+    if (percent === 0) return 'text-muted-foreground';
     if (percent >= mermaP75 && mermaP75 > 0) return 'text-red-600 bg-red-50 font-black';
     if (percent >= 5) return 'text-red-500 font-bold';
     if (percent >= 2) return 'text-amber-600 font-bold';
     return 'text-green-600 font-semibold';
   };
   return (
-    <Card className="col-span-4 border-gray-200 shadow-sm overflow-hidden" style={{ borderTop: '3px solid #D30B15' }}>
+    <Card accent className="col-span-4 shadow-sm">
       <CardHeader>
-        <CardTitle className="text-lg font-bold text-gray-800">Detalle de Producción</CardTitle>
+        <CardTitle className="text-lg font-bold text-foreground">Detalle de Producción</CardTitle>
       </CardHeader>
       <CardContent>
         <Table>
           <TableHeader>
-            <TableRow className="border-gray-200 hover:bg-transparent">
-              <TableHead className="font-bold text-gray-700">Fecha</TableHead>
-              <TableHead className="font-bold text-gray-700">Artículo</TableHead>
-              <TableHead className="font-bold text-gray-700">Descripción</TableHead>
-              <TableHead className="text-right font-bold text-gray-700">Fabricado</TableHead>
-              <TableHead className="text-right font-bold text-gray-700">Merma</TableHead>
-              <TableHead className="text-right font-bold text-gray-700">Fabricado + Merma</TableHead>
-              <TableHead className="text-right font-bold text-gray-700">% Merma</TableHead>
-              <TableHead className="font-bold text-gray-700 text-center">UM</TableHead>
-              <TableHead className="font-bold text-gray-700">Planta / Línea</TableHead>
+            <TableRow className="hover:bg-transparent">
+              <TableHead className="font-bold text-secondary-foreground">Fecha</TableHead>
+              <TableHead className="font-bold text-secondary-foreground">Artículo</TableHead>
+              <TableHead className="font-bold text-secondary-foreground">Descripción</TableHead>
+              <TableHead className="text-right font-bold text-secondary-foreground">Fabricado</TableHead>
+              <TableHead className="text-right font-bold text-secondary-foreground">Merma</TableHead>
+              <TableHead className="text-right font-bold text-secondary-foreground">Fabricado + Merma</TableHead>
+              <TableHead className="text-right font-bold text-secondary-foreground">% Merma</TableHead>
+              <TableHead className="font-bold text-secondary-foreground text-center">UM</TableHead>
+              <TableHead className="font-bold text-secondary-foreground">Planta / Línea</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             {displayData.map((row, i) => (
-              <TableRow key={i} className="hover:bg-slate-50 border-gray-100">
-                <TableCell className="font-medium text-gray-900">
-                  {groupByArticle ? <span className="text-gray-400 text-xs">Varios</span> : (row.date ? new Date(row.date).toLocaleDateString() : row.productionDateRaw)}
+              <TableRow key={i}>
+                <TableCell className="font-medium text-foreground">
+                  {groupByArticle ? <span className="text-muted-foreground text-xs">Varios</span> : (row.date ? new Date(row.date).toLocaleDateString() : row.productionDateRaw)}
                 </TableCell>
-                <TableCell className="text-gray-700 font-mono text-xs bg-gray-100 px-2 py-1 rounded w-fit">{row.article}</TableCell>
-                <TableCell className="text-gray-600 uppercase text-xs font-semibold">{row.description}</TableCell>
-                <TableCell className="text-right font-bold text-slate-900">
+                <TableCell className="text-secondary-foreground font-mono text-xs bg-muted px-2 py-1 rounded w-fit">{row.article}</TableCell>
+                <TableCell className="text-secondary-foreground uppercase text-xs font-semibold">{row.description}</TableCell>
+                <TableCell className="text-right font-bold text-foreground">
                   {row.quantity?.toLocaleString('es-ES', { maximumFractionDigits: 0 })}
                 </TableCell>
-                <TableCell className="text-right text-sm text-gray-700">
+                <TableCell className="text-right text-sm text-secondary-foreground">
                   {groupByArticle ? (
                     // En modo agrupado por artículo no se puede pedir el desglose por fila concreta
                     Math.abs(row.merma || 0).toLocaleString('es-ES', { maximumFractionDigits: 0 })
@@ -108,32 +137,36 @@ const ProductionTable = memo(({ displayData, mermaP75, groupByArticle, loading, 
                     />
                   )}
                 </TableCell>
-                <TableCell className="text-right text-sm font-semibold text-gray-800">
+                <TableCell className="text-right text-sm font-semibold text-foreground">
                   {(Math.round(row.quantity || 0) + Math.round(Math.abs(row.merma || 0))).toLocaleString('es-ES')}
                 </TableCell>
                 <TableCell className={`text-right text-sm px-3 py-1 rounded ${getMermaColor(row.mermaPercent || 0)}`}>
                   {(row.mermaPercent || 0).toFixed(2)}%
                 </TableCell>
-                <TableCell className="text-center text-xs text-gray-500 font-mono">{row.unit}</TableCell>
+                <TableCell className="text-center text-xs text-muted-foreground font-mono">{row.unit}</TableCell>
                 <TableCell>
                   <div className="flex flex-col">
-                    <span className="font-bold text-gray-800 text-xs">{row.subLine}</span>
-                    <span className="text-[10px] text-gray-400 font-mono">{row.subLineCode} · {row.plantCode}</span>
+                    <span className="font-bold text-foreground text-xs">{row.subLine}</span>
+                    <span className="text-xs text-muted-foreground font-mono">{row.subLineCode} · {row.plantCode}</span>
                   </div>
                 </TableCell>
               </TableRow>
             ))}
             {loading && (
-              <TableRow>
-                <TableCell colSpan={9} className="text-center py-10">
-                  <Loader2 className="h-6 w-6 animate-spin mx-auto text-slate-800" />
+              <TableRow className="hover:bg-transparent">
+                <TableCell colSpan={9}>
+                  <Spinner label="Cargando producción..." className="py-10" />
                 </TableCell>
               </TableRow>
             )}
             {!loading && dataLength === 0 && (
-              <TableRow>
-                <TableCell colSpan={9} className="text-center py-10 text-gray-500 font-medium">
-                  No se encontraron datos para los filtros seleccionados.
+              <TableRow className="hover:bg-transparent">
+                <TableCell colSpan={9}>
+                  <EmptyState
+                    icon={SearchX}
+                    title="Sin resultados"
+                    description="No se encontraron datos para los filtros seleccionados."
+                  />
                 </TableCell>
               </TableRow>
             )}
@@ -141,12 +174,12 @@ const ProductionTable = memo(({ displayData, mermaP75, groupByArticle, loading, 
         </Table>
         {hasMore && dataLength > 0 && !loading && (
           <div className="mt-6 flex justify-center gap-3">
-            <Button onClick={onLoadMore} variant="ghost" className="text-slate-600 hover:text-slate-900 hover:bg-slate-100">
-              <ChevronDown className="mr-2 h-4 w-4" />
+            <Button onClick={onLoadMore} variant="ghost" className="text-secondary-foreground">
+              <ChevronDown className="mr-2 h-4 w-4" aria-hidden="true" />
               Cargar más (150)
             </Button>
-            <Button onClick={onLoadAll} variant="outline" className="text-slate-600 hover:text-slate-900 hover:bg-slate-100 border-slate-300">
-              <ChevronsDown className="mr-2 h-4 w-4" />
+            <Button onClick={onLoadAll} variant="outline" className="text-secondary-foreground">
+              <ChevronsDown className="mr-2 h-4 w-4" aria-hidden="true" />
               Cargar todos
             </Button>
           </div>
@@ -181,7 +214,7 @@ export default function Dashboard() {
   const [presetsSignal, setPresetsSignal] = useState(0)
 
   // --- DATOS ---
-  const [data, setData] = useState<any[]>([]) // Lista de registros de producción
+  const [data, setData] = useState<ProductionRow[]>([]) // Lista de registros de producción
   const [loading, setLoading] = useState(false) // Spinner de carga
   const [page, setPage] = useState(1) // Página actual para paginación
   const [hasMore, setHasMore] = useState(true) // Si hay más datos por cargar
@@ -297,7 +330,7 @@ export default function Dashboard() {
       const json = await res.json()
 
       // La API devuelve { data: [...], sqlRowCount: N }
-      const items = json.data ?? json
+      const items: ProductionRow[] = json.data ?? json
       const sqlRowCount = json.sqlRowCount ?? (Array.isArray(json) ? json.length : items.length)
 
       if (Array.isArray(items)) {
@@ -312,7 +345,7 @@ export default function Dashboard() {
 
           // Artículos únicos para el multi-select
           const articleMap = new Map<string, { id: string; description: string }>()
-          newData.forEach((item: any) => {
+          newData.forEach((item: ProductionRow) => {
             if (item.article && item.description)
               articleMap.set(String(item.article).trim(), { id: String(item.article).trim(), description: item.description })
           })
@@ -322,7 +355,7 @@ export default function Dashboard() {
           let qtyUN = 0, qtyKG = 0, totalMerma = 0, totalProduced = 0
           const plants: Record<string, number> = {}
           const orders = new Set()
-          newData.forEach((item: any) => {
+          newData.forEach((item: ProductionRow) => {
             const u = item.unit ? item.unit.toUpperCase() : ''
             if (u === 'UN') qtyUN += item.quantity || 0
             else if (u === 'KG') qtyKG += item.quantity || 0
@@ -453,7 +486,7 @@ export default function Dashboard() {
       matrixParams.append('mode', 'matrix')
       const res = await fetch(`/api/production/merma-breakdown?${matrixParams.toString()}`)
       const json = await res.json()
-      const items: any[] = (json && Array.isArray(json.items)) ? json.items : []
+      const items: MermaMatrixItem[] = (json && Array.isArray(json.items)) ? json.items : []
       if (items.length > 0) {
         const groupLabel = (g: string) => g === 'Q' ? 'Etiquetado' : g === 'P' ? 'Pasteurizado' : 'Otros'
         const matrixRows = items.map(it => ({
@@ -483,7 +516,7 @@ export default function Dashboard() {
   const deferredGroupByArticle = useDeferredValue(groupByArticle)
 
   const displayData = useMemo(() => {
-    const groupMap = new Map<string, any>()
+    const groupMap = new Map<string, ProductionRow>()
     deferredData.forEach(item => {
       const key = deferredGroupByArticle
         ? `${item.article}-${item.subLineCode}-${item.unit}`
@@ -491,7 +524,7 @@ export default function Dashboard() {
       if (!groupMap.has(key)) {
         groupMap.set(key, { ...item, quantity: 0, merma: 0 })
       }
-      const g = groupMap.get(key)
+      const g = groupMap.get(key)!
       g.quantity += item.quantity || 0
       g.merma += item.merma || 0
     })
@@ -515,17 +548,16 @@ export default function Dashboard() {
 
   // --- RENDERIZADO ---
   return (
-    <main className="min-h-screen bg-gray-100 p-8 font-sans text-gray-900">
-      <div className="mx-auto max-w-7xl space-y-8">
-
-        {/* --- BARRA DE NAVEGACIÓN --- */}
-        <Navbar
-          currentPanel="produccion"
-          user={sessionUser}
-          onLogout={logout}
-          onPresetsClick={() => setPresetsSignal(s => s + 1)}
-        />
-
+    <AppShell
+      navbar={{
+        currentPanel: "produccion",
+        user: sessionUser,
+        onLogout: logout,
+        onPresetsClick: () => setPresetsSignal(s => s + 1),
+      }}
+      title="Producción"
+      description="Órdenes de fabricación, producción y merma por planta y línea"
+    >
         {/* --- PANEL DE FILTROS ---
             FilterPanel gestiona internamente su draft state (filtros, presets, categorías).
             Solo notifica al Dashboard cuando el usuario pulsa "Filtrar" (via onApply).
@@ -543,85 +575,56 @@ export default function Dashboard() {
         />
 
         {/* --- TARJETAS DE MÉTRICAS (KPIs) --- */}
-        <div className="grid gap-4 md:grid-cols-4">
-          {/* Tarjeta 1: Cantidad Total */}
-          <Card className="border-gray-200 shadow-sm overflow-hidden" style={{ borderTop: '3px solid #D30B15' }}>
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-bold text-gray-700">Cantidad Total</CardTitle>
-              <Factory className="h-4 w-4" style={{ color: '#D30B15' }} />
-            </CardHeader>
-            <CardContent>
-              <div className="flex flex-col space-y-1">
-                <div className="flex items-baseline justify-between">
-                  <div className="text-2xl font-black text-gray-900">{metrics.totalQtyUN.toLocaleString('es-ES', { maximumFractionDigits: 0 })}</div>
-                  <span className="text-xs font-bold text-gray-500">UN</span>
-                </div>
-                {metrics.totalQtyKG > 0 && (
-                  <div className="flex items-baseline justify-between border-t border-gray-100 pt-1">
-                    <div className="text-lg font-bold text-gray-700">{metrics.totalQtyKG.toLocaleString('es-ES', { maximumFractionDigits: 0 })}</div>
-                    <span className="text-xs font-bold text-gray-500">KG</span>
-                  </div>
-                )}
+        <div className="grid gap-4 sm:grid-cols-2 md:grid-cols-4">
+          {/* Tarjeta 1: Cantidad Total (cuerpo custom: dos filas UN/KG) */}
+          <KpiCard title="Cantidad Total" icon={Factory}>
+            <div className="flex flex-col space-y-1">
+              <div className="flex items-baseline justify-between">
+                <div className="text-2xl font-black text-foreground">{metrics.totalQtyUN.toLocaleString('es-ES', { maximumFractionDigits: 0 })}</div>
+                <span className="text-xs font-bold text-muted-foreground">UN</span>
               </div>
-              <p className="text-xs text-gray-500 font-medium mt-2">Unidades fabricadas (cargadas)</p>
-            </CardContent>
-          </Card>
+              {metrics.totalQtyKG > 0 && (
+                <div className="flex items-baseline justify-between border-t border-border pt-1">
+                  <div className="text-lg font-bold text-secondary-foreground">{metrics.totalQtyKG.toLocaleString('es-ES', { maximumFractionDigits: 0 })}</div>
+                  <span className="text-xs font-bold text-muted-foreground">KG</span>
+                </div>
+              )}
+            </div>
+            <p className="text-xs text-muted-foreground font-medium mt-2">Unidades fabricadas (cargadas)</p>
+          </KpiCard>
 
           {/* Tarjeta 2: Órdenes */}
-          <Card className="border-gray-200 shadow-sm overflow-hidden" style={{ borderTop: '3px solid #D30B15' }}>
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-bold text-gray-700">Órdenes</CardTitle>
-              <Calendar className="h-4 w-4" style={{ color: '#D30B15' }} />
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-black text-gray-900">{metrics.totalOrders}</div>
-              <p className="text-xs text-gray-500 font-medium">Total de órdenes (cargadas)</p>
-            </CardContent>
-          </Card>
+          <KpiCard title="Órdenes" icon={Calendar} value={metrics.totalOrders} caption="Total de órdenes (cargadas)" />
 
-          {/* Tarjeta 3: Merma global */}
-          <Card className="border-gray-200 shadow-sm overflow-hidden" style={{ borderTop: '3px solid #D30B15' }}>
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-bold text-gray-700">Merma</CardTitle>
-              <Factory className="h-4 w-4" style={{ color: '#D30B15' }} />
-            </CardHeader>
-            <CardContent>
-              {(() => {
-                const total = metrics.totalMerma + metrics.totalProduced
-                const pct = total > 0 ? (metrics.totalMerma / total) * 100 : 0
-                const color = pct >= 5 ? 'text-red-600' : pct >= 2 ? 'text-amber-600' : 'text-green-600'
-                return (
-                  <div className="flex flex-col space-y-1">
-                    <div className="flex items-baseline justify-between">
-                      <div className={`text-2xl font-black ${color}`}>{pct.toFixed(2)}%</div>
-                    </div>
-                    <div className="text-xs text-gray-500 font-medium">
-                      {metrics.totalMerma.toLocaleString('es-ES', { maximumFractionDigits: 0 })} merma / {metrics.totalProduced.toLocaleString('es-ES', { maximumFractionDigits: 0 })} producido
-                    </div>
+          {/* Tarjeta 3: Merma global (cuerpo custom: color condicional) */}
+          <KpiCard title="Merma" icon={Factory}>
+            {(() => {
+              const total = metrics.totalMerma + metrics.totalProduced
+              const pct = total > 0 ? (metrics.totalMerma / total) * 100 : 0
+              const color = pct >= 5 ? 'text-red-600' : pct >= 2 ? 'text-amber-600' : 'text-green-600'
+              return (
+                <div className="flex flex-col space-y-1">
+                  <div className={`text-2xl font-black ${color}`}>{pct.toFixed(2)}%</div>
+                  <div className="text-xs text-muted-foreground font-medium">
+                    {metrics.totalMerma.toLocaleString('es-ES', { maximumFractionDigits: 0 })} merma / {metrics.totalProduced.toLocaleString('es-ES', { maximumFractionDigits: 0 })} producido
                   </div>
-                )
-              })()}
-            </CardContent>
-          </Card>
+                </div>
+              )
+            })()}
+          </KpiCard>
 
           {/* Tarjeta 4: Planta con mayor volumen */}
-          <Card className="border-gray-200 shadow-sm overflow-hidden" style={{ borderTop: '3px solid #D30B15' }}>
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-bold text-gray-700">Top Planta</CardTitle>
-              <Factory className="h-4 w-4" style={{ color: '#D30B15' }} />
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-black text-gray-900">
-                {Object.entries(metrics.byPlant).sort((a, b) => b[1] - a[1])[0]?.[0] || '-'}
-              </div>
-              <p className="text-xs text-gray-500 font-medium">Mayor volumen (cargado)</p>
-            </CardContent>
-          </Card>
+          <KpiCard
+            title="Top Planta"
+            icon={Factory}
+            value={Object.entries(metrics.byPlant).sort((a, b) => b[1] - a[1])[0]?.[0] || '-'}
+            caption="Mayor volumen (cargado)"
+          />
         </div>
 
         {/* --- DESGLOSE DE MERMA (global) ---
             Arranca colapsada. El header completo es un botón que la abre/cierra. */}
-        <Card className="border-gray-200 shadow-sm overflow-hidden" style={{ borderTop: '3px solid #D30B15' }}>
+        <Card accent className="shadow-sm">
           <button
             type="button"
             onClick={() => setBreakdownOpen(o => !o)}
@@ -629,26 +632,26 @@ export default function Dashboard() {
             aria-controls="desglose-merma-content"
             className="w-full text-left"
           >
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-3 hover:bg-gray-50/60 transition-colors">
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-3 hover:bg-muted/60 transition-colors">
               <div className="flex items-center gap-2">
                 {breakdownOpen ? (
-                  <ChevronDown className="h-4 w-4 text-gray-500" />
+                  <ChevronDown className="h-4 w-4 text-muted-foreground" aria-hidden="true" />
                 ) : (
-                  <ChevronRight className="h-4 w-4 text-gray-500" />
+                  <ChevronRight className="h-4 w-4 text-muted-foreground" aria-hidden="true" />
                 )}
                 <div>
-                  <CardTitle className="text-lg font-bold text-gray-800">Desglose de merma</CardTitle>
-                  <p className="text-xs text-gray-500 font-medium mt-1">
+                  <CardTitle className="text-lg font-bold text-foreground">Desglose de merma</CardTitle>
+                  <p className="text-xs text-muted-foreground font-medium mt-1">
                     Por tipo de motivo (Q: Etiquetado · P: Pasteurizado). Pulsa para {breakdownOpen ? 'ocultar' : 'desplegar'}.
                   </p>
                 </div>
               </div>
               {globalBreakdown && globalBreakdown.total > 0 && (
                 <div className="text-right">
-                  <div className="text-2xl font-black text-gray-900">
+                  <div className="text-2xl font-black text-foreground">
                     {Math.round(globalBreakdown.total).toLocaleString('es-ES')}
                   </div>
-                  <div className="text-[10px] text-gray-500">Total merma</div>
+                  <div className="text-xs text-muted-foreground">Total merma</div>
                 </div>
               )}
             </CardHeader>
@@ -677,7 +680,6 @@ export default function Dashboard() {
           appliedFilters={appliedFilters}
         />
 
-      </div>
-    </main>
+    </AppShell>
   )
 }
