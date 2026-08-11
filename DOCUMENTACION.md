@@ -842,10 +842,10 @@ Tarjeta de métrica (borde superior rojo corporativo vía `Card accent`, icono, 
 
 ### `PresetPanel.tsx` — `PresetPanel`, `PresetQuickSelect`, `usePresets`
 
-Sistema de presets compartido por todos los paneles con presets (`caducados`, `preparacion-pedidos`, `comparativa-seres`; `produccion` mantiene su propia variante integrada en `FilterPanel`). Antes estaba duplicado (con pequeñas divergencias que eran bugs latentes) en cada página.
+Sistema de presets compartido por todos los paneles con presets (`caducados`, `preparacion-pedidos`, `comparativa-seres`, `compras`; `produccion` mantiene su propia variante integrada en `FilterPanel`). Antes estaba duplicado (con pequeñas divergencias que eran bugs latentes) en cada página.
 
 - **`usePresets(screen)`** — hook que hace el `fetch('/api/presets?screen=...')` y expone `{ presets, reload }`. Se llama **una vez por página** y su resultado se reparte a los otros dos componentes, para que ambos vean siempre la misma lista sin fetches duplicados ni desincronización tras guardar/borrar.
-- **`PresetPanel`** — panel "Mis Presets de Filtros" (guardar/editar/listar/borrar). Props: `screen`, `presets`, `onReload` (del hook), `open`, `onClose`, `getFilters()` (serializa el estado de filtros actual), `applyFilters(filters)` (restaura cada filtro con sus defaults), `hint?`. Gestiona guardar/editar (`toast` de éxito/error) y borrado con `ConfirmDialog` de confirmación (antes era un borrado inmediato sin confirmar); llama a `onReload()` tras cada cambio.
+- **`PresetPanel`** — panel "Mis Presets de Filtros" (guardar/editar/listar/borrar). Props: `screen`, `presets`, `onReload` (del hook), `open`, `onClose`, `getFilters()` (serializa el estado de filtros actual), `applyFilters(filters)` (restaura cada filtro con sus defaults), `hint?`, `dateFields?` (nombres de campos de fecha; si se pasan, añade el checkbox "Incluir fechas" — ver `docs/design-system.md` §5). Gestiona guardar/editar (`toast` de éxito/error) y borrado con `ConfirmDialog` de confirmación (antes era un borrado inmediato sin confirmar); llama a `onReload()` tras cada cambio.
 - **`PresetQuickSelect`** — desplegable de carga inmediata en la barra de acciones (junto a Filtrar/Excel/Limpiar), para cargar un preset sin abrir el panel completo. Props: `presets`, `onSelect(preset)`. No renderiza nada si no hay presets guardados.
 
 Cada panel debe montar los tres juntos — ver el checklist de [`docs/design-system.md`](docs/design-system.md#5-componentes-de-panel-components) para el patrón completo.

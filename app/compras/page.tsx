@@ -305,7 +305,12 @@ export default function ComprasPage() {
 
     const getPresetFilters = () => ({ startDate: filters.startDate, endDate: filters.endDate, selectedItems })
     const applyPresetFilters = (f: Record<string, unknown>) => {
-        const next = { startDate: (f.startDate as string) || '', endDate: (f.endDate as string) || '' }
+        // Si el preset no incluye fechas (checkbox "Incluir fechas" desmarcado al guardarlo),
+        // se mantiene el rango actual en vez de vaciarlo.
+        const next = {
+            startDate: (f.startDate as string) || filters.startDate,
+            endDate: (f.endDate as string) || filters.endDate,
+        }
         const items = (f.selectedItems as string[]) || []
         setPeriodPreset('personalizado')
         setFilters(next)
@@ -344,7 +349,8 @@ export default function ComprasPage() {
                     onClose={() => setShowPresets(false)}
                     getFilters={getPresetFilters}
                     applyFilters={applyPresetFilters}
-                    hint="Se guardarán el rango de fechas y los artículos seleccionados."
+                    dateFields={['startDate', 'endDate']}
+                    hint="Se guardarán los artículos seleccionados."
                 />
             )}
 

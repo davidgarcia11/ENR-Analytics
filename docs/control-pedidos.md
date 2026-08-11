@@ -300,7 +300,7 @@ Usa el sistema de presets **compartido** de `components/PresetPanel.tsx` (mismo 
 
 **Piezas del sistema compartido:**
 - `usePresets('pedidos')` — hook que hace `fetch('/api/presets?screen=pedidos')` una vez al montar y expone `{ presets, reload }`. Se declara una sola vez en la página y se pasa a los dos componentes de abajo para que ambos vean siempre la misma lista.
-- `<PresetPanel screen="pedidos" presets={presets} onReload={reloadPresets} open={showPresets} onClose={...} getFilters={getPresetFilters} applyFilters={applyPresetFilters} hint="..." />` — panel completo de guardar / editar / listar / borrar presets. Sustituye al estado y los `fetch` que antes estaban escritos a mano en `page.tsx`. El borrado de un preset ahora pide confirmación con `<ConfirmDialog>` (antes era inmediato al pulsar el icono de papelera). Los mensajes de éxito/error usan `useToast()` → `toast(mensaje, 'success'|'error')` en vez de `alert()`.
+- `<PresetPanel screen="pedidos" presets={presets} onReload={reloadPresets} open={showPresets} onClose={...} getFilters={getPresetFilters} applyFilters={applyPresetFilters} dateFields={['startDate','endDate','deliveryStartDate','deliveryEndDate']} hint="..." />` — panel completo de guardar / editar / listar / borrar presets. Sustituye al estado y los `fetch` que antes estaban escritos a mano en `page.tsx`. El borrado de un preset ahora pide confirmación con `<ConfirmDialog>` (antes era inmediato al pulsar el icono de papelera). Los mensajes de éxito/error usan `useToast()` → `toast(mensaje, 'success'|'error')` en vez de `alert()`. `dateFields` añade el checkbox "Incluir fechas" (desmarcado por defecto, igual que en producción/`FilterPanel`) — ver `docs/design-system.md` §5.
 - `<PresetQuickSelect presets={presets} onSelect={p => applyPresetFilters(JSON.parse(p.filters))} />` — el desplegable "Cargar preset" en la barra de acciones (junto a Filtrar/Excel/Limpiar), ahora como componente reutilizable en vez de un `<select>` escrito a mano en la página. No se renderiza si no hay presets guardados.
 
 **Cómo se abre el panel de presets (`<PresetPanel>`):**
@@ -311,7 +311,7 @@ La página solo aporta la serialización de sus propios filtros a través de dos
 - `getPresetFilters()` — construye el objeto de filtros actuales a partir del estado de la página (mismo shape que antes).
 - `applyPresetFilters(raw)` — recibe el objeto ya parseado (`JSON.parse(preset.filters)`) y actualiza el estado de la página con los mismos valores por defecto que tenía la carga de presets original.
 
-**Filtros que se guardan en un preset de pedidos** (shape JSON sin cambios):
+**Filtros que se guardan en un preset de pedidos:**
 ```json
 {
   "filters": {
@@ -330,6 +330,8 @@ La página solo aporta la serialización de sus propios filtros a través de dos
 }
 ```
 
+> **Fechas opcionales**: `startDate`/`endDate`/`deliveryStartDate`/`deliveryEndDate` solo aparecen en el JSON si al guardar el preset se marcó el checkbox "Incluir fechas" (ver §Presets arriba) — desmarcado por defecto. Al cargar un preset sin fechas, `applyPresetFilters` mantiene el rango de fechas que ya estuviera puesto en pantalla en vez de vaciarlo.
+>
 > La planta **no se guarda** en los presets ya que las plantas disponibles son dinámicas y pueden cambiar.
 
 #### Ordenamiento

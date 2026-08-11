@@ -140,6 +140,7 @@ const applyPresetFilters = (f: Record<string, unknown>) => {
   getFilters={() => ({ /* objeto con TUS filtros actuales */ })}
   applyFilters={applyPresetFilters}
   hint="Se guardarán X, Y y Z."       // opcional, texto de ayuda bajo el botón Guardar
+  dateFields={['startDate', 'endDate']}  // opcional, ver más abajo — omite si tu panel no tiene fechas
 />
 
 // 2) Desplegable de carga rápida — junto a los botones Filtrar/Excel/Limpiar
@@ -154,6 +155,13 @@ La página aporta:
 - `applyPresetFilters` (nómbrala como quieras): hace el `setX(f.x ?? default)` de cada filtro al cargar un preset — **una sola función**, compartida por `PresetPanel` y `PresetQuickSelect`, para que cargar un preset se comporte igual desde cualquiera de los dos sitios.
 
 El hook `usePresets(screen)` es quien de verdad hace el fetch a `/api/presets?screen=...` — se llama **una vez** en la página y se reparte a ambos componentes. Esto es importante: si cada componente hiciera su propio fetch, el desplegable rápido y el panel podrían mostrar listas desincronizadas después de guardar/borrar un preset. `PresetPanel` llama a `onReload()` (el `reload` del hook) tras guardar/editar/borrar, así que el desplegable rápido se actualiza solo.
+
+**`dateFields` — "Incluir fechas" opcional al guardar (igual que producción/`FilterPanel`)**: si tu panel filtra por rango de fechas, pásale la lista de claves de fecha que devuelve tu `getFilters()` (ej. `['startDate', 'endDate']`, o con fecha de entrega `['startDate','endDate','deliveryStartDate','deliveryEndDate']` como en pedidos). Con esto:
+- Aparece un checkbox **"Incluir fechas"** junto al nombre, desmarcado por defecto — si no lo marcas, esas claves se borran del objeto antes de guardarlo, así el preset sirve para cualquier día.
+- Los presets guardados con fecha muestran un icono de calendario junto al nombre.
+- Al editar un preset que ya tenía fechas, el checkbox aparece premarcado solo.
+
+Si tu panel no tiene filtro de fechas (ej. caducados) o usa un filtro relativo que no caduca igual (ej. "últimos N días" en comparativa SERES), simplemente **omite** `dateFields` — el componente se comporta exactamente igual que antes, sin checkbox.
 
 Todo lo demás (guardar, editar, listar, `ConfirmDialog` al borrar, toasts de éxito/error) lo gestiona `PresetPanel`. La página sigue necesitando su propio estado `showPresets` (booleano) y `presetsSignal` (para que el botón "Presets" del Navbar lo abra) — eso no cambia.
 

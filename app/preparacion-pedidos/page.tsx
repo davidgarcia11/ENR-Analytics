@@ -418,7 +418,8 @@ export default function PreparacionPedidos() {
             onClose={() => setShowPresets(false)}
             getFilters={getPresetFilters}
             applyFilters={applyPresetFilters}
-            hint="Se guardarán las plantas, fechas, estado, artículo, destino y búsquedas seleccionados."
+            dateFields={['startDate', 'endDate', 'deliveryStartDate', 'deliveryEndDate']}
+            hint="Se guardarán las plantas, estado, artículo, destino y búsquedas seleccionados."
           />
         )}
 
