@@ -45,6 +45,8 @@ export default function LoginPage() {
         { key: 'pedidos',     path: '/preparacion-pedidos' },
         { key: 'caducados',   path: '/caducados' },
         { key: 'comparativa', path: '/comparativa-seres' },
+        { key: 'consulta_stock_pda', path: '/consulta-stock-pda' },
+        { key: 'compras',     path: '/compras' },
       ]
       try {
         const screensRes = await fetch('/api/screen-permissions')
