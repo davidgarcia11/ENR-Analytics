@@ -274,7 +274,7 @@ independiente), igual que en el resto de paneles.
 
 ## 9. Registro del panel
 
-- `components/Navbar.tsx` → entrada `compras` en el array `PANELS` (icono `ShoppingCart`).
+- `lib/panels.ts` → entrada `compras` en `PANELS` (icono `ShoppingCart`) — fuente única que alimenta Navbar, portada, login y permisos de admin (ver `docs/design-system.md` §5.1).
 - `lib/sqlite.ts` → seed en la tabla `screens` (`is_public=1` por defecto).
 
 ---
