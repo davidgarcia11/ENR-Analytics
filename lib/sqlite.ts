@@ -2,6 +2,7 @@ import Database from 'better-sqlite3';
 import path from 'path';
 import fs from 'fs';
 import { hashSync } from 'bcryptjs';
+import { PANELS } from './panels';
 
 const DB_PATH = path.join(process.cwd(), 'data', 'app.db');
 
@@ -109,15 +110,15 @@ export function getDb(): Database.Database {
     INSERT OR IGNORE INTO roles (name, label) VALUES ('user', 'Usuario');
   `);
 
-  // Seed pantallas (idempotente)
+  // Seed pantallas (idempotente) — derivado de PANELS (lib/panels.ts), la fuente única
+  // de paneles. Públicas por defecto; restringible luego desde /admin sin tocar código.
+  const seedScreen = _db.prepare(
+    'INSERT OR IGNORE INTO screens (key, label, path, is_public) VALUES (?, ?, ?, 1)'
+  );
+  for (const p of PANELS) seedScreen.run(p.key, p.label, p.href);
+  // 'admin' no es un panel real (no vive en PANELS) y es privado por defecto.
   _db.exec(`
-    INSERT OR IGNORE INTO screens (key, label, path, is_public) VALUES ('produccion',  'Producción',       '/produccion',          1);
-    INSERT OR IGNORE INTO screens (key, label, path, is_public) VALUES ('pedidos',     'Pedidos',          '/preparacion-pedidos', 1);
-    INSERT OR IGNORE INTO screens (key, label, path, is_public) VALUES ('caducados',   'Caducados',        '/caducados',           1);
-    INSERT OR IGNORE INTO screens (key, label, path, is_public) VALUES ('comparativa', 'Comparativa SERES','/comparativa-seres',   1);
-    INSERT OR IGNORE INTO screens (key, label, path, is_public) VALUES ('consulta_stock_pda', 'Consulta stock PDA', '/consulta-stock-pda', 1);
-    INSERT OR IGNORE INTO screens (key, label, path, is_public) VALUES ('compras',     'Compras',          '/compras',             1);
-    INSERT OR IGNORE INTO screens (key, label, path, is_public) VALUES ('admin',       'Administración',   '/admin',               0);
+    INSERT OR IGNORE INTO screens (key, label, path, is_public) VALUES ('admin', 'Administración', '/admin', 0);
   `);
 
   // Seed: rol admin tiene acceso a pantalla admin (idempotente)

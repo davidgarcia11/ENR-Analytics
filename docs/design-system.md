@@ -168,12 +168,15 @@ Todo lo demás (guardar, editar, listar, `ConfirmDialog` al borrar, toasts de é
 ### `lib/panels.ts` — fuente única de paneles (§5.1)
 
 **Nunca vuelvas a declarar una lista de paneles a mano.** Hasta que existía este archivo, la
-misma lista (clave, label, href, icono) estaba copiada en 4 sitios — `Navbar.tsx`, la portada
-(`app/page.tsx`), el login (`app/login/page.tsx`) y `SCREEN_KEYS` de `app/admin/page.tsx` — y
-añadir un panel nuevo significaba acordarse de actualizar los 4 a mano. Dos bugs reales salieron
-de esto: un panel aparecía en unos sitios sí y en otros no (logs, permisos, portada), y en el
-peor caso un usuario con acceso real a un panel **no podía ni iniciar sesión** porque
-`login/page.tsx` no lo reconocía en su copia de la lista.
+misma lista (clave, label, href, icono) estaba copiada en 5 sitios — `Navbar.tsx`, la portada
+(`app/page.tsx`), el login (`app/login/page.tsx`), `SCREEN_KEYS` de `app/admin/page.tsx` y el seed
+de la tabla `screens` en `lib/sqlite.ts` — y añadir un panel nuevo significaba acordarse de
+actualizar los 5 a mano. Dos bugs reales salieron de esto: un panel aparecía en unos sitios sí y en
+otros no (logs, permisos, portada), y en el peor caso un usuario con acceso real a un panel **no
+podía ni iniciar sesión** porque `login/page.tsx` no lo reconocía en su copia de la lista. El seed
+de SQLite tenía el mismo problema latente (detectado en revisión antes de causar un incidente): un
+panel sin fila en `screens` queda público por defecto y ni siquiera aparece en "Pantallas" de
+`/admin` para poder restringirlo.
 
 ```ts
 // lib/panels.ts
@@ -186,8 +189,10 @@ export type PanelKey = typeof PANELS[number]['key']
 ```
 
 `Navbar.tsx`, `app/page.tsx` y `app/login/page.tsx` importan `PANELS` directamente; `SCREEN_KEYS`
-de `app/admin/page.tsx` se deriva con `PANELS.map(({ key, label }) => ({ key, label }))`. Añadir
-un panel nuevo es **una sola línea en un solo archivo** — los 4 consumidores se actualizan solos.
+de `app/admin/page.tsx` se deriva con `PANELS.map(({ key, label }) => ({ key, label }))`; el seed
+de `lib/sqlite.ts` itera `PANELS` con un `INSERT OR IGNORE` preparado (públicas por defecto, igual
+que antes). Añadir un panel nuevo es **una sola línea en un solo archivo** — los 5 consumidores se
+actualizan solos.
 
 ### `Navbar` (`components/Navbar.tsx`)
 
