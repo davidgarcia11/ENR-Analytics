@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getDb } from '@/lib/sqlite';
 import { verifySession, hashPassword } from '@/lib/auth';
+import { PLANTS } from '@/lib/plants';
 
 export async function GET() {
   const user = await verifySession();
@@ -9,7 +10,7 @@ export async function GET() {
   }
 
   const db = getDb();
-  const users = db.prepare('SELECT id, username, role, name, surname, created_at FROM users ORDER BY id').all();
+  const users = db.prepare('SELECT id, username, role, name, surname, default_plant AS defaultPlant, created_at FROM users ORDER BY id').all();
   return NextResponse.json(users);
 }
 
@@ -20,7 +21,7 @@ export async function POST(req: NextRequest) {
   }
 
   try {
-    const { username, password, role, mustChangePassword, name, surname } = await req.json();
+    const { username, password, role, mustChangePassword, name, surname, defaultPlant } = await req.json();
 
     if (!username || !password) {
       return NextResponse.json({ error: 'Usuario y contraseña requeridos' }, { status: 400 });
@@ -31,9 +32,10 @@ export async function POST(req: NextRequest) {
     const db = getDb();
     const validRole = db.prepare('SELECT name FROM roles WHERE name = ?').get(role) as { name: string } | undefined;
     const userRole = validRole ? role : 'user';
+    const userDefaultPlant = PLANTS.some(p => p.id === defaultPlant) ? defaultPlant : '';
 
     try {
-      db.prepare('INSERT INTO users (username, password_hash, role, must_change_password, name, surname) VALUES (?, ?, ?, ?, ?, ?)').run(username, hash, userRole, forceChange, name || '', surname || '');
+      db.prepare('INSERT INTO users (username, password_hash, role, must_change_password, name, surname, default_plant) VALUES (?, ?, ?, ?, ?, ?, ?)').run(username, hash, userRole, forceChange, name || '', surname || '', userDefaultPlant);
     } catch (err: any) {
       if (err.message?.includes('UNIQUE')) {
         return NextResponse.json({ error: 'El usuario ya existe' }, { status: 409 });

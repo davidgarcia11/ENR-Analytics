@@ -3,24 +3,11 @@
 import Image from "next/image"
 import { useRouter } from "next/navigation"
 import { useState, useEffect } from "react"
-import {
-  User, LogOut, Settings, FileText, ChevronDown,
-  Factory, Package, AlertTriangle, ArrowLeftRight, BookmarkCheck, ScanBarcode, ShoppingCart
-} from "lucide-react"
+import { User, LogOut, Settings, FileText, ChevronDown, BookmarkCheck } from "lucide-react"
+import { PANELS, type PanelKey } from "@/lib/panels"
 
 interface SessionUser { id: number; username: string; role: string; name: string; surname: string }
 interface ScreenConfig { is_public: boolean; allowed_roles: string[] }
-
-const PANELS = [
-  { key: 'produccion',  label: 'Producción',       href: '/produccion',          Icon: Factory },
-  { key: 'pedidos',     label: 'Pedidos',           href: '/preparacion-pedidos', Icon: Package },
-  { key: 'caducados',   label: 'Caducados',         href: '/caducados',           Icon: AlertTriangle },
-  { key: 'comparativa', label: 'Comparativa SERES', href: '/comparativa-seres',   Icon: ArrowLeftRight },
-  { key: 'consulta_stock_pda', label: 'Consulta stock PDA', href: '/consulta-stock-pda', Icon: ScanBarcode },
-  { key: 'compras',     label: 'Compras',          href: '/compras',             Icon: ShoppingCart },
-] as const
-
-type PanelKey = typeof PANELS[number]['key']
 
 interface NavbarProps {
   // Opcional: páginas que no son uno de los 4 paneles (ej. /admin/logs) no marcan ninguno como activo

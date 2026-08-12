@@ -9,7 +9,7 @@ export async function GET() {
   }
 
   const db = getDb();
-  const dbUser = db.prepare('SELECT must_change_password, name, surname FROM users WHERE id = ?').get(user.id) as any;
+  const dbUser = db.prepare('SELECT must_change_password, name, surname, default_plant FROM users WHERE id = ?').get(user.id) as any;
 
   return NextResponse.json({
     id: user.id,
@@ -18,5 +18,6 @@ export async function GET() {
     name: dbUser?.name || '',
     surname: dbUser?.surname || '',
     mustChangePassword: !!(dbUser?.must_change_password),
+    defaultPlant: dbUser?.default_plant || '',
   });
 }

@@ -4,59 +4,12 @@ import { useEffect, useState } from "react"
 import { useRouter } from "next/navigation"
 import Image from "next/image"
 import Link from "next/link"
-import {
-  Factory, Package, AlertTriangle, ArrowLeftRight, ScanBarcode, ShoppingCart,
-  Loader2, Lock, ArrowRight,
-} from "lucide-react"
+import { Loader2, Lock, ArrowRight } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { EmptyState } from "@/components/ui/empty-state"
+import { PANELS } from "@/lib/panels"
 
 interface ScreenConfig { is_public: boolean; allowed_roles: string[] }
-
-const PANELS = [
-  {
-    key: 'produccion',
-    label: 'Producción',
-    href: '/produccion',
-    Icon: Factory,
-    description: 'Órdenes de fabricación y merma por planta y línea',
-  },
-  {
-    key: 'pedidos',
-    label: 'Pedidos',
-    href: '/preparacion-pedidos',
-    Icon: Package,
-    description: 'Control de preparación de pedidos por planta',
-  },
-  {
-    key: 'caducados',
-    label: 'Caducados y bloqueados',
-    href: '/caducados',
-    Icon: AlertTriangle,
-    description: 'Productos caducados o con bloqueo de calidad',
-  },
-  {
-    key: 'comparativa',
-    label: 'Comparativa SERES',
-    href: '/comparativa-seres',
-    Icon: ArrowLeftRight,
-    description: 'Comparativa de pedidos EDI SERES vs JDE',
-  },
-  {
-    key: 'consulta_stock_pda',
-    label: 'Consulta Stock PDA',
-    href: '/consulta-stock-pda',
-    Icon: ScanBarcode,
-    description: 'Consulta de stock FEFO por escaneo de palet',
-  },
-  {
-    key: 'compras',
-    label: 'Compras',
-    href: '/compras',
-    Icon: ShoppingCart,
-    description: 'Previsión de ventas vs. venta real, por artículo y mes',
-  },
-]
 
 function canAccess(cfg: ScreenConfig | undefined, role: string | null): boolean {
   if (!cfg) return true
@@ -69,8 +22,8 @@ function canAccess(cfg: ScreenConfig | undefined, role: string | null): boolean 
 export default function HomePage() {
   const router = useRouter()
   const [checking, setChecking] = useState(true)
-  const [publicPanels, setPublicPanels] = useState<typeof PANELS>([])
-  const [privatePanels, setPrivatePanels] = useState<typeof PANELS>([])
+  const [publicPanels, setPublicPanels] = useState<(typeof PANELS)[number][]>([])
+  const [privatePanels, setPrivatePanels] = useState<(typeof PANELS)[number][]>([])
 
   useEffect(() => {
     const init = async () => {
@@ -95,7 +48,7 @@ export default function HomePage() {
         setPublicPanels(pub)
         setPrivatePanels(priv)
       } catch {
-        setPublicPanels(PANELS)
+        setPublicPanels([...PANELS])
         setPrivatePanels([])
       } finally {
         setChecking(false)

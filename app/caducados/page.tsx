@@ -16,8 +16,9 @@ import { PresetPanel, PresetQuickSelect, usePresets } from "@/components/PresetP
 import { ArticleMultiSelect } from "@/components/ArticleMultiSelect"
 import * as XLSX from 'xlsx'
 import { useRouter } from "next/navigation"
+import { plantJdeCode } from "@/lib/plants"
 
-interface SessionUser { id: number; username: string; role: string; name: string; surname: string }
+interface SessionUser { id: number; username: string; role: string; name: string; surname: string; defaultPlant: string }
 interface Plant { id: string; description: string }
 interface LotState { code: string; description: string }
 interface PaletRow {
@@ -173,12 +174,20 @@ export default function CaducadosPage() {
 
   const deferredData = useDeferredValue(filteredData)
 
+  // Espera a conocer la sesión antes de la primera consulta, para que ya venga
+  // filtrada por la planta por defecto del usuario (si tiene una) y no se vea
+  // primero "todas las plantas" y luego solo la suya.
   useEffect(() => {
-    checkSession()
+    (async () => {
+      const user = await checkSession()
+      const code = plantJdeCode(user?.defaultPlant)
+      const initialPlants = code ? [code] : []
+      setSelectedPlants(initialPlants)
+      fetchPlants()
+      fetchData(initialPlants)
+    })()
     fetchLotStates()
     fetchCategories()
-    fetchPlants()
-    fetchData()
   }, [])
 
   const fetchPlants = async () => {
@@ -209,13 +218,13 @@ export default function CaducadosPage() {
     } catch { }
   }
 
-  const checkSession = async () => {
+  const checkSession = async (): Promise<SessionUser | null> => {
     try {
       const res = await fetch('/api/auth/me')
       let user = null
       if (res.ok) {
         user = await res.json()
-        if (user.mustChangePassword) { router.push('/cambiar-contrasena'); return }
+        if (user.mustChangePassword) { router.push('/cambiar-contrasena'); return null }
         setSessionUser(user)
       }
       const screensRes = await fetch('/api/screen-permissions')
@@ -225,11 +234,12 @@ export default function CaducadosPage() {
         if (mine && !mine.is_public) {
           if (!user || (user.role !== 'admin' && !mine.allowed_roles.includes(user.role))) {
             router.push('/login')
-            return
+            return null
           }
         }
       }
-    } catch { }
+      return user
+    } catch { return null }
   }
 
   const logout = async () => {
@@ -237,13 +247,16 @@ export default function CaducadosPage() {
     setSessionUser(null)
   }
 
-  const fetchData = async () => {
+  // plantsOverride se usa solo en la carga inicial, cuando aún no ha dado tiempo
+  // a que el estado selectedPlants recién fijado se refleje en este cierre (closure).
+  const fetchData = async (plantsOverride?: string[]) => {
     // Aplicar el filtro de artículo al pulsar "Filtrar" (igual que producción)
     setAppliedArticles(selectedArticles)
     setLoading(true)
     try {
       const params = new URLSearchParams()
-      selectedPlants.forEach(v => params.append('plant', v))
+      const plantsToUse = plantsOverride ?? selectedPlants
+      plantsToUse.forEach(v => params.append('plant', v))
       selectedLocations.forEach(v => params.append('location', v))
       params.append('type', selectedType)
       selectedLotStates.forEach(v => params.append('lotStates', v))
@@ -509,7 +522,7 @@ export default function CaducadosPage() {
 
         {/* Acciones */}
         <div className="flex flex-wrap items-end gap-3 justify-end">
-          <Button id="cad-filtrar" onClick={fetchData} disabled={loading} className="font-semibold">
+          <Button id="cad-filtrar" onClick={() => fetchData()} disabled={loading} className="font-semibold">
             {loading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" aria-hidden="true" /> : <Search className="mr-2 h-4 w-4" aria-hidden="true" />}
             Filtrar
           </Button>

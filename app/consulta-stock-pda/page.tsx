@@ -12,8 +12,9 @@ import { Spinner } from "@/components/ui/spinner"
 import { EmptyState } from "@/components/ui/empty-state"
 import { ScanBarcode, Camera, AlertTriangle, CheckCircle2, PackageSearch, X } from "lucide-react"
 import { parseGs1, type Gs1Fields } from "@/lib/gs1"
+import { plantReflexCode } from "@/lib/plants"
 
-interface SessionUser { id: number; username: string; role: string; name: string; surname: string }
+interface SessionUser { id: number; username: string; role: string; name: string; surname: string; defaultPlant: string }
 
 interface LoteStock {
     lote: string
@@ -108,6 +109,8 @@ export default function ConsultaStockPdaPage() {
                 const user = res.ok ? await res.json() : null
                 if (user?.mustChangePassword) { router.push('/cambiar-contrasena'); return }
                 setSessionUser(user)
+                const defaultReflexCode = plantReflexCode(user?.defaultPlant)
+                if (defaultReflexCode) setPlanta(defaultReflexCode)
                 const screensRes = await fetch('/api/screen-permissions')
                 if (screensRes.ok) {
                     const screens = await screensRes.json()
@@ -129,7 +132,7 @@ export default function ConsultaStockPdaPage() {
         setSessionUser(null)
     }
 
-    const fetchStock = useCallback(async (ean: string | undefined, sscc?: string) => {
+    const fetchStock = useCallback(async (sscc: string) => {
         setLoading(true)
         setError(null)
         setArticulo(null)
@@ -139,9 +142,8 @@ export default function ConsultaStockPdaPage() {
         setSearched(true)
         try {
             const params = new URLSearchParams()
-            if (ean) params.set('ean', ean)
+            params.set('sscc', sscc)
             if (planta) params.set('planta', planta)
-            if (sscc) params.set('sscc', sscc)
             const res = await fetch(`/api/consulta-stock-pda?${params}`)
             const data = await res.json()
             if (!res.ok) throw new Error(data.error || `Error ${res.status}`)
@@ -157,20 +159,18 @@ export default function ConsultaStockPdaPage() {
     }, [planta])
 
     // Procesa un código escaneado (da igual si viene del input HID o de la cámara):
-    // lo parsea como GS1-128 y consulta el stock por EAN. Si además trae SSCC (palet completo,
-    // no solo el EAN "pelado" del artículo), la API valida si es correcto FEFO. Algunas etiquetas
-    // no traen EAN en absoluto (o viene a ceros) — en ese caso se busca directamente por SSCC.
+    // lo parsea como GS1-128 y solo se busca por SSCC (número de palet, AI 00) — la API
+    // valida además si ese palet concreto es correcto FEFO. Un EAN "pelado" del artículo,
+    // sin SSCC, se rechaza: hay que escanear la etiqueta del palet, no la del artículo.
     const handleScan = useCallback((raw: string) => {
         const code = raw.trim()
         if (!code) return
         const fields = parseGs1(code)
         setParsed(fields)
-        if (fields.ean) {
-            fetchStock(fields.ean, fields.sscc)
-        } else if (fields.sscc) {
-            fetchStock(undefined, fields.sscc)
+        if (fields.sscc) {
+            fetchStock(fields.sscc)
         } else {
-            setError('No se ha podido identificar el EAN ni el SSCC en el código escaneado')
+            setError('Debes escanear el número de palet (SSCC), no el código del artículo')
             setArticulo(null)
             setLotes([])
         }
@@ -262,7 +262,7 @@ export default function ConsultaStockPdaPage() {
                             value={inputValue}
                             onChange={(e) => setInputValue(e.target.value)}
                             onKeyDown={handleInputKeyDown}
-                            placeholder="Pulsa aquí y escanea con la pistola, o teclea el código + Enter"
+                            placeholder="Pulsa aquí y escanea la etiqueta del palet (SSCC), o teclea el código + Enter"
                             className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm font-mono shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
                         />
                     </div>
@@ -353,16 +353,17 @@ export default function ConsultaStockPdaPage() {
                                 <TableHeader>
                                     <TableRow className="hover:bg-transparent">
                                         <TableHead className="font-bold text-secondary-foreground">Lote</TableHead>
+                                        <TableHead className="font-bold text-secondary-foreground">Caducidad</TableHead>
                                         <TableHead className="font-bold text-secondary-foreground">SSCC</TableHead>
                                         <TableHead className="font-bold text-secondary-foreground">Cantidad</TableHead>
-                                        <TableHead className="font-bold text-secondary-foreground">Caducidad</TableHead>
                                         <TableHead className="font-bold text-secondary-foreground">Ubicación</TableHead>
+                                        <TableHead className="font-bold text-secondary-foreground">Planta</TableHead>
                                     </TableRow>
                                 </TableHeader>
                                 <TableBody>
                                     {lotes.length === 0 ? (
                                         <TableRow className="hover:bg-transparent">
-                                            <TableCell colSpan={5}>
+                                            <TableCell colSpan={6}>
                                                 <EmptyState icon={PackageSearch} title="Sin stock" description="No hay lotes en stock para este artículo." />
                                             </TableCell>
                                         </TableRow>
@@ -370,6 +371,12 @@ export default function ConsultaStockPdaPage() {
                                         lotes.map((l, i) => (
                                             <TableRow key={`${l.sscc || l.lote}-${i}`} className={filaClassName(l, parsed?.sscc)}>
                                                 <TableCell className="font-mono text-sm">{l.lote}</TableCell>
+                                                <TableCell className="text-sm">
+                                                    {formatFecha(l.fechaCaducidad)}
+                                                    {l.fechaCaducidad === primerCaduca && (
+                                                        <Badge variant="warning" className="ml-2">Primero en caducar</Badge>
+                                                    )}
+                                                </TableCell>
                                                 <TableCell className="font-mono text-sm text-secondary-foreground">
                                                     {l.sscc ? l.sscc.slice(-6) : '-'}
                                                     {parsed?.sscc && l.sscc === parsed.sscc && (
@@ -377,13 +384,8 @@ export default function ConsultaStockPdaPage() {
                                                     )}
                                                 </TableCell>
                                                 <TableCell className="text-sm">{l.cantidad}</TableCell>
-                                                <TableCell className="text-sm">
-                                                    {formatFecha(l.fechaCaducidad)}
-                                                    {l.fechaCaducidad === primerCaduca && (
-                                                        <Badge variant="warning" className="ml-2">Primero en caducar</Badge>
-                                                    )}
-                                                </TableCell>
                                                 <TableCell className="text-sm text-secondary-foreground">{l.ubicacion || '-'}</TableCell>
+                                                <TableCell className="text-sm text-secondary-foreground">{l.planta || '-'}</TableCell>
                                             </TableRow>
                                         ))
                                     )}
@@ -397,7 +399,7 @@ export default function ConsultaStockPdaPage() {
             {!loading && !articulo && !error && searched && (
                 <EmptyState
                     icon={PackageSearch}
-                    title="Sin stock para este EAN"
+                    title="Sin stock para este palet"
                     description="Se ha buscado, pero no hay artículo/stock registrado para ese código en esta base de datos."
                     className="py-16"
                 />

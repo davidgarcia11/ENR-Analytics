@@ -70,6 +70,7 @@ dashboard/
 │   ├── sqlite.ts                 ← Conexión a SQLite (usuarios, presets, migraciones, roles, pantallas)
 │   ├── auth.ts                   ← JWT, bcrypt, SessionUser, cookieOptions
 │   ├── permissions.ts            ← Control de acceso por pantalla (getAllScreensConfig, requireScreenAccess)
+│   ├── panels.ts                 ← Fuente única de los paneles reales (clave, label, href, icono, descripción)
 │   ├── utils.ts                  ← Funciones auxiliares (fechas, cantidades, clases CSS)
 │   ├── reflex.ts                 ← Conexión a SQL Server (Reflex), análoga a db.ts para Oracle
 │   └── gs1.ts                    ← Parser de códigos de barras GS1-128 (EAN/lote/cantidad/SSCC/fechas)
@@ -221,6 +222,7 @@ CREATE TABLE users (
   must_change_password INTEGER DEFAULT 0,   -- 1 = forzar cambio en próximo login
   name TEXT NOT NULL DEFAULT '',             -- Nombre del usuario
   surname TEXT NOT NULL DEFAULT '',          -- Apellido del usuario
+  default_plant TEXT NOT NULL DEFAULT '',    -- id de lib/plants.ts, '' = sin planta por defecto (todas)
   created_at TEXT DEFAULT (datetime('now'))
 );
 
@@ -292,7 +294,7 @@ CREATE TABLE jde_status_descriptions (
 Todos los seeds usan `INSERT OR IGNORE` para no romper DBs existentes.
 
 **Migraciones automáticas:** Al arrancar, comprueba si faltan columnas y las añade con `ALTER TABLE`. Columnas gestionadas:
-- `must_change_password`, `name`, `surname` → tabla `users`
+- `must_change_password`, `name`, `surname`, `default_plant` → tabla `users`
 - `source` → tabla `query_logs`
 - `screen` → tabla `presets` (con `DEFAULT 'produccion'` para no romper presets anteriores)
 
@@ -316,8 +318,36 @@ interface SessionUser {
   role: string;
   name: string;
   surname: string;
+  defaultPlant: string;
 }
 ```
+
+### `lib/plants.ts` — Planta por defecto del usuario
+
+Fuente única de las 4 plantas físicas de la empresa (Aguilar, Corella, Funes, Tudefrigo). Cada
+sistema tiene su propio código para la misma planta física — JDE (`F0006.MCMCU`) y Reflex
+(`HLEMPLP.EMCDPO`) — así que `lib/plants.ts` define un `id` canónico por planta (el que se guarda
+en `users.default_plant`) y expone `plantJdeCode(id)` / `plantReflexCode(id)` / `plantLabel(id)`
+para traducirlo al código que necesita cada panel. `id` vacío = el usuario no tiene planta por
+defecto (se comporta como "Todas", igual que antes de tener esta función).
+
+Los códigos JDE se confirmaron consultando `F0006` (`WHERE MCSTYL = 'BP'`), no son una suposición:
+
+| Planta | `id` canónico | Código JDE | Código Reflex |
+|---|---|---|---|
+| Aguilar | `aguilar` | `10100` | `001` |
+| Corella | `corella` | `10200` | `002` |
+| Funes | `funes` | `10300` | `004` |
+| Tudefrigo | `tudefrigo` | `10003` | `006` |
+
+**Uso en los paneles con filtro de planta** (`/produccion`, `/preparacion-pedidos`, `/caducados`,
+`/consulta-stock-pda`): al cargar, cada panel espera a conocer la sesión (`/api/auth/me`) antes de
+disparar su primera consulta, resuelve `defaultPlant` al código de su propio sistema, y lo usa como
+filtro inicial — así la primera pantalla ya sale filtrada, sin parpadeo de "todas las plantas" y
+luego solo la suya. `/produccion` solo tiene como opción Aguilar/Corella/Funes (Tudefrigo es
+almacén, no se produce ahí): si la planta por defecto de un usuario es Tudefrigo, ese panel en
+concreto cae a "Todas", los demás paneles sí la aplican. `/compras` y `/comparativa-seres` no
+tienen filtro de planta, no usan este módulo.
 
 ### Flujo de autenticación
 
@@ -357,9 +387,9 @@ Solo usuarios con `role === 'admin'`. Si no eres admin, te redirige a `/producci
 El panel tiene cuatro pestañas: **Usuarios**, **Roles**, **Pantallas** y **Estados JDE**.
 
 #### Pestaña Usuarios
-1. **Crear usuario:** Formulario con campos Nombre, Apellido, Usuario (login), Contraseña, Rol (dropdown dinámico desde BD), checkbox "Forzar cambio de contraseña"
-2. **Listar usuarios:** Tabla con ID, Nombre completo, Usuario, Rol (badge), Fecha creación
-3. **Editar usuario:** Botón lápiz azul → fila editable (nombre, apellido, usuario, rol). Valida unicidad del username (409 inline)
+1. **Crear usuario:** Formulario con campos Nombre, Apellido, Usuario (login), Contraseña, Rol (dropdown dinámico desde BD), Planta por defecto (dropdown desde `lib/plants.ts` — "Todas" + las 4 plantas), checkbox "Forzar cambio de contraseña"
+2. **Listar usuarios:** Tabla con ID, Nombre completo, Usuario, Rol (badge), Planta, Fecha creación
+3. **Editar usuario:** Botón lápiz azul → fila editable (nombre, apellido, usuario, rol, planta por defecto). Valida unicidad del username (409 inline)
 4. **Resetear contraseña:** Botón llave ámbar → input inline → nueva contraseña + fuerza cambio en próximo login
 5. **Eliminar usuario:** Con confirmación. No permite auto-eliminación.
 
@@ -389,7 +419,7 @@ Edición de las descripciones de los códigos `F47011.SYEDSP` que se muestran en
 |---|---|---|
 | GET | `/api/admin/users` | Lista todos los usuarios |
 | POST | `/api/admin/users` | Crea usuario. Rol validado contra tabla `roles`. 409 si username duplicado |
-| PUT | `/api/admin/users/:id` | Edita datos (nombre, apellido, username, rol). 409 si username duplicado |
+| PUT | `/api/admin/users/:id` | Edita datos (nombre, apellido, username, rol, planta por defecto). 409 si username duplicado |
 | PATCH | `/api/admin/users/:id` | Resetea contraseña (fuerza cambio en próximo login) |
 | DELETE | `/api/admin/users/:id` | Elimina usuario (no permite auto-eliminación) |
 | GET | `/api/admin/roles` | Lista todos los roles |
@@ -858,21 +888,21 @@ Barra de navegación compartida por todos los paneles. Reemplaza el top bar dupl
 
 | Prop | Tipo | Descripción |
 |---|---|---|
-| `currentPanel` | `'produccion' \| 'pedidos' \| 'caducados' \| 'comparativa'` (opcional) | Panel activo (se marca con punto rojo en el dropdown). Se omite en páginas que usan `Navbar`/`AppShell` pero no son uno de los 4 paneles reales (ej. `/admin/logs`) — así no marcan ninguno como activo |
+| `currentPanel` | `PanelKey` (de `lib/panels.ts`, opcional) | Panel activo (se marca con punto rojo en el dropdown). Se omite en páginas que usan `Navbar`/`AppShell` pero no son uno de los paneles reales (ej. `/admin/logs`) — así no marcan ninguno como activo |
 | `user` | `SessionUser \| null` | Usuario de sesión. Si es null, muestra botón "Iniciar sesión" |
 | `onLogout` | `() => void` | Callback para cerrar sesión |
-| `onPresetsClick` | `() => void` (opcional) | Si se pasa, aparece el botón "Presets". Lo wirean los 4 paneles (`/produccion`, `/preparacion-pedidos`, `/caducados`, `/comparativa-seres`) sólo con sesión activa |
+| `onPresetsClick` | `() => void` (opcional) | Si se pasa, aparece el botón "Presets". Lo wirean los paneles con presets (`/produccion`, `/preparacion-pedidos`, `/caducados`, `/comparativa-seres`, `/compras`) sólo con sesión activa |
 
 **Comportamiento:**
 - Logo a la izquierda
 - Botón **"Paneles ▾"** con dropdown filtrado según permisos: solo muestra los paneles a los que el usuario actual tiene acceso. Si no hay ninguno accesible, el botón se oculta.
-- Botón "Presets" visible en los 4 paneles cuando hay sesión. Al pulsarlo, cada panel incrementa una señal interna (`presetsSignal`) que abre su propio panel/modal de presets. Los presets están aislados por `screen` (`produccion`, `pedidos`, `caducados`, `comparativa`)
+- Botón "Presets" visible en los paneles con presets cuando hay sesión. Al pulsarlo, cada panel incrementa una señal interna (`presetsSignal`) que abre su propio panel/modal de presets. Los presets están aislados por `screen` (`produccion`, `pedidos`, `caducados`, `comparativa`, `compras`)
 - Con sesión: nombre del usuario, botones Admin y Logs (solo si `role === 'admin'`), botón Salir
 - Sin sesión: enlace "Iniciar sesión"
 
 La Navbar obtiene la configuración de pantallas de `GET /api/screen-permissions` en un `useEffect` al montarse. Usa la misma función `canAccessPanel()` que las páginas para decidir qué mostrar.
 
-**Añadir un nuevo panel al dropdown:** añadir una entrada al array `PANELS` en `components/Navbar.tsx` y usar la nueva clave en `currentPanel`.
+**Añadir un nuevo panel al dropdown:** añadir una entrada a `PANELS` en `lib/panels.ts` — **no** en `Navbar.tsx` directamente. Es la fuente única que también usan la portada (`app/page.tsx`), el login (`app/login/page.tsx`) y `SCREEN_KEYS` de `app/admin/page.tsx`; ver `docs/design-system.md` §5.1 para el porqué (dos bugs reales salieron de tener esta lista copiada en cada sitio).
 
 ### `FilterPanel.tsx`
 

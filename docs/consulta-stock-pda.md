@@ -7,12 +7,17 @@
 
 ## 1. Descripción general
 
-Panel pensado para operarios de almacén: escanean el código de barras de un palet (con pistola
-láser en PDA, o cámara en móvil/PC) y el panel muestra el artículo identificado y el stock de ese
-artículo **ordenado por fecha de caducidad ascendente** (FEFO — First Expired, First Out), para
-saber qué palet coger primero. Un selector de planta permite acotar la consulta a un depósito
-concreto, y si el código escaneado es la etiqueta completa del palet (con SSCC), el panel avisa si
-ese palet en concreto es correcto para consumir o si hay otro lote que caduca antes (§7.2).
+Panel pensado para operarios de almacén: escanean el código de barras de la etiqueta del **palet**
+(con pistola láser en PDA, o cámara en móvil/PC) y el panel muestra el artículo identificado y el
+stock de ese artículo **ordenado por fecha de caducidad ascendente** (FEFO — First Expired, First
+Out), para saber qué palet coger primero. Un selector de planta permite acotar la consulta a un
+depósito concreto. Como el código escaneado siempre trae el SSCC del palet, el panel avisa además
+si ese palet en concreto es correcto para consumir o si hay otro lote que caduca antes (§7.2).
+
+**Solo se busca por SSCC** (número de palet, AI `00` de GS1-128) — nunca por el EAN del artículo.
+Si se escanea el EAN "pelado" de la etiqueta del artículo (sin SSCC), el panel rechaza el escaneo
+con el mensaje "Debes escanear el número de palet (SSCC), no el código del artículo": buscar solo
+por EAN no permite validar qué palet concreto coger (§7.2), que es el objetivo del panel.
 
 **Fuente de datos:** a diferencia del resto de paneles (Oracle/JDE), este consulta la base de datos
 de **Reflex (SQL Server)**, un sistema externo distinto de JDE. Es la primera integración del
@@ -68,9 +73,9 @@ mediante Application Identifiers (AI) en una sola cadena. `lib/gs1.ts` los separ
 - **Legible entre paréntesis**: `(01)08412345678905(10)LOTE123(17)260315(37)000012` — algunos
   lectores/configuraciones lo emiten así; los paréntesis delimitan cada campo sin necesitar FNC1.
 
-Solo se usa el **EAN** (`fields.ean`) para buscar el artículo; el resto de campos (lote, cantidad,
-SSCC, fechas) se muestran en pantalla como referencia del propio palet escaneado, no se usan en la
-consulta al servidor.
+Solo se usa el **SSCC** (`fields.sscc`) para buscar el artículo; el resto de campos (EAN, lote,
+cantidad, fechas) se muestran en pantalla como referencia del propio palet escaneado, no se usan en
+la consulta al servidor.
 
 ### 3.3 EAN-13 / DUN-14 sueltos (sin envoltorio de AIs)
 
@@ -84,7 +89,9 @@ AIs:
   indicador inicial**.
 
 Sin esto, un EAN-13/DUN-14 suelto se interpretaba erróneamente como un AI de 2 dígitos desconocido
-y se descartaba en silencio (bug real detectado al probar con lector físico en planta).
+y se descartaba en silencio (bug real detectado al probar con lector físico en planta). Este
+código sigue sin traer SSCC, así que el panel lo rechaza igual (§7) — solo se parsea para poder
+mostrarlo en pantalla si aparece junto a un SSCC válido, no para permitir la búsqueda por sí solo.
 
 > **Importante:** en versiones anteriores de este parser, el GTIN-14 (tanto vía AI `01` como
 > suelto) se convertía a EAN-13 quitando el dígito indicador inicial (asumiendo que casi siempre es
@@ -148,11 +155,11 @@ REFLEX_PASSWORD=
 
 ## 6. Esquema real de Reflex
 
-Confirmado y verificado contra la base de datos de test `RFXTEST`. Cinco tablas encadenadas:
+Confirmado y verificado contra la base de datos de test `RFXTEST`. Cuatro tablas encadenadas
+(la búsqueda es siempre por SSCC — `reflex.HLVLIDP`, que relaciona EAN → artículo, no se usa):
 
 | Tabla | Descripción | Campos usados |
 |---|---|---|
-| `reflex.HLVLIDP` | Identificador (EAN) de una variante logística de artículo | `VICIVL` (EAN), `VICART` (artículo) |
 | `reflex.HLARTIP` | Maestro de artículo (descripción + activo/inactivo) | `ARCART` (artículo), `ARLART` (descripción), `ARTOPD` (0=activo, 1=desactivado) |
 | `reflex.HLGEINP` | Elemento (lote/SSCC) en stock, por artículo | `GECART` (artículo), `GENSUP` (SSCC), `GELOTF` (lote), `GEQGEI` (cantidad), `GEJDLC`/`GEMDLC`/`GEADLC` (día/mes/año de DLC), `GEJDLU`/`GEMDLU`/`GEADLU` (día/mes/año de DLU, fallback) |
 | `reflex.HLSUPPP` | Soporte (palet/SSCC) → depósito + ubicación | `SUNSUP` (SSCC), `SUCDPO` (depósito), `SUNEMP` (nº ubicación) |
@@ -161,27 +168,27 @@ Confirmado y verificado contra la base de datos de test `RFXTEST`. Cinco tablas 
 ### 6.1 Encadenamiento (JOIN)
 
 ```
-HLVLIDP.VICIVL = @ean            → obtiene VICART (artículo)
-HLGEINP.GECART = HLVLIDP.VICART  → obtiene lote/SSCC/cantidad/caducidad (INNER JOIN)
-HLARTIP.ARCART = HLVLIDP.VICART
+HLGEINP.GECART IN (SELECT GECART FROM HLGEINP WHERE GENSUP = @sscc)
+                                  → identifica el artículo a partir del SSCC escaneado, y
+                                    devuelve TODOS los lotes de ese artículo (no solo el
+                                    SSCC escaneado), necesario para la validación FEFO (§7.2)
+HLARTIP.ARCART = HLGEINP.GECART
   AND HLARTIP.ARTOPD = 0          → descripción del artículo, solo si está activo (INNER JOIN)
 HLSUPPP.SUNSUP = HLGEINP.GENSUP  → obtiene depósito+nº ubicación del soporte (LEFT JOIN)
 HLEMPLP.EMCDPO = HLSUPPP.SUCDPO
   AND HLEMPLP.EMNEMP = HLSUPPP.SUNEMP → obtiene descripción/código de ubicación y planta (LEFT JOIN)
 ```
 
+El `IN` en vez de `=` en el filtro por SSCC es por si el mismo SSCC tuviera más de una fila en
+`HLGEINP`.
+
 Los JOIN hacia `HLSUPPP`/`HLEMPLP` son `LEFT` a propósito: si un lote no tiene soporte físico
 asociado (ej. en tránsito), sigue apareciendo en el listado con ubicación `null`, en vez de
 desaparecer silenciosamente.
 
-El JOIN hacia `HLARTIP` es **INNER** a propósito, con `ARTOPD = 0`: si el artículo del EAN
-escaneado está desactivado, la consulta no devuelve filas y el panel lo trata igual que un EAN no
+El JOIN hacia `HLARTIP` es **INNER** a propósito, con `ARTOPD = 0`: si el artículo del palet
+escaneado está desactivado, la consulta no devuelve filas y el panel lo trata igual que un SSCC no
 encontrado (no se distingue "desactivado" de "no existe").
-
-Este filtro es necesario, no defensivo de sobra: comprobado con datos reales, `HLVLIDP` puede tener
-**más de una fila para el mismo EAN** (ej. un artículo antiguo desactivado y otro activo que
-reutiliza el mismo `VICIVL`). Sin el `INNER JOIN` a `HLARTIP`, la consulta mezclaría lotes de ambos
-artículos bajo el mismo EAN.
 
 Filtro `g.GEQGEI > 0` — igual que `/caducados` con `LIPQOH > 0`, solo interesa stock con cantidad
 positiva.
@@ -222,6 +229,11 @@ El panel tiene un selector de planta (`<select>`, valor vacío = "Todas"). Si se
 parámetro `planta` (código, ej. `002`) se manda en **todas** las peticiones — filtra tanto el
 listado de lotes como la validación de SSCC (§7.2) a esa planta.
 
+Si el usuario logueado tiene una planta por defecto asignada en `/admin` (ver `lib/plants.ts` y
+`DOCUMENTACION.md` §4), al comprobar la sesión (`checkAccess`) se preselecciona en este `<select>`
+mapeada al código Reflex con `plantReflexCode()`. A diferencia de `/produccion`, este panel sí
+tiene opción para las 4 plantas, así que aquí nunca cae a "Todas" por planta no soportada.
+
 ### 6.4 Descripción de artículo
 
 `HLARTIP.ARLART` da la descripción legible del artículo (`ARCART` = código). El panel muestra
@@ -233,12 +245,11 @@ listado de lotes como la validación de SSCC (§7.2) a esa planta.
 
 | Parámetro | Tipo | Validación |
 |---|---|---|
-| `ean` | string, opcional* | `/^\d{8,14}$/` (EAN-8/12/13 o GTIN-14) — 400 si no cumple el formato cuando se manda |
+| `sscc` | string, **obligatorio** | `/^\d{18}$/` (SSCC de palet, AI `00` de GS1-128) — 400 si falta o no cumple el formato |
 | `planta` | string, opcional | Debe ser una clave de `PLANTAS` (`001`/`002`/`004`/`006`) — 400 si no |
-| `sscc` | string, opcional* | `/^\d{18}$/` (SSCC de palet, AI `00` de GS1-128) — 400 si no cumple |
 
-\* Hace falta **al menos uno** de `ean` o `sscc`; si falta `ean` (o viene "todo ceros", ver §7.3)
-y tampoco hay `sscc`, la API responde 400.
+No se acepta búsqueda por EAN. Si `sscc` falta, la API responde 400 con
+"Debes escanear el número de palet (SSCC)".
 
 Respuesta:
 ```json
@@ -288,9 +299,8 @@ marca (`bg-primary/10`) para localizarla de un vistazo en listados largos —
 
 ### 7.2 Validación FEFO por SSCC
 
-Cuando el código escaneado trae SSCC (AI `00` de GS1-128 — es decir, es la etiqueta del **palet**,
-no solo el EAN "pelado" del artículo), `page.tsx` manda ese SSCC a la API y esta responde si es
-correcto consumir ese palet concreto o si hay otro lote del mismo artículo que caduca antes.
+Como toda búsqueda se hace por SSCC, la API responde siempre si el palet escaneado es correcto para
+consumir o si hay otro lote del mismo artículo que caduca antes.
 
 La comparación se hace **después** de construir y ordenar `lotes` (mismo array que se devuelve
 para la tabla, ya filtrado por `planta` si se indicó) — no es una query aparte:
@@ -302,52 +312,29 @@ para la tabla, ya filtrado por `planta` si se indicó) — no es una query apart
 | `no_encontrado` | El SSCC no aparece en `lotes` (consumido ya, cantidad a 0, o no está en la planta filtrada) | "Palet no está en stock en Corella" (o sin "en X" si no se filtró planta) |
 | `sin_fecha` | El SSCC escaneado sí está en stock pero su `fechaCaducidad` es `null` (ni DLC ni DLU) | "Este palet no tiene fecha de caducidad registrada; no se puede comprobar si hay lotes anteriores" |
 
-Si el código escaneado **no** trae SSCC (ej. el EAN-13 suelto de la etiqueta del artículo), no se
-envía `sscc` y `validacionSscc` no aparece en la respuesta — el panel se comporta como antes,
-solo mostrando la tabla de lotes.
+### 7.3 Rechazo de códigos sin SSCC (EAN suelto, etc.)
 
-### 7.3 Búsqueda por SSCC cuando no hay EAN útil
+Si el código escaneado no trae SSCC (ej. el EAN-13/DUN-14 suelto de la etiqueta del artículo, o un
+código sin AI `00`), `handleScan()` en `page.tsx` no llama a la API: muestra directamente el error
+"Debes escanear el número de palet (SSCC), no el código del artículo". Buscar solo por EAN no
+permite identificar qué palet concreto se tiene en la mano ni validar FEFO por SSCC (§7.2), que es
+el objetivo del panel.
 
-Problema real de operativa: algunas etiquetas de palet no traen un EAN utilizable — o falta el AI
-`01`/`02` por completo (código con solo SSCC), o viene relleno a ceros (`00000000000000`).
-`parseGs1()` no distingue estos casos como error: simplemente `fields.ean` sale vacío en ambos.
-
-En el cliente, `handleScan()` en `page.tsx` tiene 3 ramas:
-
-1. `fields.ean` presente → se manda `ean` (+ `sscc` si lo hay), como el flujo normal.
-2. `fields.ean` vacío pero `fields.sscc` presente → se manda **solo** `sscc` (sin `ean`).
-3. Ninguno de los dos → error en pantalla, no se llama a la API.
-
-En el servidor, `route.ts` calcula `buscarPorSscc = !ean || EAN_SIN_DATOS_REGEX.test(ean)` (el
-regex detecta "todo ceros", cualquier longitud). Si es `true`:
-- Si no hay `sscc` tampoco → 400 ("no se ha podido identificar el artículo").
-- Si hay `sscc` → la identidad del artículo se resuelve directamente contra `HLGEINP` en vez de
-  `HLVLIDP`:
-  ```sql
-  FROM reflex.HLGEINP g
-  INNER JOIN reflex.HLARTIP a ON a.ARCART = g.GECART AND a.ARTOPD = 0
-  ...
-  WHERE g.GECART IN (SELECT GECART FROM reflex.HLGEINP WHERE GENSUP = @sscc)
-  ```
-  (`IN` en vez de `=`, por si un SSCC tuviera más de una fila — mismo motivo que en §6.1 con
-  `HLVLIDP`). El resto de la query (JOINs a `HLSUPPP`/`HLEMPLP`, filtro de planta, `ORDER BY`) es
-  idéntico al camino por EAN.
-
-Esto no requiere ningún cambio en la lógica de §7.2: `validacionSscc` opera sobre el array `lotes`
-final sin importar cómo se resolvió el artículo, así que la validación FEFO funciona igual venga
-el artículo por EAN o por SSCC.
+Por si algún llamador externo o futuro cambio de cliente saltara esta comprobación, el servidor
+(`route.ts`) también exige `sscc` y responde 400 si falta — la validación no depende solo del
+cliente.
 
 ---
 
 ## 8. Logging de consultas
 
 Cada consulta inserta un registro en `query_logs` (SQLite) con `source = 'consulta_stock_pda'` y
-`filters: { ean, planta?, sscc? }` (los dos últimos solo si se usaron). El logging nunca bloquea
-la respuesta (try/catch independiente), igual que en el resto de paneles.
+`filters: { sscc, planta? }` (`planta` solo si se usó). El logging nunca bloquea la respuesta
+(try/catch independiente), igual que en el resto de paneles.
 
 ---
 
 ## 9. Registro del panel
 
-- `components/Navbar.tsx` → entrada `consulta_stock_pda` en el array `PANELS` (icono `ScanBarcode`).
+- `lib/panels.ts` → entrada `consulta_stock_pda` en `PANELS` (icono `ScanBarcode`) — fuente única que alimenta Navbar, portada, login y permisos de admin (ver `docs/design-system.md` §5.1).
 - `lib/sqlite.ts` → seed en la tabla `screens` (`is_public=1` por defecto).

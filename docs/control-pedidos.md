@@ -236,6 +236,11 @@ Las filas de lote muestran el identificador de palet con el prefijo `↳` en la 
 
 **Planta:** `ArticleMultiSelect` con `showId={true}` (muestra código + nombre). Cargado dinámicamente desde `/api/plants`. Las plantas seleccionadas se envían al servidor como múltiples parámetros `plant`.
 
+Si el usuario logueado tiene una planta por defecto asignada en `/admin` (ver `lib/plants.ts` y
+`DOCUMENTACION.md` §4), `page.tsx` espera a conocer la sesión antes de la primera consulta y
+preselecciona esa planta en `selectedPlants` (mapeada al código JDE con `plantJdeCode()`) — el
+usuario puede añadir más plantas o quitarla igual que con cualquier selección manual.
+
 **Artículo:** `ArticleMultiSelect` con `showId={true}`. Lista dinámica calculada a partir de los artículos presentes en los pedidos cargados (`order.articles[].itemNumber + description`).
 
 **Destino:** `ArticleMultiSelect` con `showId={true}`. Lista dinámica calculada a partir de `order.shipToNum + shipToDesc`. La columna de la tabla muestra también el nombre de mailing (`shipToMlnm`) debajo del nombre principal, con el mismo estilo visual que Ref. Cliente en la columna Nº Pedido.
