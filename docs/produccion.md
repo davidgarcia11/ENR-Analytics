@@ -455,6 +455,15 @@ Las plantas (`Aguilar`, `Corella`, `Funes`) están hardcodeadas en el `<select>`
 
 El motivo: la lógica de sub-plantas de Funes depende del primer dígito de `TO55TAREA`, que es un campo custom de la empresa. No hay forma de determinar eso dinámicamente desde F0006.
 
+### Planta por defecto del usuario
+
+Si el usuario logueado tiene una planta por defecto asignada en `/admin` (ver `lib/plants.ts` y
+`DOCUMENTACION.md` §4), `page.tsx` espera a conocer la sesión antes de la primera consulta y la usa
+como filtro inicial — tanto en la consulta de datos como en el `<select>` de planta de
+`FilterPanel` (prop `initialPlant`, aplicado una sola vez vía `handlePlantChange`). Tudefrigo no es
+una opción en este panel (no se produce ahí): si esa es la planta por defecto del usuario, este
+panel en concreto cae a "Todas", aunque el resto de paneles sí la respeten.
+
 ### Señal para presets desde el header
 
 El botón "Presets" se renderiza dentro de `<Navbar>` (montado por `AppShell`), pero el panel de presets está dentro de `FilterPanel`. Para comunicarlos sin hacer que FilterPanel sea descendiente del header, se usa un "signal counter":

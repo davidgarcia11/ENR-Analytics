@@ -46,7 +46,7 @@ Todos usan `ArticleMultiSelect` — multi-selección con buscador interno, mismo
 | **Planta** | Multi-select | `/api/plants?screen=caducados` (F0006) | `plant[]` | `TRIM(A.LIMCU)` |
 | **Ubicación** | Multi-select, default=GENERICA | F4100 via respuesta API | `location[]` | `TRIM(A.LILOCN)` |
 
-**Default al cargar:** Ubicación preseleccionada en GENERICA (`__blank__`). El resto vacío (sin filtro).
+**Default al cargar:** Ubicación preseleccionada en GENERICA (`__blank__`). El resto vacío (sin filtro), salvo Planta: si el usuario logueado tiene una planta por defecto asignada en `/admin` (ver `lib/plants.ts` y `DOCUMENTACION.md` §4), `page.tsx` espera a conocer la sesión antes de la primera consulta y preselecciona esa planta en `selectedPlants` (mapeada al código JDE con `plantJdeCode()`).
 
 **Tipo de bloqueo** — a diferencia de los demás, este filtro aplica en **cualquier tipo** (Todos/Caducados/Obsoletos/Bloqueados), no solo en Bloqueados. Permite ver, por ejemplo, los caducados que además tienen un estado de lote activo.
 

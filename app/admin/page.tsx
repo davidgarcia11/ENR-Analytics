@@ -14,6 +14,7 @@ import { useToast } from "@/components/ui/toast"
 import { Loader2, Trash2, UserPlus, ArrowLeft, KeyRound, Pencil, FileText, ShieldCheck, Tag } from "lucide-react"
 import Image from "next/image"
 import { PANELS } from "@/lib/panels"
+import { PLANTS, plantLabel } from "@/lib/plants"
 
 interface User {
   id: number
@@ -21,6 +22,7 @@ interface User {
   role: string
   name: string
   surname: string
+  defaultPlant: string
   created_at: string
 }
 
@@ -71,6 +73,7 @@ export default function AdminPage() {
   const [newRole, setNewRole] = useState("user")
   const [newName, setNewName] = useState("")
   const [newSurname, setNewSurname] = useState("")
+  const [newDefaultPlant, setNewDefaultPlant] = useState("")
   const [forceChange, setForceChange] = useState(true)
   const [creating, setCreating] = useState(false)
   const [userError, setUserError] = useState("")
@@ -82,6 +85,7 @@ export default function AdminPage() {
   const [editSurname, setEditSurname] = useState("")
   const [editUsername, setEditUsername] = useState("")
   const [editRole, setEditRole] = useState("user")
+  const [editDefaultPlant, setEditDefaultPlant] = useState("")
   const [editError, setEditError] = useState("")
 
   // ─── Roles ───────────────────────────────────────────────────────────────────
@@ -199,12 +203,12 @@ export default function AdminPage() {
       const res = await fetch("/api/admin/users", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ username: newUsername, password: newPassword, role: newRole, mustChangePassword: forceChange, name: newName, surname: newSurname }),
+        body: JSON.stringify({ username: newUsername, password: newPassword, role: newRole, mustChangePassword: forceChange, name: newName, surname: newSurname, defaultPlant: newDefaultPlant }),
       })
       const data = await res.json()
       if (!res.ok) { setUserError(data.error); return }
       setUserSuccess(`Usuario "${newUsername}" creado`)
-      setNewUsername(""); setNewPassword(""); setNewRole("user"); setNewName(""); setNewSurname(""); setForceChange(true)
+      setNewUsername(""); setNewPassword(""); setNewRole("user"); setNewName(""); setNewSurname(""); setNewDefaultPlant(""); setForceChange(true)
       loadUsers()
     } catch { setUserError("Error de conexión") } finally { setCreating(false) }
   }
@@ -243,7 +247,8 @@ export default function AdminPage() {
 
   const startEdit = (u: User) => {
     setEditUserId(u.id); setEditName(u.name || ""); setEditSurname(u.surname || "")
-    setEditUsername(u.username); setEditRole(u.role); setEditError(""); setResetUserId(null)
+    setEditUsername(u.username); setEditRole(u.role); setEditDefaultPlant(u.defaultPlant || "")
+    setEditError(""); setResetUserId(null)
   }
 
   const saveEdit = async () => {
@@ -253,7 +258,7 @@ export default function AdminPage() {
       const res = await fetch(`/api/admin/users/${editUserId}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ username: editUsername, name: editName, surname: editSurname, role: editRole }),
+        body: JSON.stringify({ username: editUsername, name: editName, surname: editSurname, role: editRole, defaultPlant: editDefaultPlant }),
       })
       const data = await res.json()
       if (!res.ok) { setEditError(data.error); return }
@@ -407,6 +412,13 @@ export default function AdminPage() {
                         {roles.map(r => <option key={r.name} value={r.name}>{r.label}</option>)}
                       </select>
                     </div>
+                    <div className="space-y-1.5">
+                      <label className="text-xs font-semibold text-secondary-foreground">Planta por defecto</label>
+                      <select value={newDefaultPlant} onChange={e => setNewDefaultPlant(e.target.value)} className="flex h-9 w-[150px] rounded-md border border-input bg-card px-3 py-1 text-sm shadow-sm">
+                        <option value="">Todas</option>
+                        {PLANTS.map(p => <option key={p.id} value={p.id}>{p.label}</option>)}
+                      </select>
+                    </div>
                     <Button type="submit" disabled={creating} className="font-semibold">
                       {creating ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <UserPlus className="mr-2 h-4 w-4" />}
                       Crear
@@ -438,6 +450,7 @@ export default function AdminPage() {
                         <TableHead className="font-bold text-secondary-foreground">Nombre</TableHead>
                         <TableHead className="font-bold text-secondary-foreground">Usuario</TableHead>
                         <TableHead className="font-bold text-secondary-foreground">Rol</TableHead>
+                        <TableHead className="font-bold text-secondary-foreground">Planta</TableHead>
                         <TableHead className="font-bold text-secondary-foreground">Creado</TableHead>
                         <TableHead className="font-bold text-secondary-foreground text-right">Acciones</TableHead>
                       </TableRow>
@@ -461,6 +474,12 @@ export default function AdminPage() {
                                 {roles.map(r => <option key={r.name} value={r.name}>{r.label}</option>)}
                               </select>
                             </TableCell>
+                            <TableCell>
+                              <select value={editDefaultPlant} onChange={e => setEditDefaultPlant(e.target.value)} className="h-8 rounded-md border border-input bg-card px-2 text-sm">
+                                <option value="">Todas</option>
+                                {PLANTS.map(p => <option key={p.id} value={p.id}>{p.label}</option>)}
+                              </select>
+                            </TableCell>
                             <TableCell colSpan={2}>
                               <div className="flex items-center gap-2">
                                 <Button size="sm" onClick={saveEdit} className="text-xs font-semibold h-8">Guardar</Button>
@@ -479,6 +498,7 @@ export default function AdminPage() {
                                 {roles.find(r => r.name === u.role)?.label ?? u.role}
                               </Badge>
                             </TableCell>
+                            <TableCell className="text-muted-foreground text-sm">{plantLabel(u.defaultPlant) || 'Todas'}</TableCell>
                             <TableCell className="text-muted-foreground text-sm">{new Date(u.created_at).toLocaleDateString('es-ES')}</TableCell>
                             <TableCell className="text-right space-x-1">
                               <Button variant="ghost" size="sm" onClick={() => startEdit(u)} className="text-blue-500 hover:text-blue-700 hover:bg-blue-50" title="Editar usuario">
@@ -496,7 +516,7 @@ export default function AdminPage() {
                       ))}
                       {resetUserId && (
                         <TableRow className="bg-amber-50 border-amber-200">
-                          <TableCell colSpan={6}>
+                          <TableCell colSpan={7}>
                             <div className="flex items-center gap-3">
                               <span className="text-sm font-medium text-amber-700">Nueva contraseña para &quot;{users.find(u => u.id === resetUserId)?.username}&quot;:</span>
                               <Input type="password" value={resetPassword} onChange={e => setResetPassword(e.target.value)} placeholder="Nueva contraseña" className="h-8 w-[200px] text-sm" autoFocus onKeyDown={e => e.key === 'Enter' && resetUserPassword(resetUserId)} />

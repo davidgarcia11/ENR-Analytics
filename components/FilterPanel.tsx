@@ -38,6 +38,9 @@ export interface AppliedFilters {
 
 interface FilterPanelProps {
   sessionUser: SessionUser | null
+  // Planta por defecto del usuario ya resuelta al código de este panel (o null si no
+  // tiene, o si su planta no existe aquí). Solo se aplica una vez, al conocerse.
+  initialPlant?: string | null
   // Artículos disponibles vienen del Dashboard (se actualizan tras cada búsqueda)
   availableArticles: { id: string; description: string }[]
   loading: boolean        // para deshabilitar el botón Filtrar mientras carga
@@ -53,7 +56,7 @@ interface FilterPanelProps {
 // --- COMPONENTE ---
 
 export function FilterPanel({
-  sessionUser, availableArticles, loading, dataLength,
+  sessionUser, initialPlant, availableArticles, loading, dataLength,
   groupByArticle, onApply, onExcel, onGroupByArticleChange,
   openPresetsSignal,
 }: FilterPanelProps) {
@@ -226,6 +229,12 @@ export function FilterPanel({
     else if (plantValue === '10200') newSubLine = '2'
     setFilters(prev => ({ ...prev, plant: plantValue, subLine: newSubLine }))
   }
+
+  // Preselecciona la planta por defecto del usuario en cuanto se conoce (no pisa
+  // cambios manuales posteriores: initialPlant no vuelve a cambiar tras resolverse).
+  useEffect(() => {
+    if (initialPlant) handlePlantChange(initialPlant)
+  }, [initialPlant])
 
   const clearFilters = () => {
     setFilters({ plant: "all", subLine: "all", startDate: todayStr, endDate: todayStr, startTime: "", endTime: "" })
