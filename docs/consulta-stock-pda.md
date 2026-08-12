@@ -229,6 +229,11 @@ El panel tiene un selector de planta (`<select>`, valor vacío = "Todas"). Si se
 parámetro `planta` (código, ej. `002`) se manda en **todas** las peticiones — filtra tanto el
 listado de lotes como la validación de SSCC (§7.2) a esa planta.
 
+Si el usuario logueado tiene una planta por defecto asignada en `/admin` (ver `lib/plants.ts` y
+`DOCUMENTACION.md` §4), al comprobar la sesión (`checkAccess`) se preselecciona en este `<select>`
+mapeada al código Reflex con `plantReflexCode()`. A diferencia de `/produccion`, este panel sí
+tiene opción para las 4 plantas, así que aquí nunca cae a "Todas" por planta no soportada.
+
 ### 6.4 Descripción de artículo
 
 `HLARTIP.ARLART` da la descripción legible del artículo (`ARCART` = código). El panel muestra

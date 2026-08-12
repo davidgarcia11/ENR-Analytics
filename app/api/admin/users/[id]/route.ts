@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getDb } from '@/lib/sqlite';
 import { verifySession, hashPassword } from '@/lib/auth';
+import { PLANTS } from '@/lib/plants';
 
 // PUT: editar datos de un usuario (solo admin)
 export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
@@ -11,7 +12,7 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
 
   const { id } = await params;
   const userId = Number(id);
-  const { username, name, surname, role } = await req.json();
+  const { username, name, surname, role, defaultPlant } = await req.json();
 
   if (!username || !username.trim()) {
     return NextResponse.json({ error: 'El usuario es obligatorio' }, { status: 400 });
@@ -27,8 +28,9 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
 
   const validRole = db.prepare('SELECT name FROM roles WHERE name = ?').get(role) as { name: string } | undefined;
   const userRole = validRole ? role : 'user';
-  db.prepare('UPDATE users SET username = ?, name = ?, surname = ?, role = ? WHERE id = ?')
-    .run(username.trim(), name || '', surname || '', userRole, userId);
+  const userDefaultPlant = PLANTS.some(p => p.id === defaultPlant) ? defaultPlant : '';
+  db.prepare('UPDATE users SET username = ?, name = ?, surname = ?, role = ?, default_plant = ? WHERE id = ?')
+    .run(username.trim(), name || '', surname || '', userRole, userDefaultPlant, userId);
 
   return NextResponse.json({ ok: true });
 }

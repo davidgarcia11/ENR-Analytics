@@ -12,8 +12,9 @@ import { Spinner } from "@/components/ui/spinner"
 import { EmptyState } from "@/components/ui/empty-state"
 import { ScanBarcode, Camera, AlertTriangle, CheckCircle2, PackageSearch, X } from "lucide-react"
 import { parseGs1, type Gs1Fields } from "@/lib/gs1"
+import { plantReflexCode } from "@/lib/plants"
 
-interface SessionUser { id: number; username: string; role: string; name: string; surname: string }
+interface SessionUser { id: number; username: string; role: string; name: string; surname: string; defaultPlant: string }
 
 interface LoteStock {
     lote: string
@@ -108,6 +109,8 @@ export default function ConsultaStockPdaPage() {
                 const user = res.ok ? await res.json() : null
                 if (user?.mustChangePassword) { router.push('/cambiar-contrasena'); return }
                 setSessionUser(user)
+                const defaultReflexCode = plantReflexCode(user?.defaultPlant)
+                if (defaultReflexCode) setPlanta(defaultReflexCode)
                 const screensRes = await fetch('/api/screen-permissions')
                 if (screensRes.ok) {
                     const screens = await screensRes.json()

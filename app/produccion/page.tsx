@@ -23,6 +23,19 @@ import { useRouter } from "next/navigation"
 import { FilterPanel, AppliedFilters } from "@/components/FilterPanel"
 import MermaBreakdown, { MermaCode } from "@/components/MermaBreakdown"
 import MermaCellPopover from "@/components/MermaCellPopover"
+import { plantJdeCode } from "@/lib/plants"
+
+// Plantas JDE que existen como opción en este panel (ver select de planta más abajo).
+// Tudefrigo (10003) es solo almacén, no se produce ahí, así que no tiene opción aquí:
+// si la planta por defecto de un usuario es Tudefrigo, este panel cae a "Todas".
+const PRODUCCION_PLANT_CODES = new Set(['10100', '10200', '10300'])
+
+// Resuelve la planta por defecto del usuario al código JDE de este panel, o null
+// si no tiene una asignada o si esa planta no existe aquí (ver PRODUCCION_PLANT_CODES).
+function resolveInitialPlant(user: SessionUser | null): string | null {
+  const code = plantJdeCode(user?.defaultPlant)
+  return code && PRODUCCION_PLANT_CODES.has(code) ? code : null
+}
 
 // Construye los URLSearchParams para los endpoints de producción a partir de los filtros aplicados.
 // Se reutiliza en /api/production y /api/production/merma-breakdown.
@@ -46,7 +59,7 @@ function buildProductionParams(filtersArg: AppliedFilters): URLSearchParams {
   return params
 }
 
-interface SessionUser { id: number; username: string; role: string; name: string; surname: string }
+interface SessionUser { id: number; username: string; role: string; name: string; surname: string; defaultPlant: string }
 
 // Fila de producción tal como la devuelve GET /api/production (fecha ya serializada a ISO string)
 interface ProductionRow {
@@ -191,11 +204,11 @@ const ProductionTable = memo(({ displayData, mermaP75, groupByArticle, loading, 
 ProductionTable.displayName = 'ProductionTable';
 
 // Genera los filtros por defecto con la fecha de hoy
-function makeTodayFilters(): AppliedFilters {
+function makeTodayFilters(plant: string = 'all'): AppliedFilters {
   const d = new Date()
   const todayStr = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
   return {
-    plant: 'all', subLine: 'all',
+    plant, subLine: 'all',
     startDate: todayStr, endDate: todayStr,
     startTime: '', endTime: '',
     selectedArticles: [], selectedPrp6: [], selectedSrp3: [], selectedSrp5: [],
@@ -245,12 +258,17 @@ export default function Dashboard() {
   const [breakdownOpen, setBreakdownOpen] = useState(false) // Arranca colapsado, el usuario lo abre si le interesa
 
   // --- CARGA INICIAL ---
+  // Espera a conocer la sesión antes de disparar la primera consulta, para que
+  // ya venga filtrada por la planta por defecto del usuario (si tiene una) y no
+  // se vea primero "todas las plantas" y luego solo la suya.
   useEffect(() => {
-    const initial = makeTodayFilters()
-    setAppliedFilters(initial)
-    fetchData(1, true, false, initial)
-    fetchGlobalBreakdown(initial)
-    checkSession()
+    (async () => {
+      const user = await checkSession()
+      const initial = makeTodayFilters(resolveInitialPlant(user) ?? 'all')
+      setAppliedFilters(initial)
+      fetchData(1, true, false, initial)
+      fetchGlobalBreakdown(initial)
+    })()
   }, [])
 
   // Pide el desglose global de merma para los filtros aplicados.
@@ -279,7 +297,7 @@ export default function Dashboard() {
 
   // --- AUTENTICACIÓN ---
 
-  const checkSession = async () => {
+  const checkSession = async (): Promise<SessionUser | null> => {
     try {
       const res = await fetch('/api/auth/me')
       let user = null
@@ -287,7 +305,7 @@ export default function Dashboard() {
         user = await res.json()
         if (user.mustChangePassword) {
           router.push('/cambiar-contrasena')
-          return
+          return null
         }
         setSessionUser(user)
       }
@@ -298,11 +316,12 @@ export default function Dashboard() {
         if (mine && !mine.is_public) {
           if (!user || (user.role !== 'admin' && !mine.allowed_roles.includes(user.role))) {
             router.push('/login')
-            return
+            return null
           }
         }
       }
-    } catch { /* no logueado, ok */ }
+      return user
+    } catch { return null /* no logueado, ok */ }
   }
 
   const logout = async () => {
@@ -564,6 +583,7 @@ export default function Dashboard() {
             Esto evita re-renders del Dashboard (tabla + métricas) al editar los filtros. */}
         <FilterPanel
           sessionUser={sessionUser}
+          initialPlant={resolveInitialPlant(sessionUser)}
           availableArticles={availableArticles}
           loading={loading}
           dataLength={data.length}

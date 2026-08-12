@@ -26,6 +26,7 @@ export function getDb(): Database.Database {
       must_change_password INTEGER NOT NULL DEFAULT 0,
       name TEXT NOT NULL DEFAULT '',
       surname TEXT NOT NULL DEFAULT '',
+      default_plant TEXT NOT NULL DEFAULT '',
       created_at TEXT DEFAULT (datetime('now'))
     );
 
@@ -90,6 +91,9 @@ export function getDb(): Database.Database {
   }
   if (!columns.some(c => c.name === 'surname')) {
     _db.exec("ALTER TABLE users ADD COLUMN surname TEXT NOT NULL DEFAULT ''");
+  }
+  if (!columns.some(c => c.name === 'default_plant')) {
+    _db.exec("ALTER TABLE users ADD COLUMN default_plant TEXT NOT NULL DEFAULT ''");
   }
 
   // Migración: añadir columna source a query_logs si no existe
