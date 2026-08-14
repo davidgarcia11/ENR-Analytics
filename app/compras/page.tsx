@@ -34,6 +34,7 @@ interface Row {
     item: string
     descripcion: string
     familia: string
+    marca: string
     mesLabel: string
     gramaje: number | null
     previsto: { cantidad: number | null; precioUnitario: number | null; importe: number | null; kg: number | null }
@@ -210,10 +211,12 @@ export default function ComprasPage() {
     const initialRange = presetToRange('mes_actual')!
     const [filters, setFilters] = useState({ startDate: initialRange.startDate, endDate: initialRange.endDate })
     const [selectedItems, setSelectedItems] = useState<string[]>([])
+    const [selectedMarcas, setSelectedMarcas] = useState<string[]>([])
 
     const [rows, setRows] = useState<Row[]>([])
     const [resumen, setResumen] = useState<Resumen>(RESUMEN_VACIO)
     const [availableArticles, setAvailableArticles] = useState<{ id: string; description: string }[]>([])
+    const [availableMarcas, setAvailableMarcas] = useState<{ id: string; description: string }[]>([])
     const [loading, setLoading] = useState(false)
     const [error, setError] = useState<string | null>(null)
     const [searched, setSearched] = useState(false)
@@ -248,7 +251,7 @@ export default function ComprasPage() {
         setSessionUser(null)
     }
 
-    const fetchData = useCallback(async (f: typeof filters, items: string[]) => {
+    const fetchData = useCallback(async (f: typeof filters, items: string[], marcas: string[]) => {
         setLoading(true)
         setError(null)
         setSearched(true)
@@ -257,6 +260,7 @@ export default function ComprasPage() {
             if (f.startDate) params.set('startDate', f.startDate)
             if (f.endDate) params.set('endDate', f.endDate)
             items.forEach(it => params.append('item', it))
+            marcas.forEach(m => params.append('marca', m))
             const res = await fetch(`/api/compras?${params}`)
             const data = await res.json()
             if (!res.ok) throw new Error(data.error || `Error ${res.status}`)
@@ -275,7 +279,15 @@ export default function ComprasPage() {
     }, [toast])
 
     // Carga inicial con el rango por defecto (año actual)
-    useEffect(() => { fetchData(filters, selectedItems) }, [])
+    useEffect(() => { fetchData(filters, selectedItems, selectedMarcas) }, [])
+
+    // Opciones de Marca (IMSRP4, mismo campo/patrón que el filtro Marca de /produccion)
+    useEffect(() => {
+        fetch('/api/categories?field=srp4&screen=compras')
+            .then(res => res.ok ? res.json() : [])
+            .then(data => setAvailableMarcas(Array.isArray(data) ? data : []))
+            .catch(() => setAvailableMarcas([]))
+    }, [])
 
     const handlePeriodChange = (preset: PeriodPreset) => {
         setPeriodPreset(preset)
@@ -286,13 +298,13 @@ export default function ComprasPage() {
         const range = presetToRange(preset)
         if (range) {
             setFilters(range)
-            fetchData(range, selectedItems)
+            fetchData(range, selectedItems, selectedMarcas)
         }
     }
 
     const applyFilters = () => {
         setPeriodPreset('personalizado')
-        fetchData(filters, selectedItems)
+        fetchData(filters, selectedItems, selectedMarcas)
     }
 
     const clearFilters = () => {
@@ -300,10 +312,11 @@ export default function ComprasPage() {
         setPeriodPreset('mes_actual')
         setFilters(range)
         setSelectedItems([])
-        fetchData(range, [])
+        setSelectedMarcas([])
+        fetchData(range, [], [])
     }
 
-    const getPresetFilters = () => ({ startDate: filters.startDate, endDate: filters.endDate, selectedItems })
+    const getPresetFilters = () => ({ startDate: filters.startDate, endDate: filters.endDate, selectedItems, selectedMarcas })
     const applyPresetFilters = (f: Record<string, unknown>) => {
         // Si el preset no incluye fechas (checkbox "Incluir fechas" desmarcado al guardarlo),
         // se mantiene el rango actual en vez de vaciarlo.
@@ -312,10 +325,12 @@ export default function ComprasPage() {
             endDate: (f.endDate as string) || filters.endDate,
         }
         const items = (f.selectedItems as string[]) || []
+        const marcas = (f.selectedMarcas as string[]) || []
         setPeriodPreset('personalizado')
         setFilters(next)
         setSelectedItems(items)
-        fetchData(next, items)
+        setSelectedMarcas(marcas)
+        fetchData(next, items, marcas)
     }
 
     // Serie de tendencia según la métrica de la pestaña activa
@@ -350,7 +365,7 @@ export default function ComprasPage() {
                     getFilters={getPresetFilters}
                     applyFilters={applyPresetFilters}
                     dateFields={['startDate', 'endDate']}
-                    hint="Se guardarán los artículos seleccionados."
+                    hint="Se guardarán los artículos y marcas seleccionados."
                 />
             )}
 
@@ -369,6 +384,10 @@ export default function ComprasPage() {
                     <div className="grid gap-1.5 min-w-[240px]">
                         <label className="text-xs font-semibold text-secondary-foreground">Artículos</label>
                         <ArticleMultiSelect articles={availableArticles} selected={selectedItems} onChange={setSelectedItems} />
+                    </div>
+                    <div className="grid gap-1.5 min-w-[170px]">
+                        <label className="text-xs font-semibold text-secondary-foreground">Marca</label>
+                        <ArticleMultiSelect articles={availableMarcas} selected={selectedMarcas} onChange={setSelectedMarcas} label="Marca" />
                     </div>
                     <PresetQuickSelect presets={presets} onSelect={(p) => applyPresetFilters(JSON.parse(p.filters))} />
                     <div className="flex gap-2">

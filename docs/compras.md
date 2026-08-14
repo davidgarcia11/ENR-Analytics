@@ -210,9 +210,9 @@ No se creó ningún componente nuevo en `components/ui/` para esto — todo vive
 
 `<PresetPanel>` se usa con `dateFields={['startDate', 'endDate']}` (ver `docs/design-system.md` §5):
 al guardar un preset aparece el checkbox "Incluir fechas" (desmarcado por defecto, igual que en
-producción); si no se marca, el preset guarda solo los artículos seleccionados, sin fechas. Al cargar
-un preset sin fechas, `applyPresetFilters` mantiene el rango de fechas ya puesto en pantalla en vez
-de vaciarlo.
+producción); si no se marca, el preset guarda solo los artículos y marcas seleccionados, sin fechas.
+Al cargar un preset sin fechas, `applyPresetFilters` mantiene el rango de fechas ya puesto en pantalla
+en vez de vaciarlo.
 
 ---
 
@@ -223,15 +223,16 @@ de vaciarlo.
 | `startDate` | string `YYYY-MM-DD`, opcional | Default: día 1 del mes en curso (ver §11, no el año — rendimiento) |
 | `endDate` | string `YYYY-MM-DD`, opcional | Default: último día del mes en curso |
 | `item` | string, repetible, opcional | Filtro por uno o varios artículos (código largo/visible) |
+| `marca` | string, repetible, opcional | Filtro por Marca (`F4101.IMSRP4`, mismo campo que el filtro Marca de `/produccion`). Ver nota abajo sobre cuándo se aplica. |
 
 Respuesta (resumida, ver también `app/api/compras/route.ts`):
 
 ```json
 {
-  "filters": { "startDate": "2026-01-01", "endDate": "2026-12-31", "items": [] },
+  "filters": { "startDate": "2026-01-01", "endDate": "2026-12-31", "items": [], "marcas": [] },
   "rows": [
     {
-      "item": "12345", "descripcion": "...", "familia": "COCIDOS",
+      "item": "12345", "descripcion": "...", "familia": "COCIDOS", "marca": "01",
       "anio": 2026, "mes": 7, "mesLabel": "2026-07",
       "gramaje": 500,
       "previsto": { "cantidad": 5000, "precioUnitario": 3.42, "importe": 17100, "kg": 2500 },
@@ -262,12 +263,24 @@ Respuesta (resumida, ver también `app/api/compras/route.ts`):
 Kg descrito en §13.1 — `gramaje` es `null` cuando el artículo no tiene fila en `F554101` o `AAZE03`
 no es un número válido (`> 0`).
 
+### 7.1 Filtro por Marca — se aplica después de construir `rows`, no en Oracle
+
+A diferencia de `item` (que sí reduce lo que se pide a F3460/F4211/F4105), el filtro `marca` se
+resuelve **igual que `familia`**: ambos vienen de `F4101.IMSRP2`/`IMSRP4`, que solo se cruza *después*
+de saber qué artículos aparecieron en la previsión/venta real de ese rango de fechas (ver §3.1, el
+`shortItemMap`). Por eso `marcas` filtra el array `rows` ya construido, antes de llamar a
+`buildResumen()` — así que reduce lo mostrado en KPIs/tabla, pero no acelera la consulta a Oracle (el
+coste de F3460/F4211 para el rango de fechas se paga igual, con o sin filtro de marca).
+
+El desplegable de Marca en `app/compras/page.tsx` reutiliza `/api/categories?field=srp4&screen=compras`
+(mismo endpoint que ya usa `/produccion`), no una consulta propia.
+
 ---
 
 ## 8. Logging de consultas
 
 Cada consulta inserta un registro en `query_logs` (SQLite) con `source = 'compras'` y
-`filters: { startDate, endDate, items }`. El logging nunca bloquea la respuesta (try/catch
+`filters: { startDate, endDate, items, marcas }`. El logging nunca bloquea la respuesta (try/catch
 independiente), igual que en el resto de paneles.
 
 ---
