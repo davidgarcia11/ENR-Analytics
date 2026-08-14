@@ -42,6 +42,7 @@ export async function GET(req: NextRequest) {
 
     const { searchParams } = new URL(req.url);
     const items = searchParams.getAll('item');
+    const marcas = searchParams.getAll('marca'); // Filtro por Marca (IMSRP4 de F4101, ver /api/categories?field=srp4)
     const now = new Date();
     // Default "este mes", no el año — sin filtro SDNXTR el año completo escanea ~165.000 líneas
     // de F4211 y tarda ~2,5min (ver docs/compras.md §3.3/§11). El mes es rápido.
@@ -127,7 +128,7 @@ export async function GET(req: NextRequest) {
 
         if (itemIds.length === 0) {
             return NextResponse.json({
-                filters: { startDate: startDateStr, endDate: endDateStr, items },
+                filters: { startDate: startDateStr, endDate: endDateStr, items, marcas },
                 rows: [],
                 resumen: emptyResumen(),
             });
@@ -137,8 +138,8 @@ export async function GET(req: NextRequest) {
         itemIds.forEach((id, i) => { idBinds[`id${i}`] = id; });
         const idPlaceholders = itemIds.map((_, i) => `:id${i}`).join(', ');
 
-        // D) Metadata de artículo (descripción/familia, para mostrar en la tabla)
-        const metaSql = `SELECT TRIM(IMITM) AS ITEM, TRIM(IMDSC1) AS DESCRIPCION, TRIM(IMSRP2) AS FAMILIA FROM F4101 WHERE IMITM IN (${idPlaceholders})`;
+        // D) Metadata de artículo (descripción/familia/marca, para mostrar y filtrar en la tabla)
+        const metaSql = `SELECT TRIM(IMITM) AS ITEM, TRIM(IMDSC1) AS DESCRIPCION, TRIM(IMSRP2) AS FAMILIA, TRIM(IMSRP4) AS MARCA FROM F4101 WHERE IMITM IN (${idPlaceholders})`;
         // E) Gramaje (F554101.AAZE03 = gramos por unidad, directo, sin pasar por la descripción
         // de prodctl.f0005) — mismo patrón de artículo corto que usa /produccion para el filtro
         // de gramaje (AAITM = IMITM).
@@ -149,11 +150,12 @@ export async function GET(req: NextRequest) {
             conn.execute(gramajeSql, idBinds),
         ]);
 
-        const metaMap = new Map<string, { descripcion: string; familia: string }>();
+        const metaMap = new Map<string, { descripcion: string; familia: string; marca: string }>();
         (metaResult.rows as any[]).forEach(r => {
             metaMap.set(String(r.ITEM).trim(), {
                 descripcion: String(r.DESCRIPCION || '').trim(),
                 familia: String(r.FAMILIA || '').trim(),
+                marca: String(r.MARCA || '').trim(),
             });
         });
 
@@ -239,6 +241,7 @@ export async function GET(req: NextRequest) {
                 item: b.item,
                 descripcion: meta?.descripcion || '',
                 familia: meta?.familia || '',
+                marca: meta?.marca || '',
                 anio: b.anio,
                 mes: b.mes,
                 mesLabel: `${b.anio}-${String(b.mes).padStart(2, '0')}`,
@@ -255,24 +258,28 @@ export async function GET(req: NextRequest) {
             };
         }).sort((a, b) => a.mesLabel === b.mesLabel ? a.item.localeCompare(b.item) : a.mesLabel.localeCompare(b.mesLabel));
 
-        const resumen = buildResumen(rows);
+        // Marca (IMSRP4) solo se conoce tras cruzar con F4101, igual que familia — se filtra aquí
+        // sobre las filas ya construidas, no en las queries a F3460/F4211/F4105.
+        const rowsFiltradas = marcas.length > 0 ? rows.filter(r => marcas.includes(r.marca)) : rows;
+
+        const resumen = buildResumen(rowsFiltradas);
         // Artículos (distintos) sin gramaje en F554101, para que se puedan revisar de un vistazo
         // en vez de tener que pasar el ratón fila a fila por el aviso.
-        resumen.articulosSinGramaje = Array.from(new Set(rows.filter(r => r.gramaje == null).map(r => r.item))).sort();
+        resumen.articulosSinGramaje = Array.from(new Set(rowsFiltradas.filter(r => r.gramaje == null).map(r => r.item))).sort();
 
         // Registrar consulta en logs (nunca bloquea la respuesta)
         try {
             const user = await verifySession().catch(() => null);
-            const filters = { startDate: startDateStr, endDate: endDateStr, items };
+            const filters = { startDate: startDateStr, endDate: endDateStr, items, marcas };
             const db = getDb();
             db.prepare(
                 'INSERT INTO query_logs (user_id, username, source, filters, result_count, execution_time_ms) VALUES (?, ?, ?, ?, ?, ?)'
-            ).run(user?.id ?? null, user ? user.username : 'Invitado', 'compras', JSON.stringify(filters), rows.length, Date.now() - startTime);
+            ).run(user?.id ?? null, user ? user.username : 'Invitado', 'compras', JSON.stringify(filters), rowsFiltradas.length, Date.now() - startTime);
         } catch (logErr) {
             console.error('Error logging query:', logErr);
         }
 
-        return NextResponse.json({ filters: { startDate: startDateStr, endDate: endDateStr, items }, rows, resumen });
+        return NextResponse.json({ filters: { startDate: startDateStr, endDate: endDateStr, items, marcas }, rows: rowsFiltradas, resumen });
     } catch (err: any) {
         console.error('Database Error:', err);
         return NextResponse.json({ error: err.message }, { status: 500 });
