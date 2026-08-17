@@ -3,6 +3,7 @@
 import * as React from "react"
 import { useState, useEffect, useCallback, useRef, useMemo } from "react"
 import { useRouter } from "next/navigation"
+import * as XLSX from "xlsx"
 import {
     LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
     RadialBarChart, RadialBar, PolarAngleAxis,
@@ -21,7 +22,7 @@ import { ArticleMultiSelect } from "@/components/ArticleMultiSelect"
 import { usePresets, PresetPanel, PresetQuickSelect } from "@/components/PresetPanel"
 import { useToast } from "@/components/ui/toast"
 import {
-    ShoppingCart, Euro, Tag, Boxes, Scale, Package, ArrowUp, ArrowDown, AlertTriangle,
+    ShoppingCart, Euro, Tag, Boxes, Scale, Package, ArrowUp, ArrowDown, AlertTriangle, Download,
 } from "lucide-react"
 import type { LucideIcon } from "lucide-react"
 
@@ -78,6 +79,21 @@ const fmtEur = (v: number) => v.toLocaleString('es-ES', { style: 'currency', cur
 const fmtPrecioUnitario = (v: number) => `${v.toLocaleString('es-ES', { maximumFractionDigits: 2 })} €/ud`
 const fmtCantidad = (v: number) => `${v.toLocaleString('es-ES', { maximumFractionDigits: 0 })} ud`
 const fmtKg = (v: number) => `${v.toLocaleString('es-ES', { maximumFractionDigits: 0 })} kg`
+
+// Formatos numéricos nativos de Excel (ponytail: 'xlsx' no soporta colores/negrita al escribir,
+// solo number format + anchos de columna + merges — ver docs/compras.md).
+const XLS_FMT_UD = '#,##0'
+const XLS_FMT_KG = '#,##0" kg"'
+const XLS_FMT_EUR = '#,##0.00" €"'
+const XLS_FMT_PCT = '+0.00%;-0.00%'
+
+// Aplica un number format de Excel a una columna completa (por índice, 0-based) de un rango de filas.
+function setColNumFmt(ws: XLSX.WorkSheet, colIdx: number, rowCount: number, fmt: string, headerRows = 1) {
+    for (let r = 0; r < rowCount; r++) {
+        const cell = ws[XLSX.utils.encode_cell({ r: r + headerRows, c: colIdx })]
+        if (cell && typeof cell.v === 'number') cell.z = fmt
+    }
+}
 
 function presetToRange(preset: PeriodPreset): { startDate: string; endDate: string } | null {
     const now = new Date()
@@ -349,6 +365,103 @@ export default function ComprasPage() {
         return resumen.articulosSinGramaje.map(item => ({ item, descripcion: descripcionPorItem.get(item) || '' }))
     }, [resumen, rows])
 
+    // Exporta la comparativa completa (las 4 métricas, no solo la pestaña activa) a un único Excel
+    // con 3 hojas: Resumen, Tendencia mensual y Detalle por artículo/mes.
+    const exportToExcel = () => {
+        const wb = XLSX.utils.book_new()
+
+        // --- Hoja "Resumen" ---
+        const articulosDesc = selectedItems.length > 0 ? selectedItems.join(', ') : 'Todos'
+        const marcasDesc = selectedMarcas.length > 0 ? selectedMarcas.join(', ') : 'Todas'
+        const resumenAoa: (string | number)[][] = [
+            ['Comparativa de compras — Previsión vs. Real'],
+            [`Periodo: ${filters.startDate} a ${filters.endDate}`],
+            [`Artículos: ${articulosDesc}    Marca: ${marcasDesc}`],
+            [],
+            ['Métrica', 'Previsto', 'Real', 'Desviación', 'Desviación %'],
+            ['Unidades', resumen.totalCantidadPrevisto, resumen.totalCantidadReal,
+                resumen.totalCantidadReal - resumen.totalCantidadPrevisto, (resumen.desviacionCantidadPct ?? 0) / 100],
+            ['Kg', resumen.totalKgPrevisto, resumen.totalKgReal,
+                resumen.totalKgReal - resumen.totalKgPrevisto, (resumen.desviacionKgPct ?? 0) / 100],
+            ['Importe (€)', resumen.totalImportePrevisto, resumen.totalImporteReal,
+                resumen.totalImporteReal - resumen.totalImportePrevisto, (resumen.desviacionImportePct ?? 0) / 100],
+            ['Precio medio (€/ud)', resumen.precioMedioPrevisto ?? '', resumen.precioMedioReal ?? '',
+                (resumen.precioMedioReal ?? 0) - (resumen.precioMedioPrevisto ?? 0), (resumen.desviacionPrecioPct ?? 0) / 100],
+        ]
+        if (resumen.articulosSinGramaje.length > 0) {
+            resumenAoa.push([], [`Artículos sin gramaje (Kg no calculable): ${resumen.articulosSinGramaje.join(', ')}`])
+        }
+        const wsResumen = XLSX.utils.aoa_to_sheet(resumenAoa)
+        wsResumen['!merges'] = [
+            { s: { r: 0, c: 0 }, e: { r: 0, c: 4 } },
+            { s: { r: 1, c: 0 }, e: { r: 1, c: 4 } },
+            { s: { r: 2, c: 0 }, e: { r: 2, c: 4 } },
+        ]
+        wsResumen['!cols'] = [{ wch: 22 }, { wch: 16 }, { wch: 16 }, { wch: 16 }, { wch: 14 }]
+        setColNumFmt(wsResumen, 1, 4, XLS_FMT_UD, 5)
+        setColNumFmt(wsResumen, 2, 4, XLS_FMT_UD, 5)
+        setColNumFmt(wsResumen, 3, 4, XLS_FMT_UD, 5)
+        setColNumFmt(wsResumen, 4, 4, XLS_FMT_PCT, 5)
+        XLSX.utils.book_append_sheet(wb, wsResumen, 'Resumen')
+
+        // --- Hoja "Tendencia mensual" ---
+        const tendenciaRows = resumen.porMes.map(m => ({
+            'Mes': m.mesLabel,
+            'Unidades previsto': m.cantidadPrevisto, 'Unidades real': m.cantidadReal,
+            'Kg previsto': m.kgPrevisto, 'Kg real': m.kgReal,
+            'Importe previsto (€)': m.importePrevisto, 'Importe real (€)': m.importeReal,
+            'Precio previsto (€/ud)': m.precioPrevisto ?? '', 'Precio real (€/ud)': m.precioReal ?? '',
+        }))
+        const wsTendencia = XLSX.utils.json_to_sheet(tendenciaRows)
+        wsTendencia['!cols'] = [{ wch: 10 }, { wch: 14 }, { wch: 14 }, { wch: 12 }, { wch: 12 }, { wch: 16 }, { wch: 16 }, { wch: 16 }, { wch: 16 }]
+        setColNumFmt(wsTendencia, 1, tendenciaRows.length, XLS_FMT_UD)
+        setColNumFmt(wsTendencia, 2, tendenciaRows.length, XLS_FMT_UD)
+        setColNumFmt(wsTendencia, 3, tendenciaRows.length, XLS_FMT_KG)
+        setColNumFmt(wsTendencia, 4, tendenciaRows.length, XLS_FMT_KG)
+        setColNumFmt(wsTendencia, 5, tendenciaRows.length, XLS_FMT_EUR)
+        setColNumFmt(wsTendencia, 6, tendenciaRows.length, XLS_FMT_EUR)
+        setColNumFmt(wsTendencia, 7, tendenciaRows.length, XLS_FMT_EUR)
+        setColNumFmt(wsTendencia, 8, tendenciaRows.length, XLS_FMT_EUR)
+        XLSX.utils.book_append_sheet(wb, wsTendencia, 'Tendencia mensual')
+
+        // --- Hoja "Detalle" (las 4 métricas para cada artículo+mes, no solo la pestaña activa) ---
+        const detalleRows = rows.map(r => ({
+            'Mes': r.mesLabel, 'Artículo': r.item, 'Descripción': r.descripcion,
+            'Familia': r.familia, 'Marca': r.marca, 'Gramaje (g)': r.gramaje ?? '',
+            'Unid. previsto': r.previsto.cantidad ?? '', 'Unid. real': r.real.cantidad ?? '',
+            'Desv. unid.': r.desviacion.cantidad.abs ?? '', 'Desv. unid. %': r.desviacion.cantidad.pct != null ? r.desviacion.cantidad.pct / 100 : '',
+            'Kg previsto': r.previsto.kg ?? '', 'Kg real': r.real.kg ?? '',
+            'Desv. kg': r.desviacion.kg.abs ?? '', 'Desv. kg %': r.desviacion.kg.pct != null ? r.desviacion.kg.pct / 100 : '',
+            'Importe previsto (€)': r.previsto.importe ?? '', 'Importe real (€)': r.real.importe ?? '',
+            'Desv. importe (€)': r.desviacion.importe.abs ?? '', 'Desv. importe %': r.desviacion.importe.pct != null ? r.desviacion.importe.pct / 100 : '',
+            'Precio previsto (€/ud)': r.previsto.precioUnitario ?? '', 'Precio real (€/ud)': r.real.precioUnitario ?? '',
+            'Desv. precio (€/ud)': r.desviacion.precio.abs ?? '', 'Desv. precio %': r.desviacion.precio.pct != null ? r.desviacion.precio.pct / 100 : '',
+            'Avisos': r.avisos.join(', '),
+        }))
+        const wsDetalle = XLSX.utils.json_to_sheet(detalleRows)
+        wsDetalle['!cols'] = [
+            { wch: 10 }, { wch: 12 }, { wch: 28 }, { wch: 14 }, { wch: 8 }, { wch: 10 },
+            { wch: 12 }, { wch: 10 }, { wch: 10 }, { wch: 11 },
+            { wch: 11 }, { wch: 9 }, { wch: 9 }, { wch: 10 },
+            { wch: 15 }, { wch: 13 }, { wch: 13 }, { wch: 12 },
+            { wch: 15 }, { wch: 13 }, { wch: 13 }, { wch: 11 },
+            { wch: 30 },
+        ]
+        const n = detalleRows.length
+        setColNumFmt(wsDetalle, 5, n, XLS_FMT_UD)   // Gramaje
+        setColNumFmt(wsDetalle, 6, n, XLS_FMT_UD); setColNumFmt(wsDetalle, 7, n, XLS_FMT_UD); setColNumFmt(wsDetalle, 8, n, XLS_FMT_UD)
+        setColNumFmt(wsDetalle, 9, n, XLS_FMT_PCT)
+        setColNumFmt(wsDetalle, 10, n, XLS_FMT_KG); setColNumFmt(wsDetalle, 11, n, XLS_FMT_KG); setColNumFmt(wsDetalle, 12, n, XLS_FMT_KG)
+        setColNumFmt(wsDetalle, 13, n, XLS_FMT_PCT)
+        setColNumFmt(wsDetalle, 14, n, XLS_FMT_EUR); setColNumFmt(wsDetalle, 15, n, XLS_FMT_EUR); setColNumFmt(wsDetalle, 16, n, XLS_FMT_EUR)
+        setColNumFmt(wsDetalle, 17, n, XLS_FMT_PCT)
+        setColNumFmt(wsDetalle, 18, n, XLS_FMT_EUR); setColNumFmt(wsDetalle, 19, n, XLS_FMT_EUR); setColNumFmt(wsDetalle, 20, n, XLS_FMT_EUR)
+        setColNumFmt(wsDetalle, 21, n, XLS_FMT_PCT)
+        XLSX.utils.book_append_sheet(wb, wsDetalle, 'Detalle')
+
+        XLSX.writeFile(wb, `Compras_${filters.startDate}_${filters.endDate}.xlsx`)
+    }
+
     return (
         <AppShell
             navbar={{ currentPanel: 'compras', user: sessionUser, onLogout: logout, onPresetsClick: () => setShowPresets(s => !s) }}
@@ -393,6 +506,11 @@ export default function ComprasPage() {
                     <div className="flex gap-2">
                         <Button type="button" onClick={applyFilters}>Filtrar</Button>
                         <Button type="button" variant="outline" onClick={clearFilters}>Limpiar</Button>
+                        <Button type="button" variant="outline" onClick={exportToExcel} disabled={rows.length === 0}
+                            className="border-green-600 text-green-700 hover:bg-green-50">
+                            <Download className="mr-2 h-4 w-4" aria-hidden="true" />
+                            Excel
+                        </Button>
                     </div>
                 </div>
             </Card>
