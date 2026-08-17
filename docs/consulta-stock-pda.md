@@ -12,12 +12,15 @@ Panel pensado para operarios de almacén: escanean el código de barras de la et
 stock de ese artículo **ordenado por fecha de caducidad ascendente** (FEFO — First Expired, First
 Out), para saber qué palet coger primero. Un selector de planta permite acotar la consulta a un
 depósito concreto. Como el código escaneado siempre trae el SSCC del palet, el panel avisa además
-si ese palet en concreto es correcto para consumir o si hay otro lote que caduca antes (§7.2).
+si ese palet en concreto es correcto para consumir o si hay otro lote que caduca antes, si está
+caducado o bloqueado por calidad (§7.3). El stock se agrupa por lote, con el detalle por palet
+desplegable (§7.1), y cada escaneo exige aceptar un pop-up que queda registrado (§8) — trazabilidad
+por si un producto se mete erróneamente en línea y hay que saber a quién le salió el aviso.
 
 **Solo se busca por SSCC** (número de palet, AI `00` de GS1-128) — nunca por el EAN del artículo.
 Si se escanea el EAN "pelado" de la etiqueta del artículo (sin SSCC), el panel rechaza el escaneo
 con el mensaje "Debes escanear el número de palet (SSCC), no el código del artículo": buscar solo
-por EAN no permite validar qué palet concreto coger (§7.2), que es el objetivo del panel.
+por EAN no permite validar qué palet concreto coger (§7.3), que es el objetivo del panel.
 
 **Fuente de datos:** a diferencia del resto de paneles (Oracle/JDE), este consulta la base de datos
 de **Reflex (SQL Server)**, un sistema externo distinto de JDE. Es la primera integración del
@@ -35,7 +38,10 @@ administrador puede restringirlo a roles específicos desde `/admin` → pestañ
 | Archivo | Descripción |
 |---|---|
 | `app/consulta-stock-pda/page.tsx` | Página cliente (input de escaneo + cámara, tabla de lotes), envuelta en `<AppShell>` |
-| `app/api/consulta-stock-pda/route.ts` | API Route servidor — consulta a Reflex (SQL Server) |
+| `app/api/consulta-stock-pda/route.ts` | API Route servidor — consulta a Reflex (SQL Server), agrupado por lote y validación FEFO/calidad |
+| `app/api/consulta-stock-pda/confirmaciones/route.ts` | API Route servidor — registra la aceptación del pop-up (§8.2) en SQLite |
+| `app/api/admin/scan-confirmations/route.ts` | API Route servidor — lista/filtra las confirmaciones registradas (§8.2), solo admin |
+| `app/admin/logs/page.tsx` | Pestaña "Confirmaciones PDA" (además de la ya existente "Consultas") — ver §8.2 |
 | `lib/reflex.ts` | Conexión a SQL Server (Reflex), análoga a `lib/db.ts` para Oracle |
 | `lib/gs1.ts` | Parser de códigos de barras GS1-128 (separa EAN/lote/cantidad/SSCC/fechas) |
 | `__tests__/gs1.test.ts` | Tests del parser GS1 |
@@ -162,7 +168,7 @@ Confirmado y verificado contra la base de datos de test `RFXTEST`. Cuatro tablas
 |---|---|---|
 | `reflex.HLARTIP` | Maestro de artículo (descripción + activo/inactivo) | `ARCART` (artículo), `ARLART` (descripción), `ARTOPD` (0=activo, 1=desactivado) |
 | `reflex.HLGEINP` | Elemento (lote/SSCC) en stock, por artículo | `GECART` (artículo), `GENSUP` (SSCC), `GELOTF` (lote), `GEQGEI` (cantidad), `GEJDLC`/`GEMDLC`/`GEADLC` (día/mes/año de DLC), `GEJDLU`/`GEMDLU`/`GEADLU` (día/mes/año de DLU, fallback) |
-| `reflex.HLSUPPP` | Soporte (palet/SSCC) → depósito + ubicación | `SUNSUP` (SSCC), `SUCDPO` (depósito), `SUNEMP` (nº ubicación) |
+| `reflex.HLSUPPP` | Soporte (palet/SSCC) → depósito + ubicación + calidad | `SUNSUP` (SSCC), `SUCDPO` (depósito), `SUNEMP` (nº ubicación), `SUCQAL` (código de calidad) |
 | `reflex.HLEMPLP` | Maestro de ubicaciones | `EMCDPO` (depósito/planta), `EMNEMP` (nº ubicación), `EMC1EM`..`EMC5EM` (código ubicación), `EMLIEM` (descripción ubicación) |
 
 ### 6.1 Encadenamiento (JOIN)
@@ -192,6 +198,19 @@ encontrado (no se distingue "desactivado" de "no existe").
 
 Filtro `g.GEQGEI > 0` — igual que `/caducados` con `LIPQOH > 0`, solo interesa stock con cantidad
 positiva.
+
+### 6.1b Bloqueo de calidad (`SUCQAL`)
+
+`HLSUPPP.SUCQAL` es el código de calidad del soporte/palet. `esBloqueadoPorCalidad()` en el route
+lo recorta y compara: `'STD'` (calidad estándar) = válido para consumir, **cualquier otro código**
+= bloqueado. Confirmado consultando datos reales de Reflex — la mayoría son `STD`, pero hay muchos
+códigos de bloqueo distintos (`CAD`, `CAL`, `CUA`, `PTE`, `ROT`, `OBS`, `SOB`, `NOC`, `M01`..`M09`,
+entre otros). El mensaje al operario no distingue el motivo concreto (solo "bloqueado por
+Calidad"): el código exacto no es accionable desde el PDA, solo importa que no se puede consumir.
+
+`SUCQAL` viene de un `LEFT JOIN`, pero en la práctica todo palet con stock (`GEQGEI > 0`) tiene fila
+en `HLSUPPP` (comprobado: cobertura 100%) — si algún día no la tuviera, se trata como no bloqueado
+(mismo criterio defensivo que la ubicación en §6.1).
 
 ### 6.2 Fecha de caducidad (DLC / DLU)
 
@@ -256,31 +275,82 @@ Respuesta:
 {
   "articulo": "1313300003",
   "descripcion": "JAMON COCIDO EXTRA 1KG",
-  "lotes": [
+  "grupos": [
     {
       "lote": "250110240D",
-      "sscc": "584370129261191942",
-      "cantidad": 1000,
       "fechaCaducidad": "2025-01-31",
-      "ubicacion": "Cámara 2 - Suelo 1",
-      "planta": "Corella"
+      "cantidadTotal": 2000,
+      "cantidadBloqueada": 500,
+      "totalPalets": 2,
+      "paletsBloqueados": 1,
+      "palets": [
+        {
+          "lote": "250110240D",
+          "sscc": "584370129261191942",
+          "cantidad": 1500,
+          "fechaCaducidad": "2025-01-31",
+          "ubicacion": "Cámara 2 - Suelo 1",
+          "planta": "Corella",
+          "caducado": false,
+          "bloqueado": false,
+          "primeroEnCaducar": true
+        },
+        {
+          "lote": "250110240D",
+          "sscc": "584370129261191943",
+          "cantidad": 500,
+          "fechaCaducidad": "2025-01-31",
+          "ubicacion": "Cámara 2 - Suelo 2",
+          "planta": "Corella",
+          "caducado": false,
+          "bloqueado": true,
+          "primeroEnCaducar": false
+        }
+      ]
     }
   ],
   "validacionSscc": {
     "estado": "correcto",
-    "mensaje": "Correcto para consumir: no hay lotes que caduquen antes"
+    "mensajes": ["Correcto para consumir."]
   }
 }
 ```
 
-Los lotes vienen ya ordenados por caducidad ascendente (FEFO) — ver §6.2 para el porqué del
-reordenado final en JS en vez de confiar solo en el `ORDER BY` de la query. El primero de la lista
-se resalta en la tabla con el badge "Primero en caducar".
+`grupos` reemplaza al antiguo array plano `lotes` — ver §7.1 para el porqué de agrupar por lote.
+Los grupos vienen ordenados por `fechaCaducidad` ascendente (FEFO) — ver §6.2 para el porqué del
+reordenado final en JS en vez de confiar solo en el `ORDER BY` de la query.
 
-### 7.1 Resaltado de filas por caducidad
+### 7.1 Agrupado por lote
 
-`app/consulta-stock-pda/page.tsx` colorea cada fila según cuántos días quedan hasta
-`fechaCaducidad` (`filaCaducidadClassName()`):
+El panel muestra un **resumen por lote** como lista de tarjetas apiladas (no una tabla de
+columnas fijas — ver §7.2b para el porqué), cada una desplegable — mismo concepto que el
+desplegable de pedidos por artículo en `/preparacion-pedidos`, pero en tarjeta en vez de fila de
+tabla — que revela el detalle por palet (también en tarjetas: SSCC, caducidad, cantidad,
+ubicación). El route agrupa los palets (`palets` en la respuesta anterior a agrupar) por
+`GELOTF` con un `Map<lote, palets[]>` y calcula, por lote:
+
+- `fechaCaducidad`: la del primer palet del lote que tenga fecha (en la práctica todos los palets
+  de un mismo lote comparten fecha, es el mismo dato de fabricación).
+- `cantidadTotal` / `cantidadBloqueada`: suma de `GEQGEI` de todos los palets del lote / solo de
+  los bloqueados (§6.1b).
+- `totalPalets` / `paletsBloqueados`: recuento de palets del lote / solo bloqueados.
+
+En la cabecera de la tarjeta (visible **sin desplegar**), si `paletsBloqueados > 0` lleva un badge
+tipo "2/5 bloqueados", y si `cantidadBloqueada > 0` otro badge "500/2000 bloqueada" — mismo
+componente `<Badge>` que usa el badge "Escaneado" del detalle. Al desplegar un lote, `page.tsx`
+abre por defecto (`expandedLotes`) el lote que contiene el SSCC recién escaneado.
+
+**Qué lote se está leyendo, sin desplegar:** `loteContieneEscaneado()` marca la tarjeta del lote
+que contiene el SSCC recién escaneado con un badge **"Escaneado"** en la cabecera y un borde/anillo
+en rojo corporativo (`border-primary ring-1 ring-primary`) — visible tanto si la tarjeta está
+desplegada como colapsada. Antes solo se veía el "Escaneado" en el detalle del palet, había que
+desplegar el lote para saber cuál era.
+
+### 7.2 Resaltado por caducidad
+
+`app/consulta-stock-pda/page.tsx` colorea el fondo de cada tarjeta (tanto la de resumen del lote
+como las de detalle por palet) según cuántos días quedan hasta `fechaCaducidad`
+(`fondoCaducidadClassName()`):
 
 | Estado | Condición | Estilo |
 |---|---|---|
@@ -291,33 +361,69 @@ se resalta en la tabla con el badge "Primero en caducar".
 `DIAS_AVISO_CADUCIDAD` es una constante en el propio archivo — cambiar ahí el umbral de 5 días si
 el almacén pide otro valor.
 
-Además, la fila cuyo `sscc` coincide con el SSCC recién escaneado (`parsed.sscc`) siempre lleva un
-badge **"Escaneado"** junto al SSCC, sea cual sea el color de fondo de la fila. Si esa fila no
-tiene ya aviso de caducidad (rojo/ámbar manda, por ser más urgente), además se tiñe en tono de
-marca (`bg-primary/10`) para localizarla de un vistazo en listados largos —
-`filaClassName()` en `page.tsx` decide esta prioridad.
+En el detalle por palet, además del color de fondo, cada tarjeta lleva badges explícitos calculados
+por el route (no solo color, para que el estado se entienda sin ambigüedad):
 
-### 7.2 Validación FEFO por SSCC
+- **"Caducado"** (rojo) si `palet.caducado` es `true` — sustituye a cualquier otro badge de
+  caducidad; un palet caducado **nunca** lleva "Primero en caducar" (ver §7.3). En la cabecera del
+  lote (sin desplegar) se muestra el mismo badge si **algún** palet del lote está caducado
+  (`grupo.palets.some(p => p.caducado)`).
+- **"Primero en caducar"** (ámbar) si `palet.primeroEnCaducar` es `true` — solo puede haber uno por
+  artículo, y solo entre los palets consumibles (§7.3). Solo se muestra en el detalle por palet:
+  es una distinción a nivel de palet concreto, no de lote.
+- **"Escaneado"** (rojo corporativo) si el `sscc` coincide con el SSCC recién escaneado
+  (`parsed.sscc`) — también en la cabecera del lote, ver §7.1.
+- **"Bloqueado por Calidad"** (rojo) si `palet.bloqueado` es `true` (§6.1b).
 
-Como toda búsqueda se hace por SSCC, la API responde siempre si el palet escaneado es correcto para
-consumir o si hay otro lote del mismo artículo que caduca antes.
+Si la tarjeta del palet no tiene ya aviso de caducidad (rojo/ámbar manda, por ser más urgente) y es
+la del SSCC escaneado, además se tiñe en tono de marca (`bg-primary/10`) —
+`paletClassName()` en `page.tsx` decide esta prioridad.
 
-La comparación se hace **después** de construir y ordenar `lotes` (mismo array que se devuelve
-para la tabla, ya filtrado por `planta` si se indicó) — no es una query aparte:
+### 7.2b Tarjetas apiladas en vez de tabla — por qué
 
-| `estado` | Cuándo | Ejemplo de `mensaje` |
+Este panel es de uso casi exclusivo en PDA/móvil de almacén (a diferencia de paneles de oficina
+como `/produccion`). Una tabla con columnas fijas (Lote, Caducidad, SSCC, Cantidad, Ubicación, más
+los badges de bloqueo) no cabe en una pantalla de PDA de 320-375px de ancho sin scroll horizontal
+— y el operario necesita ver toda la información **sin desplazarse lateralmente**, con las manos
+ocupadas o con guantes.
+
+Por eso tanto el resumen por lote como el detalle por palet se pintan como listas de `<div>`
+apiladas (cada campo en su propia línea, envuelto con `flex-wrap`), no con `<Table>`/`<table>` de
+columnas fijas — es la única vista de la app que se desvía del componente `Table` de
+`components/ui/` (ver `docs/design-system.md` §4), justificado porque el dispositivo objetivo real
+es distinto al del resto de paneles. Verificado en viewport móvil (375px) y tablet (768px): ningún
+elemento fuerza scroll horizontal (`document.documentElement.scrollWidth` = `clientWidth`).
+
+### 7.3 Validación del SSCC escaneado
+
+Como toda búsqueda se hace por SSCC, la API responde siempre si el palet escaneado se puede
+consumir o no, y por qué. La respuesta es una lista de `mensajes` (no un único mensaje): si
+coinciden varios problemas a la vez (ej. un palet caducado que además está bloqueado), se listan
+**todos**, en este orden de prioridad — ver el porqué de cada uno en §6.1b/§7.1/§6.2:
+
+1. **Caducado** — `palet.caducado`.
+2. **Bloqueado por Calidad** — `palet.bloqueado`.
+3. **Hay lote anterior** — solo se comprueba si el palet **no** está caducado ni bloqueado (no
+   tiene sentido decir "hay uno antes" de un palet que de por sí no se puede consumir), y solo
+   contra otros palets que **tampoco** estén caducados ni bloqueados (`consumibles` en el route) —
+   no sirve de nada recomendar como alternativa un palet que en realidad tampoco se puede consumir.
+
+| `estado` | Cuándo | `mensajes` |
 |---|---|---|
-| `correcto` | Ningún otro lote tiene `fechaCaducidad` estrictamente menor que la del SSCC escaneado (empate cuenta como correcto) | "Correcto para consumir: no hay lotes que caduquen antes" |
-| `incorrecto` | Existe al menos un lote con `fechaCaducidad` anterior | "Este palet no se puede consumir: hay lotes de este artículo que caducan antes" |
-| `no_encontrado` | El SSCC no aparece en `lotes` (consumido ya, cantidad a 0, o no está en la planta filtrada) | "Palet no está en stock en Corella" (o sin "en X" si no se filtró planta) |
-| `sin_fecha` | El SSCC escaneado sí está en stock pero su `fechaCaducidad` es `null` (ni DLC ni DLU) | "Este palet no tiene fecha de caducidad registrada; no se puede comprobar si hay lotes anteriores" |
+| `aviso` | Caducado, bloqueado, y/o hay un palet consumible anterior (uno o varios a la vez) | Uno o más de: "Este palet no se puede consumir: está Caducado.", "...: está bloqueado por Calidad.", "...: hay lotes de este artículo que caducan antes." |
+| `correcto` | Ni caducado, ni bloqueado, ni hay ningún palet consumible con caducidad anterior | `["Correcto para consumir."]` |
+| `no_encontrado` | El SSCC no aparece en los palets devueltos (consumido ya, cantidad a 0, o no está en la planta filtrada) | `["Palet no está en stock en Corella"]` (o sin "en X" si no se filtró planta) |
+| `sin_fecha` | El SSCC escaneado sí está en stock, no está bloqueado, pero su `fechaCaducidad` es `null` (ni DLC ni DLU) | `["Este palet no tiene fecha de caducidad registrada; no se puede comprobar si hay lotes anteriores."]` |
 
-### 7.3 Rechazo de códigos sin SSCC (EAN suelto, etc.)
+El `estado` sigue sirviendo para el color del aviso en pantalla (verde=correcto, ámbar=sin_fecha,
+rojo=aviso/no_encontrado) — ver §8 para dónde se muestra (banner en la página + pop-up obligatorio).
+
+### 7.4 Rechazo de códigos sin SSCC (EAN suelto, etc.)
 
 Si el código escaneado no trae SSCC (ej. el EAN-13/DUN-14 suelto de la etiqueta del artículo, o un
 código sin AI `00`), `handleScan()` en `page.tsx` no llama a la API: muestra directamente el error
 "Debes escanear el número de palet (SSCC), no el código del artículo". Buscar solo por EAN no
-permite identificar qué palet concreto se tiene en la mano ni validar FEFO por SSCC (§7.2), que es
+permite identificar qué palet concreto se tiene en la mano ni validar FEFO por SSCC (§7.3), que es
 el objetivo del panel.
 
 Por si algún llamador externo o futuro cambio de cliente saltara esta comprobación, el servidor
@@ -326,11 +432,72 @@ cliente.
 
 ---
 
-## 8. Logging de consultas
+## 8. Pop-up obligatorio y logging
+
+### 8.1 Logging de la consulta
 
 Cada consulta inserta un registro en `query_logs` (SQLite) con `source = 'consulta_stock_pda'` y
 `filters: { sscc, planta? }` (`planta` solo si se usó). El logging nunca bloquea la respuesta
-(try/catch independiente), igual que en el resto de paneles.
+(try/catch independiente), igual que en el resto de paneles. Esto registra *qué se consultó*, no
+quién aceptó qué aviso — para eso está §8.2.
+
+### 8.2 Pop-up de confirmación (`stock_scan_confirmations`)
+
+Cada vez que el escaneo resuelve un `validacionSscc` (siempre que hay resultado, incluido
+`estado: 'correcto'`), `page.tsx` abre un `<Dialog>` **no descartable** (`dismissible={false}` en
+`components/ui/dialog.tsx` — ni Escape, ni clic fuera, ni la X lo cierran) con los mismos
+`mensajes` que se ven en el banner de la página, y un único botón "Aceptar". El operario tiene que
+pulsarlo sí o sí para seguir usando el panel.
+
+El título del pop-up es `Palet {sscc} · Lote {lote}` (SSCC completo, sin truncar — igual que en el
+detalle por palet, ver §7.2b) — `loteEscaneado` se resuelve buscando en `grupos` qué lote contiene
+ese SSCC (mismo cálculo que decide qué lote se despliega por defecto, §7.1). Si el SSCC no está en
+stock (`no_encontrado`), no hay lote que mostrar y el título omite esa parte.
+
+**Lenguaje visual (`ESTADO_VISUAL` en `page.tsx`)** — pensado para que "se puede o no consumir" se
+entienda de un vistazo, sin tener que leer el texto, tanto en el pop-up como en el banner de la
+página (comparten la misma tabla de estilos):
+
+| `estado` | Icono grande | Titular | Color |
+|---|---|---|---|
+| `correcto` | `CheckCircle2` | "SE PUEDE CONSUMIR" | verde |
+| `aviso` | `XCircle` | "NO SE PUEDE CONSUMIR" | rojo |
+| `no_encontrado` | `PackageX` | "PALET NO ENCONTRADO" | rojo |
+| `sin_fecha` | `HelpCircle` | "SIN FECHA DE CADUCIDAD" | ámbar |
+
+Cuando el estado no es `correcto`, cada mensaje de `mensajes[]` se pinta en su propia fila con un
+icono según el motivo concreto (`iconoMensaje()`, por coincidencia de texto — no hay un campo
+`tipo` en la respuesta de la API, los mensajes son fijos y se controlan en ambos lados):
+`CalendarX` (Caducado), `ShieldAlert` (Bloqueado por Calidad), `ArrowLeftRight` (hay lote anterior),
+`AlertTriangle` como genérico. El botón "Aceptar" del pop-up también cambia de color según
+`estado` (verde/rojo/ámbar) — refuerza el mensaje en vez de ser siempre el rojo corporativo por
+defecto.
+
+Al pulsar "Aceptar", `acceptAck()` hace `POST /api/consulta-stock-pda/confirmaciones` (best-effort:
+si falla la petición, el pop-up se cierra igual — un fallo de red no debe atrapar al operario) con
+`{ sscc, articulo, estado, mensajes }`. La ruta inserta en SQLite:
+
+```sql
+CREATE TABLE stock_scan_confirmations (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  username TEXT NOT NULL DEFAULT 'Invitado',
+  sscc TEXT NOT NULL,
+  articulo TEXT,
+  estado TEXT NOT NULL,
+  mensajes TEXT NOT NULL,        -- JSON array de los mensajes exactos mostrados
+  created_at TEXT DEFAULT (datetime('now'))
+);
+```
+
+Objetivo: trazabilidad. Si un producto se mete erróneamente en línea, se puede consultar esta tabla
+por `sscc` o `articulo` y saber exactamente qué usuario escaneó ese palet, qué aviso vio (el texto
+literal, no solo el estado) y a qué hora lo aceptó.
+
+**Dónde verlo:** `/admin/logs` → pestaña **"Confirmaciones PDA"** (junto a la pestaña "Consultas"
+existente). Lista paginada con filtros por usuario, resultado (correcto/aviso/no encontrado/sin
+fecha), SSCC y rango de fechas — `GET /api/admin/scan-confirmations` (solo admin). Cada fila
+muestra fecha, usuario, SSCC completo, artículo y el resultado aceptado con sus mensajes exactos.
 
 ---
 

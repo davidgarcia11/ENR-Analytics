@@ -7,8 +7,13 @@ import { Button } from "@/components/ui/button"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Spinner } from "@/components/ui/spinner"
 import { EmptyState } from "@/components/ui/empty-state"
+import { Badge } from "@/components/ui/badge"
+import { Tabs } from "@/components/ui/tabs"
 import { AppShell } from "@/components/AppShell"
-import { FileText, ChevronLeft, ChevronRight, LogIn, Clock, Search, Users, Zap, BarChart3, Download, Trophy, Inbox } from "lucide-react"
+import {
+  FileText, ChevronLeft, ChevronRight, LogIn, Clock, Search, Users, Zap, BarChart3, Download,
+  Trophy, Inbox, ScanBarcode,
+} from "lucide-react"
 import * as XLSX from 'xlsx'
 import { DatePicker } from "@/components/DatePicker"
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from "recharts"
@@ -24,6 +29,33 @@ interface LogEntry {
   result_count: number
   execution_time_ms: number
   created_at: string
+}
+
+interface ScanConfirmation {
+  id: number
+  user_id: number | null
+  username: string
+  sscc: string
+  articulo: string | null
+  estado: 'correcto' | 'aviso' | 'no_encontrado' | 'sin_fecha'
+  mensajes: string // JSON array
+  created_at: string
+}
+
+const ESTADO_BADGE: Record<ScanConfirmation['estado'], { label: string; variant: 'success' | 'destructive' | 'warning' }> = {
+  correcto: { label: 'Correcto', variant: 'success' },
+  aviso: { label: 'Aviso', variant: 'destructive' },
+  no_encontrado: { label: 'No encontrado', variant: 'destructive' },
+  sin_fecha: { label: 'Sin fecha', variant: 'warning' },
+}
+
+function parseMensajes(json: string): string[] {
+  try {
+    const v = JSON.parse(json)
+    return Array.isArray(v) ? v : [String(v)]
+  } catch {
+    return [json]
+  }
 }
 
 const SOURCE_LABELS: Record<string, string> = {
@@ -144,6 +176,21 @@ export default function LogsPage() {
   const [usernames, setUsernames] = useState<string[]>([])
   const [filterTrigger, setFilterTrigger] = useState(0)
 
+  // ─── Pestaña "Confirmaciones PDA" (pop-up de /consulta-stock-pda) ───────────
+  const [activeTab, setActiveTab] = useState<'consultas' | 'confirmaciones'>('consultas')
+  const [confirmations, setConfirmations] = useState<ScanConfirmation[]>([])
+  const [loadingConfirmations, setLoadingConfirmations] = useState(true)
+  const [confirmPage, setConfirmPage] = useState(1)
+  const [confirmTotalPages, setConfirmTotalPages] = useState(1)
+  const [confirmTotal, setConfirmTotal] = useState(0)
+  const [confirmUsernames, setConfirmUsernames] = useState<string[]>([])
+  const [filterConfirmUsername, setFilterConfirmUsername] = useState("")
+  const [filterConfirmEstado, setFilterConfirmEstado] = useState("")
+  const [filterConfirmSscc, setFilterConfirmSscc] = useState("")
+  const [filterConfirmStartDate, setFilterConfirmStartDate] = useState("")
+  const [filterConfirmEndDate, setFilterConfirmEndDate] = useState("")
+  const [confirmFilterTrigger, setConfirmFilterTrigger] = useState(0)
+
   useEffect(() => {
     checkAuth()
   }, [])
@@ -151,6 +198,10 @@ export default function LogsPage() {
   useEffect(() => {
     if (authorized) loadLogs()
   }, [page, authorized, filterTrigger, chartDays])
+
+  useEffect(() => {
+    if (authorized && activeTab === 'confirmaciones') loadConfirmations()
+  }, [authorized, activeTab, confirmPage, confirmFilterTrigger])
 
   const checkAuth = async () => {
     try {
@@ -211,6 +262,44 @@ export default function LogsPage() {
     setFilterTrigger(t => t + 1)
   }
 
+  const loadConfirmations = async () => {
+    setLoadingConfirmations(true)
+    try {
+      const params = new URLSearchParams({ page: String(confirmPage) })
+      if (filterConfirmUsername) params.set('username', filterConfirmUsername)
+      if (filterConfirmEstado) params.set('estado', filterConfirmEstado)
+      if (filterConfirmSscc) params.set('sscc', filterConfirmSscc)
+      if (filterConfirmStartDate) params.set('startDate', filterConfirmStartDate)
+      if (filterConfirmEndDate) params.set('endDate', filterConfirmEndDate)
+
+      const res = await fetch(`/api/admin/scan-confirmations?${params}`)
+      if (res.ok) {
+        const data = await res.json()
+        setConfirmations(data.confirmations)
+        setConfirmTotalPages(data.totalPages)
+        setConfirmTotal(data.total)
+        setConfirmUsernames(data.usernames)
+      }
+    } finally {
+      setLoadingConfirmations(false)
+    }
+  }
+
+  const applyConfirmFilters = () => {
+    setConfirmPage(1)
+    setConfirmFilterTrigger(t => t + 1)
+  }
+
+  const clearConfirmFilters = () => {
+    setFilterConfirmUsername("")
+    setFilterConfirmEstado("")
+    setFilterConfirmSscc("")
+    setFilterConfirmStartDate("")
+    setFilterConfirmEndDate("")
+    setConfirmPage(1)
+    setConfirmFilterTrigger(t => t + 1)
+  }
+
   const exportToExcel = () => {
     const rows = logs.map(log => ({
       'Fecha': new Date(log.created_at + 'Z').toLocaleString('es-ES'),
@@ -252,7 +341,17 @@ export default function LogsPage() {
       title="Logs de consultas"
       description="Registro de consultas ejecutadas por panel y usuario"
     >
+        <Tabs
+          value={activeTab}
+          onValueChange={v => setActiveTab(v as 'consultas' | 'confirmaciones')}
+          tabs={[
+            { value: 'consultas', label: 'Consultas' },
+            { value: 'confirmaciones', label: 'Confirmaciones PDA', count: confirmTotal || undefined },
+          ]}
+        />
 
+        {activeTab === 'consultas' && (
+        <>
         {/* Tarjetas de estadísticas */}
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
           <Card accent className="overflow-hidden">
@@ -530,6 +629,150 @@ export default function LogsPage() {
             )}
           </CardContent>
         </Card>
+        </>
+        )}
+
+        {activeTab === 'confirmaciones' && (
+        <>
+        {/* Filtros */}
+        <Card accent>
+          <CardContent className="pt-4">
+            <div className="flex flex-wrap items-end gap-4">
+              <div className="space-y-1.5">
+                <label className="text-xs font-semibold text-secondary-foreground">Usuario</label>
+                <select
+                  value={filterConfirmUsername}
+                  onChange={e => setFilterConfirmUsername(e.target.value)}
+                  className="flex h-9 w-[160px] rounded-md border border-input bg-card px-3 py-1 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                >
+                  <option value="">Todos</option>
+                  {confirmUsernames.map(u => (
+                    <option key={u} value={u}>{u}</option>
+                  ))}
+                </select>
+              </div>
+              <div className="space-y-1.5">
+                <label className="text-xs font-semibold text-secondary-foreground">Resultado</label>
+                <select
+                  value={filterConfirmEstado}
+                  onChange={e => setFilterConfirmEstado(e.target.value)}
+                  className="flex h-9 w-[150px] rounded-md border border-input bg-card px-3 py-1 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                >
+                  <option value="">Todos</option>
+                  {Object.entries(ESTADO_BADGE).map(([key, v]) => (
+                    <option key={key} value={key}>{v.label}</option>
+                  ))}
+                </select>
+              </div>
+              <div className="space-y-1.5">
+                <label className="text-xs font-semibold text-secondary-foreground">SSCC</label>
+                <input
+                  value={filterConfirmSscc}
+                  onChange={e => setFilterConfirmSscc(e.target.value)}
+                  placeholder="Buscar SSCC..."
+                  className="flex h-9 w-[170px] rounded-md border border-input bg-card px-3 py-1 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring font-mono"
+                />
+              </div>
+              <div className="space-y-1.5">
+                <label className="text-xs font-semibold text-secondary-foreground">Desde</label>
+                <DatePicker value={filterConfirmStartDate} onChange={setFilterConfirmStartDate} className="w-[150px]" />
+              </div>
+              <div className="space-y-1.5">
+                <label className="text-xs font-semibold text-secondary-foreground">Hasta</label>
+                <DatePicker value={filterConfirmEndDate} onChange={setFilterConfirmEndDate} className="w-[150px]" />
+              </div>
+              <Button onClick={applyConfirmFilters} className="font-semibold">
+                Filtrar
+              </Button>
+              <Button variant="outline" onClick={clearConfirmFilters}>
+                Limpiar
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* Tabla de confirmaciones */}
+        <Card accent>
+          <CardHeader>
+            <CardTitle className="text-sm font-bold text-secondary-foreground flex items-center gap-2">
+              <ScanBarcode className="h-4 w-4 text-primary" aria-hidden="true" />
+              Confirmaciones del pop-up de Consulta Stock PDA
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            {loadingConfirmations ? (
+              <Spinner label="Cargando confirmaciones..." className="py-10" />
+            ) : confirmations.length === 0 ? (
+              <EmptyState
+                icon={Inbox}
+                title="Sin registros"
+                description="No hay confirmaciones registradas para los filtros seleccionados"
+              />
+            ) : (
+              <>
+                <Table>
+                  <TableHeader>
+                    <TableRow className="border-border hover:bg-transparent">
+                      <TableHead className="font-bold text-secondary-foreground">Fecha / Hora</TableHead>
+                      <TableHead className="font-bold text-secondary-foreground">Usuario</TableHead>
+                      <TableHead className="font-bold text-secondary-foreground">SSCC</TableHead>
+                      <TableHead className="font-bold text-secondary-foreground">Artículo</TableHead>
+                      <TableHead className="font-bold text-secondary-foreground">Resultado aceptado</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {confirmations.map(c => (
+                      <TableRow key={c.id} className="border-border hover:bg-muted/50">
+                        <TableCell className="text-sm text-muted-foreground whitespace-nowrap">
+                          {new Date(c.created_at + 'Z').toLocaleString('es-ES', {
+                            day: '2-digit', month: '2-digit', year: 'numeric',
+                            hour: '2-digit', minute: '2-digit'
+                          })}
+                        </TableCell>
+                        <TableCell>
+                          <span className={`text-sm font-medium ${c.user_id ? 'text-foreground' : 'text-muted-foreground italic'}`}>
+                            {c.username}
+                          </span>
+                        </TableCell>
+                        <TableCell className="text-sm font-mono text-secondary-foreground">{c.sscc}</TableCell>
+                        <TableCell className="text-sm text-secondary-foreground">{c.articulo || '—'}</TableCell>
+                        <TableCell>
+                          <div className="space-y-0.5">
+                            <Badge variant={ESTADO_BADGE[c.estado].variant}>{ESTADO_BADGE[c.estado].label}</Badge>
+                            {parseMensajes(c.mensajes).map((m, i) => (
+                              <div key={i} className="text-xs text-muted-foreground">{m}</div>
+                            ))}
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+
+                {/* Paginación */}
+                {confirmTotalPages > 1 && (
+                  <div className="flex items-center justify-between mt-4 pt-4 border-t border-border">
+                    <p className="text-sm text-muted-foreground">
+                      Página {confirmPage} de {confirmTotalPages}
+                    </p>
+                    <div className="flex gap-2">
+                      <Button variant="outline" size="sm" disabled={confirmPage <= 1} onClick={() => setConfirmPage(p => p - 1)}>
+                        <ChevronLeft className="h-4 w-4" aria-hidden="true" />
+                        Anterior
+                      </Button>
+                      <Button variant="outline" size="sm" disabled={confirmPage >= confirmTotalPages} onClick={() => setConfirmPage(p => p + 1)}>
+                        Siguiente
+                        <ChevronRight className="h-4 w-4" aria-hidden="true" />
+                      </Button>
+                    </div>
+                  </div>
+                )}
+              </>
+            )}
+          </CardContent>
+        </Card>
+        </>
+        )}
     </AppShell>
   )
 }

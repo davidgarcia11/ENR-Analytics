@@ -14,6 +14,9 @@ import { cn } from "@/lib/utils"
  * @param title        Título del modal (encabezado accesible).
  * @param children     Contenido del cuerpo.
  * @param footer       Nodo opcional con las acciones (botones).
+ * @param dismissible  Si es false, no se puede cerrar con Escape, clic fuera ni la X — solo
+ *                     mediante una acción explícita del `footer` (ver /consulta-stock-pda,
+ *                     pop-up de confirmación de escaneo que hay que aceptar sí o sí).
  *
  * @example
  * <Dialog open={open} onOpenChange={setOpen} title="Editar usuario" footer={<Button>Guardar</Button>}>
@@ -27,6 +30,7 @@ function Dialog({
     children,
     footer,
     className,
+    dismissible = true,
 }: {
     open: boolean
     onOpenChange: (open: boolean) => void
@@ -34,6 +38,7 @@ function Dialog({
     children?: React.ReactNode
     footer?: React.ReactNode
     className?: string
+    dismissible?: boolean
 }) {
     const ref = React.useRef<HTMLDialogElement>(null)
 
@@ -49,9 +54,11 @@ function Dialog({
         <dialog
             ref={ref}
             onClose={() => onOpenChange(false)}
+            // Escape dispara "cancel" antes de cerrar — si no es descartable, se bloquea aquí
+            onCancel={(e) => { if (!dismissible) e.preventDefault() }}
             // Clic en el backdrop (el propio <dialog> es el target fuera del panel) → cerrar
             onClick={(e) => {
-                if (e.target === ref.current) onOpenChange(false)
+                if (dismissible && e.target === ref.current) onOpenChange(false)
             }}
             className={cn(
                 "m-auto w-full max-w-md rounded-xl border border-border bg-card p-0 text-card-foreground shadow-xl",
@@ -63,15 +70,17 @@ function Dialog({
             <div className="p-6">
                 <div className="flex items-start justify-between gap-4">
                     <h2 className="text-base font-semibold leading-none tracking-tight">{title}</h2>
-                    <Button
-                        variant="ghost"
-                        size="icon"
-                        className="-mr-2 -mt-2 h-8 w-8"
-                        onClick={() => onOpenChange(false)}
-                        aria-label="Cerrar"
-                    >
-                        <X className="h-4 w-4" aria-hidden="true" />
-                    </Button>
+                    {dismissible && (
+                        <Button
+                            variant="ghost"
+                            size="icon"
+                            className="-mr-2 -mt-2 h-8 w-8"
+                            onClick={() => onOpenChange(false)}
+                            aria-label="Cerrar"
+                        >
+                            <X className="h-4 w-4" aria-hidden="true" />
+                        </Button>
+                    )}
                 </div>
                 {children && <div className="mt-3 text-sm text-muted-foreground">{children}</div>}
                 {footer && <div className="mt-6 flex justify-end gap-2">{footer}</div>}

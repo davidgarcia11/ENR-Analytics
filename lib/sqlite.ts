@@ -79,6 +79,20 @@ export function getDb(): Database.Database {
       description TEXT NOT NULL,
       updated_at TEXT DEFAULT (datetime('now'))
     );
+
+    -- Registro de aceptación del pop-up de /consulta-stock-pda: qué mensaje se le mostró al
+    -- operario al escanear un SSCC y quién/cuándo lo aceptó. Trazabilidad para el caso de que
+    -- un producto se meta erróneamente en línea: saber a quién le salió el aviso y cuál era.
+    CREATE TABLE IF NOT EXISTS stock_scan_confirmations (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+      username TEXT NOT NULL DEFAULT 'Invitado',
+      sscc TEXT NOT NULL,
+      articulo TEXT,
+      estado TEXT NOT NULL,
+      mensajes TEXT NOT NULL,
+      created_at TEXT DEFAULT (datetime('now'))
+    );
   `);
 
   // Migración: añadir columna must_change_password si no existe (para BDs creadas antes de esta versión)
