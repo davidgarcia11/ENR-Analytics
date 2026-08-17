@@ -283,6 +283,18 @@ CREATE TABLE jde_status_descriptions (
   description TEXT NOT NULL,
   updated_at TEXT DEFAULT (datetime('now'))
 );
+
+-- Registro de aceptación del pop-up de /consulta-stock-pda (ver docs/consulta-stock-pda.md §8.2)
+CREATE TABLE stock_scan_confirmations (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  username TEXT NOT NULL DEFAULT 'Invitado',
+  sscc TEXT NOT NULL,
+  articulo TEXT,
+  estado TEXT NOT NULL,
+  mensajes TEXT NOT NULL,        -- JSON array de los mensajes exactos mostrados
+  created_at TEXT DEFAULT (datetime('now'))
+);
 ```
 
 **Seeds iniciales:**
@@ -732,6 +744,18 @@ Solo accesible para admins. Se accede desde:
 - La columna "Panel" muestra badges con colores según el source (`SOURCE_LABELS`)
 - `summarizeFilters()` convierte el JSON de filtros en un resumen legible (ej: "Aguilar · 01/03 - 02/03 · 3 filtros"). También maneja filtros específicos de caducados (type, location).
 - Las estadísticas, gráfico y ranking excluyen entradas de login (solo consultas reales)
+
+### Pestaña "Confirmaciones PDA" (`/admin/logs`)
+
+Segunda pestaña de la misma página (`<Tabs>`, junto a "Consultas"), con su propio estado y su
+propia API — no reutiliza `query_logs`. Lista el registro de aceptación del pop-up obligatorio de
+`/consulta-stock-pda` (ver `docs/consulta-stock-pda.md` §8.2): quién aceptó qué aviso, con qué SSCC
+y cuándo — trazabilidad si un producto se mete erróneamente en línea.
+
+- **Archivo:** mismo `app/admin/logs/page.tsx`, tabla `stock_scan_confirmations`.
+- **API:** `GET /api/admin/scan-confirmations` (`app/api/admin/scan-confirmations/route.ts`) — paginada, filtros por usuario, resultado (correcto/aviso/no_encontrado/sin_fecha), SSCC (parcial) y rango de fechas. Solo admin.
+- **Tabla:** Fecha/Hora, Usuario, SSCC completo, Artículo, Resultado aceptado (badge de color + los mensajes exactos que vio el operario).
+- No comparte filtros, paginación ni contador de página con la pestaña "Consultas" — son datasets independientes.
 
 ### Persistencia
 
