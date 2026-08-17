@@ -41,12 +41,12 @@ Todos usan `ArticleMultiSelect` — multi-selección con buscador interno, mismo
 |---|---|---|---|---|
 | **Tipo** | Selección única (botones) | Estático | `type` | — (condiciona la lógica de la query) |
 | **Tipo de bloqueo** | Multi-select | F0005 (`DRSY=41`, `DRRT=L`) via `?onlyLotStates=1` | `lotStates[]` | `TRIM(B.IOLOTS)` |
-| **Categoría** | Multi-select | `/api/categories?field=srp1&screen=caducados` | `srp1[]` | `TRIM(D.IMSRP1)` |
+| **Categoría** | Multi-select, default=10,11,12,13,14 | `/api/categories?field=srp1&screen=caducados` | `srp1[]` | `TRIM(D.IMSRP1)` |
 | **Familia** | Multi-select | `/api/categories?field=srp2&screen=caducados` | `srp2[]` | `TRIM(D.IMSRP2)` |
 | **Planta** | Multi-select | `/api/plants?screen=caducados` (F0006) | `plant[]` | `TRIM(A.LIMCU)` |
 | **Ubicación** | Multi-select, default=GENERICA | F4100 via respuesta API | `location[]` | `TRIM(A.LILOCN)` |
 
-**Default al cargar:** Ubicación preseleccionada en GENERICA (`__blank__`). El resto vacío (sin filtro), salvo Planta: si el usuario logueado tiene una planta por defecto asignada en `/admin` (ver `lib/plants.ts` y `DOCUMENTACION.md` §4), `page.tsx` espera a conocer la sesión antes de la primera consulta y preselecciona esa planta en `selectedPlants` (mapeada al código JDE con `plantJdeCode()`).
+**Default al cargar:** Categoría preseleccionada en `['10','11','12','13','14']` (constante `DEFAULT_SRP1` en `app/caducados/page.tsx`) y Ubicación preseleccionada en GENERICA (`__blank__`, constante `DEFAULT_LOCATIONS`). El resto vacío (sin filtro), salvo Planta: si el usuario logueado tiene una planta por defecto asignada en `/admin` (ver `lib/plants.ts` y `DOCUMENTACION.md` §4), `page.tsx` espera a conocer la sesión antes de la primera consulta y preselecciona esa planta en `selectedPlants` (mapeada al código JDE con `plantJdeCode()`). El botón **Limpiar** restaura Categoría y Ubicación a estos mismos defaults (no los deja vacíos), a diferencia del resto de filtros.
 
 **Tipo de bloqueo** — a diferencia de los demás, este filtro aplica en **cualquier tipo** (Todos/Caducados/Obsoletos/Bloqueados), no solo en Bloqueados. Permite ver, por ejemplo, los caducados que además tienen un estado de lote activo.
 

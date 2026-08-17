@@ -249,7 +249,7 @@ Sistema idéntico al del resto de paneles. Aislado por `screen='comparativa'` en
 
 ### Interfaz de usuario
 
-La página se envuelve en `<AppShell navbar={{...}} title="Comparativa SERES" description="...">` (`components/AppShell.tsx`), que ya incluye la barra de navegación (Navbar), el título y la descripción del panel — no hay `<main>`/`max-w-7xl` manual como en versiones anteriores. Los colores usan tokens Tailwind del sistema de diseño (`bg-primary`, `text-muted-foreground`, `border-border`, etc., ver `docs/design-system.md`) en vez de hex o clases `gray-*` hardcodeadas. La tarjeta de filtros usa `<Card accent>` (borde superior rojo).
+La página se envuelve en `<AppShell navbar={{...}} title="Comparativa SERES" description="...">` (`components/AppShell.tsx`), que ya incluye la barra de navegación (Navbar), el título y la descripción del panel — no hay `<main>`/`max-w-7xl` manual como en versiones anteriores. Los colores usan tokens Tailwind del sistema de diseño (`bg-primary`, `text-muted-foreground`, `border-border`, etc., ver `docs/design-system.md`) en vez de hex o clases `gray-*` hardcodeadas. La tarjeta de filtros usa `<Card accent className="overflow-visible ...">` (borde superior rojo). El `overflow-visible` es necesario porque `accent` trae `overflow-hidden` por defecto, que recortaría el desplegable `absolute` del filtro Cliente (`ArticleMultiSelect`) — ver `docs/design-system.md` §4.
 
 ```
 ┌─ AppShell: Navbar + título "Comparativa SERES" ──────┐
