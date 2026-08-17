@@ -206,7 +206,28 @@ No se creó ningún componente nuevo en `components/ui/` para esto — todo vive
 `app/compras/page.tsx` (`DesviacionCard`, `PeriodPresetSelect`), reutilizando `Card`/`CardHeader`/
 `CardTitle`/`CardContent`/`Badge` ya existentes.
 
-### 6.1 Presets — fechas opcionales
+### 6.1 Exportación a Excel
+
+Botón "Excel" en la barra de filtros (mismo estilo que el resto de paneles — borde/texto verde,
+icono `Download`, deshabilitado si `rows.length === 0`). Genera un único `.xlsx` con `XLSX.writeFile`
+(librería `xlsx`, ya dependencia del proyecto) con 3 hojas:
+
+- **Resumen**: título y periodo/filtros aplicados (fila combinada), y una tabla Previsto/Real/
+  Desviación (abs y %) para las 4 métricas (Unidades, Kg, Importe, Precio medio), más la lista de
+  artículos sin gramaje si aplica.
+- **Tendencia mensual**: una fila por mes con las 4 métricas (previsto/real), igual que alimenta el
+  gráfico de tendencia.
+- **Detalle**: una fila por artículo+mes con las 4 métricas completas (previsto, real, desviación
+  abs y %) y avisos — **no solo la pestaña activa**, a diferencia de la tabla en pantalla.
+
+`ponytail:` la librería `xlsx` (versión community, no Pro) no soporta escribir color de fondo ni
+negrita en las celdas — comprobado directamente inspeccionando el `.xlsx` generado. El "formato
+bonito" se limita a lo que sí soporta al escribir: number format nativo de Excel (`€`, `%`, miles),
+anchos de columna (`!cols`) y celdas combinadas para el título (`!merges`). Si en el futuro hace
+falta cabecera con color/negrita de verdad, la alternativa es cambiar de librería (ej.
+`xlsx-js-style`, mismo API) — decisión tomada con el usuario de no añadir esa dependencia por ahora.
+
+### 6.2 Presets — fechas opcionales
 
 `<PresetPanel>` se usa con `dateFields={['startDate', 'endDate']}` (ver `docs/design-system.md` §5):
 al guardar un preset aparece el checkbox "Incluir fechas" (desmarcado por defecto, igual que en
