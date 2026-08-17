@@ -11,6 +11,7 @@ import { requireScreenAccess } from '@/lib/permissions';
 const COLEDG_VIGENTE = 'P6';
 
 const PLANTA_PRESUPUESTOS = 10999;
+const TIPO_DOC_EXCLUIDO = 'ST'; // F4211.SDDCTO — excluido de "venta real" a petición del usuario
 
 function jdeBoundsFromDates(startDateStr: string, endDateStr: string) {
     const start = new Date(startDateStr);
@@ -78,24 +79,25 @@ export async function GET(req: NextRequest) {
             WHERE COMCU = :planta AND COLEDG = :coledg
             ${items.length ? `AND TRIM(COLITM) IN (${itemPlaceholders})` : ''}
         `;
-        // C) Venta real (F4211) — solo pedidos con albarán generado (SDDELN != 0), fecha de envío
-        // real (SDADDJ), no fecha de pedido. SDAITM = artículo largo/visible (clave de agrupación).
-        // SDITM = artículo corto para F4101 (mismo patrón que app/api/orders/route.ts:
-        // `LEFT JOIN F4101 E ON E.IMITM = A.SDITM`).
+        // C) Venta real (F4211) — excluye tipo de documento SDDCTO='ST' y líneas sin fecha de
+        // envío (SDADDJ!=0), fecha de envío real (SDADDJ), no fecha de pedido. SDAITM = artículo
+        // largo/visible (clave de agrupación). SDITM = artículo corto para F4101 (mismo patrón
+        // que app/api/orders/route.ts: `LEFT JOIN F4101 E ON E.IMITM = A.SDITM`).
         // ojo: SIN filtro SDNXTR!=999 — ese filtro es propio de /preparacion-pedidos (pedidos
         // pendientes, excluye cerrados/históricos) y aquí excluía casi todo el histórico real.
         const salesSql = `
             SELECT TRIM(A.SDAITM) AS ITEM, TRIM(A.SDITM) AS ITEM_CORTO, A.SDADDJ AS FECHA_JDE,
                    A.SDUORG AS CANT_REAL_RAW, A.SDUPRC AS PRECIO_RAW
             FROM F4211 A
-            WHERE A.SDDELN != 0 AND A.SDADDJ BETWEEN :startJde AND :endJde
+            WHERE TRIM(A.SDDCTO) != :tipoDocExcluido AND A.SDADDJ != 0
+                AND A.SDADDJ BETWEEN :startJde AND :endJde
             ${items.length ? `AND TRIM(A.SDAITM) IN (${itemPlaceholders})` : ''}
         `;
 
         const [forecastResult, costResult, salesResult] = await Promise.all([
             conn.execute(forecastSql, { planta: PLANTA_PRESUPUESTOS, startJde, endJde, ...itemBinds }),
             conn.execute(costSql, { planta: PLANTA_PRESUPUESTOS, coledg: COLEDG_VIGENTE, ...itemBinds }),
-            conn.execute(salesSql, { startJde, endJde, ...itemBinds }),
+            conn.execute(salesSql, { tipoDocExcluido: TIPO_DOC_EXCLUIDO, startJde, endJde, ...itemBinds }),
         ]);
 
         const forecastRows = forecastResult.rows as any[];
