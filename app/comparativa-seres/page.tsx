@@ -308,7 +308,9 @@ export default function ComparativaSeresPage() {
                 )}
 
                 {/* --- FILTROS --- */}
-                <Card accent className="space-y-4 p-4">
+                {/* overflow-visible: Card accent trae overflow-hidden (para la barra superior redondeada),
+                    pero eso recortaba el desplegable absolute de ArticleMultiSelect. */}
+                <Card accent className="overflow-visible space-y-4 p-4">
                     <div>
                         <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2">Filtros</p>
                         <div className="flex flex-wrap items-end gap-3">
