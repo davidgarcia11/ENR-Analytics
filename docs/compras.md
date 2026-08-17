@@ -39,7 +39,7 @@ Cuatro tablas sin precedente en el resto del proyecto:
 |---|---|---|
 | `F3460` | Previsión de ventas (presupuesto) | `MFMCU` (planta, filtro fijo `10999` = planta de presupuestos), `MFLITM` (artículo largo/visible), `MFITM` (artículo corto, solo para F4101/F554101), `MFDRQJ` (fecha JDE, siempre fin de mes = previsión de todo ese mes), `MFFQT` (cantidad, ÷100) |
 | `F4105` | Coste de artículo | `COMCU` (almacén, filtro fijo `10999`), `COLEDG` (tipo de coste, ver §3.1), `COLITM` (artículo largo), `COUNCS` (coste unitario, ÷10000) |
-| `F4211` | Ventas reales (pedidos de venta, ya usada en `api/orders`) | `SDAITM` (artículo largo/visible), `SDITM` (artículo corto, solo para F4101/F554101), `SDADDJ` (fecha real de envío), `SDDELN` (nº de albarán — filtro), `SDUORG` (cantidad, ÷100), `SDUPRC` (precio unitario, ÷10000) — **sin** filtro `SDNXTR` (ver §3.3) |
+| `F4211` | Ventas reales (pedidos de venta, ya usada en `api/orders`) | `SDAITM` (artículo largo/visible), `SDITM` (artículo corto, solo para F4101/F554101), `SDADDJ` (fecha real de envío — filtro `!=0`), `SDDCTO` (tipo de documento — filtro `!='ST'`), `SDUORG` (cantidad, ÷100), `SDUPRC` (precio unitario, ÷10000) — **sin** filtro `SDNXTR` (ver §3.3) |
 | `F554101` | Extensión del maestro de artículos (gramaje) | `AAITM` (artículo corto, = `IMITM`/`MFITM`/`SDITM`), `AAZE03` (gramos por unidad, directo — ver §3.2) |
 
 ### 3.1 Artículo "largo" vs. "corto"
@@ -87,13 +87,12 @@ manejar distintas UOM de origen.
 edge case en §5), el patrón de conversión por `F41002`/BFS sigue disponible en
 `app/api/production/route.ts` líneas ~304-378 como alternativa.
 
-### 3.3 Solo ventas con albarán (`SDDELN`), sin filtro `SDNXTR`
+### 3.3 Filtro por tipo de documento y fecha de envío, sin filtro `SDNXTR`
 
-A petición del usuario, `F4211` se filtra con `AND SDDELN != 0` — solo cuentan como "venta real" los
-pedidos que ya tienen un albarán generado (es decir, mercancía efectivamente enviada), no todo lo
-pedido. La fecha de referencia para el rango también cambió de `SDPDDJ` (fecha de pedido) a `SDADDJ`
-(fecha real de envío), para que el mes en el que se contabiliza una venta sea el mes en que
-efectivamente salió, no el mes en que se pidió.
+A petición del usuario, `F4211` se filtra con `TRIM(SDDCTO) != 'ST'` (excluye ese tipo de documento)
+y `SDADDJ != 0` (descarta líneas sin fecha de envío real). La fecha de referencia para el rango
+también es `SDADDJ` (fecha real de envío), no `SDPDDJ` (fecha de pedido), para que el mes en el que
+se contabiliza una venta sea el mes en que efectivamente salió, no el mes en que se pidió.
 
 **Bug real encontrado al comparar contra JDE en vivo**: la primera versión reutilizaba el filtro
 `SDNXTR != 999` de `app/api/orders/route.ts` sin validar que encajara aquí. Consultando directamente
@@ -102,8 +101,12 @@ enero, máximo el día de hoy), pero con `SDNXTR != 999` el mínimo saltaba a me
 número de filas caía de ~165.000 a ~3.100 — ese filtro estaba descartando casi todo el histórico.
 `SDNXTR` (estado del pedido) tiene sentido para `/preparacion-pedidos` (que quiere pedidos
 *pendientes*, excluyendo los ya cerrados/históricos), pero para "venta real ya sucedida" el filtro
-correcto es el opuesto: no filtrar por `SDNXTR` en absoluto (confirmado con el usuario). El único
-filtro de estado que queda es `SDDELN != 0` (con albarán).
+correcto es el opuesto: no filtrar por `SDNXTR` en absoluto (confirmado con el usuario).
+
+**Cambio posterior (confirmado con el usuario):** el filtro `SDDELN != 0` (con albarán) se sustituyó
+por `SDDCTO != 'ST'` + `SDADDJ != 0` — el criterio de "venta real" pasa a ser tipo de documento y
+fecha de envío informada, no la existencia de albarán. Constante `TIPO_DOC_EXCLUIDO = 'ST'` en
+`app/api/compras/route.ts`.
 
 ### 3.4 Constante `COLEDG_VIGENTE` (tipo de coste)
 
@@ -133,7 +136,7 @@ costeUnitarioPrevisto = hasPrevisto ? COUNCS/10000 : null          // ver nota a
 importePrevisto    = qtyPrevisto * costeUnitarioPrevisto
 kgPrevisto         = qtyPrevisto * (AAZE03/1000)                  // null si no hay gramaje (F554101)
 
-// Real: agregado línea a línea de F4211 (solo líneas con SDDELN != 0)
+// Real: agregado línea a línea de F4211 (solo líneas con SDDCTO != 'ST' y SDADDJ != 0)
 importeLinea  = (SDUORG/100) * (SDUPRC/10000)
 qtyReal            = Σ (SDUORG/100)
 importeReal        = Σ importeLinea
@@ -206,7 +209,28 @@ No se creó ningún componente nuevo en `components/ui/` para esto — todo vive
 `app/compras/page.tsx` (`DesviacionCard`, `PeriodPresetSelect`), reutilizando `Card`/`CardHeader`/
 `CardTitle`/`CardContent`/`Badge` ya existentes.
 
-### 6.1 Presets — fechas opcionales
+### 6.1 Exportación a Excel
+
+Botón "Excel" en la barra de filtros (mismo estilo que el resto de paneles — borde/texto verde,
+icono `Download`, deshabilitado si `rows.length === 0`). Genera un único `.xlsx` con `XLSX.writeFile`
+(librería `xlsx`, ya dependencia del proyecto) con 3 hojas:
+
+- **Resumen**: título y periodo/filtros aplicados (fila combinada), y una tabla Previsto/Real/
+  Desviación (abs y %) para las 4 métricas (Unidades, Kg, Importe, Precio medio), más la lista de
+  artículos sin gramaje si aplica.
+- **Tendencia mensual**: una fila por mes con las 4 métricas (previsto/real), igual que alimenta el
+  gráfico de tendencia.
+- **Detalle**: una fila por artículo+mes con las 4 métricas completas (previsto, real, desviación
+  abs y %) y avisos — **no solo la pestaña activa**, a diferencia de la tabla en pantalla.
+
+`ponytail:` la librería `xlsx` (versión community, no Pro) no soporta escribir color de fondo ni
+negrita en las celdas — comprobado directamente inspeccionando el `.xlsx` generado. El "formato
+bonito" se limita a lo que sí soporta al escribir: number format nativo de Excel (`€`, `%`, miles),
+anchos de columna (`!cols`) y celdas combinadas para el título (`!merges`). Si en el futuro hace
+falta cabecera con color/negrita de verdad, la alternativa es cambiar de librería (ej.
+`xlsx-js-style`, mismo API) — decisión tomada con el usuario de no añadir esa dependencia por ahora.
+
+### 6.2 Presets — fechas opcionales
 
 `<PresetPanel>` se usa con `dateFields={['startDate', 'endDate']}` (ver `docs/design-system.md` §5):
 al guardar un preset aparece el checkbox "Incluir fechas" (desmarcado por defecto, igual que en
@@ -308,6 +332,8 @@ Ninguno de estos se habría detectado sin probar el panel contra la base de dato
    descartaba casi todo el histórico real de F4211 (de ~165.000 filas a ~3.100 en 2026) porque aquí
    el sentido es el contrario: se quiere venta ya sucedida, no pedidos abiertos. Se quitó ese filtro
    por completo (ver §3.3).
+6. El filtro `SDDELN != 0` (con albarán) se sustituyó por `SDDCTO != 'ST'` + `SDADDJ != 0`, a
+   petición del usuario (ver §3.3).
 
 ---
 
@@ -316,8 +342,8 @@ Ninguno de estos se habría detectado sin probar el panel contra la base de dato
 Al quitar el filtro `SDNXTR` (punto 5 arriba), la consulta a F4211 pasó de ~3.100 a ~165.000 filas
 para el año completo. Medido directamente contra JDE: la query de F4211 sola tarda **~150 segundos**
 para un año completo (la consulta posterior a F4101, con ~166 artículos distintos, tarda 337ms — no
-es el cuello de botella). Muy probablemente falta un índice adecuado para `SDDELN != 0 AND SDADDJ
-BETWEEN ...` y Oracle hace un escaneo completo de tabla.
+es el cuello de botella). Muy probablemente falta un índice adecuado para `SDDCTO != 'ST' AND
+SDADDJ != 0 AND SDADDJ BETWEEN ...` y Oracle hace un escaneo completo de tabla.
 
 Decisión (con el usuario): en vez de tocar índices de Oracle (fuera de alcance de este panel, lo
 gestionaría el DBA/administrador JDE), el rango por defecto de `app/compras/page.tsx` y de
@@ -326,7 +352,7 @@ año — rápido (unos miles de filas). El usuario puede ampliar el rango manual
 año completo puede tardar minutos.
 
 `ponytail:` si el año completo se vuelve un caso de uso habitual (no solo puntual), la solución de
-fondo es un índice en Oracle sobre `F4211(SDADDJ, SDDELN)` o similar — pedirlo al equipo de JDE/DBA,
+fondo es un índice en Oracle sobre `F4211(SDADDJ, SDDCTO)` o similar — pedirlo al equipo de JDE/DBA,
 no intentar compensarlo con más código aquí.
 
 ---

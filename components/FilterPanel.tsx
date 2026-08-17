@@ -4,6 +4,7 @@ import { useState, useEffect, type Dispatch, type SetStateAction } from "react"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 import { ArticleMultiSelect } from "@/components/ArticleMultiSelect"
+import { SingleSelect } from "@/components/SingleSelect"
 import { Search, Download, X, Save, BookmarkCheck, Trash2, Pencil, Layers, Calendar, Loader2 } from "lucide-react"
 import { DatePicker } from "@/components/DatePicker"
 import { ConfirmDialog } from "@/components/ui/dialog"
@@ -351,7 +352,8 @@ export function FilterPanel({
       )}
 
       {/* Panel de Filtros */}
-      <div className="bg-card p-4 rounded-xl shadow-sm border border-border border-t-[3px] border-t-primary overflow-hidden space-y-4">
+      {/* Sin overflow-hidden: recortaba el desplegable absolute de ArticleMultiSelect */}
+      <div className="bg-card p-4 rounded-xl shadow-sm border border-border border-t-[3px] border-t-primary space-y-4">
 
         {/* Sección 1: Filtros de categoría */}
         <div>
@@ -437,38 +439,35 @@ export function FilterPanel({
               <Input id="filter-end-time" type="time" step="1" value={filters.endTime} onChange={e => setFilters({ ...filters, endTime: e.target.value })} className="w-[145px] font-medium" />
             </div>
             <div className="grid gap-1.5">
-              <label htmlFor="filter-plant" className="text-xs font-semibold text-secondary-foreground">Planta</label>
-              <select
-                id="filter-plant"
-                className="flex h-9 w-[150px] rounded-md border border-input bg-card px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring font-medium"
-                value={filters.plant}
-                onChange={e => handlePlantChange(e.target.value)}
-              >
-                <option value="all">Todas</option>
-                <option value="10100">Aguilar</option>
-                <option value="10200">Corella</option>
-                <option value="10300">Funes</option>
-              </select>
+              <label className="text-xs font-semibold text-secondary-foreground">Planta</label>
+              <div className="w-[150px]">
+                <SingleSelect
+                  options={[
+                    { id: '10100', description: 'Aguilar' },
+                    { id: '10200', description: 'Corella' },
+                    { id: '10300', description: 'Funes' },
+                  ]}
+                  value={filters.plant}
+                  onChange={handlePlantChange}
+                  label="Planta"
+                />
+              </div>
             </div>
             {(filters.plant === '10300' || filters.plant === 'all') && (
               <div className="grid gap-1.5 animate-in fade-in duration-300">
-                <label htmlFor="filter-subline" className="text-xs font-semibold text-secondary-foreground">Sub-planta / Línea</label>
-                <select
-                  id="filter-subline"
-                  className="flex h-9 w-[150px] rounded-md border border-input bg-card px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring font-medium disabled:opacity-50"
-                  value={filters.subLine}
-                  onChange={e => setFilters({ ...filters, subLine: e.target.value })}
-                  disabled={filters.plant !== '10300' && filters.plant !== 'all'}
-                >
-                  <option value="all">Todas</option>
-                  {filters.plant === '10300' && (
-                    <>
-                      <option value="3">Funes 1</option>
-                      <option value="4">Funes 2</option>
-                      <option value="5">Funes Past.</option>
-                    </>
-                  )}
-                </select>
+                <label className="text-xs font-semibold text-secondary-foreground">Sub-planta / Línea</label>
+                <div className="w-[150px]">
+                  <SingleSelect
+                    options={filters.plant === '10300' ? [
+                      { id: '3', description: 'Funes 1' },
+                      { id: '4', description: 'Funes 2' },
+                      { id: '5', description: 'Funes Past.' },
+                    ] : []}
+                    value={filters.subLine}
+                    onChange={v => setFilters({ ...filters, subLine: v })}
+                    label="Sub-planta"
+                  />
+                </div>
               </div>
             )}
           </div>

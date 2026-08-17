@@ -107,6 +107,11 @@ const CaducadosTable = memo(function CaducadosTable({ data, loading }: { data: P
   )
 })
 
+// Prefiltro por defecto del filtro Categoría al acceder al panel
+const DEFAULT_SRP1 = ['10', '11', '12', '13', '14']
+// Prefiltro por defecto del filtro Ubicacion al acceder al panel (GENERICA)
+const DEFAULT_LOCATIONS = ['__blank__']
+
 export default function CaducadosPage() {
   const router = useRouter()
 
@@ -119,10 +124,10 @@ export default function CaducadosPage() {
   const [availableLotStates, setAvailableLotStates] = useState<LotState[]>([])
   const [availableSrp1, setAvailableSrp1] = useState<{ id: string; description: string }[]>([])
   const [availableSrp2, setAvailableSrp2] = useState<{ id: string; description: string }[]>([])
-  const [selectedSrp1, setSelectedSrp1] = useState<string[]>([])
+  const [selectedSrp1, setSelectedSrp1] = useState<string[]>(DEFAULT_SRP1)
   const [selectedSrp2, setSelectedSrp2] = useState<string[]>([])
   const [selectedPlants, setSelectedPlants] = useState<string[]>([])
-  const [selectedLocations, setSelectedLocations] = useState<string[]>(['__blank__'])
+  const [selectedLocations, setSelectedLocations] = useState<string[]>(DEFAULT_LOCATIONS)
   const [selectedType, setSelectedType] = useState<'todos' | 'caducados' | 'obsoletos' | 'bloqueados'>('todos')
   const [selectedLotStates, setSelectedLotStates] = useState<string[]>([])
   const [paletSearch, setPaletSearch] = useState('')
@@ -283,10 +288,10 @@ export default function CaducadosPage() {
 
   const clearFilters = () => {
     setSelectedPlants([])
-    setSelectedLocations([])
+    setSelectedLocations(DEFAULT_LOCATIONS)
     setSelectedType('todos')
     setSelectedLotStates([])
-    setSelectedSrp1([])
+    setSelectedSrp1(DEFAULT_SRP1)
     setSelectedSrp2([])
     setPaletSearch('')
     setLoteSearch('')
@@ -321,7 +326,7 @@ export default function CaducadosPage() {
     setSelectedSrp2((f.selectedSrp2 as string[]) || [])
     setSelectedPlants((f.selectedPlants as string[]) || [])
     const locs = f.selectedLocations as string[] | undefined
-    setSelectedLocations(locs && locs.length > 0 ? locs : ['__blank__'])
+    setSelectedLocations(locs && locs.length > 0 ? locs : DEFAULT_LOCATIONS)
     setPaletSearch((f.paletSearch as string) || '')
     setLoteSearch((f.loteSearch as string) || '')
     setSelectedArticles((f.selectedArticles as string[]) || [])
@@ -385,7 +390,9 @@ export default function CaducadosPage() {
       )}
 
       {/* --- FILTROS --- */}
-      <Card accent className="space-y-4 p-4">
+      {/* overflow-visible: Card accent trae overflow-hidden (para la barra superior redondeada),
+          pero eso recortaba el desplegable absolute de ArticleMultiSelect. */}
+      <Card accent className="overflow-visible space-y-4 p-4">
         <div>
           <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2">Filtros</p>
           <div className="flex flex-wrap items-end gap-3">

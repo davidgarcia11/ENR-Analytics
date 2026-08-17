@@ -1,7 +1,7 @@
 "use client"
 
 import * as React from "react"
-import { BookmarkCheck, Calendar, Pencil, Save, Trash2, X } from "lucide-react"
+import { BookmarkCheck, Calendar, ChevronsUpDown, Pencil, Save, Trash2, X } from "lucide-react"
 import { Card } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -55,24 +55,49 @@ export function PresetQuickSelect({
     onSelect: (preset: Preset) => void
     className?: string
 }) {
+    const [open, setOpen] = React.useState(false)
+    const containerRef = React.useRef<HTMLDivElement>(null)
+
+    React.useEffect(() => {
+        const handleClickOutside = (event: MouseEvent) => {
+            if (containerRef.current && !containerRef.current.contains(event.target as Node)) setOpen(false)
+        }
+        document.addEventListener("mousedown", handleClickOutside)
+        return () => document.removeEventListener("mousedown", handleClickOutside)
+    }, [])
+
     if (presets.length === 0) return null
     return (
         <div className="grid gap-1.5">
             <label className="text-xs font-semibold text-secondary-foreground">Cargar preset</label>
-            <select
-                onChange={(e) => {
-                    const p = presets.find((pp) => pp.id === Number(e.target.value))
-                    if (p) onSelect(p)
-                    e.target.value = ""
-                }}
-                defaultValue=""
-                className={cn("flex h-9 w-[160px] rounded-md border border-input bg-card px-3 py-1 text-sm shadow-sm", className)}
-            >
-                <option value="" disabled>Seleccionar...</option>
-                {presets.map((p) => (
-                    <option key={p.id} value={p.id}>{p.name}</option>
-                ))}
-            </select>
+            <div className="relative w-[160px]" ref={containerRef}>
+                <Button
+                    type="button"
+                    variant="outline"
+                    role="combobox"
+                    aria-expanded={open}
+                    aria-label="Cargar preset"
+                    onClick={() => setOpen(o => !o)}
+                    className={cn("h-9 w-full justify-between border-slate-300 bg-white font-normal", className)}
+                >
+                    <span className="text-slate-500 truncate">Seleccionar...</span>
+                    <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" aria-hidden="true" />
+                </Button>
+
+                {open && (
+                    <div className="absolute top-full mt-1 z-50 w-[220px] bg-white border border-slate-200 rounded-md shadow-lg flex flex-col max-h-[300px] overflow-y-auto p-1">
+                        {presets.map((p) => (
+                            <div
+                                key={p.id}
+                                onClick={() => { onSelect(p); setOpen(false) }}
+                                className="flex w-full cursor-pointer select-none items-center rounded-sm py-1.5 px-2 text-sm text-slate-700 hover:bg-slate-100 truncate"
+                            >
+                                {p.name}
+                            </div>
+                        ))}
+                    </div>
+                )}
+            </div>
         </div>
     )
 }

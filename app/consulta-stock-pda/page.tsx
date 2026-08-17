@@ -7,27 +7,43 @@ import { AppShell } from "@/components/AppShell"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Spinner } from "@/components/ui/spinner"
 import { EmptyState } from "@/components/ui/empty-state"
-import { ScanBarcode, Camera, AlertTriangle, CheckCircle2, PackageSearch, X } from "lucide-react"
+import { Dialog } from "@/components/ui/dialog"
+import {
+    ScanBarcode, Camera, AlertTriangle, CheckCircle2, PackageSearch, X, ChevronDown, ChevronRight,
+    XCircle, PackageX, HelpCircle, CalendarX, ShieldAlert, ArrowLeftRight, type LucideIcon,
+} from "lucide-react"
 import { parseGs1, type Gs1Fields } from "@/lib/gs1"
 import { plantReflexCode } from "@/lib/plants"
 
 interface SessionUser { id: number; username: string; role: string; name: string; surname: string; defaultPlant: string }
 
-interface LoteStock {
+interface PaletDetalle {
     lote: string
     sscc: string | null
     cantidad: number
     fechaCaducidad: string | null
     ubicacion: string | null
     planta: string | null
+    caducado: boolean
+    bloqueado: boolean
+    primeroEnCaducar: boolean
+}
+
+interface GrupoLote {
+    lote: string
+    fechaCaducidad: string | null
+    cantidadTotal: number
+    cantidadBloqueada: number
+    totalPalets: number
+    paletsBloqueados: number
+    palets: PaletDetalle[]
 }
 
 interface ValidacionSscc {
-    estado: 'correcto' | 'incorrecto' | 'no_encontrado' | 'sin_fecha'
-    mensaje: string
+    estado: 'correcto' | 'aviso' | 'no_encontrado' | 'sin_fecha'
+    mensajes: string[]
 }
 
 // Código de depósito físico (Reflex) -> nombre de planta, igual que en app/api/consulta-stock-pda/route.ts
@@ -53,26 +69,80 @@ function formatFecha(fecha: string | null) {
 
 const DIAS_AVISO_CADUCIDAD = 5
 
-// Resalta filas caducadas (rojo) o a punto de caducar (ámbar, dentro de DIAS_AVISO_CADUCIDAD días)
-function filaCaducidadClassName(fecha: string | null): string {
-    if (!fecha) return ""
+function diasHastaCaducidad(fecha: string | null): number | null {
+    if (!fecha) return null
     const d = new Date(fecha)
-    if (isNaN(d.getTime())) return ""
+    if (isNaN(d.getTime())) return null
     const hoy = new Date()
     hoy.setHours(0, 0, 0, 0)
     d.setHours(0, 0, 0, 0)
-    const diasRestantes = (d.getTime() - hoy.getTime()) / (1000 * 60 * 60 * 24)
-    if (diasRestantes < 0) return "bg-red-50 hover:bg-red-100"
-    if (diasRestantes <= DIAS_AVISO_CADUCIDAD) return "bg-amber-50 hover:bg-amber-100"
+    return (d.getTime() - hoy.getTime()) / (1000 * 60 * 60 * 24)
+}
+
+// Resalta tarjetas caducadas (rojo) o a punto de caducar (ámbar, dentro de DIAS_AVISO_CADUCIDAD días)
+function fondoCaducidadClassName(fecha: string | null): string {
+    const dias = diasHastaCaducidad(fecha)
+    if (dias === null) return ""
+    if (dias < 0) return "bg-red-50"
+    if (dias <= DIAS_AVISO_CADUCIDAD) return "bg-amber-50"
     return ""
 }
 
-// La caducidad manda si hay aviso; si no, resalta en tono de marca la fila del SSCC escaneado
-function filaClassName(lote: LoteStock, ssccEscaneado: string | null | undefined): string {
-    const porCaducidad = filaCaducidadClassName(lote.fechaCaducidad)
+// La caducidad manda si hay aviso; si no, resalta en tono de marca la tarjeta del SSCC escaneado
+function paletClassName(palet: PaletDetalle, ssccEscaneado: string | null | undefined): string {
+    const porCaducidad = fondoCaducidadClassName(palet.fechaCaducidad)
     if (porCaducidad) return porCaducidad
-    if (ssccEscaneado && lote.sscc === ssccEscaneado) return "bg-primary/10 hover:bg-primary/15"
-    return ""
+    if (ssccEscaneado && palet.sscc === ssccEscaneado) return "bg-primary/10"
+    return "bg-card"
+}
+
+// Para que se vea claro qué lote se está leyendo SIN desplegarlo
+function loteContieneEscaneado(grupo: GrupoLote, ssccEscaneado: string | null | undefined): boolean {
+    return !!ssccEscaneado && grupo.palets.some(p => p.sscc === ssccEscaneado)
+}
+
+// Look & feel por estado, compartido entre el banner de la página y el pop-up obligatorio:
+// icono + titular grande en el mismo color, para que "se puede o no consumir" se entienda
+// de un vistazo sin tener que leer el texto.
+const ESTADO_VISUAL: Record<ValidacionSscc['estado'], {
+    Icon: LucideIcon; titulo: string
+    iconBg: string; iconText: string; texto: string
+    filaBorde: string; filaFondo: string
+    botonClassName: string
+}> = {
+    correcto: {
+        Icon: CheckCircle2, titulo: 'SE PUEDE CONSUMIR',
+        iconBg: 'bg-green-100', iconText: 'text-green-600', texto: 'text-green-700',
+        filaBorde: 'border-green-200', filaFondo: 'bg-green-50',
+        botonClassName: 'bg-green-600 hover:bg-green-700 text-white',
+    },
+    aviso: {
+        Icon: XCircle, titulo: 'NO SE PUEDE CONSUMIR',
+        iconBg: 'bg-red-100', iconText: 'text-red-600', texto: 'text-red-700',
+        filaBorde: 'border-red-200', filaFondo: 'bg-red-50',
+        botonClassName: 'bg-red-600 hover:bg-red-700 text-white',
+    },
+    no_encontrado: {
+        Icon: PackageX, titulo: 'PALET NO ENCONTRADO',
+        iconBg: 'bg-red-100', iconText: 'text-red-600', texto: 'text-red-700',
+        filaBorde: 'border-red-200', filaFondo: 'bg-red-50',
+        botonClassName: 'bg-red-600 hover:bg-red-700 text-white',
+    },
+    sin_fecha: {
+        Icon: HelpCircle, titulo: 'SIN FECHA DE CADUCIDAD',
+        iconBg: 'bg-amber-100', iconText: 'text-amber-600', texto: 'text-amber-700',
+        filaBorde: 'border-amber-200', filaFondo: 'bg-amber-50',
+        botonClassName: 'bg-amber-500 hover:bg-amber-600 text-white',
+    },
+}
+
+// Icono por motivo concreto dentro de un aviso (un palet puede acumular varios a la vez:
+// caducado + bloqueado, por ejemplo — cada mensaje se muestra en su propia fila con su icono).
+function iconoMensaje(mensaje: string): LucideIcon {
+    if (mensaje.includes('Caducado')) return CalendarX
+    if (mensaje.includes('bloqueado por Calidad')) return ShieldAlert
+    if (mensaje.includes('caducan antes')) return ArrowLeftRight
+    return AlertTriangle
 }
 
 export default function ConsultaStockPdaPage() {
@@ -82,8 +152,11 @@ export default function ConsultaStockPdaPage() {
     const [parsed, setParsed] = useState<Gs1Fields | null>(null)
     const [articulo, setArticulo] = useState<string | null>(null)
     const [descripcion, setDescripcion] = useState<string | null>(null)
-    const [lotes, setLotes] = useState<LoteStock[]>([])
+    const [grupos, setGrupos] = useState<GrupoLote[]>([])
+    const [expandedLotes, setExpandedLotes] = useState<Set<string>>(new Set())
+    const [loteEscaneado, setLoteEscaneado] = useState<string | null>(null)
     const [validacionSscc, setValidacionSscc] = useState<ValidacionSscc | null>(null)
+    const [ackOpen, setAckOpen] = useState(false)
     const [planta, setPlanta] = useState("")
     const [loading, setLoading] = useState(false)
     const [error, setError] = useState<string | null>(null)
@@ -137,7 +210,9 @@ export default function ConsultaStockPdaPage() {
         setError(null)
         setArticulo(null)
         setDescripcion(null)
-        setLotes([])
+        setGrupos([])
+        setExpandedLotes(new Set())
+        setLoteEscaneado(null)
         setValidacionSscc(null)
         setSearched(true)
         try {
@@ -149,8 +224,16 @@ export default function ConsultaStockPdaPage() {
             if (!res.ok) throw new Error(data.error || `Error ${res.status}`)
             setArticulo(data.articulo)
             setDescripcion(data.descripcion)
-            setLotes(data.lotes || [])
-            setValidacionSscc(data.validacionSscc || null)
+            const gruposRecibidos: GrupoLote[] = data.grupos || []
+            setGrupos(gruposRecibidos)
+            // El lote del palet escaneado empieza desplegado, el resto colapsado
+            const loteDelEscaneado = gruposRecibidos.find(g => g.palets.some(p => p.sscc === sscc))?.lote ?? null
+            setExpandedLotes(loteDelEscaneado ? new Set([loteDelEscaneado]) : new Set())
+            setLoteEscaneado(loteDelEscaneado)
+            if (data.validacionSscc) {
+                setValidacionSscc(data.validacionSscc)
+                setAckOpen(true)
+            }
         } catch (err) {
             setError(err instanceof Error ? err.message : 'Error desconocido')
         } finally {
@@ -172,7 +255,7 @@ export default function ConsultaStockPdaPage() {
         } else {
             setError('Debes escanear el número de palet (SSCC), no el código del artículo')
             setArticulo(null)
-            setLotes([])
+            setGrupos([])
         }
     }, [fetchStock])
 
@@ -187,12 +270,41 @@ export default function ConsultaStockPdaPage() {
         setParsed(null)
         setArticulo(null)
         setDescripcion(null)
-        setLotes([])
+        setGrupos([])
+        setExpandedLotes(new Set())
+        setLoteEscaneado(null)
         setValidacionSscc(null)
+        setAckOpen(false)
         setError(null)
         setSearched(false)
         setInputValue('')
         inputRef.current?.focus()
+    }
+
+    const toggleLote = (lote: string) => setExpandedLotes(prev => {
+        const next = new Set(prev)
+        next.has(lote) ? next.delete(lote) : next.add(lote)
+        return next
+    })
+
+    // Deja constancia de quién aceptó el pop-up y con qué mensaje, para poder saber a quién
+    // le salió un aviso concreto si luego el producto se mete erróneamente en línea.
+    // Best-effort: un fallo de red no debe atrapar al operario en el pop-up.
+    const acceptAck = async () => {
+        setAckOpen(false)
+        if (!validacionSscc || !parsed?.sscc) return
+        try {
+            await fetch('/api/consulta-stock-pda/confirmaciones', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    sscc: parsed.sscc,
+                    articulo,
+                    estado: validacionSscc.estado,
+                    mensajes: validacionSscc.mensajes,
+                }),
+            })
+        } catch { /* trazabilidad best-effort */ }
     }
 
     // --- Escaneo por cámara (API nativa BarcodeDetector, sin dependencias) ---
@@ -235,8 +347,6 @@ export default function ConsultaStockPdaPage() {
     }, [handleScan, stopCamera])
 
     useEffect(() => stopCamera, [stopCamera]) // liberar la cámara al desmontar
-
-    const primerCaduca = lotes[0]?.fechaCaducidad || null
 
     return (
         <AppShell
@@ -323,19 +433,26 @@ export default function ConsultaStockPdaPage() {
                 </div>
             )}
 
-            {validacionSscc && (
-                <div className={`flex items-center gap-3 rounded-lg border px-4 py-3 ${validacionSscc.estado === 'correcto'
-                    ? 'bg-green-50 border-green-200 text-green-700'
-                    : validacionSscc.estado === 'sin_fecha'
-                        ? 'bg-amber-50 border-amber-200 text-amber-700'
-                        : 'bg-red-50 border-red-200 text-red-700'
-                    }`}>
-                    {validacionSscc.estado === 'correcto'
-                        ? <CheckCircle2 className="h-5 w-5 flex-shrink-0" aria-hidden="true" />
-                        : <AlertTriangle className="h-5 w-5 flex-shrink-0" aria-hidden="true" />}
-                    <span className="text-sm font-medium">{validacionSscc.mensaje}</span>
-                </div>
-            )}
+            {validacionSscc && (() => {
+                const v = ESTADO_VISUAL[validacionSscc.estado]
+                return (
+                    <div className={`flex items-center gap-3 rounded-lg border px-4 py-3 ${v.filaBorde} ${v.filaFondo}`}>
+                        <div className={`flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full ${v.iconBg}`}>
+                            <v.Icon className={`h-5 w-5 ${v.iconText}`} aria-hidden="true" />
+                        </div>
+                        <div>
+                            <div className={`text-sm font-black tracking-wide ${v.texto}`}>{v.titulo}</div>
+                            {validacionSscc.estado !== 'correcto' && (
+                                <div className="mt-0.5 space-y-0.5">
+                                    {validacionSscc.mensajes.map((m, i) => (
+                                        <div key={i} className="text-sm font-medium text-secondary-foreground">{m}</div>
+                                    ))}
+                                </div>
+                            )}
+                        </div>
+                    </div>
+                )
+            })()}
 
             {loading && <Spinner label="Consultando stock en Reflex..." className="py-10" />}
 
@@ -347,51 +464,75 @@ export default function ConsultaStockPdaPage() {
                             {descripcion && <span className="ml-2 font-normal text-secondary-foreground">{descripcion}</span>}
                         </CardTitle>
                     </CardHeader>
-                    <CardContent>
-                        <div className="overflow-x-auto">
-                            <Table>
-                                <TableHeader>
-                                    <TableRow className="hover:bg-transparent">
-                                        <TableHead className="font-bold text-secondary-foreground">Lote</TableHead>
-                                        <TableHead className="font-bold text-secondary-foreground">Caducidad</TableHead>
-                                        <TableHead className="font-bold text-secondary-foreground">SSCC</TableHead>
-                                        <TableHead className="font-bold text-secondary-foreground">Cantidad</TableHead>
-                                        <TableHead className="font-bold text-secondary-foreground">Ubicación</TableHead>
-                                        <TableHead className="font-bold text-secondary-foreground">Planta</TableHead>
-                                    </TableRow>
-                                </TableHeader>
-                                <TableBody>
-                                    {lotes.length === 0 ? (
-                                        <TableRow className="hover:bg-transparent">
-                                            <TableCell colSpan={6}>
-                                                <EmptyState icon={PackageSearch} title="Sin stock" description="No hay lotes en stock para este artículo." />
-                                            </TableCell>
-                                        </TableRow>
-                                    ) : (
-                                        lotes.map((l, i) => (
-                                            <TableRow key={`${l.sscc || l.lote}-${i}`} className={filaClassName(l, parsed?.sscc)}>
-                                                <TableCell className="font-mono text-sm">{l.lote}</TableCell>
-                                                <TableCell className="text-sm">
-                                                    {formatFecha(l.fechaCaducidad)}
-                                                    {l.fechaCaducidad === primerCaduca && (
-                                                        <Badge variant="warning" className="ml-2">Primero en caducar</Badge>
+                    <CardContent className="space-y-2">
+                        {grupos.length === 0 ? (
+                            <EmptyState icon={PackageSearch} title="Sin stock" description="No hay lotes en stock para este artículo." />
+                        ) : (
+                            grupos.map(grupo => {
+                                const escaneado = loteContieneEscaneado(grupo, parsed?.sscc)
+                                return (
+                                    <div
+                                        key={grupo.lote}
+                                        className={`rounded-lg border ${escaneado ? 'border-primary ring-1 ring-primary' : 'border-border'} ${fondoCaducidadClassName(grupo.fechaCaducidad) || 'bg-card'}`}
+                                    >
+                                        {/* Cabecera del lote — toda la info clave visible sin desplegar, sin scroll horizontal */}
+                                        <div
+                                            className="flex cursor-pointer items-start justify-between gap-2 p-3"
+                                            onClick={() => toggleLote(grupo.lote)}
+                                        >
+                                            <div className="flex min-w-0 items-start gap-2">
+                                                {expandedLotes.has(grupo.lote)
+                                                    ? <ChevronDown className="mt-0.5 h-4 w-4 flex-shrink-0 text-muted-foreground" aria-hidden="true" />
+                                                    : <ChevronRight className="mt-0.5 h-4 w-4 flex-shrink-0 text-muted-foreground" aria-hidden="true" />}
+                                                <div className="min-w-0">
+                                                    <div className="flex flex-wrap items-center gap-1.5">
+                                                        <span className="font-mono text-sm font-bold text-foreground">{grupo.lote}</span>
+                                                        {escaneado && <Badge variant="primary">Escaneado</Badge>}
+                                                    </div>
+                                                    <div className="mt-1 flex flex-wrap items-center gap-1.5 text-xs text-secondary-foreground">
+                                                        <span>Caducidad: {formatFecha(grupo.fechaCaducidad)}</span>
+                                                        {grupo.palets.some(p => p.caducado) && <Badge variant="destructive">Caducado</Badge>}
+                                                    </div>
+                                                </div>
+                                            </div>
+                                            <div className="flex-shrink-0 text-right">
+                                                <div className="text-sm font-bold text-foreground">{grupo.cantidadTotal}</div>
+                                                <div className="mt-1 flex flex-col items-end gap-1">
+                                                    {grupo.paletsBloqueados > 0 && (
+                                                        <Badge variant="destructive">{grupo.paletsBloqueados}/{grupo.totalPalets} bloqueados</Badge>
                                                     )}
-                                                </TableCell>
-                                                <TableCell className="font-mono text-sm text-secondary-foreground">
-                                                    {l.sscc ? l.sscc.slice(-6) : '-'}
-                                                    {parsed?.sscc && l.sscc === parsed.sscc && (
-                                                        <Badge variant="primary" className="ml-2">Escaneado</Badge>
+                                                    {grupo.cantidadBloqueada > 0 && (
+                                                        <Badge variant="destructive">{grupo.cantidadBloqueada}/{grupo.cantidadTotal} bloqueada</Badge>
                                                     )}
-                                                </TableCell>
-                                                <TableCell className="text-sm">{l.cantidad}</TableCell>
-                                                <TableCell className="text-sm text-secondary-foreground">{l.ubicacion || '-'}</TableCell>
-                                                <TableCell className="text-sm text-secondary-foreground">{l.planta || '-'}</TableCell>
-                                            </TableRow>
-                                        ))
-                                    )}
-                                </TableBody>
-                            </Table>
-                        </div>
+                                                </div>
+                                            </div>
+                                        </div>
+
+                                        {/* Detalle por palet — desplegable, también en tarjetas apiladas (nunca en columnas fijas) */}
+                                        {expandedLotes.has(grupo.lote) && (
+                                            <div className="space-y-1.5 border-t border-border p-3 pt-2.5">
+                                                {grupo.palets.map((p, i) => (
+                                                    <div key={p.sscc || i} className={`rounded-md border border-border/60 p-2 ${paletClassName(p, parsed?.sscc)}`}>
+                                                        <div className="flex flex-wrap items-center justify-between gap-1.5">
+                                                            <span className="font-mono text-xs text-secondary-foreground">SSCC {p.sscc || '-'}</span>
+                                                            <span className="text-sm font-bold text-foreground">{p.cantidad}</span>
+                                                        </div>
+                                                        <div className="mt-1 flex flex-wrap items-center gap-1.5">
+                                                            <span className="text-xs text-secondary-foreground">{formatFecha(p.fechaCaducidad)}</span>
+                                                            {p.caducado && <Badge variant="destructive">Caducado</Badge>}
+                                                            {!p.caducado && p.primeroEnCaducar && <Badge variant="warning">Primero en caducar</Badge>}
+                                                            {parsed?.sscc && p.sscc === parsed.sscc && <Badge variant="primary">Escaneado</Badge>}
+                                                            {p.bloqueado && <Badge variant="destructive">Bloqueado por Calidad</Badge>}
+                                                        </div>
+                                                        {p.ubicacion && <div className="mt-1 text-xs text-muted-foreground">{p.ubicacion}</div>}
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        )}
+                                    </div>
+                                )
+                            })
+                        )}
                     </CardContent>
                 </Card>
             )}
@@ -413,6 +554,45 @@ export default function ConsultaStockPdaPage() {
                     className="py-16"
                 />
             )}
+
+            <Dialog
+                open={ackOpen}
+                onOpenChange={setAckOpen}
+                dismissible={false}
+                title={parsed?.sscc
+                    ? `Palet ${parsed.sscc}${loteEscaneado ? ` · Lote ${loteEscaneado}` : ''}`
+                    : 'Resultado del escaneo'}
+                footer={validacionSscc && (
+                    <Button onClick={acceptAck} size="lg" className={`w-full font-bold ${ESTADO_VISUAL[validacionSscc.estado].botonClassName}`}>
+                        Aceptar
+                    </Button>
+                )}
+            >
+                {validacionSscc && (() => {
+                    const v = ESTADO_VISUAL[validacionSscc.estado]
+                    return (
+                        <div className="flex flex-col items-center gap-3 py-2 text-center">
+                            <div className={`flex h-16 w-16 items-center justify-center rounded-full ${v.iconBg}`}>
+                                <v.Icon className={`h-9 w-9 ${v.iconText}`} aria-hidden="true" />
+                            </div>
+                            <div className={`text-xl font-black tracking-wide ${v.texto}`}>{v.titulo}</div>
+                            {validacionSscc.estado !== 'correcto' && (
+                                <div className="w-full space-y-1.5">
+                                    {validacionSscc.mensajes.map((m, i) => {
+                                        const Icon = iconoMensaje(m)
+                                        return (
+                                            <div key={i} className={`flex items-center gap-2 rounded-lg border px-3 py-2 text-left text-sm font-medium text-foreground ${v.filaBorde} ${v.filaFondo}`}>
+                                                <Icon className={`h-4 w-4 flex-shrink-0 ${v.iconText}`} aria-hidden="true" />
+                                                <span>{m}</span>
+                                            </div>
+                                        )
+                                    })}
+                                </div>
+                            )}
+                        </div>
+                    )
+                })()}
+            </Dialog>
         </AppShell>
     )
 }

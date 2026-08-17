@@ -61,7 +61,7 @@ Estilo shadcn simplificado. Todos aceptan `className` para extender, nunca para 
 | Componente | Uso | Notas |
 |---|---|---|
 | `Button` | Cualquier acción clicable | Variantes: `default` (rojo corporativo), `destructive`, `outline`, `secondary`, `ghost`, `link`. Tamaños: `default`, `sm`, `lg`, `icon`. El botón "principal" de una página (Filtrar, Guardar, Crear) es siempre `variant="default"` — no le pongas `style={{backgroundColor:'#D30B15'}}`, ya lo es. |
-| `Card` | Contenedor con borde y sombra | Prop **`accent`** (`<Card accent>`) añade el borde superior rojo de 3px + `overflow-hidden`. Es el reemplazo directo de `style={{borderTop:'3px solid #D30B15'}}`. Úsalo en toda tarjeta de panel/filtros/KPI. |
+| `Card` | Contenedor con borde y sombra | Prop **`accent`** (`<Card accent>`) añade el borde superior rojo de 3px + `overflow-hidden`. Es el reemplazo directo de `style={{borderTop:'3px solid #D30B15'}}`. Úsalo en toda tarjeta de panel/filtros/KPI. **Si la Card contiene un `ArticleMultiSelect`/`SingleSelect`** (menú `absolute`), añade `className="overflow-visible"` — si no, el `overflow-hidden` de `accent` recorta el desplegable al abrirlo. Ya pasó en compras, caducados, producción y comparativa SERES; ver `overflow-visible` en cualquiera de esos filtros como ejemplo. |
 | `Input` | Campo de texto | Ya trae borde, foco y disabled tokenizados. |
 | `Table` / `TableHeader` / `TableBody` / `TableRow` / `TableHead` / `TableCell` | Tablas de datos | `TableRow` ya tiene hover; si la fila no debe reaccionar al hover (fila de estado, spinner, empty state), añade `className="hover:bg-transparent"`. |
 | `Popover` / `PopoverTrigger` / `PopoverContent` | Desplegables posicionados | Basado en Radix, con Portal. |
@@ -203,6 +203,12 @@ gestiona el dropdown, la sesión y el filtrado por permisos (`canAccessPanel`).
 
 Es específico del dashboard de producción (categorías JDE). Para un panel nuevo con filtros propios, **no lo reutilices tal cual** — construye tu propio bloque de filtros dentro de un `<Card accent>` siguiendo el patrón visual: `p-4 space-y-4`, secciones separadas por `<div className="border-t border-border" />`, labels `text-xs font-semibold text-secondary-foreground`, título de sección `text-xs font-semibold text-muted-foreground uppercase tracking-wider`.
 
+### `ArticleMultiSelect` / `SingleSelect` (`components/ArticleMultiSelect.tsx`, `components/SingleSelect.tsx`)
+
+Desplegables con el mismo look (botón + panel `absolute` blanco redondeado con buscador y hover). `ArticleMultiSelect` es multi-selección (categorías, artículos, plantas...); `SingleSelect` es de una sola opción con una opción "Todas" implícita (planta, sub-planta...). **Nunca un `<select>` nativo** para un filtro de panel — se ve distinto al resto (estilo del navegador) y rompe la consistencia visual. `PresetQuickSelect` ("Cargar preset") sigue el mismo patrón visual aunque no reutiliza estos componentes (es una acción de un solo disparo, no un filtro con valor persistente).
+
+Van siempre dentro de una `<Card accent>` — recuerda el `overflow-visible` de la fila `Card` de la tabla del punto 4, si no el menú se recorta al abrirse.
+
 ---
 
 ## 6. Patrones de interacción obligatorios
@@ -225,7 +231,7 @@ Sigue este orden; cada paso da por hecho que el anterior está hecho.
 
 1. **Página** (`app/mi-panel/page.tsx`, `"use client"`): monta `<AppShell navbar={{...}} title="..." description="...">` como contenedor raíz. No repitas `<main>`/`max-w-*`/`<Navbar>` sueltos.
 2. **Registrar el panel**: añade una entrada a `PANELS` en `lib/panels.ts` (clave, label, href, icono de lucide-react, descripción) — **y solo ahí** (ver §5.1). `Navbar.tsx`, la portada (`app/page.tsx`), el login (`app/login/page.tsx`) y `SCREEN_KEYS` de `app/admin/page.tsx` lo importan automáticamente, no hay que tocarlos.
-3. **Filtros**: bloque propio en un `<Card accent>` siguiendo el patrón del punto 5 (FilterPanel). Usa `Input`, `DatePicker`, `ArticleMultiSelect`/`SingleSelect` según el tipo de filtro.
+3. **Filtros**: bloque propio en un `<Card accent>` siguiendo el patrón del punto 5 (FilterPanel). Usa `Input`, `DatePicker`, `ArticleMultiSelect`/`SingleSelect` según el tipo de filtro (nunca un `<select>` nativo — ver punto 5). Si usas `ArticleMultiSelect`/`SingleSelect`, añade `overflow-visible` a la `Card accent` (ver punto 4) o el desplegable se recorta.
 4. **Presets** (si el panel los necesita): estado `showPresets`/`presetsSignal` + `const { presets, reload } = usePresets('mi_panel')` + `<PresetPanel .../>` **y** `<PresetQuickSelect .../>` en la barra de acciones — ver punto 5. Recuerda pasar `onPresetsClick` al `navbar` del `AppShell`.
 5. **KPIs** (si aplica): `<KpiCard>` en un grid `sm:grid-cols-2 md:grid-cols-N`.
 6. **Tabla**: `Table`/`TableHeader`/`TableBody`/`TableRow`/`TableHead`/`TableCell` dentro de `<Card accent>`. Estados de `loading` → `Spinner`, sin resultados → `EmptyState`, ambos en una `TableRow className="hover:bg-transparent"` con `colSpan` al nº de columnas.

@@ -27,6 +27,22 @@ function buildFechaCaducidadConFallback(r: any): string | null {
     return buildFechaCaducidad(r.diaCad, r.mesCad, r.anioCad) ?? buildFechaCaducidad(r.diaCadLu, r.mesCadLu, r.anioCadLu);
 }
 
+// HLSUPPP.SUCQAL: código de calidad del soporte/palet. 'STD' = calidad estándar, válido
+// para consumir; cualquier otro código (CAD, CAL, CUA, PTE, ROT, OBS, M01-M09...) es un
+// bloqueo de calidad (confirmado contra datos reales de Reflex). No se distingue el motivo
+// concreto en el mensaje al operario, solo "bloqueado por Calidad" — el código exacto no
+// aporta nada accionable en el PDA.
+function esBloqueadoPorCalidad(sucqal: string | null): boolean {
+    const v = (sucqal || '').trim().toUpperCase();
+    return v !== '' && v !== 'STD';
+}
+
+interface PaletRow {
+    lote: string; sscc: string | null; cantidad: number
+    fechaCaducidad: string | null; ubicacion: string | null; planta: string | null
+    caducado: boolean; bloqueado: boolean; primeroEnCaducar: boolean
+}
+
 export async function GET(req: NextRequest) {
     const denied = await requireScreenAccess('consulta_stock_pda')
     if (denied) return denied
@@ -50,7 +66,7 @@ export async function GET(req: NextRequest) {
         conn = await getReflexConnection();
 
         // HLGEINP: lote/SSCC/cantidad/caducidad por artículo. HLARTIP: maestro de artículo
-        // (descripción + activo/inactivo). HLSUPPP: soporte (palet) -> depósito+ubicación.
+        // (descripción + activo/inactivo). HLSUPPP: soporte (palet) -> depósito+ubicación+calidad.
         // HLEMPLP: maestro de ubicaciones.
         // INNER JOIN a HLARTIP con ARTOPD = 0 (activo): un artículo desactivado se trata como no encontrado.
         // Filtro de planta opcional (e.EMCDPO): filtra toda la consulta (listado y validación de SSCC)
@@ -76,7 +92,8 @@ export async function GET(req: NextRequest) {
                     g.GEADLU  AS anioCadLu,
                     e.EMLIEM  AS ubicacionDesc,
                     e.EMC1EM  AS emc1, e.EMC2EM AS emc2, e.EMC3EM AS emc3, e.EMC4EM AS emc4, e.EMC5EM AS emc5,
-                    e.EMCDPO  AS plantaCod
+                    e.EMCDPO  AS plantaCod,
+                    s.SUCQAL  AS calidad
                 FROM reflex.HLGEINP g
                 INNER JOIN reflex.HLARTIP a ON a.ARCART = g.GECART AND a.ARTOPD = 0
                 LEFT JOIN reflex.HLSUPPP s ON s.SUNSUP = g.GENSUP
@@ -90,21 +107,38 @@ export async function GET(req: NextRequest) {
         const rows = result.recordset as any[];
         const articulo = rows.length > 0 ? rows[0].articulo : null;
         const descripcion = rows.length > 0 ? (rows[0].descripcion || '').trim() || null : null;
-        const lotes = rows
-            .map(r => {
-                const codigoUbicacion = [r.emc1, r.emc2, r.emc3, r.emc4, r.emc5]
-                    .map((v: string | null) => (v || '').trim())
-                    .filter(Boolean)
-                    .join('-');
-                return {
-                    lote: r.lote,
-                    sscc: r.sscc,
-                    cantidad: r.cantidad,
-                    fechaCaducidad: buildFechaCaducidadConFallback(r),
-                    ubicacion: (r.ubicacionDesc || '').trim() || codigoUbicacion || null,
-                    planta: PLANTAS[(r.plantaCod || '').trim()] || r.plantaCod || null,
-                };
-            })
+
+        // hoy en ISO (YYYY-MM-DD): comparación lexicográfica segura contra fechaCaducidad
+        const hoyIso = new Date().toISOString().slice(0, 10);
+
+        const palets: Omit<PaletRow, 'primeroEnCaducar'>[] = rows.map(r => {
+            const codigoUbicacion = [r.emc1, r.emc2, r.emc3, r.emc4, r.emc5]
+                .map((v: string | null) => (v || '').trim())
+                .filter(Boolean)
+                .join('-');
+            const fechaCaducidad = buildFechaCaducidadConFallback(r);
+            return {
+                lote: r.lote,
+                sscc: r.sscc,
+                cantidad: r.cantidad,
+                fechaCaducidad,
+                ubicacion: (r.ubicacionDesc || '').trim() || codigoUbicacion || null,
+                planta: PLANTAS[(r.plantaCod || '').trim()] || r.plantaCod || null,
+                caducado: fechaCaducidad !== null && fechaCaducidad < hoyIso,
+                bloqueado: esBloqueadoPorCalidad(r.calidad),
+            };
+        });
+
+        // "Primero en caducar" real: solo cuenta entre los palets consumibles (ni caducados
+        // ni bloqueados) — no tiene sentido destacar como "el que hay que coger primero" un
+        // palet que en realidad no se puede consumir.
+        const consumibles = palets.filter(p => !p.caducado && !p.bloqueado && p.fechaCaducidad);
+        const primerConsumible = consumibles.length > 0
+            ? consumibles.reduce((min, p) => p.fechaCaducidad! < min.fechaCaducidad! ? p : min)
+            : null;
+
+        const lotes: PaletRow[] = palets
+            .map(p => ({ ...p, primeroEnCaducar: primerConsumible !== null && p.sscc === primerConsumible.sscc }))
             // FEFO real: al mezclar DLC y DLU no todas las filas vienen ya ordenadas desde el ORDER BY de la query
             .sort((a, b) => {
                 if (!a.fechaCaducidad && !b.fechaCaducidad) return 0;
@@ -113,25 +147,59 @@ export async function GET(req: NextRequest) {
                 return a.fechaCaducidad.localeCompare(b.fechaCaducidad);
             });
 
-        // Validación FEFO del palet escaneado: ¿hay algún otro lote de este mismo artículo
-        // (y planta, si se filtró) que caduque antes?
-        let validacionSscc: { estado: 'correcto' | 'incorrecto' | 'no_encontrado' | 'sin_fecha'; mensaje: string };
+        // Agrupado por lote para la tabla (ver docs/consulta-stock-pda.md §7 para el porqué)
+        const gruposPorLote = new Map<string, PaletRow[]>();
+        for (const p of lotes) {
+            const grupo = gruposPorLote.get(p.lote) ?? [];
+            grupo.push(p);
+            gruposPorLote.set(p.lote, grupo);
+        }
+        const grupos = Array.from(gruposPorLote.entries())
+            .map(([lote, paletsDelLote]) => ({
+                lote,
+                fechaCaducidad: paletsDelLote.find(p => p.fechaCaducidad)?.fechaCaducidad ?? null,
+                cantidadTotal: paletsDelLote.reduce((sum, p) => sum + (p.cantidad || 0), 0),
+                cantidadBloqueada: paletsDelLote.filter(p => p.bloqueado).reduce((sum, p) => sum + (p.cantidad || 0), 0),
+                totalPalets: paletsDelLote.length,
+                paletsBloqueados: paletsDelLote.filter(p => p.bloqueado).length,
+                palets: paletsDelLote,
+            }))
+            .sort((a, b) => {
+                if (!a.fechaCaducidad && !b.fechaCaducidad) return 0;
+                if (!a.fechaCaducidad) return 1;
+                if (!b.fechaCaducidad) return -1;
+                return a.fechaCaducidad.localeCompare(b.fechaCaducidad);
+            });
+
+        // Validación del palet escaneado. Prioridad de avisos cuando coinciden varios:
+        // Caducado > Bloqueado por calidad > hay lote anterior (esta última solo se comprueba
+        // si el propio palet es consumible, y solo contra otros palets también consumibles —
+        // no tiene sentido decir "hay uno antes" si ese "antes" está caducado o bloqueado).
+        let validacionSscc: { estado: 'correcto' | 'aviso' | 'no_encontrado' | 'sin_fecha'; mensajes: string[] };
         const escaneado = lotes.find(l => l.sscc === sscc);
         if (!escaneado) {
             validacionSscc = {
                 estado: 'no_encontrado',
-                mensaje: `Palet no está en stock${planta ? ` en ${PLANTAS[planta]}` : ''}`,
-            };
-        } else if (!escaneado.fechaCaducidad) {
-            validacionSscc = {
-                estado: 'sin_fecha',
-                mensaje: 'Este palet no tiene fecha de caducidad registrada; no se puede comprobar si hay lotes anteriores',
+                mensajes: [`Palet no está en stock${planta ? ` en ${PLANTAS[planta]}` : ''}`],
             };
         } else {
-            const hayAnterior = lotes.some(l => l.sscc !== sscc && l.fechaCaducidad && l.fechaCaducidad < escaneado.fechaCaducidad!);
-            validacionSscc = hayAnterior
-                ? { estado: 'incorrecto', mensaje: 'Este palet no se puede consumir: hay lotes de este artículo que caducan antes' }
-                : { estado: 'correcto', mensaje: 'Correcto para consumir: no hay lotes que caduquen antes' };
+            const avisos: string[] = [];
+            if (escaneado.caducado) avisos.push('Este palet no se puede consumir: está Caducado.');
+            if (escaneado.bloqueado) avisos.push('Este palet no se puede consumir: está bloqueado por Calidad.');
+
+            if (avisos.length > 0) {
+                validacionSscc = { estado: 'aviso', mensajes: avisos };
+            } else if (!escaneado.fechaCaducidad) {
+                validacionSscc = {
+                    estado: 'sin_fecha',
+                    mensajes: ['Este palet no tiene fecha de caducidad registrada; no se puede comprobar si hay lotes anteriores.'],
+                };
+            } else {
+                const hayAnterior = consumibles.some(p => p.sscc !== sscc && p.fechaCaducidad! < escaneado.fechaCaducidad!);
+                validacionSscc = hayAnterior
+                    ? { estado: 'aviso', mensajes: ['Este palet no se puede consumir: hay lotes de este artículo que caducan antes.'] }
+                    : { estado: 'correcto', mensajes: ['Correcto para consumir.'] };
+            }
         }
 
         // Logging en SQLite (nunca bloquea la respuesta)
@@ -152,7 +220,7 @@ export async function GET(req: NextRequest) {
             console.error('Error logging query:', logErr);
         }
 
-        return NextResponse.json({ articulo, descripcion, lotes, validacionSscc });
+        return NextResponse.json({ articulo, descripcion, grupos, validacionSscc });
     } catch (err: any) {
         console.error('Consulta stock PDA Error:', err);
         return NextResponse.json({ error: err.message }, { status: 500 });
