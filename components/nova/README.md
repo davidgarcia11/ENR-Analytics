@@ -1,0 +1,135 @@
+# Sistema de diseño Nova (ShadcnSpace) — en construcción
+
+Base del nuevo sistema de diseño sobre [ShadcnSpace](https://shadcnspace.com), aislada
+del sistema actual (`app/globals.css`, `components/ui/`) que siguen usando todos los
+paneles en producción sin ningún cambio de comportamiento.
+
+Aún no hay pantallas ni blocks instalados. Esto es solo la base.
+
+## Configuración elegida
+
+| Opción | Valor |
+|---|---|
+| Librería base de componentes | Base UI (`@base-ui/react`), no Radix |
+| Estilo | Nova (`base-nova`) |
+| Color base | Zinc |
+| Librería de iconos | Lucide (`lucide-react`, se reutiliza la versión `^0.563.0` ya instalada — ver riesgo abajo) |
+| Radius | El de fábrica del preset Nova (`0.625rem`), sin override |
+| Fuente | Geist Sans / Geist Mono — ya estaban instaladas y fijadas en `app/layout.tsx`, se reutilizan tal cual (ambos sistemas comparten `--font-sans`, no hace falta nada especial) |
+| Dark mode | No activado. El proyecto lo quitó deliberadamente (ver `DECISIONS.md`). Los tokens `[data-nova-theme="dark"]` existen por paridad con el preset pero nada los activa |
+
+`components.json` en la raíz del proyecto registra esta configuración para el CLI de shadcn.
+
+## Mecanismo de aislamiento: por SELECTOR, no por nombre de variable
+
+Un block de ShadcnSpace trae en su código clases estándar tal cual las genera el CLI:
+`bg-primary`, `text-muted-foreground`, `border-border`, `rounded-lg`... Si aislásemos
+con nombres de variable distintos (`--nova-primary`, `bg-nova-primary`), cada block
+habría que reescribirlo a mano para usarlos — inviable, y rompe la idea de "una sola
+variable para el color corporativo".
+
+En su lugar, el aislamiento es 100% por **selector CSS**: los mismos nombres estándar
+(`--primary`, `--background`, `--muted-foreground`, `--border`, `--radius-lg`...) solo
+se REDEFINEN dentro de `[data-nova-theme]`. Fuera de ese atributo, esas variables siguen
+siendo las que ya define `app/globals.css` (rojo corporativo), porque `app/nova-theme.css`
+no toca `:root` para ninguna de ellas.
+
+```css
+/* app/globals.css (sistema actual, sin cambio de comportamiento) */
+:root { --primary: #d30b15; --background: #f7f7f6; ... }
+
+/* app/nova-theme.css (nuevo) */
+[data-nova-theme] { --primary: oklch(0.21 0.006 285.885); --background: oklch(1 0 0); ... }
+```
+
+Un `<div data-nova-theme="light">` y todo lo que haya dentro ve el rojo corporativo
+reemplazado por Zinc. Cualquier página sin ese atributo (todos los paneles actuales) ve
+exactamente lo mismo que antes.
+
+### Por qué hizo falta tocar `app/globals.css`
+
+Antes de este cambio, `app/globals.css` definía los tokens como **literales directos**
+(`--color-primary: #d30b15`), y Tailwind compilaba `.bg-primary{background-color:#d30b15}`
+— un valor estático, sin ninguna variable en tiempo de ejecución. No había nada que
+`[data-nova-theme]` pudiera sobrescribir.
+
+Se cambió a una indirección de dos niveles: `--color-primary: var(--primary)` (mapeo
+Tailwind) + `--primary: #d30b15` (valor real, en `:root`). El resultado visual y el
+valor computado son **idénticos** para todo lo que no lleva `data-nova-theme` — solo
+cambia CÓMO se resuelve (variable en vez de literal). Verificado con build (ver más
+abajo).
+
+Los `--radius-sm/md/lg/xl/2xl/3xl` no necesitaron este cambio: Tailwind ya los expone
+por defecto como variables reales en `:root` (comprobado con build), así que
+`app/nova-theme.css` los sobrescribe directamente dentro de `[data-nova-theme]` sin
+tocar `app/globals.css`.
+
+### Verificado con build
+
+```
+.bg-primary{background-color:var(--primary)}       ← utilidad compartida, usa variable
+:root{--primary:#d30b15;...}                        ← fuera del scope: rojo corporativo
+[data-nova-theme]{--primary:#18181b;...}             ← dentro del scope: Zinc de Nova
+
+.rounded-lg{border-radius:var(--radius-lg)}
+:root{--radius-lg:.5rem}                             ← Tailwind por defecto, sin tocar
+[data-nova-theme]{--radius-lg:.625rem}               ← radio de fábrica de Nova
+```
+
+## Estructura de carpetas (aislamiento de componentes)
+
+- **Componentes**: `components/nova/` y `components/nova/ui/` (aliases `components`/`ui`
+  en `components.json`), nunca `components/ui/` a secas.
+- **CSS**: `app/nova-theme.css`, importado en `app/layout.tsx`.
+- **`cn()`**: se reutiliza `@/lib/utils` (ya existe, es idéntico al que trae el preset).
+
+## Regla de oro para cualquier componente Nova
+
+Cualquier color en JSX se pone por variable/utilidad de tema estándar (`bg-primary`,
+`text-muted-foreground`, `border-border`...), **nunca** un literal
+(`style={{color: '#...'}}` o un hex a mano). Un block instalado tal cual ya cumple esto
+porque así es como el CLI de shadcn genera su código.
+
+## Cómo activar el tema en una pantalla nueva
+
+Todavía no existe ninguna. Cuando se cree la primera:
+
+```tsx
+<div data-nova-theme="light" className="bg-background text-foreground">
+  {/* ... */}
+</div>
+```
+
+o, si se agrupan varias pantallas Nova bajo un route group (`app/(nova)/layout.tsx`),
+poner el atributo ahí una sola vez.
+
+## Aplicar el rojo corporativo al final
+
+Cuando se decida, cambiar únicamente estas dos variables en `app/nova-theme.css`
+(bloque `[data-nova-theme]`, modo claro):
+
+```css
+--primary: #d30b15;            /* o el oklch equivalente */
+--primary-foreground: #ffffff;
+```
+
+Un solo cambio, se propaga a todos los componentes Nova instalados sin tocar ni un JSX,
+porque ninguno usa el rojo como literal.
+
+## Notas / decisiones tomadas sin preguntar dos veces
+
+- **`lucide-react` — riesgo abierto**: el preset Nova de referencia pide `^1.33.0`, pero
+  el proyecto ya usa `^0.563.0` en todos los paneles existentes. Subir la versión es un
+  cambio compartido que puede afectar iconos ya en producción, así que **no se ha
+  tocado**: se reutiliza la `^0.563.0` instalada. Si al instalar el primer block/página
+  Nova falta un icono que no existe en `0.563` o cambia de API, se trata en ese momento
+  (import roto de un icono concreto, no un problema de todo el sistema).
+- **Sin `ThemeProvider`/`next-themes`**: el preset Nova de referencia trae un
+  `ThemeProvider` con toggle claro/oscuro y atajo de teclado. No se ha instalado porque
+  contradice la decisión ya tomada de no tener dark mode. Si se quiere igualmente para
+  el sistema Nova en concreto, es una decisión a pedir explícitamente.
+- **`baseColor` de referencia era `neutral`**: el preset Nova no expone un flag de CLI
+  para elegir color base (solo hay 7 presets fijos: nova, vega, maia, lyra, mira, luma,
+  sera, rhea, cada uno con su paleta). Los valores de este archivo son la paleta
+  **Zinc** oficial de Tailwind, mapeados a mano sustituyendo la paleta `neutral` que trae
+  el preset por defecto.
