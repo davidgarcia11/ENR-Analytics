@@ -44,7 +44,9 @@ administrador puede restringirlo a roles específicos desde `/admin` → pestañ
 | `app/admin/logs/page.tsx` | Pestaña "Confirmaciones PDA" (además de la ya existente "Consultas") — ver §8.2 |
 | `lib/reflex.ts` | Conexión a SQL Server (Reflex), análoga a `lib/db.ts` para Oracle |
 | `lib/gs1.ts` | Parser de códigos de barras GS1-128 (separa EAN/lote/cantidad/SSCC/fechas) |
+| `lib/plants.ts` | Fuente única de plantas y de las sub-plantas de Funes (§7.5) |
 | `__tests__/gs1.test.ts` | Tests del parser GS1 |
+| `__tests__/consulta-stock-pda-validacion.test.ts` | Tests de la validación FEFO y del filtro de sub-planta (§7.5) |
 
 ---
 
@@ -169,7 +171,7 @@ Confirmado y verificado contra la base de datos de test `RFXTEST`. Cuatro tablas
 | `reflex.HLARTIP` | Maestro de artículo (descripción + activo/inactivo) | `ARCART` (artículo), `ARLART` (descripción), `ARTOPD` (0=activo, 1=desactivado) |
 | `reflex.HLGEINP` | Elemento (lote/SSCC) en stock, por artículo | `GECART` (artículo), `GENSUP` (SSCC), `GELOTF` (lote), `GEQGEI` (cantidad), `GEJDLC`/`GEMDLC`/`GEADLC` (día/mes/año de DLC), `GEJDLU`/`GEMDLU`/`GEADLU` (día/mes/año de DLU, fallback) |
 | `reflex.HLSUPPP` | Soporte (palet/SSCC) → depósito + ubicación + calidad | `SUNSUP` (SSCC), `SUCDPO` (depósito), `SUNEMP` (nº ubicación), `SUCQAL` (código de calidad) |
-| `reflex.HLEMPLP` | Maestro de ubicaciones | `EMCDPO` (depósito/planta), `EMNEMP` (nº ubicación), `EMC1EM`..`EMC5EM` (código ubicación), `EMLIEM` (descripción ubicación) |
+| `reflex.HLEMPLP` | Maestro de ubicaciones | `EMCDPO` (depósito/planta), `EMCMGN` (sub-planta, ver §7.5), `EMNEMP` (nº ubicación), `EMC1EM`..`EMC5EM` (código ubicación), `EMLIEM` (descripción ubicación) |
 
 ### 6.1 Encadenamiento (JOIN)
 
@@ -253,6 +255,8 @@ Si el usuario logueado tiene una planta por defecto asignada en `/admin` (ver `l
 mapeada al código Reflex con `plantReflexCode()`. A diferencia de `/produccion`, este panel sí
 tiene opción para las 4 plantas, así que aquí nunca cae a "Todas" por planta no soportada.
 
+Funes se subdivide además en dos naves, y eso cambia qué palet hay que coger — ver §7.5.
+
 ### 6.4 Descripción de artículo
 
 `HLARTIP.ARLART` da la descripción legible del artículo (`ARCART` = código). El panel muestra
@@ -266,6 +270,7 @@ tiene opción para las 4 plantas, así que aquí nunca cae a "Todas" por planta 
 |---|---|---|
 | `sscc` | string, **obligatorio** | `/^\d{18}$/` (SSCC de palet, AI `00` de GS1-128) — 400 si falta o no cumple el formato |
 | `planta` | string, opcional | Debe ser una clave de `PLANTAS` (`001`/`002`/`004`/`006`) — 400 si no |
+| `subplanta` | string, opcional | Solo válida con `planta=004` (Funes) — 400 si se manda con otra planta o si no es `004`/`005`. Ver §7.5 |
 
 No se acepta búsqueda por EAN. Si `sscc` falta, la API responde 400 con
 "Debes escanear el número de palet (SSCC)".
@@ -401,22 +406,28 @@ consumir o no, y por qué. La respuesta es una lista de `mensajes` (no un único
 coinciden varios problemas a la vez (ej. un palet caducado que además está bloqueado), se listan
 **todos**, en este orden de prioridad — ver el porqué de cada uno en §6.1b/§7.1/§6.2:
 
-1. **Caducado** — `palet.caducado`.
-2. **Bloqueado por Calidad** — `palet.bloqueado`.
+1. **Caducado** — `palet.caducado` (por palet).
+2. **Bloqueado por Calidad** — `palet.bloqueado` (por palet).
 3. **Hay lote anterior** — solo se comprueba si el palet **no** está caducado ni bloqueado (no
    tiene sentido decir "hay uno antes" de un palet que de por sí no se puede consumir), y solo
-   contra otros palets que **tampoco** estén caducados ni bloqueados (`consumibles` en el route) —
-   no sirve de nada recomendar como alternativa un palet que en realidad tampoco se puede consumir.
+   contra otros **lotes** que **tampoco** estén caducados ni bloqueados (`consumibles` en el route,
+   excluyendo el lote escaneado entero — ver §7.5) — no sirve de nada recomendar como alternativa
+   un palet que en realidad tampoco se puede consumir.
+
+Toda la lógica vive en `validarPaletEscaneado()`, una función pura exportada desde el route y
+cubierta por `__tests__/consulta-stock-pda-validacion.test.ts`.
 
 | `estado` | Cuándo | `mensajes` |
 |---|---|---|
-| `aviso` | Caducado, bloqueado, y/o hay un palet consumible anterior (uno o varios a la vez) | Uno o más de: "Este palet no se puede consumir: está Caducado.", "...: está bloqueado por Calidad.", "...: hay lotes de este artículo que caducan antes." |
-| `correcto` | Ni caducado, ni bloqueado, ni hay ningún palet consumible con caducidad anterior | `["Correcto para consumir."]` |
-| `no_encontrado` | El SSCC no aparece en los palets devueltos (consumido ya, cantidad a 0, o no está en la planta filtrada) | `["Palet no está en stock en Corella"]` (o sin "en X" si no se filtró planta) |
+| `aviso` | Caducado, bloqueado, y/o hay un lote consumible anterior (uno o varios a la vez) | Uno o más de: "Este palet no se puede consumir: está Caducado.", "...: está bloqueado por Calidad.", "...: hay lotes de este artículo que caducan antes." |
+| `correcto` | Ni caducado, ni bloqueado, ni hay ningún lote consumible con caducidad anterior | `["Correcto para consumir."]` |
+| `no_encontrado` | El SSCC no aparece en los palets devueltos (consumido ya, cantidad a 0, o no está en la planta/sub-planta filtrada) | `["Palet no está en stock en Corella"]` (con el nombre de la sub-planta si se filtró por una, ej. "en Funes 1") |
+| `otra_subplanta` | El **lote** del SSCC escaneado no está en la sub-planta consultada pero sí en la otra nave de Funes — ver §7.5 | `["Este lote está en Funes 2, no en Funes 1."]` |
 | `sin_fecha` | El SSCC escaneado sí está en stock, no está bloqueado, pero su `fechaCaducidad` es `null` (ni DLC ni DLU) | `["Este palet no tiene fecha de caducidad registrada; no se puede comprobar si hay lotes anteriores."]` |
 
-El `estado` sigue sirviendo para el color del aviso en pantalla (verde=correcto, ámbar=sin_fecha,
-rojo=aviso/no_encontrado) — ver §8 para dónde se muestra (banner en la página + pop-up obligatorio).
+El `estado` sigue sirviendo para el color del aviso en pantalla (verde=correcto,
+ámbar=sin_fecha/otra_subplanta, rojo=aviso/no_encontrado) — ver §8 para dónde se muestra (banner en
+la página + pop-up obligatorio).
 
 ### 7.4 Rechazo de códigos sin SSCC (EAN suelto, etc.)
 
@@ -430,6 +441,88 @@ Por si algún llamador externo o futuro cambio de cliente saltara esta comprobac
 (`route.ts`) también exige `sscc` y responde 400 si falta — la validación no depende solo del
 cliente.
 
+### 7.5 Sub-plantas de Funes
+
+**El problema:** Funes tiene dos naves físicas, y el stock de un mismo artículo se reparte entre
+ellas (comprobado con datos reales: 2.746 palets con stock en una y 233 en la otra, y decenas de
+artículos presentes en ambas). Sin distinguirlas, el panel podía decirle a un operario de una nave
+"hay lotes que caducan antes" por un palet que está en la nave de al lado y al que no tiene acceso
+— o al revés, darle por bueno un palet cuando en su propia nave había otro anterior.
+
+**El dato:** `HLEMPLP.EMCMGN` (magasin/sub-planta de la ubicación). En el depósito de Funes
+(`EMCDPO = '004'`):
+
+| `EMCMGN` | Nave | Ubicaciones | Palets con stock |
+|---|---|---|---|
+| `004` | Funes 1 | 688 | 2.746 |
+| `005` | Funes 2 | 542 | 233 |
+| *(vacío)* | — | 31 | 0 |
+
+> **`EMCMGN` NO es único entre depósitos.** Comprobado contra datos reales: el valor `001` aparece
+> en los depósitos `001` y `002`, y `006` en `002` y `006`. Solo `004`/`005` son exclusivos de
+> Funes. **Cualquier filtro por sub-planta debe ir siempre acompañado del depósito**
+> (`EMCDPO = '004'`), nunca por `EMCMGN` suelto — de ahí que `plantHasSubplants()` en
+> `lib/plants.ts` valide primero la planta.
+
+No mapean 1:1 con las sub-líneas de `/produccion` (que salen de JDE y son **tres**: Funes 1 /
+Funes 2 / Funes Past.) — son sistemas distintos, con granularidades distintas. `lib/plants.ts` es
+la fuente única de ambos códigos.
+
+**Cómo se pide al operario.** Cuando la planta seleccionada es Funes (venga de su planta por
+defecto o la elija a mano en el `<select>`), aparece un segundo selector **"Sub-planta"**
+(`¿Dónde estás?` / Funes 1 / Funes 2) y `handleScan()` **rechaza el escaneo** hasta que se elija
+("Elige primero en qué sub-planta de Funes estás"), con un aviso ámbar explicando por qué. Al
+cambiar de planta, la sub-planta elegida se limpia (`handlePlantaChange`). Fuera de Funes el
+selector no existe.
+
+Se eligió un selector fijo (que se elige una vez y queda visible) en vez de preguntar en cada
+escaneo: repetir la misma pregunta decenas de veces por turno entrena a responder sin leer, y eso
+contamina el pop-up que de verdad importa (§8.2), que quedaría como segundo modal seguido. El
+riesgo del selector fijo —que se quede desactualizado si el operario cambia de nave— se cubre con
+la detección cruzada de abajo, que lo caza con el dato real en vez de fiarse de su memoria.
+
+**La unidad de decisión es el LOTE, no el palet.** Lo que determina si el operario puede consumir
+es si ese **lote** está en su nave y si hay otro **lote** de su nave que caduque antes. El palet
+solo aporta su propio estado (caducado / bloqueado, que sí es por palet: dentro de un mismo lote
+puede haber palets bloqueados y otros no — caso real, el lote `M-C-B/4` con 19 de 20 bloqueados).
+
+Esto importa porque un lote puede estar repartido entre las dos naves — y, comprobado con datos
+reales, incluso con **fechas distintas según el palet** (el lote `123456` del artículo `1313300003`
+resuelve `2026-05-25` en sus 2 palets de Funes 1 y `2026-08-04` en sus 23 de Funes 2, por la mezcla
+DLC/DLU de §6.2). Por eso la comparación de "hay lotes que caducan antes" excluye el **lote**
+escaneado entero, no solo el palet: si no, un palet avisaría contra otro palet de su propio lote.
+
+**Detección cruzada (`estado: 'otra_subplanta'`).** El filtro de sub-planta **no** se aplica en
+SQL: la query trae `EMCMGN` como columna y el filtro se hace después en JS. Así, cuando el SSCC
+escaneado no aparece en la nave consultada, el route puede mirar en el conjunto completo
+(`todosLosPalets`) y distinguir tres casos:
+
+| Situación | Qué se responde |
+|---|---|
+| El **lote** entero está en la otra nave | `estado: 'otra_subplanta'` + `subplantaReal`, mensaje *"Este lote está en Funes 2, no en Funes 1."* El pop-up ofrece un botón **"Ver en Funes 2"** que cambia el selector y relanza la consulta sin volver a escanear (`cambiarASubplantaReal` en `page.tsx`, que registra la confirmación igual antes de cambiar). |
+| El palet está registrado en la otra nave **pero su lote sí está en la mía** | Se valida con normalidad (el lote está disponible donde el operario está) y se añade una `nota`: *"Ojo: este palet está registrado en Funes 2, aunque el lote sí está en Funes 1."* — es el caso de un movimiento físico sin registrar, y no tiene sentido cortarle el flujo. |
+| El SSCC no existe en ninguna nave | El `no_encontrado` de siempre. |
+
+`nota` es información secundaria y se muestra en **cualquier** estado, incluido `correcto` (a
+diferencia de `mensajes`, que en `correcto` no se pintan porque el titular ya lo dice todo).
+
+**Palets sin sub-planta asignada** (`EMCMGN` vacío) se dejan pasar **siempre**, sea cual sea la
+nave elegida: son ubicaciones de tránsito/playa de Funes (muelles, transpaletas, apiladoras — hoy 0
+palets con stock), accesibles desde cualquier nave. Filtrarlas escondería stock real; mismo criterio
+defensivo que los `LEFT JOIN` de §6.1.
+
+**Un lote presente en las dos naves** se muestra solo con los palets de la nave consultada — la
+cantidad total y el recuento de bloqueados del lote (§7.1) se calculan con esos, para que reflejen
+lo que el operario realmente puede coger ahí, no stock que no tiene a mano.
+
+El filtro de sub-planta afecta a **todo** lo que se calcula después: el listado agrupado (§7.1), el
+"primero en caducar" y la comparación de "hay lotes que caducan antes" (§7.3).
+
+**Tests:** `__tests__/consulta-stock-pda-validacion.test.ts` cubre esta lógica (`validarPaletEscaneado()`,
+función pura exportada desde el route) con los casos construidos a partir de los datos reales de
+arriba — incluido el que motiva la funcionalidad: un lote anterior en la otra nave **no** debe
+avisar, y sin filtro de sub-planta sí.
+
 ---
 
 ## 8. Pop-up obligatorio y logging
@@ -437,7 +530,7 @@ cliente.
 ### 8.1 Logging de la consulta
 
 Cada consulta inserta un registro en `query_logs` (SQLite) con `source = 'consulta_stock_pda'` y
-`filters: { sscc, planta? }` (`planta` solo si se usó). El logging nunca bloquea la respuesta
+`filters: { sscc, planta?, subplanta? }` (los dos últimos solo si se usaron). El logging nunca bloquea la respuesta
 (try/catch independiente), igual que en el resto de paneles. Esto registra *qué se consultó*, no
 quién aceptó qué aviso — para eso está §8.2.
 
@@ -449,10 +542,11 @@ Cada vez que el escaneo resuelve un `validacionSscc` (siempre que hay resultado,
 `mensajes` que se ven en el banner de la página, y un único botón "Aceptar". El operario tiene que
 pulsarlo sí o sí para seguir usando el panel.
 
-El título del pop-up es `Palet {sscc} · Lote {lote}` (SSCC completo, sin truncar — igual que en el
-detalle por palet, ver §7.2b) — `loteEscaneado` se resuelve buscando en `grupos` qué lote contiene
-ese SSCC (mismo cálculo que decide qué lote se despliega por defecto, §7.1). Si el SSCC no está en
-stock (`no_encontrado`), no hay lote que mostrar y el título omite esa parte.
+El título del pop-up es `Palet {sscc} · Lote {lote} · {sub-planta}` (SSCC completo, sin truncar —
+igual que en el detalle por palet, ver §7.2b) — `loteEscaneado` se resuelve buscando en `grupos` qué
+lote contiene ese SSCC (mismo cálculo que decide qué lote se despliega por defecto, §7.1). Cada
+parte se omite si no aplica: sin lote cuando el SSCC no está en stock (`no_encontrado`), y sin
+sub-planta cuando no se está filtrando por una (§7.5).
 
 **Lenguaje visual (`ESTADO_VISUAL` en `page.tsx`)** — pensado para que "se puede o no consumir" se
 entienda de un vistazo, sin tener que leer el texto, tanto en el pop-up como en el banner de la
@@ -464,14 +558,19 @@ página (comparten la misma tabla de estilos):
 | `aviso` | `XCircle` | "NO SE PUEDE CONSUMIR" | rojo |
 | `no_encontrado` | `PackageX` | "PALET NO ENCONTRADO" | rojo |
 | `sin_fecha` | `HelpCircle` | "SIN FECHA DE CADUCIDAD" | ámbar |
+| `otra_subplanta` | `MapPinOff` | "ESTÁ EN OTRA SUB-PLANTA" | ámbar |
+
+`otra_subplanta` va en ámbar y no en rojo a propósito: el palet no tiene ningún problema, es que el
+operario está consultando la nave equivocada (§7.5) — y su pop-up lleva un botón extra
+**"Ver en {la otra nave}"** además del "Aceptar".
 
 Cuando el estado no es `correcto`, cada mensaje de `mensajes[]` se pinta en su propia fila con un
 icono según el motivo concreto (`iconoMensaje()`, por coincidencia de texto — no hay un campo
 `tipo` en la respuesta de la API, los mensajes son fijos y se controlan en ambos lados):
-`CalendarX` (Caducado), `ShieldAlert` (Bloqueado por Calidad), `ArrowLeftRight` (hay lote anterior),
-`AlertTriangle` como genérico. El botón "Aceptar" del pop-up también cambia de color según
-`estado` (verde/rojo/ámbar) — refuerza el mensaje en vez de ser siempre el rojo corporativo por
-defecto.
+`CalendarX` (Caducado), `MapPinOff` (otra sub-planta), `ShieldAlert` (Bloqueado por Calidad),
+`ArrowLeftRight` (hay lote anterior), `AlertTriangle` como genérico. El botón "Aceptar" del pop-up
+también cambia de color según `estado` (verde/rojo/ámbar) — refuerza el mensaje en vez de ser
+siempre el rojo corporativo por defecto.
 
 Al pulsar "Aceptar", `acceptAck()` hace `POST /api/consulta-stock-pda/confirmaciones` (best-effort:
 si falla la petición, el pop-up se cierra igual — un fallo de red no debe atrapar al operario) con
