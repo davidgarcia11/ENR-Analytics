@@ -37,7 +37,7 @@ interface ScanConfirmation {
   username: string
   sscc: string
   articulo: string | null
-  estado: 'correcto' | 'aviso' | 'no_encontrado' | 'sin_fecha'
+  estado: 'correcto' | 'aviso' | 'no_encontrado' | 'sin_fecha' | 'otra_subplanta'
   mensajes: string // JSON array
   created_at: string
 }
@@ -47,6 +47,7 @@ const ESTADO_BADGE: Record<ScanConfirmation['estado'], { label: string; variant:
   aviso: { label: 'Aviso', variant: 'destructive' },
   no_encontrado: { label: 'No encontrado', variant: 'destructive' },
   sin_fecha: { label: 'Sin fecha', variant: 'warning' },
+  otra_subplanta: { label: 'Otra sub-planta', variant: 'warning' },
 }
 
 function parseMensajes(json: string): string[] {

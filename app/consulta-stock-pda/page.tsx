@@ -12,10 +12,10 @@ import { EmptyState } from "@/components/ui/empty-state"
 import { Dialog } from "@/components/ui/dialog"
 import {
     ScanBarcode, Camera, AlertTriangle, CheckCircle2, PackageSearch, X, ChevronDown, ChevronRight,
-    XCircle, PackageX, HelpCircle, CalendarX, ShieldAlert, ArrowLeftRight, type LucideIcon,
+    XCircle, PackageX, HelpCircle, CalendarX, ShieldAlert, ArrowLeftRight, MapPinOff, type LucideIcon,
 } from "lucide-react"
 import { parseGs1, type Gs1Fields } from "@/lib/gs1"
-import { plantReflexCode } from "@/lib/plants"
+import { plantReflexCode, FUNES_SUBPLANTS, funesSubplantLabel, plantHasSubplants } from "@/lib/plants"
 
 interface SessionUser { id: number; username: string; role: string; name: string; surname: string; defaultPlant: string }
 
@@ -26,6 +26,7 @@ interface PaletDetalle {
     fechaCaducidad: string | null
     ubicacion: string | null
     planta: string | null
+    subplanta: string | null
     caducado: boolean
     bloqueado: boolean
     primeroEnCaducar: boolean
@@ -42,8 +43,10 @@ interface GrupoLote {
 }
 
 interface ValidacionSscc {
-    estado: 'correcto' | 'aviso' | 'no_encontrado' | 'sin_fecha'
+    estado: 'correcto' | 'aviso' | 'no_encontrado' | 'sin_fecha' | 'otra_subplanta'
     mensajes: string[]
+    nota?: string
+    subplantaReal?: string
 }
 
 // Código de depósito físico (Reflex) -> nombre de planta, igual que en app/api/consulta-stock-pda/route.ts
@@ -134,12 +137,21 @@ const ESTADO_VISUAL: Record<ValidacionSscc['estado'], {
         filaBorde: 'border-amber-200', filaFondo: 'bg-amber-50',
         botonClassName: 'bg-amber-500 hover:bg-amber-600 text-white',
     },
+    // El palet existe pero está en la otra nave de Funes: no es un error del operario ni un
+    // "no se puede consumir", es que está consultando la sub-planta equivocada (ámbar, no rojo).
+    otra_subplanta: {
+        Icon: MapPinOff, titulo: 'ESTÁ EN OTRA SUB-PLANTA',
+        iconBg: 'bg-amber-100', iconText: 'text-amber-600', texto: 'text-amber-700',
+        filaBorde: 'border-amber-200', filaFondo: 'bg-amber-50',
+        botonClassName: 'bg-amber-500 hover:bg-amber-600 text-white',
+    },
 }
 
 // Icono por motivo concreto dentro de un aviso (un palet puede acumular varios a la vez:
 // caducado + bloqueado, por ejemplo — cada mensaje se muestra en su propia fila con su icono).
 function iconoMensaje(mensaje: string): LucideIcon {
     if (mensaje.includes('Caducado')) return CalendarX
+    if (mensaje.includes('lote está en')) return MapPinOff
     if (mensaje.includes('bloqueado por Calidad')) return ShieldAlert
     if (mensaje.includes('caducan antes')) return ArrowLeftRight
     return AlertTriangle
@@ -158,6 +170,7 @@ export default function ConsultaStockPdaPage() {
     const [validacionSscc, setValidacionSscc] = useState<ValidacionSscc | null>(null)
     const [ackOpen, setAckOpen] = useState(false)
     const [planta, setPlanta] = useState("")
+    const [subplanta, setSubplanta] = useState("")
     const [loading, setLoading] = useState(false)
     const [error, setError] = useState<string | null>(null)
     const [cameraOpen, setCameraOpen] = useState(false)
@@ -205,7 +218,23 @@ export default function ConsultaStockPdaPage() {
         setSessionUser(null)
     }
 
-    const fetchStock = useCallback(async (sscc: string) => {
+    // Funes tiene dos naves y el stock del mismo artículo se reparte entre ellas, así que
+    // hay que saber en cuál está el operario antes de poder decirle qué palet coger (ver
+    // docs/consulta-stock-pda.md §7.5). El resto de plantas no se subdividen.
+    const requiereSubplanta = plantHasSubplants(planta)
+    const faltaElegirSubplanta = requiereSubplanta && !subplanta
+
+    // Al cambiar de planta, la sub-planta elegida deja de tener sentido
+    const handlePlantaChange = (nuevaPlanta: string) => {
+        setPlanta(nuevaPlanta)
+        setSubplanta("")
+    }
+
+    // subplantaOverride: se usa al cambiar de sub-planta desde el pop-up "está en otra
+    // sub-planta", donde hay que relanzar la consulta con el valor nuevo antes de que el
+    // estado se refleje en este cierre (closure).
+    const fetchStock = useCallback(async (sscc: string, subplantaOverride?: string) => {
+        const subplantaEfectiva = subplantaOverride ?? subplanta
         setLoading(true)
         setError(null)
         setArticulo(null)
@@ -219,6 +248,7 @@ export default function ConsultaStockPdaPage() {
             const params = new URLSearchParams()
             params.set('sscc', sscc)
             if (planta) params.set('planta', planta)
+            if (subplantaEfectiva) params.set('subplanta', subplantaEfectiva)
             const res = await fetch(`/api/consulta-stock-pda?${params}`)
             const data = await res.json()
             if (!res.ok) throw new Error(data.error || `Error ${res.status}`)
@@ -239,7 +269,7 @@ export default function ConsultaStockPdaPage() {
         } finally {
             setLoading(false)
         }
-    }, [planta])
+    }, [planta, subplanta])
 
     // Procesa un código escaneado (da igual si viene del input HID o de la cámara):
     // lo parsea como GS1-128 y solo se busca por SSCC (número de palet, AI 00) — la API
@@ -248,6 +278,12 @@ export default function ConsultaStockPdaPage() {
     const handleScan = useCallback((raw: string) => {
         const code = raw.trim()
         if (!code) return
+        // En Funes, sin saber la nave no se puede responder "qué palet coger" — se rechaza el
+        // escaneo antes de consultar, en vez de dar una respuesta que mezcla las dos naves.
+        if (faltaElegirSubplanta) {
+            setError('Elige primero en qué sub-planta de Funes estás')
+            return
+        }
         const fields = parseGs1(code)
         setParsed(fields)
         if (fields.sscc) {
@@ -257,7 +293,7 @@ export default function ConsultaStockPdaPage() {
             setArticulo(null)
             setGrupos([])
         }
-    }, [fetchStock])
+    }, [fetchStock, faltaElegirSubplanta])
 
     const handleInputKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
         if (e.key === 'Enter') {
@@ -305,6 +341,18 @@ export default function ConsultaStockPdaPage() {
                 }),
             })
         } catch { /* trazabilidad best-effort */ }
+    }
+
+    // "Ver en <otra sub-planta>" del pop-up: el palet estaba en la otra nave, así que el
+    // operario probablemente se ha movido y no cambió el selector. Se registra la confirmación
+    // igual (queda constancia del aviso que vio) y se relanza la consulta ya en la nave correcta.
+    const cambiarASubplantaReal = async () => {
+        const destino = validacionSscc?.subplantaReal
+        const ssccActual = parsed?.sscc
+        await acceptAck()
+        if (!destino || !ssccActual) return
+        setSubplanta(destino)
+        fetchStock(ssccActual, destino)
     }
 
     // --- Escaneo por cámara (API nativa BarcodeDetector, sin dependencias) ---
@@ -383,7 +431,7 @@ export default function ConsultaStockPdaPage() {
                         <select
                             id="planta-select"
                             value={planta}
-                            onChange={(e) => setPlanta(e.target.value)}
+                            onChange={(e) => handlePlantaChange(e.target.value)}
                             className="flex h-10 w-[160px] rounded-md border border-input bg-background px-3 py-2 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
                         >
                             <option value="">Todas</option>
@@ -392,6 +440,25 @@ export default function ConsultaStockPdaPage() {
                             ))}
                         </select>
                     </div>
+                    {requiereSubplanta && (
+                        <div className="grid gap-1.5">
+                            <label htmlFor="subplanta-select" className="text-xs font-semibold text-secondary-foreground">
+                                Sub-planta
+                            </label>
+                            <select
+                                id="subplanta-select"
+                                value={subplanta}
+                                onChange={(e) => setSubplanta(e.target.value)}
+                                aria-invalid={faltaElegirSubplanta}
+                                className={`flex h-10 w-[160px] rounded-md border bg-background px-3 py-2 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring ${faltaElegirSubplanta ? 'border-amber-400 ring-1 ring-amber-300' : 'border-input'}`}
+                            >
+                                <option value="">¿Dónde estás?</option>
+                                {FUNES_SUBPLANTS.map(s => (
+                                    <option key={s.reflex} value={s.reflex}>{s.label}</option>
+                                ))}
+                            </select>
+                        </div>
+                    )}
                     <div className="flex gap-2">
                         {cameraSupported && !cameraOpen && (
                             <Button type="button" variant="outline" onClick={startCamera}>
@@ -415,6 +482,19 @@ export default function ConsultaStockPdaPage() {
                     <video ref={videoRef} className="w-full max-w-sm rounded-md border border-border" muted playsInline />
                 )}
 
+                {faltaElegirSubplanta && (
+                    <div className="flex items-center gap-3 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3">
+                        <MapPinOff className="h-5 w-5 flex-shrink-0 text-amber-600" aria-hidden="true" />
+                        <div className="text-sm">
+                            <div className="font-bold text-amber-700">Elige en qué sub-planta estás</div>
+                            <div className="text-secondary-foreground">
+                                Funes tiene dos naves y el mismo artículo puede estar en las dos. Sin saber dónde estás
+                                no se puede decir qué palet coger.
+                            </div>
+                        </div>
+                    </div>
+                )}
+
                 {parsed && (
                     <div className="flex flex-wrap gap-2 text-xs">
                         {parsed.ean && <Badge variant="primary">EAN {parsed.ean}</Badge>}
@@ -422,6 +502,7 @@ export default function ConsultaStockPdaPage() {
                         {parsed.cantidad != null && <Badge>Cant. {parsed.cantidad}</Badge>}
                         {parsed.sscc && <Badge variant="outline">SSCC {parsed.sscc}</Badge>}
                         {parsed.caducidad && <Badge variant="outline">Caduca {formatFecha(parsed.caducidad)}</Badge>}
+                        {subplanta && <Badge variant="outline">{funesSubplantLabel(subplanta)}</Badge>}
                     </div>
                 )}
             </Card>
@@ -448,6 +529,10 @@ export default function ConsultaStockPdaPage() {
                                         <div key={i} className="text-sm font-medium text-secondary-foreground">{m}</div>
                                     ))}
                                 </div>
+                            )}
+                            {/* La nota se muestra en cualquier estado, incluido "correcto" */}
+                            {validacionSscc.nota && (
+                                <div className="mt-0.5 text-sm text-muted-foreground">{validacionSscc.nota}</div>
                             )}
                         </div>
                     </div>
@@ -560,12 +645,21 @@ export default function ConsultaStockPdaPage() {
                 onOpenChange={setAckOpen}
                 dismissible={false}
                 title={parsed?.sscc
-                    ? `Palet ${parsed.sscc}${loteEscaneado ? ` · Lote ${loteEscaneado}` : ''}`
+                    ? `Palet ${parsed.sscc}${loteEscaneado ? ` · Lote ${loteEscaneado}` : ''}${subplanta ? ` · ${funesSubplantLabel(subplanta)}` : ''}`
                     : 'Resultado del escaneo'}
                 footer={validacionSscc && (
-                    <Button onClick={acceptAck} size="lg" className={`w-full font-bold ${ESTADO_VISUAL[validacionSscc.estado].botonClassName}`}>
-                        Aceptar
-                    </Button>
+                    <div className="flex w-full flex-col gap-2">
+                        {/* El palet está en la otra nave: atajo para cambiar de sub-planta sin
+                            volver a escanear (el operario se ha movido y no tocó el selector) */}
+                        {validacionSscc.estado === 'otra_subplanta' && validacionSscc.subplantaReal && (
+                            <Button onClick={cambiarASubplantaReal} size="lg" variant="outline" className="w-full font-bold">
+                                Ver en {funesSubplantLabel(validacionSscc.subplantaReal)}
+                            </Button>
+                        )}
+                        <Button onClick={acceptAck} size="lg" className={`w-full font-bold ${ESTADO_VISUAL[validacionSscc.estado].botonClassName}`}>
+                            Aceptar
+                        </Button>
+                    </div>
                 )}
             >
                 {validacionSscc && (() => {
@@ -587,6 +681,13 @@ export default function ConsultaStockPdaPage() {
                                             </div>
                                         )
                                     })}
+                                </div>
+                            )}
+                            {/* La nota se muestra en cualquier estado, incluido "correcto" */}
+                            {validacionSscc.nota && (
+                                <div className="flex w-full items-center gap-2 rounded-lg border border-border bg-muted/50 px-3 py-2 text-left text-sm text-secondary-foreground">
+                                    <MapPinOff className="h-4 w-4 flex-shrink-0 text-muted-foreground" aria-hidden="true" />
+                                    <span>{validacionSscc.nota}</span>
                                 </div>
                             )}
                         </div>

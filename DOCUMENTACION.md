@@ -334,7 +334,7 @@ interface SessionUser {
 }
 ```
 
-### `lib/plants.ts` — Planta por defecto del usuario
+### `lib/plants.ts` — Plantas, sub-plantas y planta por defecto del usuario
 
 Fuente única de las 4 plantas físicas de la empresa (Aguilar, Corella, Funes, Tudefrigo). Cada
 sistema tiene su propio código para la misma planta física — JDE (`F0006.MCMCU`) y Reflex
@@ -360,6 +360,14 @@ luego solo la suya. `/produccion` solo tiene como opción Aguilar/Corella/Funes 
 almacén, no se produce ahí): si la planta por defecto de un usuario es Tudefrigo, ese panel en
 concreto cae a "Todas", los demás paneles sí la aplican. `/compras` y `/comparativa-seres` no
 tienen filtro de planta, no usan este módulo.
+
+**Sub-plantas de Funes** (`FUNES_SUBPLANTS`, `funesSubplantLabel()`, `plantHasSubplants()`): Funes
+es la única planta con dos naves físicas, y el stock del mismo artículo se reparte entre ellas. Se
+identifican con `HLEMPLP.EMCMGN` en Reflex (`004` = Funes 1, `005` = Funes 2) y las usa
+`/consulta-stock-pda` para no recomendar un palet que está en la nave de al lado — ver
+`docs/consulta-stock-pda.md` §7.5 para el detalle (incluido el aviso de que `EMCMGN` **no** es único
+entre depósitos, así que siempre se filtra junto con `EMCDPO`). No mapean 1:1 con las sub-líneas de
+`/produccion`, que salen de JDE y son tres (Funes 1 / Funes 2 / Funes Past.).
 
 ### Flujo de autenticación
 
@@ -753,7 +761,7 @@ propia API — no reutiliza `query_logs`. Lista el registro de aceptación del p
 y cuándo — trazabilidad si un producto se mete erróneamente en línea.
 
 - **Archivo:** mismo `app/admin/logs/page.tsx`, tabla `stock_scan_confirmations`.
-- **API:** `GET /api/admin/scan-confirmations` (`app/api/admin/scan-confirmations/route.ts`) — paginada, filtros por usuario, resultado (correcto/aviso/no_encontrado/sin_fecha), SSCC (parcial) y rango de fechas. Solo admin.
+- **API:** `GET /api/admin/scan-confirmations` (`app/api/admin/scan-confirmations/route.ts`) — paginada, filtros por usuario, resultado (correcto/aviso/no_encontrado/sin_fecha/otra_subplanta), SSCC (parcial) y rango de fechas. Solo admin.
 - **Tabla:** Fecha/Hora, Usuario, SSCC completo, Artículo, Resultado aceptado (badge de color + los mensajes exactos que vio el operario).
 - No comparte filtros, paginación ni contador de página con la pestaña "Consultas" — son datasets independientes.
 
