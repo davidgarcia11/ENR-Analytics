@@ -169,6 +169,13 @@ docs/                         # Documentación específica por panel
 
 ## Reglas para Claude Code
 
+### Gestión de proyecto (ClickUp) — leer siempre
+- `GUIA_GESTION_CLICKUP_ENR.md` — estructura, convenciones de nombres, estados, plantillas.
+- `MANUAL_IA_ALIMENTAR_CLICKUP.md` — qué hacer en cada paso de Git (rama, commit, PR, merge, release, producción) e ideas futuras.
+- ClickUp es la única fuente de verdad (Notion descontinuado). Buscar siempre antes de crear una tarea.
+- Este repo corresponde a la Carpeta ClickUp "ENR Analytics" (Espacio "Elaborados Naturales"). No confundir con las carpetas de "JDE - Evolutivos e Instalaciones" o "Documentación" — son de otros dominios, no de este código.
+- Idea futura mencionada durante el trabajo (no una tarea de código inmediata): crear en ClickUp como `pending`, sin fecha de inicio, siguiendo `MANUAL_IA_ALIMENTAR_CLICKUP.md` §1.7 — **sin pedir confirmación previa**, igual que no se pide para buscar o consultar. Informar después de qué se creó.
+
 ### Antes de hacer cambios
 - Verificar en qué rama estamos antes de actuar
 - Ofrecer plan detallado y esperar confirmación antes de ejecutar si el cambio afecta a más de 2 archivos
@@ -196,6 +203,7 @@ docs/                         # Documentación específica por panel
   - Cambios en el panel de compras (`/compras`, `api/compras`) → `docs/compras.md`
   - Nuevo panel → crear `docs/nombre-panel.md` y añadir referencia en `DOCUMENTACION.md` sección 9
 - Sugerir commit con mensaje siguiendo el estilo del proyecto (conventional + español)
+- Actualizar la tarea de ClickUp correspondiente (estado, comentario) según en qué paso del flujo Git se esté — ver `MANUAL_IA_ALIMENTAR_CLICKUP.md`
 
 ### Testing
 - Verificar compilación con `bun run build` después de cambios significativos
@@ -203,10 +211,14 @@ docs/                         # Documentación específica por panel
 
 ### Git — Flujo de trabajo
 ```
+# 0. Buscar/crear la tarea en ClickUp ANTES de empezar
+#    (lista del panel correspondiente en ENR Analytics; pending → in progress)
+
 # 1. Crear feature desde develop
 git checkout develop
 git pull
 git checkout -b feature/nombre
+#    → Comentar en la tarea de ClickUp: "Rama creada: feature/nombre"
 
 # 2. Trabajar y hacer commits
 git add <archivos>
@@ -216,6 +228,8 @@ git commit -m "..."
 git push -u origin feature/nombre
 
 # 4. En GitHub: crear PR → revisar → merge a develop
+#    → Al abrir el PR: enlazar en la tarea de ClickUp (MANUAL_IA_ALIMENTAR_CLICKUP.md §1.4)
+#    → Al mergear a develop: estado → in review (NUNCA completed aquí)
 
 # 5. Volver a develop y actualizar
 git checkout develop
@@ -223,7 +237,13 @@ git pull --prune
 
 # 6. Borrar rama feature local (ya mergeada)
 git branch -d feature/nombre
+
+# 7. Al mergear a main / generar release
+#    → Ver MANUAL_IA_ALIMENTAR_CLICKUP.md §1.5-1.6: crear/actualizar [RELEASE] vX.Y.Z,
+#      validar en producción, SOLO ENTONCES marcar completed
 ```
+
+Hotfix directo a `main` (sin pasar por `develop`): mismo registro en ClickUp que un PR normal, pero ver `MANUAL_IA_ALIMENTAR_CLICKUP.md` §1.4bis (prioridad Urgente/Alta, indicar en la release que fue fuera del flujo normal).
 
 ### Git — Reglas
 - La carpeta `data/` está en `.gitignore`
