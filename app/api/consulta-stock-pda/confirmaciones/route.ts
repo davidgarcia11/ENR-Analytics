@@ -5,7 +5,7 @@ import { requireScreenAccess } from '@/lib/permissions';
 
 // SSCC de palet: siempre 18 dígitos (AI 00 de GS1-128, ver lib/gs1.ts)
 const SSCC_REGEX = /^\d{18}$/;
-const ESTADOS_VALIDOS = ['correcto', 'aviso', 'no_encontrado', 'sin_fecha'];
+const ESTADOS_VALIDOS = ['correcto', 'aviso', 'no_encontrado', 'sin_fecha', 'otra_subplanta'];
 
 // Registra que un operario ha aceptado el pop-up mostrado al escanear un SSCC, con el
 // mensaje exacto que vio. Trazabilidad, no bloquea el flujo de escaneo si falla.
