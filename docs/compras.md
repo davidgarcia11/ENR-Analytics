@@ -186,6 +186,14 @@ garantía de "misma función para ambos caminos". **No genera entrada en `query_
   muestra un estado vacío real ("No hay notificaciones todavía") — no hay sistema de
   notificaciones construido aún. Se quitó el selector de idioma del bloque original (app
   solo en español, no tenía ninguna función real).
+- **Nav filtrado por permisos reales**: el bloque instalado renderizaba siempre todos los
+  paneles de `lib/panels.ts` en "Dashboards"/"Apps", sin comprobar sesión ni rol — bug
+  real corregido. `<Header>` hace ahora `fetch('/api/screen-permissions')` (mismo
+  endpoint y misma regla `canAccessPanel` que `components/Navbar.tsx`) y `getNavData()`
+  (`topbar-02/data.ts`) filtra cada panel por `is_public`/`allowed_roles`/rol admin; un
+  grupo sin ningún panel visible desaparece entero (no se queda vacío). El grupo
+  **"Maestros" solo se muestra si `role === 'admin'`** — antes era visible para
+  cualquiera, solo con sus items deshabilitados.
 
 ---
 
@@ -287,6 +295,11 @@ a mano):
 8. **Dependencias huérfanas** (`chart`, `motion`) y 3 bloques de catálogo instalados y
    nunca usados (`dashboard-shell-03`, `datatable-12`, `statistics-01`) — explorados y
    retirados antes del primer PR, sin haber sido personalizados (ver README de Nova).
+9. **El nav no filtraba por permisos** — `topbar-02` tal cual instalado mostraba
+   siempre todos los paneles de `lib/panels.ts` en "Dashboards"/"Apps", y el grupo
+   "Maestros" era visible para cualquier usuario (solo sus items estaban
+   deshabilitados). Corregido: `<Header>` consulta `/api/screen-permissions` y filtra
+   con la misma regla que `components/Navbar.tsx`; "Maestros" solo se muestra a `admin`.
 
 ---
 
