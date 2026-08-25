@@ -21,7 +21,7 @@ construirlo.
 | Librería de iconos | Lucide (`lucide-react`, se reutiliza la versión `^0.563.0` ya instalada — ver riesgo abajo) |
 | Radius | El de fábrica del preset Nova (`0.625rem`), sin override |
 | Fuente | Geist Sans / Geist Mono — ya estaban instaladas y fijadas en `app/layout.tsx`, se reutilizan tal cual (ambos sistemas comparten `--font-sans`, no hace falta nada especial) |
-| Dark mode | No activado. El proyecto lo quitó deliberadamente (ver `DECISIONS.md`). Los tokens `[data-nova-theme="dark"]` existen por paridad con el preset pero nada los activa |
+| Dark mode | **Sí, solo dentro de Nova** — pedido explícitamente por el usuario (el sistema viejo lo sigue sin tener, ver `DECISIONS.md`). Claro/Oscuro/Sistema, ver más abajo |
 
 `components.json` en la raíz del proyecto registra esta configuración para el CLI de shadcn.
 
@@ -121,6 +121,41 @@ Cuando se decida, cambiar únicamente estas dos variables en `app/nova-theme.css
 Un solo cambio, se propaga a todos los componentes Nova instalados sin tocar ni un JSX,
 porque ninguno usa el rojo como literal.
 
+## Claro / Oscuro / Sistema
+
+Los tokens `[data-nova-theme="dark"]` en `app/nova-theme.css` ya existían (paridad con
+el preset), solo faltaba activarlos. Mecanismo, por si se reutiliza en otro panel:
+
+1. **`app/nova-theme.css`** redefine la variante `dark:` de Tailwind:
+   `@custom-variant dark (&:is([data-nova-theme="dark"] *));` — sin esto, los `dark:`
+   que ya traen los primitivos instalados (`button.tsx`, `select.tsx`...) mirarían
+   `prefers-color-scheme` directamente, desincronizados del toggle explícito de la
+   página. Seguro para el sistema viejo: no usa ninguna clase `dark:` en ningún sitio
+   (comprobado con grep antes de tocar esto).
+2. **`components/nova/mode-toggle.tsx`**: botón + `DropdownMenu` (Claro/Oscuro/Sistema),
+   con los iconos de Lucide `Sun`/`Moon`/`Monitor` — construido con primitivos ya
+   instalados, no hay ningún bloque de "toggle de tema" en el catálogo de ShadcnSpace ni
+   en el registro `base-nova` (comprobado antes de escribirlo a mano).
+3. **En la página** (`app/compras/page.tsx`): `useState<ThemeMode>("system")` +
+   `useEffect` con `window.matchMedia('(prefers-color-scheme: dark)')` (con listener de
+   `change`, para reaccionar si el SO cambia de tema mientras la página está abierta) →
+   `effectiveTheme` se pasa al `data-nova-theme` del div raíz en vez del `"light"` fijo.
+   **No persiste entre recargas** (el proyecto no usa `localStorage`/`sessionStorage` en
+   componentes) — vuelve a "Sistema" en cada carga. Si se quiere persistente, la vía
+   compatible con las reglas del proyecto es una cookie simple, no localStorage.
+4. **`<Header>`** recibe `mode`/`onModeChange` como props (mismo patrón que
+   `user`/`onLogout`) y renderiza `<ModeToggle>` — si un panel no los pasa, el botón
+   simplemente no aparece.
+
+**Aviso de FOUC conocido, no resuelto**: en el primer render (SSR y primer paint en
+cliente, antes de que corra el `useEffect` de `matchMedia`) `effectiveTheme` es
+`"light"` aunque el SO esté en oscuro — puede verse un parpadeo claro→oscuro al cargar
+si el usuario tiene el SO en modo oscuro y `mode` sigue en `"system"`. `next-themes` trae
+un script inline para evitar esto (por eso lo usa el preset de referencia), pero
+requeriría dejar que gestione `document.documentElement` — lo que rompería el
+aislamiento (ver nota más arriba). Si el parpadeo molesta, pedirlo explícitamente antes
+de intentar un script inline propio.
+
 ## Notas / decisiones tomadas sin preguntar dos veces
 
 - **`lucide-react` — riesgo abierto**: el preset Nova de referencia pide `^1.33.0`, pero
@@ -129,10 +164,14 @@ porque ninguno usa el rojo como literal.
   tocado**: se reutiliza la `^0.563.0` instalada. Si al instalar el primer block/página
   Nova falta un icono que no existe en `0.563` o cambia de API, se trata en ese momento
   (import roto de un icono concreto, no un problema de todo el sistema).
-- **Sin `ThemeProvider`/`next-themes`**: el preset Nova de referencia trae un
-  `ThemeProvider` con toggle claro/oscuro y atajo de teclado. No se ha instalado porque
-  contradice la decisión ya tomada de no tener dark mode. Si se quiere igualmente para
-  el sistema Nova en concreto, es una decisión a pedir explícitamente.
+- **Dark mode, pedido explícitamente (ver §"Claro/Oscuro/Sistema" más abajo)**: no se
+  usa el `ThemeProvider` de `next-themes` del preset de referencia (manipula
+  `document.documentElement` globalmente — habría filtrado el tema oscuro a TODO la app,
+  incluido el sistema viejo, que no tiene dark mode por decisión propia). En su lugar,
+  estado React local por página (`useState<ThemeMode>`) que solo cambia el atributo
+  `data-nova-theme` del div raíz de esa página — el aislamiento por selector CSS ya
+  existente hace el resto. `next-themes` sigue como dependencia (la necesita
+  `components/nova/ui/sonner.tsx`), pero no se usa su `ThemeProvider`.
 - **`baseColor` de referencia era `neutral`**: el preset Nova no expone un flag de CLI
   para elegir color base (solo hay 7 presets fijos: nova, vega, maia, lyra, mira, luma,
   sera, rhea, cada uno con su paleta). Los valores de este archivo son la paleta
@@ -161,21 +200,28 @@ Checklist basada en lo que realmente se usó/decidió construyendo `/compras` (d
 completo en [`docs/compras.md`](../../docs/compras.md) §6) — pensada para no repetir
 desde cero las mismas decisiones de diseño:
 
-1. **Estructura de página**: raíz `<div data-nova-theme="light" className="min-h-screen bg-sidebar text-foreground">`,
+1. **Estructura de página**: raíz `<div data-nova-theme={effectiveTheme} className="min-h-screen bg-sidebar text-foreground">`
+   (nunca `"light"` fijo — ver §"Claro/Oscuro/Sistema" para calcular `effectiveTheme`),
    con un `<div className="md:m-2 md:rounded-xl md:outline md:outline-border md:shadow-sm md:overflow-hidden bg-background">`
    envolviendo header + `<main>`. Es el patrón `Sidebar variant="inset"` de shadcn
    replicado a mano (sin sidebar real) — ver `app/compras/page.tsx`.
 2. **Header/nav**: `topbar-02` (`components/shadcn-space/blocks/topbar-02/`) tal cual está
    instalado — ya tiene el fix de imports rotos, el active-state por ruta exacta (no
-   `startsWith` suelto) y la caja `rounded-lg border border-border` alrededor del grupo de
-   dropdowns. Los items de nav viven en `topbar-02/data.ts` (`lib/panels.ts` es la fuente,
-   igual que en el sistema viejo). `<Header>` acepta `user`/`onLogout`/`onPresetsClick`
-   (mismo tipo `SessionUser` y mismo patrón `fetch('/api/auth/me')` + `POST /api/auth/logout`
-   que ya usa `components/Navbar.tsx` en el resto de paneles) — la página nueva tiene que
-   pasarlos, no hay wiring automático. El logo es `/logo.png` (el real, no el de ShadcnSpace).
+   `startsWith` suelto), la caja `rounded-lg border border-border` alrededor del grupo de
+   dropdowns, y el nav filtrado por permisos reales (`getNavData(role, screensConfig)`,
+   `<Header>` hace su propio `fetch('/api/screen-permissions')` — un panel al que el
+   usuario no tiene acceso ni aparece en la lista). Los items de nav viven en
+   `topbar-02/data.ts` (`lib/panels.ts` es la fuente, igual que en el sistema viejo).
+   `<Header>` acepta `user`/`onLogout`/`onPresetsClick`/`mode`/`onModeChange` (mismo tipo
+   `SessionUser` y mismo patrón `fetch('/api/auth/me')` + `POST /api/auth/logout` que ya
+   usa `components/Navbar.tsx` en el resto de paneles) — la página nueva tiene que
+   pasarlos, no hay wiring automático (si no se pasan `mode`/`onModeChange`, el botón de
+   tema simplemente no aparece). El logo es `/logo.png` (el real, no el de ShadcnSpace).
    El dropdown de perfil (`dropdown-profile.tsx`) y el de notificaciones
    (`notification-dropdown.tsx`) ya están adaptados a datos/acciones reales — no vuelvas a
-   dejar contenido de ejemplo si los tocas.
+   dejar contenido de ejemplo si los tocas. El grupo "Maestros" del nav es solo-admin
+   (`role === 'admin'`), no un ejemplo a copiar sin más — cualquier grupo nuevo debe
+   decidir explícitamente si necesita esa misma restricción.
 3. **KPIs**: bloque `statistics-04` (`components/shadcn-space/blocks/statistics-04/`),
    acepta un array `data` de hasta 4 tarjetas.
 4. **Gráfico de evolución temporal**: bloque `chart-15`

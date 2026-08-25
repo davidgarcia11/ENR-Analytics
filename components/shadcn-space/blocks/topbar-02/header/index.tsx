@@ -25,15 +25,20 @@ import Sidebar from "@/components/shadcn-space/blocks/topbar-02/header/sidebar";
 import { NavDropdown, NavButton } from "@/components/shadcn-space/blocks/topbar-02/header/desktop-nav";
 import { getNavData, type ScreenConfig } from "@/components/shadcn-space/blocks/topbar-02/data";
 import { NavGroup } from "@/components/shadcn-space/blocks/topbar-02/types";
+import ModeToggle, { type ThemeMode } from "@/components/nova/mode-toggle";
 
 export default function Header({
   user = null,
   onLogout,
   onPresetsClick,
+  mode,
+  onModeChange,
 }: {
   user?: SessionUser | null;
   onLogout?: () => void;
   onPresetsClick?: () => void;
+  mode?: ThemeMode;
+  onModeChange?: (m: ThemeMode) => void;
 }) {
   const [sheetOpen, setSheetOpen] = useState(false);
   const pathname = usePathname();
@@ -98,6 +103,7 @@ export default function Header({
         </div>
 
         <div className="flex items-center gap-2">
+          {mode && onModeChange && <ModeToggle mode={mode} onChange={onModeChange} />}
           <NotificationDropdown
             defaultOpen={false}
             align="center"

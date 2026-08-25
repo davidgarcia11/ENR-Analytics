@@ -43,6 +43,7 @@ continuidad — ver §7.1).
 | `components/nova/hierarchical-table.tsx` | Tabla jerárquica (TanStack Table v8, `subRows`) + píldoras de ruta (`DrillPills`) |
 | `components/nova/deviation-by-family-chart.tsx` | Gráfico de desviación por familia (barras divergentes desde el centro, sin Recharts) |
 | `components/nova/month-range-picker.tsx` | Selector de rango de meses completos (sin día) |
+| `components/nova/mode-toggle.tsx` | Selector Claro/Oscuro/Sistema |
 | `components/shadcn-space/blocks/topbar-02/` | Header compartido (nav por dropdowns, perfil, notificaciones) — bloque del catálogo ShadcnSpace |
 | `components/shadcn-space/blocks/statistics-04/` | Tarjetas KPI (bloque del catálogo) |
 | `components/shadcn-space/blocks/chart-15/` | Gráfico de barras agrupadas de evolución mensual (bloque del catálogo, adaptado) |
@@ -194,6 +195,17 @@ garantía de "misma función para ambos caminos". **No genera entrada en `query_
   grupo sin ningún panel visible desaparece entero (no se queda vacío). El grupo
   **"Maestros" solo se muestra si `role === 'admin'`** — antes era visible para
   cualquiera, solo con sus items deshabilitados.
+- **Claro / Oscuro / Sistema**: pedido explícitamente por el usuario. `ModeToggle`
+  (`components/nova/mode-toggle.tsx`) en la cabecera; el estado `mode` vive en la página
+  (`useState`, no persiste entre recargas — el proyecto no usa `localStorage` en
+  componentes) y se traduce a `effectiveTheme` con `window.matchMedia
+  ('prefers-color-scheme: dark')` cuando `mode === "system"`. `app/nova-theme.css`
+  redefine la variante `dark:` de Tailwind para que dependa de
+  `[data-nova-theme="dark"]` en vez del SO directamente — necesario porque los
+  primitivos instalados ya traen clases `dark:` sueltas. Detalle completo en
+  `components/nova/README.md` §"Claro/Oscuro/Sistema" (incluye un aviso de FOUC
+  conocido y sin resolver: el primer render siempre es claro, aunque el SO esté en
+  oscuro).
 
 ---
 
