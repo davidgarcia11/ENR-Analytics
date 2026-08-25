@@ -1,0 +1,90 @@
+import { LucideIcon } from "lucide-react";
+import { Button } from "@/components/nova/ui/button";
+import {
+  NavigationMenuContent,
+  NavigationMenuItem,
+  NavigationMenuLink,
+  NavigationMenuTrigger,
+} from "@/components/nova/ui/navigation-menu";
+import { NavItem } from "@/components/shadcn-space/blocks/topbar-02/types";
+import { cn } from "@/lib/utils";
+
+export function NavDropdown({
+  label,
+  icon: Icon,
+  items,
+  active,
+}: {
+  label: string;
+  icon: LucideIcon;
+  items: NavItem[];
+  active?: boolean;
+}) {
+  return (
+    <NavigationMenuItem>
+      <NavigationMenuTrigger
+        className={cn(
+          "gap-2 rounded-lg border border-transparent cursor-pointer",
+          active
+            ? "bg-foreground text-background hover:bg-foreground hover:text-background data-[state=open]:bg-foreground data-[state=open]:text-background"
+            : "hover:bg-accent data-[state=open]:border-muted data-[state=open]:bg-accent"
+        )}
+      >
+        <Icon size={16} />
+        <span className="text-sm">{label}</span>
+      </NavigationMenuTrigger>
+
+      <NavigationMenuContent className="min-w-48 p-1">
+        <ul className="space-y-1">
+          {items.map((item) => {
+            const ItemIcon = item.icon;
+            if (item.disabled) {
+              return (
+                <li key={item.label}>
+                  <span
+                    aria-disabled="true"
+                    title="Próximamente"
+                    className="flex cursor-not-allowed items-center gap-2 rounded-md px-2 py-1.5 text-sm text-muted-foreground/60"
+                  >
+                    <ItemIcon size={16} />
+                    <span>{item.label}</span>
+                  </span>
+                </li>
+              );
+            }
+            return (
+              <li key={item.label}>
+                <NavigationMenuLink
+                  render={
+                    <a
+                      href={item.href}
+                      className="flex items-center gap-2 rounded-md px-2 py-1.5 text-sm hover:bg-accent hover:text-foreground"
+                    >
+                      <ItemIcon size={16} />
+                      <span>{item.label}</span>
+                    </a>
+                  }
+                />
+              </li>
+            );
+          })}
+        </ul>
+      </NavigationMenuContent>
+    </NavigationMenuItem>
+  );
+}
+
+export function NavButton({
+  label,
+  icon: Icon,
+}: {
+  label: string;
+  icon: LucideIcon;
+}) {
+  return (
+    <Button variant="ghost" className="gap-2 rounded-lg">
+      <Icon size={16} />
+      <span className="text-sm">{label}</span>
+    </Button>
+  );
+}

@@ -133,3 +133,19 @@ porque ninguno usa el rojo como literal.
   sera, rhea, cada uno con su paleta). Los valores de este archivo son la paleta
   **Zinc** oficial de Tailwind, mapeados a mano sustituyendo la paleta `neutral` que trae
   el preset por defecto.
+- **`@tanstack/react-table` fijado a `^8`, no `^9`**: al instalar `datatable-12` (bloque
+  ya retirado, ver más abajo) el CLI resolvió la `9.1.2` (última), pero el código del
+  propio block (y el de los ejemplos de shadcn/ui en general) usa la API de v8
+  (`useReactTable`), que v9 eliminó/renombró — build roto (`useReactTable was not found
+  in module`). Es un bug de resolución de dependencias del catálogo, no algo introducido
+  en este proyecto. Fijado en `package.json` a `^8` porque es la versión que espera el
+  código instalado, no un workaround. Comprobado antes de tocarlo: ningún panel existente
+  usaba esta librería, así que no hay conflicto con nada previo. Sigue fijado aunque
+  `datatable-12` ya no está: `components/nova/hierarchical-table.tsx` (tabla del panel de
+  compras) también usa la API v8.
+- **Bloques instalados y luego retirados**: `dashboard-shell-03`, `datatable-12` y
+  `statistics-01` se instalaron explorando alternativas, pero no se llegaron a usar en
+  ningún panel (compras-v2 usa `topbar-02` + `statistics-04` + `chart-15`, y una tabla
+  jerárquica propia en vez de un datatable genérico). Se borraron sin haber sido
+  personalizados — reinstalarlos más adelante es el mismo comando de una línea
+  (`bunx --bun shadcn@latest add @shadcn-space/<nombre>`), no se perdió trabajo.

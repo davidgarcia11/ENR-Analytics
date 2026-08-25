@@ -26,6 +26,18 @@
 
 @custom-variant nova-dark (&:is([data-nova-theme="dark"] *));
 
+/* Sin esto, un `border`/`border-b` sin color explícito cae en currentColor (texto,
+ * casi negro) en vez de en --border — es la línea negra que aparecía en el header de
+ * topbar-02. app/globals.css ya tiene el equivalente para el sistema viejo
+ * (`@layer base { * { @apply border-border } }`); el scope Nova necesita el suyo. */
+@layer base {
+  [data-nova-theme] *,
+  [data-nova-theme]::before,
+  [data-nova-theme]::after {
+    border-color: var(--border);
+  }
+}
+
 /* Claves que NO existen en app/globals.css (chart-*, sidebar-*): son de registro
  * nuevo, aditivo, sin conflicto posible con el sistema actual. */
 @theme inline {
