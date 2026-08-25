@@ -1,6 +1,7 @@
 import type { Metadata } from "next"; // Tipo de dato para definir metadatos (título, descripción) para SEO
 import { Geist, Geist_Mono } from "next/font/google"; // Fuentes de Google optimizadas por Next.js
 import "./globals.css"; // Importamos los estilos globales (Tailwind, resets, etc.)
+import "./nova-theme.css"; // Tema Nova (ShadcnSpace) aislado bajo [data-nova-theme] — no afecta a los paneles existentes
 import { ToastProvider } from "@/components/ui/toast"; // Sistema de notificaciones global
 
 // Configuración de la fuente Sans Serif (Geist)

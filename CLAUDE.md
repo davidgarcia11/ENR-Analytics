@@ -33,7 +33,7 @@ app/                          # Rutas Next.js (App Router)
   caducados/                  # Panel palets caducados/obsoletos/bloqueados
   comparativa-seres/          # Panel comparativa SERES vs JDE
   consulta-stock-pda/         # Panel consulta de stock por escaneo (FEFO, Reflex/SQL Server)
-  compras/                    # Panel comparativa previsión de ventas vs. venta real (director de compras)
+  compras/                    # Panel comparativa previsión de ventas vs. venta real (director de compras) — sistema Nova
   admin/page.tsx              # Panel de administración de usuarios
   admin/logs/page.tsx         # Logs de consultas (solo admin)
   login/page.tsx              # Login
@@ -49,7 +49,7 @@ app/                          # Rutas Next.js (App Router)
     jde-orders/               # GET órdenes JDE (API externa, usada por herramientas externas)
     comparativa-seres/        # GET comparativa SERES vs JDE
     consulta-stock-pda/       # GET stock FEFO por EAN escaneado (Reflex/SQL Server)
-    compras/                  # GET previsión (F3460) vs venta real (F4211), coste (F4105), gramaje (F554101)
+    compras/                  # GET previsión (F3460) vs venta real (F4211), coste (F4105), gramaje (F554101) — jerárquico Familia>Canal>Artículo (Nova)
     auth/                     # login, logout, me, change-password
     admin/                    # users CRUD, logs
     presets/                  # CRUD presets de filtros
@@ -71,15 +71,20 @@ components/
   MermaCellPopover.tsx        # Popover por fila al pulsar celda Merma en /produccion
   ui/                         # button, card (prop `accent`), input, table, popover, badge, skeleton,
                                # spinner, empty-state, dialog (Dialog/ConfirmDialog), toast (useToast), tabs
+  nova/                        # Sistema de diseño Nova (ShadcnSpace), AISLADO vía [data-nova-theme] — ver README propio
+    ui/                        # Primitivos shadcn instalados para Nova (button, card, table, select, popover...)
+    README.md                  # Mecanismo de aislamiento, configuración, decisiones — leer antes de tocar UI Nova
+  shadcn-space/blocks/          # Blocks del catálogo ShadcnSpace instalados tal cual (topbar-02, statistics-04, chart-15)
 middleware.ts                 # Protege /api/admin/* (JWT + role admin)
 docs/                         # Documentación específica por panel
-  design-system.md            # SISTEMA DE DISEÑO — leer antes de tocar UI de cualquier panel (obligatorio)
+  design-system.md            # SISTEMA DE DISEÑO (viejo, components/ui/) — leer antes de tocar UI de un panel que NO sea Nova
   produccion.md               # Dashboard de producción — completo para juniors
   control-pedidos.md          # Panel de pedidos
   palets-caducados.md         # Panel de caducados
   seres-jde-comparativa.md    # Panel comparativa SERES vs JDE
   consulta-stock-pda.md       # Panel consulta de stock por escaneo (FEFO, Reflex)
-  compras.md                  # Panel comparativa previsión de ventas vs. venta real
+  compras.md                  # Panel comparativa previsión de ventas vs. venta real (sistema Nova) — también referencia de patrones Nova reutilizables
+  compras-v1-historico.md     # Documentación de la versión anterior de /compras (código ya sustituido, conocimiento JDE aún vigente)
 ```
 
 ## Convenciones de código
@@ -131,6 +136,7 @@ docs/                         # Documentación específica por panel
 - Componentes UI base en `components/ui/` (estilo shadcn simplificado): button, card (prop `accent` = borde superior rojo), input, table, popover, badge, skeleton, spinner, empty-state, dialog/ConfirmDialog, toast (`useToast`), tabs
 - Toda página de panel se monta con `<AppShell>` (`components/AppShell.tsx`) — no se repite `<main>`/`max-w-*`/`<Navbar>` sueltos
 - No hay dark mode (se quitó deliberadamente; ver `DECISIONS.md`)
+- **Excepción — sistema Nova**: `/compras` (y cualquier panel futuro que lo use explícitamente) vive en un segundo sistema de diseño, `components/nova/` + `app/nova-theme.css`, aislado por `[data-nova-theme]` — no sigue las reglas de `docs/design-system.md` (que es solo del sistema viejo). Antes de tocar su UI, lee `components/nova/README.md` y `docs/compras.md` §6
 
 ### TypeScript
 - `tsconfig.json`: target ES2017, strict: true, moduleResolution: bundler
@@ -144,6 +150,13 @@ docs/                         # Documentación específica por panel
 3. Presets → `usePresets(screen)` + `<PresetPanel>` + `<PresetQuickSelect>` (`components/PresetPanel.tsx`), nunca un panel de presets escrito a mano — ver `docs/design-system.md` §5
 4. `alert()`/`confirm()` → `useToast()` / `<ConfirmDialog>` (`components/ui/toast.tsx`, `components/ui/dialog.tsx`)
 5. KPIs → `<KpiCard>` (`components/KpiCard.tsx`); tarjetas con borde superior de marca → `<Card accent>`
+
+### Crear un panel nuevo sobre el sistema Nova (ShadcnSpace)
+Solo cuando se pida explícitamente usar Nova (no es el sistema por defecto todavía):
+1. Lee **[`components/nova/README.md`](components/nova/README.md)** — mecanismo `[data-nova-theme]`, configuración, decisiones tomadas
+2. Lee **[`docs/compras.md`](docs/compras.md) §6** ("UI — patrones Nova") — checklist de qué bloque/componente reutilizar (estructura de página, nav, KPIs, gráficos, tabla, selector de meses, export) basado en el primer panel real construido con Nova
+3. Componentes nuevos → SIEMPRE por comando oficial (`bunx --bun shadcn@latest add ...` / `@shadcn-space/...`), nunca una imitación escrita a mano — ver `components/nova/README.md`
+4. Al terminar → crear `docs/nombre-panel.md` (mismo criterio que el resto de paneles) y añadir sus patrones nuevos a `components/nova/README.md` §"Cómo construir el siguiente panel Nova" si aportan algo no cubierto ya
 
 ### Añadir nuevo filtro de categoría (dashboard de producción)
 1. `api/categories/route.ts` → añadir entrada al `FIELD_MAP`
@@ -169,6 +182,13 @@ docs/                         # Documentación específica por panel
 
 ## Reglas para Claude Code
 
+### Gestión de proyecto (ClickUp) — leer siempre
+- `GUIA_GESTION_CLICKUP_ENR.md` — estructura, convenciones de nombres, estados, plantillas.
+- `MANUAL_IA_ALIMENTAR_CLICKUP.md` — qué hacer en cada paso de Git (rama, commit, PR, merge, release, producción) e ideas futuras.
+- ClickUp es la única fuente de verdad (Notion descontinuado). Buscar siempre antes de crear una tarea.
+- Este repo corresponde a la Carpeta ClickUp "ENR Analytics" (Espacio "Elaborados Naturales"). No confundir con las carpetas de "JDE - Evolutivos e Instalaciones" o "Documentación" — son de otros dominios, no de este código.
+- Idea futura mencionada durante el trabajo (no una tarea de código inmediata): crear en ClickUp como `pending`, sin fecha de inicio, siguiendo `MANUAL_IA_ALIMENTAR_CLICKUP.md` §1.7 — **sin pedir confirmación previa**, igual que no se pide para buscar o consultar. Informar después de qué se creó.
+
 ### Antes de hacer cambios
 - Verificar en qué rama estamos antes de actuar
 - Ofrecer plan detallado y esperar confirmación antes de ejecutar si el cambio afecta a más de 2 archivos
@@ -193,9 +213,10 @@ docs/                         # Documentación específica por panel
   - Cambios en el panel de caducados → `docs/palets-caducados.md`
   - Cambios en el panel comparativa SERES vs JDE → `docs/seres-jde-comparativa.md`
   - Cambios en el panel de consulta de stock por escaneo → `docs/consulta-stock-pda.md`
-  - Cambios en el panel de compras (`/compras`, `api/compras`) → `docs/compras.md`
+  - Cambios en el panel de compras o en el sistema Nova (`/compras`, `api/compras`, `components/nova/`, `components/shadcn-space/`) → `docs/compras.md` y `components/nova/README.md`
   - Nuevo panel → crear `docs/nombre-panel.md` y añadir referencia en `DOCUMENTACION.md` sección 9
 - Sugerir commit con mensaje siguiendo el estilo del proyecto (conventional + español)
+- Actualizar la tarea de ClickUp correspondiente (estado, comentario) según en qué paso del flujo Git se esté — ver `MANUAL_IA_ALIMENTAR_CLICKUP.md`
 
 ### Testing
 - Verificar compilación con `bun run build` después de cambios significativos
@@ -203,10 +224,14 @@ docs/                         # Documentación específica por panel
 
 ### Git — Flujo de trabajo
 ```
+# 0. Buscar/crear la tarea en ClickUp ANTES de empezar
+#    (lista del panel correspondiente en ENR Analytics; pending → in progress)
+
 # 1. Crear feature desde develop
 git checkout develop
 git pull
 git checkout -b feature/nombre
+#    → Comentar en la tarea de ClickUp: "Rama creada: feature/nombre"
 
 # 2. Trabajar y hacer commits
 git add <archivos>
@@ -216,6 +241,8 @@ git commit -m "..."
 git push -u origin feature/nombre
 
 # 4. En GitHub: crear PR → revisar → merge a develop
+#    → Al abrir el PR: enlazar en la tarea de ClickUp (MANUAL_IA_ALIMENTAR_CLICKUP.md §1.4)
+#    → Al mergear a develop: estado → in review (NUNCA completed aquí)
 
 # 5. Volver a develop y actualizar
 git checkout develop
@@ -223,7 +250,13 @@ git pull --prune
 
 # 6. Borrar rama feature local (ya mergeada)
 git branch -d feature/nombre
+
+# 7. Al mergear a main / generar release
+#    → Ver MANUAL_IA_ALIMENTAR_CLICKUP.md §1.5-1.6: crear/actualizar [RELEASE] vX.Y.Z,
+#      validar en producción, SOLO ENTONCES marcar completed
 ```
+
+Hotfix directo a `main` (sin pasar por `develop`): mismo registro en ClickUp que un PR normal, pero ver `MANUAL_IA_ALIMENTAR_CLICKUP.md` §1.4bis (prioridad Urgente/Alta, indicar en la release que fue fuera del flujo normal).
 
 ### Git — Reglas
 - La carpeta `data/` está en `.gitignore`

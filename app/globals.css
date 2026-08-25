@@ -10,42 +10,76 @@
  * p. ej. `bg-primary`, `text-muted-foreground`, `border-border`, `ring-ring`.
  */
 @theme inline {
-  /* ── Marca ─────────────────────────────────────────────── */
-  --color-primary: #d30b15;            /* rojo corporativo */
-  --color-primary-hover: #b00a12;      /* hover/pressed del rojo corporativo */
-  --color-primary-foreground: #ffffff; /* texto sobre rojo */
+  /* Cada --color-X apunta a la variable semántica --X (definida en :root más abajo),
+   * nunca a un literal. Es lo que permite que app/nova-theme.css pueda sobrescribir
+   * --primary, --background, etc. solo dentro de [data-nova-theme], sin tocar este
+   * archivo ni afectar a ningún panel existente (que no lleva ese atributo). */
+  --color-primary: var(--primary);
+  --color-primary-hover: var(--primary-hover);
+  --color-primary-foreground: var(--primary-foreground);
 
-  /* ── Superficies ───────────────────────────────────────── */
-  --color-background: #f7f7f6;         /* fondo general de la app */
-  --color-foreground: #171717;         /* texto principal */
-  --color-card: #ffffff;               /* tarjetas y paneles */
-  --color-card-foreground: #171717;
-  --color-popover: #ffffff;            /* popovers, dropdowns, menús */
-  --color-popover-foreground: #171717;
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
 
-  /* ── Neutros ───────────────────────────────────────────── */
-  --color-muted: #f4f4f4;              /* fondos sutiles (cabeceras de tabla, hover) */
-  --color-muted-foreground: #6b7280;   /* texto secundario */
-  --color-border: #e5e7eb;             /* bordes y separadores */
-  --color-input: #e5e7eb;              /* borde de inputs */
-  --color-ring: #d30b15;               /* anillo de foco (accesibilidad) */
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
 
-  /* ── Acciones secundarias ──────────────────────────────── */
-  --color-secondary: #f4f4f4;
-  --color-secondary-foreground: #374151;
-  --color-accent: #f4f4f4;             /* hover de botones ghost/outline */
-  --color-accent-foreground: #171717;
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
 
-  /* ── Semánticos ────────────────────────────────────────── */
-  --color-destructive: #ef4444;        /* acciones destructivas / error */
-  --color-destructive-foreground: #ffffff;
-  --color-success: #22c55e;            /* estados correctos */
-  --color-warning: #f59e0b;            /* avisos */
-  --color-info: #2563eb;               /* informativo / modo edición */
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-success: var(--success);
+  --color-warning: var(--warning);
+  --color-info: var(--info);
 
   /* ── Tipografía ────────────────────────────────────────── */
   --font-sans: var(--font-geist-sans), system-ui, sans-serif;
   --font-mono: var(--font-geist-mono), ui-monospace, monospace;
+}
+
+:root {
+  /* ── Marca ─────────────────────────────────────────────── */
+  --primary: #d30b15;            /* rojo corporativo */
+  --primary-hover: #b00a12;      /* hover/pressed del rojo corporativo */
+  --primary-foreground: #ffffff; /* texto sobre rojo */
+
+  /* ── Superficies ───────────────────────────────────────── */
+  --background: #f7f7f6;         /* fondo general de la app */
+  --foreground: #171717;         /* texto principal */
+  --card: #ffffff;               /* tarjetas y paneles */
+  --card-foreground: #171717;
+  --popover: #ffffff;            /* popovers, dropdowns, menús */
+  --popover-foreground: #171717;
+
+  /* ── Neutros ───────────────────────────────────────────── */
+  --muted: #f4f4f4;              /* fondos sutiles (cabeceras de tabla, hover) */
+  --muted-foreground: #6b7280;   /* texto secundario */
+  --border: #e5e7eb;             /* bordes y separadores */
+  --input: #e5e7eb;              /* borde de inputs */
+  --ring: #d30b15;               /* anillo de foco (accesibilidad) */
+
+  /* ── Acciones secundarias ──────────────────────────────── */
+  --secondary: #f4f4f4;
+  --secondary-foreground: #374151;
+  --accent: #f4f4f4;             /* hover de botones ghost/outline */
+  --accent-foreground: #171717;
+
+  /* ── Semánticos ────────────────────────────────────────── */
+  --destructive: #ef4444;        /* acciones destructivas / error */
+  --destructive-foreground: #ffffff;
+  --success: #22c55e;            /* estados correctos */
+  --warning: #f59e0b;            /* avisos */
+  --info: #2563eb;               /* informativo / modo edición */
 }
 
 body {

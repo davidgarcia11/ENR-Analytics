@@ -34,7 +34,7 @@ Esta aplicación es un **panel de control (dashboard) de producción** para la e
 | **xlsx** | 0.18 | Generar archivos Excel (.xlsx) |
 | **recharts** | — | Gráficos de líneas para estadísticas de logs |
 | **lucide-react** | 0.563 | Iconos SVG (Search, Factory, Download...) |
-| **@radix-ui/react-popover** | — | Popover posicionado con Portal (usado por `MermaCellPopover` y `app/compras/page.tsx`) |
+| **@radix-ui/react-popover** | — | Popover posicionado con Portal (usado por `MermaCellPopover`; la versión anterior de `app/compras/page.tsx` también lo usaba — el `/compras` actual, sobre Nova, usa `components/nova/ui/popover.tsx` en su lugar) |
 | **Bun** | — | Gestor de paquetes y runtime (alternativa a npm/node) |
 
 ---
@@ -846,7 +846,7 @@ Cada panel tiene su documentación específica en la carpeta `docs/`:
 | Palets caducados/obsoletos/bloqueados | `/caducados` | [docs/palets-caducados.md](docs/palets-caducados.md) |
 | Comparativa SERES vs JDE | `/comparativa-seres` | [docs/seres-jde-comparativa.md](docs/seres-jde-comparativa.md) |
 | Consulta de stock por escaneo (FEFO, Reflex) | `/consulta-stock-pda` | [docs/consulta-stock-pda.md](docs/consulta-stock-pda.md) |
-| Compras (previsión de ventas vs. venta real) | `/compras` | [docs/compras.md](docs/compras.md) |
+| Compras (previsión de ventas vs. venta real, rediseño sobre sistema Nova) | `/compras` | [docs/compras.md](docs/compras.md) |
 
 ### API externa — `GET /api/jde-orders`
 
@@ -904,7 +904,7 @@ Tarjeta de métrica (borde superior rojo corporativo vía `Card accent`, icono, 
 
 ### `PresetPanel.tsx` — `PresetPanel`, `PresetQuickSelect`, `usePresets`
 
-Sistema de presets compartido por todos los paneles con presets (`caducados`, `preparacion-pedidos`, `comparativa-seres`, `compras`; `produccion` mantiene su propia variante integrada en `FilterPanel`). Antes estaba duplicado (con pequeñas divergencias que eran bugs latentes) en cada página.
+Sistema de presets compartido por los paneles con presets (`caducados`, `preparacion-pedidos`, `comparativa-seres`; `produccion` mantiene su propia variante integrada en `FilterPanel`). Antes estaba duplicado (con pequeñas divergencias que eran bugs latentes) en cada página. **`/compras` (sobre Nova) no tiene filtros ni presets conectados todavía** — la versión anterior sí los tenía; ver `docs/compras.md` §10 y la nota sobre "Presets" en el dropdown de perfil de `components/nova/README.md`.
 
 - **`usePresets(screen)`** — hook que hace el `fetch('/api/presets?screen=...')` y expone `{ presets, reload }`. Se llama **una vez por página** y su resultado se reparte a los otros dos componentes, para que ambos vean siempre la misma lista sin fetches duplicados ni desincronización tras guardar/borrar.
 - **`PresetPanel`** — panel "Mis Presets de Filtros" (guardar/editar/listar/borrar). Props: `screen`, `presets`, `onReload` (del hook), `open`, `onClose`, `getFilters()` (serializa el estado de filtros actual), `applyFilters(filters)` (restaura cada filtro con sus defaults), `hint?`, `dateFields?` (nombres de campos de fecha; si se pasan, añade el checkbox "Incluir fechas" — ver `docs/design-system.md` §5). Gestiona guardar/editar (`toast` de éxito/error) y borrado con `ConfirmDialog` de confirmación (antes era un borrado inmediato sin confirmar); llama a `onReload()` tras cada cambio.
@@ -923,7 +923,7 @@ Barra de navegación compartida por todos los paneles. Reemplaza el top bar dupl
 | `currentPanel` | `PanelKey` (de `lib/panels.ts`, opcional) | Panel activo (se marca con punto rojo en el dropdown). Se omite en páginas que usan `Navbar`/`AppShell` pero no son uno de los paneles reales (ej. `/admin/logs`) — así no marcan ninguno como activo |
 | `user` | `SessionUser \| null` | Usuario de sesión. Si es null, muestra botón "Iniciar sesión" |
 | `onLogout` | `() => void` | Callback para cerrar sesión |
-| `onPresetsClick` | `() => void` (opcional) | Si se pasa, aparece el botón "Presets". Lo wirean los paneles con presets (`/produccion`, `/preparacion-pedidos`, `/caducados`, `/comparativa-seres`, `/compras`) sólo con sesión activa |
+| `onPresetsClick` | `() => void` (opcional) | Si se pasa, aparece el botón "Presets". Lo wirean los paneles con presets (`/produccion`, `/preparacion-pedidos`, `/caducados`, `/comparativa-seres`) sólo con sesión activa. `/compras` (Nova) no usa `Navbar`/`AppShell` y no tiene presets conectados todavía — ver `docs/compras.md` §10 |
 
 **Comportamiento:**
 - Logo a la izquierda
@@ -965,7 +965,7 @@ Wrapper fino sobre `<input type="date">` nativo del navegador. Devuelve y recibe
 
 ### `components/ui/popover.tsx`
 
-Componente `Popover` / `PopoverTrigger` / `PopoverContent` estilo shadcn/ui basado en `@radix-ui/react-popover`. `PopoverContent` renderiza en Portal para garantizar z-index correcto sobre cualquier elemento. Lo usan `MermaCellPopover` y la tarjeta KPI de Kg en `app/compras/page.tsx` (lista de artículos sin gramaje, ver `docs/compras.md` §13.1).
+Componente `Popover` / `PopoverTrigger` / `PopoverContent` estilo shadcn/ui basado en `@radix-ui/react-popover`. `PopoverContent` renderiza en Portal para garantizar z-index correcto sobre cualquier elemento. Lo usa `MermaCellPopover` (y lo usaba la tarjeta KPI de Kg de la versión anterior de `/compras`, ver `docs/compras-v1-historico.md` §13.1 — el `/compras` actual usa el `Popover` propio del sistema Nova, `components/nova/ui/popover.tsx`, no este).
 
 ### `ArticleMultiSelect.tsx`
 

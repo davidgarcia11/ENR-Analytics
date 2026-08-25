@@ -5,6 +5,8 @@
 
 Este documento es la referencia obligatoria antes de escribir JSX/CSS en cualquier panel. Si algo de lo que necesitas no está aquí, es más probable que falte un componente por crear que una excepción por hacer.
 
+> **Excepción — sistema Nova:** `/compras` usa un segundo sistema de diseño (ShadcnSpace, aislado vía `[data-nova-theme]`), que **no** sigue las reglas de este documento. Si vas a tocar ese panel (o a construir el siguiente sobre Nova), lee [`components/nova/README.md`](../components/nova/README.md) y [`docs/compras.md`](compras.md) §6 en su lugar. El resto de paneles sigue usando exactamente lo de aquí.
+
 ---
 
 ## 1. Regla de oro
