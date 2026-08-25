@@ -7,7 +7,8 @@
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import * as XLSX from "xlsx";
-import { Download } from "lucide-react";
+import { toast } from "sonner";
+import { Download, Filter, Loader2 } from "lucide-react";
 import Header from "@/components/shadcn-space/blocks/topbar-02/header";
 import Statistics from "@/components/shadcn-space/blocks/statistics-04/statistics";
 import Charts15 from "@/components/shadcn-space/blocks/chart-15/charts-15";
@@ -16,6 +17,20 @@ import HierarchicalTable, { type DrillState, type FamiliaRow, type Unit } from "
 import MonthRangePicker, { type MonthRange } from "@/components/nova/month-range-picker";
 import { Button } from "@/components/nova/ui/button";
 import { Tabs, TabsList, TabsTrigger } from "@/components/nova/ui/tabs";
+import { Toaster } from "@/components/nova/ui/sonner";
+
+// Mes en curso (primer día -> último día) — mismo default que api/compras/route.ts
+// cuando se llama sin startDate/endDate.
+function currentMonthRange(): MonthRange {
+  const now = new Date();
+  const y = now.getFullYear();
+  const m = now.getMonth() + 1;
+  const lastDay = new Date(y, m, 0).getDate();
+  return {
+    startDate: `${y}-${String(m).padStart(2, "0")}-01`,
+    endDate: `${y}-${String(m).padStart(2, "0")}-${String(lastDay).padStart(2, "0")}`,
+  };
+}
 
 interface SessionUser { id: number; username: string; role: string; name: string; surname: string }
 
@@ -93,33 +108,46 @@ export default function ComprasV2Page() {
   const router = useRouter();
   const [drill, setDrill] = useState<DrillState>({ familia: null, canal: null, canalLabel: null });
   const [unit, setUnit] = useState<Unit>("unidades");
-  // Campaña por defecto (sep-ago) — filtra Oracle vía startDate/endDate.
-  const [range, setRange] = useState<MonthRange>({ startDate: "2025-09-01", endDate: "2026-08-31" });
+  // Por defecto, el mes en curso — el rango se aplica solo al pulsar "Filtrar", no en
+  // cada cambio del selector (evita una consulta a Oracle por cada clic).
+  const [range, setRange] = useState<MonthRange>(currentMonthRange());
   const [data, setData] = useState<ApiResponse | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [fetching, setFetching] = useState(false);
   const [sessionUser, setSessionUser] = useState<SessionUser | null>(null);
 
-  useEffect(() => {
-    setLoading(true);
+  const fetchData = (r: MonthRange) => {
+    setFetching(true);
+    const toastId = toast.loading("Cargando datos de compras…");
     const params = new URLSearchParams();
-    params.set("startDate", range.startDate);
-    params.set("endDate", range.endDate);
+    params.set("startDate", r.startDate);
+    params.set("endDate", r.endDate);
     fetch(`/api/compras?${params.toString()}`)
-      .then((r) => {
+      .then((res) => {
         // Sin sesión (o sin permiso) requireScreenAccess('compras') devuelve 401/403
         // con { error }, no la forma de ApiResponse — si se intenta pintar igualmente
         // (data.resumen/data.familias undefined) la página revienta en vez de redirigir.
-        if (r.status === 401 || r.status === 403) {
+        if (res.status === 401 || res.status === 403) {
           router.push("/login");
           return null;
         }
-        return r.json();
+        return res.json();
       })
       .then((json) => {
-        if (json) setData(json);
+        if (json) {
+          setData(json);
+          toast.success("Datos actualizados", { id: toastId });
+        } else {
+          toast.dismiss(toastId);
+        }
       })
-      .finally(() => setLoading(false));
-  }, [range, router]);
+      .catch(() => toast.error("No se han podido cargar los datos", { id: toastId }))
+      .finally(() => setFetching(false));
+  };
+
+  // Solo al montar, con el rango por defecto — las siguientes cargas las dispara el
+  // botón "Filtrar", nunca automáticamente al cambiar el selector de meses.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => { fetchData(range); }, []);
 
   // Mismo patrón que el resto de paneles (ver app/caducados/page.tsx) — solo para
   // mostrar quién ha entrado y poder cerrar sesión desde la cabecera. El control de
@@ -298,7 +326,13 @@ export default function ComprasV2Page() {
         <Header user={sessionUser} onLogout={logout} />
         <main className="mx-auto max-w-7xl space-y-4 p-4 md:p-6">
           <div className="flex flex-wrap items-center justify-between gap-2">
-            <MonthRangePicker value={range} onChange={setRange} />
+            <div className="flex items-center gap-2">
+              <MonthRangePicker value={range} onChange={setRange} />
+              <Button size="sm" className="gap-1.5" onClick={() => fetchData(range)} disabled={fetching}>
+                {fetching ? <Loader2 size={14} className="animate-spin" /> : <Filter size={14} />}
+                Filtrar
+              </Button>
+            </div>
             <div className="flex items-center gap-3">
               <Tabs value={unit} onValueChange={(v) => setUnit(v as Unit)}>
                 <TabsList>
@@ -314,7 +348,7 @@ export default function ComprasV2Page() {
             </div>
           </div>
 
-          {loading || !data ? (
+          {!data ? (
             <p className="text-muted-foreground">Cargando…</p>
           ) : (
             <>
@@ -355,6 +389,7 @@ export default function ComprasV2Page() {
           )}
         </main>
       </div>
+      <Toaster />
     </div>
   );
 }

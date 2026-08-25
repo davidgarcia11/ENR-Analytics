@@ -183,6 +183,13 @@ desde cero las mismas decisiones de diseño:
    `stackId`).
 5. **Selector de rango de meses**: `components/nova/month-range-picker.tsx` tal cual —
    **no** usar `<input type="month">` nativo (calendario del navegador, desentona).
+5.1. **Filtrado explícito + feedback con toast**: si un panel tiene un filtro que dispara
+   una consulta a Oracle (fechas, artículo...), que se aplique con un botón explícito
+   ("Filtrar", mismo estilo que "Exportar"), no en cada cambio del control. Al recargar,
+   nunca vaciar el `data` ya cargado — usar un toast (`sonner`, ya instalado en
+   `components/nova/ui/sonner.tsx`, montar `<Toaster />` una vez por página) para el
+   feedback de carga/éxito/error, en vez de un estado de carga que tape el contenido. Ver
+   `app/compras/page.tsx`.
 6. **Tabla con jerarquía/drill-down**: `components/nova/hierarchical-table.tsx` como
    plantilla (TanStack Table v8, `subRows`, píldoras de ruta) si el panel nuevo necesita
    lo mismo — si no, un `datatable-12` reinstalado puede bastar para una tabla plana.
