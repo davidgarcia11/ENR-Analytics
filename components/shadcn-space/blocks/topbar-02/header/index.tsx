@@ -23,7 +23,7 @@ import NotificationDropdown from "@/components/shadcn-space/blocks/topbar-02/hea
 import ProfileDropdown, { iniciales, type SessionUser } from "@/components/shadcn-space/blocks/topbar-02/header/dropdown-profile";
 import Sidebar from "@/components/shadcn-space/blocks/topbar-02/header/sidebar";
 import { NavDropdown, NavButton } from "@/components/shadcn-space/blocks/topbar-02/header/desktop-nav";
-import NavData from "@/components/shadcn-space/blocks/topbar-02/data";
+import { getNavData, type ScreenConfig } from "@/components/shadcn-space/blocks/topbar-02/data";
 import { NavGroup } from "@/components/shadcn-space/blocks/topbar-02/types";
 
 export default function Header({
@@ -38,6 +38,8 @@ export default function Header({
   const [sheetOpen, setSheetOpen] = useState(false);
   const pathname = usePathname();
   const BREAKPOINT = 1024;
+  const [screensConfig, setScreensConfig] = useState<Record<string, ScreenConfig>>({});
+  const navData = getNavData(user?.role ?? null, screensConfig);
 
   useEffect(() => {
     const handleResize = () => {
@@ -50,6 +52,16 @@ export default function Header({
     window.addEventListener("resize", handleResize);
 
     return () => window.removeEventListener("resize", handleResize);
+  }, []);
+
+  // Mismo endpoint y misma regla de acceso que components/Navbar.tsx — sin esto, el
+  // nav mostraba siempre todos los paneles de lib/panels.ts, tuviera o no acceso real
+  // el usuario a cada uno.
+  useEffect(() => {
+    fetch("/api/screen-permissions")
+      .then((r) => (r.ok ? r.json() : {}))
+      .then(setScreensConfig)
+      .catch(() => {});
   }, []);
 
   return (
@@ -76,7 +88,7 @@ export default function Header({
               <a href="/" className="p-4 sticky top-0 bg-background z-10 block">
                 <Image src="/logo.png" alt="Elaborados Naturales" width={120} height={42} priority />
               </a>
-              <Sidebar onLinkClick={() => setSheetOpen(false)} />
+              <Sidebar navData={navData} onLinkClick={() => setSheetOpen(false)} />
             </SheetContent>
           </Sheet>
 
@@ -119,7 +131,7 @@ export default function Header({
       <div className="hidden lg:flex items-center justify-start gap-1 max-w-7xl mx-auto mb-2 rounded-lg border border-border px-2 py-2">
         <NavigationMenu>
           <NavigationMenuList className="flex gap-1">
-            {(NavData as NavGroup[]).map((item) => {
+            {(navData as NavGroup[]).map((item) => {
               if (item.type === "dropdown") {
                 // Grupo activo: coincidencia EXACTA de ruta (o de segmento, "/x/y" cuelga
                 // de "/x") con alguno de sus items — nunca por prefijo de texto suelto

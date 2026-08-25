@@ -6,14 +6,13 @@ import {
   AccordionItem,
   AccordionTrigger,
 } from "@/components/nova/ui/accordion";
-import NavData from "@/components/shadcn-space/blocks/topbar-02/data";
 import { NavGroup } from "@/components/shadcn-space/blocks/topbar-02/types";
 
-export default function Sidebar({ onLinkClick }: { onLinkClick?: () => void }) {
+export default function Sidebar({ navData, onLinkClick }: { navData: NavGroup[]; onLinkClick?: () => void }) {
   return (
     <nav className="space-y-1 px-4">
       <Accordion className="w-full">
-        {(NavData as NavGroup[]).map((group) => {
+        {(navData as NavGroup[]).map((group) => {
           const GroupIcon = group.icon;
           return (
             <AccordionItem
