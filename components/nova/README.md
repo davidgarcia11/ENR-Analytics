@@ -4,7 +4,12 @@ Base del nuevo sistema de diseño sobre [ShadcnSpace](https://shadcnspace.com), 
 del sistema actual (`app/globals.css`, `components/ui/`) que siguen usando todos los
 paneles en producción sin ningún cambio de comportamiento.
 
-Aún no hay pantallas ni blocks instalados. Esto es solo la base.
+**Primer panel real construido con Nova: `/compras`** (rama `feat/panel-prevision`) — ya
+sustituyó a la versión anterior del panel (sistema viejo, `components/ui/`). Ver
+[`docs/compras.md`](../../docs/compras.md) para el detalle del panel y §"Cómo construir
+el siguiente panel Nova" más abajo para los patrones reutilizables (estructura de página,
+nav, tabla jerárquica, selector de meses, gráficos, cabecera compartida) que salieron de
+construirlo.
 
 ## Configuración elegida
 
@@ -92,8 +97,6 @@ porque así es como el CLI de shadcn genera su código.
 
 ## Cómo activar el tema en una pantalla nueva
 
-Todavía no existe ninguna. Cuando se cree la primera:
-
 ```tsx
 <div data-nova-theme="light" className="bg-background text-foreground">
   {/* ... */}
@@ -101,7 +104,9 @@ Todavía no existe ninguna. Cuando se cree la primera:
 ```
 
 o, si se agrupan varias pantallas Nova bajo un route group (`app/(nova)/layout.tsx`),
-poner el atributo ahí una sola vez.
+poner el atributo ahí una sola vez. `app/compras/page.tsx` es el ejemplo real: pone el
+atributo en el `<div>` raíz de la página (no hay route group todavía, es la única
+pantalla Nova).
 
 ## Aplicar el rojo corporativo al final
 
@@ -145,7 +150,46 @@ porque ninguno usa el rojo como literal.
   compras) también usa la API v8.
 - **Bloques instalados y luego retirados**: `dashboard-shell-03`, `datatable-12` y
   `statistics-01` se instalaron explorando alternativas, pero no se llegaron a usar en
-  ningún panel (compras-v2 usa `topbar-02` + `statistics-04` + `chart-15`, y una tabla
+  ningún panel (`/compras` usa `topbar-02` + `statistics-04` + `chart-15`, y una tabla
   jerárquica propia en vez de un datatable genérico). Se borraron sin haber sido
   personalizados — reinstalarlos más adelante es el mismo comando de una línea
   (`bunx --bun shadcn@latest add @shadcn-space/<nombre>`), no se perdió trabajo.
+
+## Cómo construir el siguiente panel Nova
+
+Checklist basada en lo que realmente se usó/decidió construyendo `/compras` (detalle
+completo en [`docs/compras.md`](../../docs/compras.md) §6) — pensada para no repetir
+desde cero las mismas decisiones de diseño:
+
+1. **Estructura de página**: raíz `<div data-nova-theme="light" className="min-h-screen bg-sidebar text-foreground">`,
+   con un `<div className="md:m-2 md:rounded-xl md:outline md:outline-border md:shadow-sm md:overflow-hidden bg-background">`
+   envolviendo header + `<main>`. Es el patrón `Sidebar variant="inset"` de shadcn
+   replicado a mano (sin sidebar real) — ver `app/compras/page.tsx`.
+2. **Header/nav**: `topbar-02` (`components/shadcn-space/blocks/topbar-02/`) tal cual está
+   instalado — ya tiene el fix de imports rotos, el active-state por ruta exacta (no
+   `startsWith` suelto) y la caja `rounded-lg border border-border` alrededor del grupo de
+   dropdowns. Los items de nav viven en `topbar-02/data.ts` (`lib/panels.ts` es la fuente,
+   igual que en el sistema viejo). `<Header>` acepta `user`/`onLogout`/`onPresetsClick`
+   (mismo tipo `SessionUser` y mismo patrón `fetch('/api/auth/me')` + `POST /api/auth/logout`
+   que ya usa `components/Navbar.tsx` en el resto de paneles) — la página nueva tiene que
+   pasarlos, no hay wiring automático. El logo es `/logo.png` (el real, no el de ShadcnSpace).
+   El dropdown de perfil (`dropdown-profile.tsx`) y el de notificaciones
+   (`notification-dropdown.tsx`) ya están adaptados a datos/acciones reales — no vuelvas a
+   dejar contenido de ejemplo si los tocas.
+3. **KPIs**: bloque `statistics-04` (`components/shadcn-space/blocks/statistics-04/`),
+   acepta un array `data` de hasta 4 tarjetas.
+4. **Gráfico de evolución temporal**: bloque `chart-15`
+   (`components/shadcn-space/blocks/chart-15/`), adaptado a barras agrupadas (sin
+   `stackId`).
+5. **Selector de rango de meses**: `components/nova/month-range-picker.tsx` tal cual —
+   **no** usar `<input type="month">` nativo (calendario del navegador, desentona).
+6. **Tabla con jerarquía/drill-down**: `components/nova/hierarchical-table.tsx` como
+   plantilla (TanStack Table v8, `subRows`, píldoras de ruta) si el panel nuevo necesita
+   lo mismo — si no, un `datatable-12` reinstalado puede bastar para una tabla plana.
+7. **Exportar a Excel**: mismo patrón `xlsx` que `app/compras/page.tsx` — hojas Resumen/
+   Tendencia mensual/Detalle, `setColNumFmt()` para formato nativo de Excel.
+8. **Antes de dar por bueno el diseño visual**: comparar contra capturas reales del
+   usuario o contra el proyecto completo descargado (si sigue disponible en
+   `c:\Users\dgarcia\Projects\Shadcn Space Admin Dashboard - Next.js`) en vez de adivinar
+   estructura por CSS suelto — varias decisiones de este panel (caja redondeada, borde de
+   nav) solo se confirmaron leyendo el código fuente real del proyecto, no a ojo.

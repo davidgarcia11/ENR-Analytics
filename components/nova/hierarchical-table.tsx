@@ -117,7 +117,7 @@ function formatNum(v: number, unit: Unit): string {
 // Fila unificada para el árbol de TanStack (subRows exige una forma homogénea).
 // `concepto` es SIEMPRE lo que se muestra (la descripción, nunca un código);
 // `canalCode` es la identidad interna de una fila de canal, usada para el estado
-// `drill` compartido con la página y para las claves de /api/compras-v2 (que sí usan
+// `drill` compartido con la página y para las claves de /api/compras (que sí usan
 // el código, no la descripción).
 interface TreeRow {
   id: string;

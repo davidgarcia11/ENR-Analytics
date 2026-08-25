@@ -9,7 +9,7 @@ import { cn } from "@/lib/utils";
 // (divs + Tailwind, colores por token) — no tiene sentido forzarlo en Recharts si no hay
 // datos plateados/ejes que dibujar.
 // Datos de ejemplo por defecto (fallback si no se pasa `data`, ver
-// components/nova/README.md — modo mock centralizado en /api/compras-v2).
+// components/nova/README.md — modo mock centralizado en /api/compras).
 const defaultDeviationData = [
     { familia: "Tortilla", pct: 7.9 },
     { familia: "Pimiento asado", pct: 9.6 },

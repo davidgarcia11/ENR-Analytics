@@ -17,7 +17,7 @@ import { BarChart, Bar, XAxis, YAxis, CartesianGrid } from "recharts";
 
 // Evolución mensual: Previsión (F3460) vs Real (F4211), barras agrupadas (no
 // apiladas — el block original traía stackId pensado para series +/-, no para
-// comparar dos magnitudes positivas lado a lado). `data` viene de /api/compras-v2
+// comparar dos magnitudes positivas lado a lado). `data` viene de /api/compras
 // (mensual.total / mensual.porFamilia / mensual.porFamiliaCanal, ver
 // components/nova/README.md) filtrado en la página según el nivel abierto (`drill`).
 const defaultMonthlyData = [

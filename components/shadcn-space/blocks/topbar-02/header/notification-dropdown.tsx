@@ -5,21 +5,10 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuGroup,
-  DropdownMenuItem,
   DropdownMenuLabel,
   DropdownMenuTrigger,
 } from "@/components/nova/ui/dropdown-menu";
-import { Badge } from "@/components/nova/ui/badge";
-import { Button } from "@/components/nova/ui/button";
-import { cn } from "@/lib/utils";
-import {
-  Headset,
-  LucideIcon,
-  Salad,
-  ScanText,
-  Star,
-  Video,
-} from "lucide-react";
+import { BellOff } from "lucide-react";
 
 type Props = {
   trigger: ReactNode;
@@ -27,58 +16,9 @@ type Props = {
   align?: "start" | "center" | "end";
 };
 
-type MenuItem = {
-  textColor: string;
-  bgColor: string;
-  icon: LucideIcon;
-  title: string;
-  desc: string;
-  time: string;
-};
-
-const PROFILE_ITEMS: MenuItem[] = [
-  {
-    textColor: "stroke-blue-500",
-    bgColor: "bg-blue-500/10",
-    icon: Star,
-    title: "Event Today",
-    desc: "Just reminder that you have to",
-    time: "9:00 AM",
-  },
-  {
-    textColor: "stroke-orange-400",
-    bgColor: "bg-orange-400/10",
-    icon: Video,
-    title: "Team Meeting",
-    desc: "Discuss project updates and next steps",
-    time: "10:00 AM",
-  },
-  {
-    textColor: "stroke-teal-400",
-    bgColor: "bg-teal-400/10",
-    icon: Salad,
-    title: "Lunch Break",
-    desc: "Take a break and recharge",
-    time: "12:30 PM",
-  },
-  {
-    textColor: "stroke-red-500",
-    bgColor: "bg-red-500/10",
-    icon: Headset,
-    title: "Client Call",
-    desc: "Monthly check-in with the client",
-    time: "3:00 PM",
-  },
-  {
-    textColor: "stroke-sky-400",
-    bgColor: "bg-sky-400/10",
-    icon: ScanText,
-    title: "Project Review",
-    desc: "Review project deliverables with client",
-    time: "4:00 PM",
-  },
-];
-
+// Sin sistema de notificaciones todavía (ver "Suscripciones de notificaciones" en el
+// dropdown de perfil) — se deja el hueco montado con un estado vacío real, no con
+// notificaciones de ejemplo que darían la falsa impresión de que ya funciona.
 const NotificationDropdown = ({
   trigger,
   defaultOpen,
@@ -89,51 +29,19 @@ const NotificationDropdown = ({
       <DropdownMenu defaultOpen={defaultOpen}>
         <DropdownMenuTrigger>{trigger}</DropdownMenuTrigger>
 
-        <DropdownMenuContent
-          align={align}
-          className="p-0 w-sm rounded-2xl data-open:slide-in-from-top-20! data-closed:slide-out-to-top-20 data-open:fade-in-0 data-closed:fade-out-0 data-closed:zoom-out-100 duration-400"
-        >
+        <DropdownMenuContent align={align} className="p-0 w-sm rounded-2xl">
           <DropdownMenuGroup>
-            {/* title */}
-            <DropdownMenuLabel className="flex items-center justify-between p-4">
+            <DropdownMenuLabel className="flex items-center p-4">
               <p className="text-base font-medium text-popover-foreground">
-                Notifications
+                Notificaciones
               </p>
-              <Badge className="h-5 font-normal leading-0">5 New</Badge>
             </DropdownMenuLabel>
 
-            {/* Notifications */}
-            {PROFILE_ITEMS.map(
-              ({ bgColor, textColor, icon: Icon, title, desc, time }) => (
-                <DropdownMenuItem
-                  key={title}
-                  className={
-                    "mx-1.5 my-1 p-2 flex items-center justify-between cursor-pointer"
-                  }
-                >
-                  <div className="flex items-center gap-3">
-                    <div className={cn("p-2.5 rounded-xl", bgColor)}>
-                      <Icon size={20} className={cn("size-5", textColor)} />
-                    </div>
-                    <div>
-                      <p className="text-sm font-medium text-popover-foreground">
-                        {title}
-                      </p>
-                      <p className="max-w-52 truncate text-sm text-muted-foreground">
-                        {desc}
-                      </p>
-                    </div>
-                  </div>
-                  <p className="text-xs text-muted-foreground">{time}</p>
-                </DropdownMenuItem>
-              ),
-            )}
-
-            {/* button */}
-            <div className="mx-1.5 my-1 p-2">
-              <Button className="rounded-xl w-full cursor-pointer hover:bg-primary/80">
-                See All Notifications
-              </Button>
+            <div className="flex flex-col items-center gap-2 px-4 pb-6 pt-2 text-center">
+              <BellOff size={28} className="text-muted-foreground" />
+              <p className="text-sm text-muted-foreground">
+                No hay notificaciones todavía
+              </p>
             </div>
           </DropdownMenuGroup>
         </DropdownMenuContent>

@@ -1,7 +1,7 @@
 "use client";
 
 import type { ReactElement } from "react";
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/nova/ui/avatar";
+import { Avatar, AvatarFallback } from "@/components/nova/ui/avatar";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -12,104 +12,105 @@ import {
   DropdownMenuTrigger,
 } from "@/components/nova/ui/dropdown-menu";
 import {
-  Bookmark,
+  BellRing,
+  BookmarkCheck,
+  FileText,
+  LogIn,
   LogOut,
-  LucideIcon,
-  ReceiptText,
   Settings,
-  User,
 } from "lucide-react";
+
+export interface SessionUser {
+  id: number;
+  username: string;
+  role: string;
+  name: string;
+  surname: string;
+}
 
 type Props = {
   trigger: ReactElement;
+  user?: SessionUser | null;
+  onLogout?: () => void;
+  onPresetsClick?: () => void;
   defaultOpen?: boolean;
   align?: "start" | "center" | "end";
 };
 
-type MenuItem = {
-  label: string;
-  icon: LucideIcon;
-  destructive?: boolean;
-};
+const itemClass = "px-3 py-2 text-sm cursor-pointer gap-2.5";
 
-const PROFILE_ITEMS: MenuItem[] = [
-  { label: "My Profile", icon: User },
-  { label: "My Subscription", icon: Bookmark },
-  { label: "My Invoice", icon: ReceiptText },
-];
+export function iniciales(user: SessionUser) {
+  const base = user.name ? `${user.name} ${user.surname || ""}`.trim() : user.username;
+  const partes = base.split(/\s+/).filter(Boolean);
+  return (partes[0]?.[0] ?? "").toUpperCase() + (partes[1]?.[0] ?? "").toUpperCase();
+}
 
-const SETTINGS_ITEMS: MenuItem[] = [
-  { label: "Account Settings", icon: Settings },
-];
-
-const LOGOUT_ITEM: MenuItem = {
-  label: "Signout",
-  icon: LogOut,
-  destructive: true,
-};
-
-const itemClass = "px-4 py-2.5 text-base cursor-pointer gap-3";
-
-const ProfileDropdown = ({ trigger, defaultOpen, align = "end" }: Props) => {
+const ProfileDropdown = ({ trigger, user, onLogout, onPresetsClick, defaultOpen, align = "end" }: Props) => {
   return (
     <DropdownMenu defaultOpen={defaultOpen}>
       <DropdownMenuTrigger>{trigger}</DropdownMenuTrigger>
 
-      <DropdownMenuContent className="w-80" align={align}>
-        <DropdownMenuGroup>
-          {/* User Info */}
-          <DropdownMenuLabel className="flex items-center gap-4 px-4 py-2.5 font-normal">
-            <div className="relative">
-              <Avatar className="size-10">
-                <AvatarImage
-                  src="https://images.shadcnspace.com/assets/profiles/user-11.jpg"
-                  alt="David McMichael"
-                />
-                <AvatarFallback>DM</AvatarFallback>
-              </Avatar>
-              <span className="ring-card absolute right-0 bottom-0 size-2 rounded-full bg-green-600 ring-2" />
-            </div>
-
-            <div className="flex flex-col">
-              <span className="text-foreground text-lg font-semibold">
-                David McMichael
-              </span>
-              <span className="text-muted-foreground text-sm">
-                david.mcmichael@example.com
-              </span>
-            </div>
-          </DropdownMenuLabel>
-
-          <DropdownMenuSeparator />
-
-          {/* Main Links */}
-          {PROFILE_ITEMS.map(({ label, icon: Icon }) => (
-            <DropdownMenuItem key={label} className={itemClass}>
-              <Icon size={20} className="text-foreground" />
-              <span>{label}</span>
-            </DropdownMenuItem>
-          ))}
-
-          <DropdownMenuSeparator />
-
-          {/* Settings */}
+      <DropdownMenuContent className="w-72" align={align}>
+        {user ? (
           <DropdownMenuGroup>
-            {SETTINGS_ITEMS.map(({ label, icon: Icon }) => (
-              <DropdownMenuItem key={label} className={itemClass}>
-                <Icon size={20} className="text-foreground" />
-                <span>{label}</span>
+            {/* Datos de la sesión — no hay página de perfil todavía, se muestra aquí */}
+            <DropdownMenuLabel className="flex items-center gap-3 px-3 py-2 font-normal">
+              <Avatar className="size-9">
+                <AvatarFallback>{iniciales(user)}</AvatarFallback>
+              </Avatar>
+              <div className="flex flex-col">
+                <span className="text-foreground text-sm font-semibold">
+                  {user.name ? `${user.name} ${user.surname || ""}`.trim() : user.username}
+                </span>
+                <span className="text-muted-foreground text-xs">
+                  {user.username} · {user.role}
+                </span>
+              </div>
+            </DropdownMenuLabel>
+
+            <DropdownMenuSeparator />
+
+            {onPresetsClick && (
+              <DropdownMenuItem className={itemClass} onClick={onPresetsClick}>
+                <BookmarkCheck size={18} className="text-foreground" />
+                <span>Presets</span>
               </DropdownMenuItem>
-            ))}
+            )}
+
+            {/* Próximamente: configuración de qué notificaciones recibir. No hay
+                sistema de notificaciones real todavía (ver dropdown de campana). */}
+            <DropdownMenuItem className={itemClass} disabled title="Próximamente">
+              <BellRing size={18} className="text-foreground" />
+              <span>Suscripciones de notificaciones</span>
+            </DropdownMenuItem>
+
+            {user.role === "admin" && (
+              <>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem className={itemClass} onClick={() => (window.location.href = "/admin")}>
+                  <Settings size={18} className="text-foreground" />
+                  <span>Panel admin</span>
+                </DropdownMenuItem>
+                <DropdownMenuItem className={itemClass} onClick={() => (window.location.href = "/admin/logs")}>
+                  <FileText size={18} className="text-foreground" />
+                  <span>Logs</span>
+                </DropdownMenuItem>
+              </>
+            )}
+
+            <DropdownMenuSeparator />
+
+            <DropdownMenuItem variant="destructive" className={itemClass} onClick={onLogout}>
+              <LogOut size={18} />
+              <span>Cerrar sesión</span>
+            </DropdownMenuItem>
           </DropdownMenuGroup>
-
-          <DropdownMenuSeparator />
-
-          {/* Logout */}
-          <DropdownMenuItem variant="destructive" className={itemClass}>
-            <LOGOUT_ITEM.icon size={20} />
-            <span>{LOGOUT_ITEM.label}</span>
+        ) : (
+          <DropdownMenuItem className={itemClass} onClick={() => (window.location.href = "/login")}>
+            <LogIn size={18} className="text-foreground" />
+            <span>Iniciar sesión</span>
           </DropdownMenuItem>
-        </DropdownMenuGroup>
+        )}
       </DropdownMenuContent>
     </DropdownMenu>
   );
