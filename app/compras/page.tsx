@@ -5,6 +5,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
 import * as XLSX from "xlsx";
 import { Download } from "lucide-react";
 import Header from "@/components/shadcn-space/blocks/topbar-02/header";
@@ -89,6 +90,7 @@ function setColNumFmt(ws: XLSX.WorkSheet, colIdx: number, rowCount: number, fmt:
 }
 
 export default function ComprasV2Page() {
+  const router = useRouter();
   const [drill, setDrill] = useState<DrillState>({ familia: null, canal: null, canalLabel: null });
   const [unit, setUnit] = useState<Unit>("unidades");
   // Campaña por defecto (sep-ago) — filtra Oracle vía startDate/endDate.
@@ -103,10 +105,21 @@ export default function ComprasV2Page() {
     params.set("startDate", range.startDate);
     params.set("endDate", range.endDate);
     fetch(`/api/compras?${params.toString()}`)
-      .then((r) => r.json())
-      .then((json) => setData(json))
+      .then((r) => {
+        // Sin sesión (o sin permiso) requireScreenAccess('compras') devuelve 401/403
+        // con { error }, no la forma de ApiResponse — si se intenta pintar igualmente
+        // (data.resumen/data.familias undefined) la página revienta en vez de redirigir.
+        if (r.status === 401 || r.status === 403) {
+          router.push("/login");
+          return null;
+        }
+        return r.json();
+      })
+      .then((json) => {
+        if (json) setData(json);
+      })
       .finally(() => setLoading(false));
-  }, [range]);
+  }, [range, router]);
 
   // Mismo patrón que el resto de paneles (ver app/caducados/page.tsx) — solo para
   // mostrar quién ha entrado y poder cerrar sesión desde la cabecera. El control de
