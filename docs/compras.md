@@ -312,6 +312,15 @@ a mano):
    "Maestros" era visible para cualquier usuario (solo sus items estaban
    deshabilitados). Corregido: `<Header>` consulta `/api/screen-permissions` y filtra
    con la misma regla que `components/Navbar.tsx`; "Maestros" solo se muestra a `admin`.
+10. **Píldora activa del nav casi ilegible al abrir el desplegable** — `desktop-nav.tsx`
+    marcaba el estado abierto con `data-[state=open]:...` (convención de Radix), pero el
+    primitivo de navegación instalado es Base UI, que usa `data-open`/`data-popup-open`.
+    Con el atributo equivocado el override nunca se aplicaba al abrir, y ganaba el
+    `data-open:bg-muted/50` gris del primitivo por defecto combinado con nuestro
+    `text-background` — texto casi invisible (bug real en ambos temas, no solo en
+    oscuro, más visible en oscuro por el pedido explícito de modo oscuro). Corregido a
+    `data-open:`/`data-popup-open:`, igual que ya usaba correctamente el propio
+    primitivo.
 
 ---
 

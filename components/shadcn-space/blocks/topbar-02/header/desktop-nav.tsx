@@ -25,9 +25,14 @@ export function NavDropdown({
       <NavigationMenuTrigger
         className={cn(
           "gap-2 rounded-lg border border-transparent cursor-pointer",
+          // Base UI marca abierto con data-open/data-popup-open, NUNCA data-[state=open]
+          // (eso es convención de Radix) — con el atributo equivocado este override no
+          // se aplicaba nunca al abrir el desplegable, y ganaba el gris por defecto del
+          // primitivo (navigation-menu.tsx: data-open:bg-muted/50) combinado con nuestro
+          // text-background, casi invisible. Bug real, no solo de modo oscuro.
           active
-            ? "bg-foreground text-background hover:bg-foreground hover:text-background data-[state=open]:bg-foreground data-[state=open]:text-background"
-            : "hover:bg-accent data-[state=open]:border-muted data-[state=open]:bg-accent"
+            ? "bg-foreground text-background hover:bg-foreground hover:text-background data-open:bg-foreground data-open:text-background data-open:hover:bg-foreground data-popup-open:bg-foreground data-popup-open:text-background data-popup-open:hover:bg-foreground"
+            : "hover:bg-accent data-open:border-muted data-open:bg-accent data-popup-open:border-muted data-popup-open:bg-accent"
         )}
       >
         <Icon size={16} />

@@ -193,6 +193,13 @@ de intentar un script inline propio.
   jerárquica propia en vez de un datatable genérico). Se borraron sin haber sido
   personalizados — reinstalarlos más adelante es el mismo comando de una línea
   (`bunx --bun shadcn@latest add @shadcn-space/<nombre>`), no se perdió trabajo.
+- **Base UI marca estado abierto con `data-open`/`data-popup-open`, NUNCA
+  `data-[state=open]`** (eso es de Radix, no de Base UI). Si copias un patrón de
+  ejemplos/documentación pensados para Radix (muy común, es la librería más extendida),
+  revisa el atributo real antes de asumirlo — un `data-[state=open]:...` que no coincide
+  con lo que el primitivo realmente emite no da error, simplemente **no hace nada**, y
+  gana el estilo por defecto del primitivo por debajo (bug real: la píldora activa del
+  nav quedaba casi ilegible al abrir el desplegable, ver `docs/compras.md` §8 punto 10).
 
 ## Cómo construir el siguiente panel Nova
 
