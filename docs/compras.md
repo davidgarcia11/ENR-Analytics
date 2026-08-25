@@ -160,6 +160,16 @@ garantía de "misma función para ambos caminos". **No genera entrada en `query_
 - **Selector de meses**: dos `<Select>` (Mes + Año) por extremo dentro de un `Popover`,
   **no** `<input type="month">` nativo — el calendario que abre el navegador (en inglés,
   con su propio estilo) desentonaba con el resto del panel. Ver `month-range-picker.tsx`.
+- **Filtrado explícito, no reactivo**: cambiar el rango de meses en el selector solo
+  actualiza el estado local (`range`) — no dispara ninguna consulta a Oracle hasta que se
+  pulsa el botón **"Filtrar"** (al lado del selector, mismo estilo que "Exportar"). Evita
+  una consulta por cada clic en el popover. Por defecto se carga el **mes en curso** (mismo
+  default que `api/compras/route.ts` sin `startDate`/`endDate`).
+- **Recarga sin vaciar la pantalla**: al filtrar, `data` nunca se pone a `null` — se sigue
+  viendo el desglose anterior mientras llega la respuesta nueva. El feedback de "cargando"
+  es un toast (`sonner`, `components/nova/ui/sonner.tsx` + `<Toaster />` montado en la
+  página) que pasa a éxito/error según la respuesta, no un estado de carga que tape el
+  contenido.
 - **Exportación a Excel**: mismo patrón de `xlsx` que la versión anterior (§6.1 de
   `docs/compras-v1-historico.md`, number format nativo, sin color/negrita), adaptado a 3
   hojas (Resumen por familia, Tendencia mensual, Detalle familia›canal›artículo) y a las
