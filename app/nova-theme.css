@@ -24,7 +24,13 @@
 @import "tw-animate-css";
 @import "shadcn/tailwind.css";
 
-@custom-variant nova-dark (&:is([data-nova-theme="dark"] *));
+/* Redefine la variante `dark:` de Tailwind (por defecto solo mira
+ * prefers-color-scheme) para que dependa de [data-nova-theme="dark"] en su lugar —
+ * así los `dark:` que ya traen los primitivos instalados (button, select...) seguido
+ * la selección explícita Claro/Oscuro/Sistema del panel, no el SO directamente.
+ * Seguro para el sistema viejo: no usa ninguna clase `dark:` en ningún sitio
+ * (comprobado con grep antes de tocar esto). */
+@custom-variant dark (&:is([data-nova-theme="dark"] *));
 
 /* Sin esto, un `border`/`border-b` sin color explícito cae en currentColor (texto,
  * casi negro) en vez de en --border — es la línea negra que aparecía en el header de

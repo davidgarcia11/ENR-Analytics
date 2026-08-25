@@ -10,6 +10,7 @@ import * as XLSX from "xlsx";
 import { toast } from "sonner";
 import { Download, Filter, Loader2 } from "lucide-react";
 import Header from "@/components/shadcn-space/blocks/topbar-02/header";
+import { type ThemeMode } from "@/components/nova/mode-toggle";
 import Statistics from "@/components/shadcn-space/blocks/statistics-04/statistics";
 import Charts15 from "@/components/shadcn-space/blocks/chart-15/charts-15";
 import DeviationByFamilyChart from "@/components/nova/deviation-by-family-chart";
@@ -114,6 +115,19 @@ export default function ComprasV2Page() {
   const [data, setData] = useState<ApiResponse | null>(null);
   const [fetching, setFetching] = useState(false);
   const [sessionUser, setSessionUser] = useState<SessionUser | null>(null);
+
+  // Claro/Oscuro/Sistema — no persiste entre recargas (sin localStorage/sessionStorage,
+  // según las reglas del proyecto): siempre empieza en "system".
+  const [mode, setMode] = useState<ThemeMode>("system");
+  const [systemPrefersDark, setSystemPrefersDark] = useState(false);
+  useEffect(() => {
+    const mq = window.matchMedia("(prefers-color-scheme: dark)");
+    setSystemPrefersDark(mq.matches);
+    const handler = (e: MediaQueryListEvent) => setSystemPrefersDark(e.matches);
+    mq.addEventListener("change", handler);
+    return () => mq.removeEventListener("change", handler);
+  }, []);
+  const effectiveTheme = mode === "system" ? (systemPrefersDark ? "dark" : "light") : mode;
 
   const fetchData = (r: MonthRange) => {
     setFetching(true);
@@ -321,9 +335,9 @@ export default function ComprasV2Page() {
   };
 
   return (
-    <div data-nova-theme="light" className="min-h-screen bg-sidebar text-foreground">
+    <div data-nova-theme={effectiveTheme} className="min-h-screen bg-sidebar text-foreground">
       <div className="md:m-2 md:rounded-xl md:outline md:outline-border md:shadow-sm md:overflow-hidden bg-background">
-        <Header user={sessionUser} onLogout={logout} />
+        <Header user={sessionUser} onLogout={logout} mode={mode} onModeChange={setMode} />
         <main className="mx-auto max-w-7xl space-y-4 p-4 md:p-6">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div className="flex items-center gap-2">
