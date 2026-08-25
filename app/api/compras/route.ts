@@ -28,7 +28,9 @@ import { verifySession } from '@/lib/auth';
 //   una foto por artículo sin mes propio, igual que la versión anterior);
 //   real = línea a línea (F4211.SDUORG × SDUPRC), NUNCA unidades reales × coste — el
 //   precio de venta real no es el coste presupuestado. Si un artículo no tiene fila en
-//   F4105, su importe queda `null` y se excluye — se reporta en `articulosSinCoste`.
+//   F4105, su importe PREVISTO queda a 0 (no hay con qué calcularlo) — se reporta en
+//   `articulosSinCoste` — pero su importe REAL se suma con normalidad: no depende del
+//   coste, solo de F4211. (Bug real corregido: antes se excluía también el real.)
 // - Mensual (para "Evolución mensual"): misma lógica de abajo arriba, por mes, a 3
 //   niveles (total, por familia, por familia+canal) en unidades, kg e importe.
 //
@@ -97,11 +99,18 @@ function totalUnidades(a: ArticuloAgg) {
 // sale de multiplicar (coste fijo), real sale de sumar (ya viene precio por línea) — no
 // son la misma operación, así que no se puede reutilizar totalUnidades()+multiplicar
 // para los dos lados como si fuera kg.
-function totalImporteArticulo(a: ArticuloAgg): { previsto: number; real: number } | null {
-  if (a.costeUnitario == null) return null;
+//
+// Bug real encontrado comparando contra la versión anterior (docs/compras-v1-historico.md):
+// aquí se descartaba TODO el importe (previsto Y real) si el artículo no tenía coste en
+// F4105, aunque el real no dependa del coste — se perdía importe real de ventas conocidas
+// solo por faltar el coste presupuestado. Ahora solo el previsto queda a 0 (sin coste no
+// hay con qué calcularlo); el real se suma siempre que haya ventas, igual que hacía la
+// versión anterior (`importeReal = b.hasReal ? b.realImporte : null`, independiente del coste).
+function totalImporteArticulo(a: ArticuloAgg): { previsto: number; real: number } {
   const unidadesPrevisto = a.meses.reduce((s, m) => s + m.previsto, 0);
   const importeReal = a.meses.reduce((s, m) => s + m.importeReal, 0);
-  return { previsto: unidadesPrevisto * a.costeUnitario, real: importeReal };
+  const previsto = a.costeUnitario != null ? unidadesPrevisto * a.costeUnitario : 0;
+  return { previsto, real: importeReal };
 }
 
 // Serie mensual agregada (abajo arriba) para un subconjunto de artículos — la usan tanto
@@ -135,11 +144,16 @@ function mensualKgDe(articulos: ArticuloAgg[]): MesPunto[] | null {
 // Igual patrón que mensualKgDe, pero asimétrico: previsto = unidades del mes × coste
 // fijo, real = importeReal del mes ya acumulado línea a línea (no se multiplica nada).
 function mensualImporteDe(articulos: ArticuloAgg[]): MesPunto[] | null {
-  const conCoste = articulos.filter((a) => a.costeUnitario != null);
-  if (conCoste.length === 0) return null;
-  const enImporte = conCoste.map((a) => ({
+  if (articulos.length === 0) return null;
+  // Mismo fix que totalImporteArticulo: no excluir el real de un mes solo porque el
+  // artículo no tenga coste — el previsto de ese mes queda a 0, el real se suma igual.
+  const enImporte = articulos.map((a) => ({
     ...a,
-    meses: a.meses.map((m) => ({ ...m, previsto: m.previsto * a.costeUnitario!, real: m.importeReal })),
+    meses: a.meses.map((m) => ({
+      ...m,
+      previsto: a.costeUnitario != null ? m.previsto * a.costeUnitario : 0,
+      real: m.importeReal,
+    })),
   }));
   return mensualDe(enImporte);
 }
@@ -178,7 +192,7 @@ function aggregate(articulos: ArticuloAgg[], umbralPct: number, canalLabels: Map
         const unidades = buildMetric(t.previsto, t.real);
         const kg = a.gramaje != null ? buildMetric((t.previsto * a.gramaje) / 1000, (t.real * a.gramaje) / 1000) : null;
         const importeTotal = totalImporteArticulo(a);
-        const importe = importeTotal != null ? buildMetric(importeTotal.previsto, importeTotal.real) : null;
+        const importe = buildMetric(importeTotal.previsto, importeTotal.real);
         return { tipo: 'articulo' as const, item: a.item, descripcion: a.descripcion, gramaje: a.gramaje, unidades, kg, importe };
       });
 

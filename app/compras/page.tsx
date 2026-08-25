@@ -346,8 +346,9 @@ export default function ComprasV2Page() {
               )}
               {data.resumen.articulosSinCoste.length > 0 && (
                 <p className="text-sm text-muted-foreground">
-                  {data.resumen.articulosSinCoste.length} artículo(s) sin coste (F4105) — no entran en los
-                  totales de Importe: {data.resumen.articulosSinCoste.join(", ")}
+                  {data.resumen.articulosSinCoste.length} artículo(s) sin coste (F4105) — su importe previsto
+                  no se puede calcular (queda en 0); su importe real sí se cuenta con normalidad:{" "}
+                  {data.resumen.articulosSinCoste.join(", ")}
                 </p>
               )}
             </>
