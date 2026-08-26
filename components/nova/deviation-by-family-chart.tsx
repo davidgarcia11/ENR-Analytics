@@ -46,7 +46,11 @@ export default function DeviationByFamilyChart({
                     % sobre previsión · {unit}
                 </p>
             </CardHeader>
-            <CardContent className="flex flex-col gap-3">
+            {/* flex-1 + justify-between: la Card se estira a la altura de Charts15
+                (grid por defecto, sin items-start); en vez de dejar hueco muerto bajo
+                la última familia cuando hay pocas, las filas se reparten para ocupar
+                todo el alto disponible (gap-3 sigue siendo el mínimo entre filas). */}
+            <CardContent className="flex flex-1 flex-col justify-between gap-3">
                 {rows.map((d) => {
                     const positivo = d.pct >= 0;
                     // Divergente desde el centro (0): mitad izquierda para negativos (crece

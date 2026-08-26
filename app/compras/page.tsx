@@ -368,10 +368,7 @@ export default function ComprasV2Page() {
             <>
               {statisticsData && <Statistics data={statisticsData} />}
 
-              {/* items-start: sin esto, DeviationByFamilyChart se estira a la altura de
-                  Charts15 (300px) y con pocas familias queda un hueco muerto debajo de
-                  la última fila. Con items-start cada Card ocupa solo su contenido. */}
-              <div className="grid grid-cols-1 items-start gap-4 lg:grid-cols-3">
+              <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
                 <Charts15
                   className="lg:col-span-2"
                   scope={drill.canal ? `${drill.familia} · ${drill.canalLabel ?? drill.canal}` : drill.familia ?? "Todas las familias"}
