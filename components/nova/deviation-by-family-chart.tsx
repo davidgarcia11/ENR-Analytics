@@ -46,7 +46,7 @@ export default function DeviationByFamilyChart({
                     % sobre previsión · {unit}
                 </p>
             </CardHeader>
-            <CardContent className="flex flex-col gap-4">
+            <CardContent className="flex flex-col gap-3">
                 {rows.map((d) => {
                     const positivo = d.pct >= 0;
                     // Divergente desde el centro (0): mitad izquierda para negativos (crece
@@ -55,39 +55,39 @@ export default function DeviationByFamilyChart({
                     const anchoMitadPct = Math.max(3, (Math.abs(d.pct) / maxAbs) * 100);
                     return (
                         <div key={d.familia} className="space-y-1">
-                            <p className="text-sm font-medium text-foreground">{d.familia}</p>
-                            <div className="flex items-center gap-3">
-                                <div className="relative h-1.5 flex-1">
-                                    {/* Carril de fondo, ancho completo — sustituye a la línea de
-                                        0: ya da la referencia visual del centro sin necesitar un
-                                        marcador aparte. */}
-                                    <div className="absolute inset-0 rounded-full bg-muted" />
-                                    <div className="absolute inset-y-0 left-0 w-1/2 pr-px">
-                                        {!positivo && (
-                                            <div
-                                                className="absolute inset-y-0 right-0 rounded-full bg-[color:var(--color-destructive)] opacity-80"
-                                                style={{ width: `${anchoMitadPct}%` }}
-                                            />
-                                        )}
-                                    </div>
-                                    <div className="absolute inset-y-0 right-0 w-1/2 pl-px">
-                                        {positivo && (
-                                            <div
-                                                className="absolute inset-y-0 left-0 rounded-full bg-[color:var(--color-success)] opacity-80"
-                                                style={{ width: `${anchoMitadPct}%` }}
-                                            />
-                                        )}
-                                    </div>
-                                </div>
+                            <div className="flex items-center justify-between gap-2 text-sm">
+                                <span className="truncate font-medium text-foreground">{d.familia}</span>
                                 <span
                                     className={cn(
-                                        "w-12 text-right text-sm font-medium tabular-nums",
+                                        "shrink-0 tabular-nums font-medium",
                                         positivo ? "text-[color:var(--color-success)]" : "text-[color:var(--color-destructive)]"
                                     )}
                                 >
                                     {positivo ? "+" : ""}
                                     {d.pct.toFixed(1)}%
                                 </span>
+                            </div>
+                            <div className="relative h-1.5">
+                                {/* Carril de fondo, ancho completo — sustituye a la línea de
+                                    0: ya da la referencia visual del centro sin necesitar un
+                                    marcador aparte. */}
+                                <div className="absolute inset-0 rounded-full bg-muted" />
+                                <div className="absolute inset-y-0 left-0 w-1/2 pr-px">
+                                    {!positivo && (
+                                        <div
+                                            className="absolute inset-y-0 right-0 rounded-full bg-[color:var(--color-destructive)] opacity-80"
+                                            style={{ width: `${anchoMitadPct}%` }}
+                                        />
+                                    )}
+                                </div>
+                                <div className="absolute inset-y-0 right-0 w-1/2 pl-px">
+                                    {positivo && (
+                                        <div
+                                            className="absolute inset-y-0 left-0 rounded-full bg-[color:var(--color-success)] opacity-80"
+                                            style={{ width: `${anchoMitadPct}%` }}
+                                        />
+                                    )}
+                                </div>
                             </div>
                         </div>
                     );
