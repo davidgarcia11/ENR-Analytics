@@ -130,14 +130,21 @@ add dialog`, sin construirla a mano) con **dos comprobaciones distintas**, no un
   0 en la suma **y no bloquea el cálculo** — se avisa aparte de cuáles son (pedido
   explícito del usuario: "si algún componente no tiene coste, se indica pero la suma
   se puede hacer igual").
-- **Local, por nivel** (dentro del árbol, `NodoDespiece`): cada nodo CON hijos lleva
-  su propia línea de comprobación — ¿sus componentes DIRECTOS (con el coste declarado
-  de cada uno, sin bajar más) suman su propio coste A1 declarado? Esto es lo que
-  permite ver en qué nivel exacto empieza un descuadre (ej. el "10" cuadra pero el
-  "11" que lo usa no), sin tener que interpretar solo el número global de arriba.
+- **Local, por nivel** (dentro del árbol, `NodoDespiece`): cada nodo CON hijos es su
+  propia **tarjeta** (`Card` de `components/nova/ui/card.tsx`) con una mini-tabla de
+  sus componentes DIRECTOS (con el coste declarado de cada uno, sin bajar más, +
+  subtotal por línea) y una barra de comprobación al pie — ¿esos componentes suman su
+  propio coste A1 declarado? Esto es lo que permite ver en qué nivel exacto empieza
+  un descuadre (ej. el "10" cuadra pero el "11" que lo usa no), sin tener que
+  interpretar solo el número global de arriba.
 
-El árbol es una lista recursiva simple (`NodoDespiece`), no una tabla TanStack aparte
-— un único árbol ya acotado a un artículo, sin necesidad de ordenar/filtrar.
+Los nodos sin componentes propios (materia prima, hojas del árbol) no llevan tarjeta
+vacía — se ven como fila dentro de la mini-tabla de su padre. Cada hijo que a su vez
+tiene su propio desglose anida su tarjeta dentro, con una guía de indentación
+(`border-l-2`) — el árbol se lee como bloques apilados, no como una lista continua de
+texto (pedido explícito tras la primera versión: "separar por cada desglose su
+resumen en recuadros"). El modal es ancho (`max-w-5xl`, `w-[92vw]`) para que la
+mini-tabla de cada tarjeta tenga sitio de sobra.
 
 El botón "Ver despiece completo" usa `e.stopPropagation()` — sin eso, el clic también
 dispara el `onClick` de la fila entera (desplegar/plegar) a la vez que abre el Dialog.

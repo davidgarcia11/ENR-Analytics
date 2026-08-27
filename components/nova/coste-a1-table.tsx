@@ -20,6 +20,7 @@ import { Badge } from "@/components/nova/ui/badge";
 import { Button } from "@/components/nova/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/nova/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/nova/ui/dialog";
+import { Card, CardHeader, CardTitle, CardContent } from "@/components/nova/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/nova/ui/table";
 import { cn } from "@/lib/utils";
 import type { DespieceNode } from "@/app/api/coste-a1/route";
@@ -124,56 +125,90 @@ function Descuadre({ valor, tono = "text" }: { valor: number; tono?: "text" | "x
   );
 }
 
-// Fila del despiece COMPLETO dentro del modal de verificación — lista recursiva
-// simple (no una tabla TanStack aparte): un único árbol ya acotado a un final
-// concreto, sin necesidad de ordenar/filtrar. Cada nodo CON hijos lleva su propia
-// comprobación LOCAL (¿sus componentes directos suman su propio coste declarado?),
-// pedida explícitamente para poder ver en qué nivel exacto empieza un descuadre,
-// sin tener que esperar a la comprobación global de arriba.
+// Desglose COMPLETO dentro del modal de verificación — una TARJETA por cada nodo que
+// tiene componentes que desglosar (los que no tienen hijos, materia prima, se ven
+// como fila dentro de la mini-tabla de su padre, no llevan tarjeta propia vacía).
+// Cada tarjeta agrupa: cabecera (artículo + código), mini-tabla de sus componentes
+// DIRECTOS con subtotal, y la comprobación LOCAL de ese nivel (¿sus componentes
+// suman su propio coste declarado?) — permite ver en qué nivel exacto empieza un
+// descuadre sin tener que interpretar solo el número global de la cabecera del
+// modal. Los hijos que a su vez tienen su propio desglose anidan su tarjeta dentro,
+// con un poco de sangría — así el árbol se lee como bloques, no como una lista
+// continua de texto.
 function NodoDespiece({ node, profundidad }: { node: DespieceNode; profundidad: number }) {
-  const tieneHijos = node.children.length > 0;
-  const sumaDirecta = tieneHijos ? node.children.reduce((s, c) => s + c.cantidad * (c.costeA1 ?? 0), 0) : 0;
-  const faltanDirectos = tieneHijos ? node.children.filter((c) => c.costeA1 == null) : [];
+  if (node.children.length === 0) return null;
+
+  const sumaDirecta = node.children.reduce((s, c) => s + c.cantidad * (c.costeA1 ?? 0), 0);
+  const faltanDirectos = node.children.filter((c) => c.costeA1 == null);
+  const subDesgloses = node.children.filter((c) => c.children.length > 0);
 
   return (
-    <div>
-      <div
-        className="flex items-center justify-between gap-3 border-b border-border/60 py-1.5"
-        style={{ paddingLeft: profundidad * 18 }}
-      >
+    <Card className={cn("gap-4 py-4", profundidad > 0 && "bg-muted/20 shadow-none ring-border")}>
+      <CardHeader className="flex-row items-center justify-between gap-3 border-b [.border-b]:pb-4">
         <div className="flex min-w-0 items-center gap-2">
-          <span className={cn("truncate text-foreground", profundidad === 0 ? "font-semibold" : "font-medium")}>{node.descripcion || "(sin descripción)"}</span>
+          <CardTitle className="truncate">{node.descripcion || "(sin descripción)"}</CardTitle>
           <Badge className={cn("shrink-0 font-normal", TIPO_COLOR[node.tipo])}>{node.tipo}</Badge>
         </div>
-        <div className="flex shrink-0 items-center gap-3 text-sm">
-          {profundidad > 0 && (
-            <span className="tabular-nums text-muted-foreground">
-              {numeroEs(node.cantidad)} <span className="text-xs">{node.um}</span>
-            </span>
-          )}
-          <span className="w-24 text-right tabular-nums">{node.costeA1 != null ? euros(node.costeA1) : "—"}</span>
+        <span className="shrink-0 font-mono text-xs text-muted-foreground">{node.codigo}</span>
+      </CardHeader>
+
+      <CardContent className="flex flex-col gap-4">
+        <div className="overflow-hidden rounded-lg border border-border">
+          <Table>
+            <TableHeader>
+              <TableRow className="bg-muted/40 hover:bg-muted/40">
+                <TableHead className="h-8 px-3 text-xs text-muted-foreground">Componente</TableHead>
+                <TableHead className="h-8 px-3 text-right text-xs text-muted-foreground">Cantidad</TableHead>
+                <TableHead className="h-8 px-3 text-right text-xs text-muted-foreground">Coste</TableHead>
+                <TableHead className="h-8 px-3 text-right text-xs text-muted-foreground">Subtotal</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {node.children.map((c, i) => (
+                <TableRow key={`${c.codigo}-${i}`}>
+                  <TableCell className="px-3 py-2">
+                    <span className="flex items-center gap-2">
+                      <span className="text-foreground">{c.descripcion || "(sin descripción)"}</span>
+                      <Badge className={cn("shrink-0 font-normal", TIPO_COLOR[c.tipo])}>{c.tipo}</Badge>
+                    </span>
+                  </TableCell>
+                  <TableCell className="px-3 py-2 text-right tabular-nums text-muted-foreground">
+                    {numeroEs(c.cantidad)} <span className="text-xs">{c.um}</span>
+                  </TableCell>
+                  <TableCell className="px-3 py-2 text-right tabular-nums text-muted-foreground">
+                    {c.costeA1 != null ? euros(c.costeA1) : "—"}
+                  </TableCell>
+                  <TableCell className="px-3 py-2 text-right font-medium tabular-nums text-foreground">
+                    {euros(c.cantidad * (c.costeA1 ?? 0))}
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
         </div>
-      </div>
-      {tieneHijos && (
-        <div
-          className="flex flex-wrap items-center gap-x-2 gap-y-0.5 border-b border-border/60 bg-muted/30 py-1 text-xs text-muted-foreground"
-          style={{ paddingLeft: profundidad * 18 + 16 }}
-        >
-          <span>Sus componentes suman {euros(sumaDirecta)}</span>
-          {node.costeA1 != null ? (
-            <Descuadre valor={sumaDirecta - node.costeA1} tono="xs" />
-          ) : (
-            <span className="text-muted-foreground">— sin coste propio declarado para comparar</span>
-          )}
-          {faltanDirectos.length > 0 && (
-            <span className="text-amber-600">({faltanDirectos.length} componente{faltanDirectos.length > 1 ? "s" : ""} sin coste, contado{faltanDirectos.length > 1 ? "s" : ""} como 0)</span>
-          )}
+
+        <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg bg-muted/40 px-4 py-3">
+          <span className="text-sm text-muted-foreground">
+            Coste declarado: <span className="font-semibold text-foreground">{node.costeA1 != null ? euros(node.costeA1) : "—"}</span>
+            {" · "}Componentes suman: <span className="font-semibold text-foreground">{euros(sumaDirecta)}</span>
+            {faltanDirectos.length > 0 && (
+              <span className="ml-1.5 text-amber-600">
+                ({faltanDirectos.length} sin coste, contado{faltanDirectos.length > 1 ? "s" : ""} como 0)
+              </span>
+            )}
+          </span>
+          {node.costeA1 != null ? <Descuadre valor={sumaDirecta - node.costeA1} /> : <span className="text-xs text-muted-foreground">Sin coste propio para comparar</span>}
         </div>
-      )}
-      {node.children.map((c, i) => (
-        <NodoDespiece key={`${c.codigo}-${i}`} node={c} profundidad={profundidad + 1} />
-      ))}
-    </div>
+
+        {subDesgloses.length > 0 && (
+          <div className="flex flex-col gap-4 border-l-2 border-border pl-4">
+            {subDesgloses.map((c, i) => (
+              <NodoDespiece key={`${c.codigo}-${i}`} node={c} profundidad={profundidad + 1} />
+            ))}
+          </div>
+        )}
+      </CardContent>
+    </Card>
   );
 }
 
@@ -438,17 +473,17 @@ export default function CosteA1Table({ data }: { data: DespieceNode[] }) {
     </div>
 
     <Dialog open={verDespieceNode != null} onOpenChange={(open) => { if (!open) setVerDespieceCodigo(null); }}>
-      <DialogContent className="flex max-h-[85vh] w-[90vw] max-w-3xl flex-col gap-0 p-0 sm:max-w-3xl">
+      <DialogContent className="flex max-h-[88vh] w-[92vw] max-w-5xl flex-col gap-0 p-0 sm:max-w-5xl">
         {verDespieceNode && verificacion && (
           <>
-            <DialogHeader className="border-b border-border p-4 pb-3">
-              <DialogTitle>{verDespieceNode.descripcion || "(sin descripción)"}</DialogTitle>
+            <DialogHeader className="border-b border-border p-6 pb-4">
+              <DialogTitle className="text-lg">{verDespieceNode.descripcion || "(sin descripción)"}</DialogTitle>
               <DialogDescription className="font-mono text-xs">{verDespieceNode.codigo}</DialogDescription>
             </DialogHeader>
 
-            <div className="flex flex-col gap-2 border-b border-border bg-muted/30 p-4">
+            <div className="flex flex-col gap-3 border-b border-border bg-muted/30 p-6">
               <p className="text-xs font-medium text-muted-foreground">Comprobación global — coste declarado del final vs. suma de todos sus componentes hasta materia prima</p>
-              <div className="flex flex-wrap items-center justify-between gap-2 text-sm">
+              <div className="flex flex-wrap items-center justify-between gap-3 text-sm">
                 <span className="text-muted-foreground">
                   Coste A1 declarado (F30026): <span className="font-semibold tabular-nums text-foreground">{verDespieceNode.costeA1 != null ? euros(verDespieceNode.costeA1) : "—"}</span>
                   {" · "}
@@ -466,8 +501,8 @@ export default function CosteA1Table({ data }: { data: DespieceNode[] }) {
               )}
             </div>
 
-            <div className="flex-1 overflow-y-auto px-4">
-              <p className="sticky top-0 bg-popover py-2 text-xs font-medium text-muted-foreground">Despiece completo — cada nivel con hijos lleva su propia comprobación local</p>
+            <div className="flex-1 overflow-y-auto p-6">
+              <p className="mb-4 text-xs font-medium text-muted-foreground">Despiece completo — cada tarjeta lleva su propia comprobación local</p>
               <NodoDespiece node={verDespieceNode} profundidad={0} />
             </div>
           </>
