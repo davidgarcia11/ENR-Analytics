@@ -59,7 +59,7 @@ resolver códigos a descripciones:
 | Tabla | Uso | Diferencia con la versión anterior |
 |---|---|---|
 | `F3460` | Previsión (`MFDRQJ`, `MFFQT`) | Igual, más `MFDRQJ` ahora usado para bucket mensual (antes solo se sumaba el periodo completo) |
-| `F4211` | Venta real (`SDADDJ`, `SDUORG`, `SDUPRC`) | Igual (mismo filtro `SDDCTO != 'ST'`, `SDADDJ != 0`) |
+| `F4211` | Venta real (`SDADDJ`, `SDSOQS`, `SDUPRC`) | Mismo filtro (`SDDCTO != 'ST'`, `SDADDJ != 0`). Campo de cantidad cambiado de `SDUORG` (el que usaba la versión anterior) a `SDSOQS` |
 | `F4105` | Coste (`COUNCS`, `COLEDG_VIGENTE` constante) | Igual |
 | `F4101` | Familia (`IMSRP2`) | **Antes se mostraba el código crudo** (`IMSRP2`, ej. `"101"`) sin resolver. Ahora se resuelve contra `prodctl.f0005` (UDC `41`/`S2`) — bug real encontrado solo con datos reales, ver §8 |
 | `F554101` | Canal (`AAZE06`) + gramaje (`AAZE03`) | Antes no había canal — se usaba **Marca** (`F4101.IMSRP4`) como segunda dimensión. Ahora se usa **Canal**, un campo distinto (ver §3.1) |
@@ -88,7 +88,7 @@ ventas se atribuyen íntegramente a él, independientemente de quién lo compre.
 
 ```
 previsto = unidades_previstas × coste_unitario_fijo   (F4105.COUNCS, foto sin mes propio)
-real     = Σ (SDUORG/100 × SDUPRC/10000)              (línea a línea, NUNCA unidades_reales × coste)
+real     = Σ (SDSOQS/100 × SDUPRC/10000)              (línea a línea, NUNCA unidades_reales × coste)
 ```
 
 Igual que antes (§4 de `docs/compras-v1-historico.md`): el precio de venta real no es el

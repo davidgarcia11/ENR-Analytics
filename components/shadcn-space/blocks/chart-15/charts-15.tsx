@@ -44,11 +44,11 @@ export interface MonthlyDatum {
 const chartConfig = {
     previsto: {
         label: "Previsión",
-        color: "var(--border)",
+        color: "var(--color-sky-400)",
     },
     real: {
         label: "Real",
-        color: "var(--foreground)",
+        color: "var(--color-blue-500)",
     },
 } satisfies ChartConfig;
 
@@ -79,11 +79,11 @@ export default function Charts15({
                 </div>
                 <div className="flex items-center gap-4">
                     <div className="flex items-center gap-1.5 text-sm">
-                        <span className="h-2 w-2 rounded-full bg-border" />
+                        <span className="h-2 w-2 rounded-full bg-sky-400" />
                         <span className="text-muted-foreground">Previsión</span>
                     </div>
                     <div className="flex items-center gap-1.5 text-sm">
-                        <span className="h-2 w-2 rounded-full bg-foreground" />
+                        <span className="h-2 w-2 rounded-full bg-blue-500" />
                         <span className="text-muted-foreground">Real</span>
                     </div>
                 </div>

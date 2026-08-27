@@ -26,7 +26,7 @@ import { verifySession } from '@/lib/auth';
 //   `null` y se excluye de las sumas de kg — se reporta en `articulosSinGramaje`.
 // - Importe (€): previsto = unidades previstas × coste unitario fijo (F4105.COUNCS,
 //   una foto por artículo sin mes propio, igual que la versión anterior);
-//   real = línea a línea (F4211.SDUORG × SDUPRC), NUNCA unidades reales × coste — el
+//   real = línea a línea (F4211.SDSOQS × SDUPRC), NUNCA unidades reales × coste — el
 //   precio de venta real no es el coste presupuestado. Si un artículo no tiene fila en
 //   F4105, su importe PREVISTO queda a 0 (no hay con qué calcularlo) — se reporta en
 //   `articulosSinCoste` — pero su importe REAL se suma con normalidad: no depende del
@@ -391,10 +391,11 @@ export async function GET(req: NextRequest) {
       WHERE MFMCU = :planta AND MFDRQJ BETWEEN :startJde AND :endJde
     `;
     // B) Venta real (F4211) — mismo filtro que la v1 del panel. SDUPRC = precio unitario
-    // de la línea (para importe real, NUNCA cantidad × coste presupuestado).
+    // de la línea (para importe real, NUNCA cantidad × coste presupuestado). Cantidad:
+    // SDSOQS (antes se usaba SDUORG, que era el campo de cantidad que usábamos antes).
     const salesSql = `
       SELECT TRIM(A.SDAITM) AS ITEM, TRIM(A.SDITM) AS ITEM_CORTO, A.SDADDJ AS FECHA_JDE,
-             A.SDUORG AS CANT_REAL_RAW, A.SDUPRC AS PRECIO_RAW
+             A.SDSOQS AS CANT_REAL_RAW, A.SDUPRC AS PRECIO_RAW
       FROM F4211 A
       WHERE TRIM(A.SDDCTO) != :tipoDocExcluido AND A.SDADDJ != 0
         AND A.SDADDJ BETWEEN :startJde AND :endJde
