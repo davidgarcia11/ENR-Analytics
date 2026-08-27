@@ -19,7 +19,7 @@ import { Input } from "@/components/nova/ui/input";
 import { Badge } from "@/components/nova/ui/badge";
 import { Button } from "@/components/nova/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/nova/ui/select";
-import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from "@/components/nova/ui/sheet";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/nova/ui/dialog";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/nova/ui/table";
 import { cn } from "@/lib/utils";
 import type { DespieceNode } from "@/app/api/coste-a1/route";
@@ -90,34 +90,56 @@ function podar1112(n: DespieceNode): DespieceNode {
   };
 }
 
-// Verificación: recompone el coste de "una unidad" de un nodo sumando sus hijos
-// (cantidad × coste de cada hijo, recursivo hasta la materia prima) — es la
+// Verificación GLOBAL: recompone el coste de "una unidad" del final sumando sus
+// hijos (cantidad × coste de cada hijo, recursivo hasta la materia prima) — es la
 // operación inversa a como JDE calcula su propio coste A1 en F30026, así que debería
-// coincidir. `completo` es false si falta el coste A1 de algún componente por el
-// camino (la suma parcial no es de fiar y hay que decirlo, no solo mostrar un número).
-function costeAcumulado(n: DespieceNode): { suma: number; completo: boolean } {
+// coincidir. Un componente sin coste A1 cuenta como 0 (no bloquea el cálculo, se
+// avisa aparte de cuáles son) — pedido explícito: "la suma se puede hacer igual y
+// mostrar si hay diferencias, aunque falte algún coste".
+function costeDesdeHojas(n: DespieceNode): { suma: number; faltantes: DespieceNode[] } {
   if (n.children.length === 0) {
-    return n.costeA1 != null ? { suma: n.costeA1, completo: true } : { suma: 0, completo: false };
+    return n.costeA1 != null ? { suma: n.costeA1, faltantes: [] } : { suma: 0, faltantes: [n] };
   }
   let suma = 0;
-  let completo = true;
+  let faltantes: DespieceNode[] = [];
   for (const c of n.children) {
-    const hijo = costeAcumulado(c);
+    const hijo = costeDesdeHojas(c);
     suma += c.cantidad * hijo.suma;
-    completo = completo && hijo.completo;
+    faltantes = faltantes.concat(hijo.faltantes);
   }
-  return { suma, completo };
+  return { suma, faltantes };
 }
 
-// Fila del despiece COMPLETO dentro del Sheet — lista recursiva simple (no una
-// tabla TanStack aparte): aquí no hace falta ordenar/filtrar, solo leer de arriba
-// abajo un único árbol ya acotado a un final concreto.
-function ArbolCompleto({ node, profundidad }: { node: DespieceNode; profundidad: number }) {
+function Descuadre({ valor, tono = "text" }: { valor: number; tono?: "text" | "xs" }) {
+  const cuadra = Math.abs(valor) < 0.01;
+  const cls = tono === "xs" ? "text-xs" : "text-sm";
+  if (cuadra) {
+    return <span className={cn("flex items-center gap-1 text-[color:var(--color-success)]", cls)}><CircleCheck size={tono === "xs" ? 12 : 14} /> Coincide</span>;
+  }
+  return (
+    <span className={cn("flex items-center gap-1 text-[color:var(--color-destructive)]", cls)}>
+      <CircleAlert size={tono === "xs" ? 12 : 14} />
+      {valor > 0 ? "+" : ""}{euros(valor)}
+    </span>
+  );
+}
+
+// Fila del despiece COMPLETO dentro del modal de verificación — lista recursiva
+// simple (no una tabla TanStack aparte): un único árbol ya acotado a un final
+// concreto, sin necesidad de ordenar/filtrar. Cada nodo CON hijos lleva su propia
+// comprobación LOCAL (¿sus componentes directos suman su propio coste declarado?),
+// pedida explícitamente para poder ver en qué nivel exacto empieza un descuadre,
+// sin tener que esperar a la comprobación global de arriba.
+function NodoDespiece({ node, profundidad }: { node: DespieceNode; profundidad: number }) {
+  const tieneHijos = node.children.length > 0;
+  const sumaDirecta = tieneHijos ? node.children.reduce((s, c) => s + c.cantidad * (c.costeA1 ?? 0), 0) : 0;
+  const faltanDirectos = tieneHijos ? node.children.filter((c) => c.costeA1 == null) : [];
+
   return (
     <div>
       <div
         className="flex items-center justify-between gap-3 border-b border-border/60 py-1.5"
-        style={{ paddingLeft: profundidad * 16 }}
+        style={{ paddingLeft: profundidad * 18 }}
       >
         <div className="flex min-w-0 items-center gap-2">
           <span className={cn("truncate text-foreground", profundidad === 0 ? "font-semibold" : "font-medium")}>{node.descripcion || "(sin descripción)"}</span>
@@ -129,11 +151,27 @@ function ArbolCompleto({ node, profundidad }: { node: DespieceNode; profundidad:
               {numeroEs(node.cantidad)} <span className="text-xs">{node.um}</span>
             </span>
           )}
-          <span className="w-20 text-right tabular-nums">{node.costeA1 != null ? euros(node.costeA1) : "—"}</span>
+          <span className="w-24 text-right tabular-nums">{node.costeA1 != null ? euros(node.costeA1) : "—"}</span>
         </div>
       </div>
+      {tieneHijos && (
+        <div
+          className="flex flex-wrap items-center gap-x-2 gap-y-0.5 border-b border-border/60 bg-muted/30 py-1 text-xs text-muted-foreground"
+          style={{ paddingLeft: profundidad * 18 + 16 }}
+        >
+          <span>Sus componentes suman {euros(sumaDirecta)}</span>
+          {node.costeA1 != null ? (
+            <Descuadre valor={sumaDirecta - node.costeA1} tono="xs" />
+          ) : (
+            <span className="text-muted-foreground">— sin coste propio declarado para comparar</span>
+          )}
+          {faltanDirectos.length > 0 && (
+            <span className="text-amber-600">({faltanDirectos.length} componente{faltanDirectos.length > 1 ? "s" : ""} sin coste, contado{faltanDirectos.length > 1 ? "s" : ""} como 0)</span>
+          )}
+        </div>
+      )}
       {node.children.map((c, i) => (
-        <ArbolCompleto key={`${c.codigo}-${i}`} node={c} profundidad={profundidad + 1} />
+        <NodoDespiece key={`${c.codigo}-${i}`} node={c} profundidad={profundidad + 1} />
       ))}
     </div>
   );
@@ -315,11 +353,8 @@ export default function CosteA1Table({ data }: { data: DespieceNode[] }) {
     getExpandedRowModel: getExpandedRowModel(),
   });
 
-  const verificacion = verDespieceNode ? costeAcumulado(verDespieceNode) : null;
-  const descuadre = verDespieceNode && verificacion ? verificacion.suma - (verDespieceNode.costeA1 ?? 0) : null;
-  // Tolerancia de redondeo (el coste declarado en F30026 y la suma recalculada no
-  // tienen por qué llevar exactamente los mismos decimales de precisión).
-  const cuadra = descuadre != null && Math.abs(descuadre) < 0.01;
+  const verificacion = verDespieceNode ? costeDesdeHojas(verDespieceNode) : null;
+  const descuadreGlobal = verDespieceNode && verificacion ? verificacion.suma - (verDespieceNode.costeA1 ?? 0) : null;
 
   return (
     <>
@@ -402,49 +437,43 @@ export default function CosteA1Table({ data }: { data: DespieceNode[] }) {
       </div>
     </div>
 
-    <Sheet open={verDespieceNode != null} onOpenChange={(open) => { if (!open) setVerDespieceCodigo(null); }}>
-      <SheetContent side="right" className="w-full gap-0 sm:max-w-xl">
+    <Dialog open={verDespieceNode != null} onOpenChange={(open) => { if (!open) setVerDespieceCodigo(null); }}>
+      <DialogContent className="flex max-h-[85vh] w-[90vw] max-w-3xl flex-col gap-0 p-0 sm:max-w-3xl">
         {verDespieceNode && verificacion && (
           <>
-            <SheetHeader className="border-b border-border pb-3">
-              <SheetTitle>{verDespieceNode.descripcion || "(sin descripción)"}</SheetTitle>
-              <SheetDescription className="font-mono text-xs">{verDespieceNode.codigo}</SheetDescription>
-            </SheetHeader>
+            <DialogHeader className="border-b border-border p-4 pb-3">
+              <DialogTitle>{verDespieceNode.descripcion || "(sin descripción)"}</DialogTitle>
+              <DialogDescription className="font-mono text-xs">{verDespieceNode.codigo}</DialogDescription>
+            </DialogHeader>
 
-            <div className="flex flex-col gap-2 border-b border-border p-4">
-              <div className="flex items-center justify-between text-sm">
-                <span className="text-muted-foreground">Coste A1 declarado (F30026)</span>
-                <span className="font-semibold tabular-nums text-foreground">{verDespieceNode.costeA1 != null ? euros(verDespieceNode.costeA1) : "—"}</span>
+            <div className="flex flex-col gap-2 border-b border-border bg-muted/30 p-4">
+              <p className="text-xs font-medium text-muted-foreground">Comprobación global — coste declarado del final vs. suma de todos sus componentes hasta materia prima</p>
+              <div className="flex flex-wrap items-center justify-between gap-2 text-sm">
+                <span className="text-muted-foreground">
+                  Coste A1 declarado (F30026): <span className="font-semibold tabular-nums text-foreground">{verDespieceNode.costeA1 != null ? euros(verDespieceNode.costeA1) : "—"}</span>
+                  {" · "}
+                  Suma de componentes: <span className="font-semibold tabular-nums text-foreground">{euros(verificacion.suma)}</span>
+                </span>
+                {verDespieceNode.costeA1 != null && <Descuadre valor={descuadreGlobal ?? 0} />}
               </div>
-              <div className="flex items-center justify-between text-sm">
-                <span className="text-muted-foreground">Suma de componentes (hasta materia prima)</span>
-                <span className="font-semibold tabular-nums text-foreground">{euros(verificacion.suma)}</span>
-              </div>
-              {!verificacion.completo ? (
-                <div className="flex items-center gap-1.5 text-sm text-amber-600">
-                  <CircleAlert size={14} />
-                  Cálculo incompleto — algún componente no tiene coste A1 en F30026, la suma puede quedarse corta.
-                </div>
-              ) : cuadra ? (
-                <div className="flex items-center gap-1.5 text-sm text-[color:var(--color-success)]">
-                  <CircleCheck size={14} />
-                  Coincide con el coste declarado.
-                </div>
-              ) : (
-                <div className="flex items-center gap-1.5 text-sm text-[color:var(--color-destructive)]">
-                  <CircleAlert size={14} />
-                  Descuadre de {euros(Math.abs(descuadre ?? 0))} {(descuadre ?? 0) > 0 ? "por encima" : "por debajo"} del coste declarado.
+              {verificacion.faltantes.length > 0 && (
+                <div className="flex items-start gap-1.5 text-xs text-amber-600">
+                  <CircleAlert size={13} className="mt-0.5 shrink-0" />
+                  <span>
+                    {verificacion.faltantes.length} componente{verificacion.faltantes.length > 1 ? "s" : ""} sin coste A1 en F30026 — contado{verificacion.faltantes.length > 1 ? "s" : ""} como 0 en la suma, no bloquea el cálculo: {verificacion.faltantes.map((f) => f.descripcion || f.codigo).join(", ")}
+                  </span>
                 </div>
               )}
             </div>
 
             <div className="flex-1 overflow-y-auto px-4">
-              <ArbolCompleto node={verDespieceNode} profundidad={0} />
+              <p className="sticky top-0 bg-popover py-2 text-xs font-medium text-muted-foreground">Despiece completo — cada nivel con hijos lleva su propia comprobación local</p>
+              <NodoDespiece node={verDespieceNode} profundidad={0} />
             </div>
           </>
         )}
-      </SheetContent>
-    </Sheet>
+      </DialogContent>
+    </Dialog>
     </>
   );
 }

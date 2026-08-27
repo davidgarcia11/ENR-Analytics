@@ -5,6 +5,7 @@ import { Dialog as SheetPrimitive } from "@base-ui/react/dialog"
 
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/nova/ui/button"
+import { useNovaPortalContainer } from "@/components/nova/portal-container"
 import { XIcon } from "lucide-react"
 
 function Sheet({ ...props }: SheetPrimitive.Root.Props) {
@@ -19,8 +20,12 @@ function SheetClose({ ...props }: SheetPrimitive.Close.Props) {
   return <SheetPrimitive.Close data-slot="sheet-close" {...props} />
 }
 
+// container: mismo bug ya corregido en popover.tsx/select.tsx/navigation-menu.tsx
+// (el Portal escapa de [data-nova-theme] a document.body por defecto) — el Sheet no
+// se había parcheado porque hasta ahora nadie lo usaba de verdad en una rama mergeada.
 function SheetPortal({ ...props }: SheetPrimitive.Portal.Props) {
-  return <SheetPrimitive.Portal data-slot="sheet-portal" {...props} />
+  const container = useNovaPortalContainer()
+  return <SheetPrimitive.Portal data-slot="sheet-portal" container={container} {...props} />
 }
 
 function SheetOverlay({ className, ...props }: SheetPrimitive.Backdrop.Props) {

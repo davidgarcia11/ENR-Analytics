@@ -114,25 +114,41 @@ descolocando el orden por cantidad descendente que ya viene calculado desde la A
 rango — es una foto del estado vigente hoy. El único control de recarga es el botón
 "Recalcular".
 
-### 4.2 Verificación — "Ver despiece completo" (Sheet)
+### 4.2 Verificación — "Ver despiece completo" (Dialog centrado)
 
 El informe podado no sirve para comprobar que el coste A1 del final cuadra con sus
 componentes (para eso hace falta ver TODO: 10/13/14 incluidos). Cada fila de final
-lleva un botón "Ver despiece completo" que abre un `Sheet` lateral
-(`components/nova/ui/sheet.tsx`) con:
+lleva un botón "Ver despiece completo" que abre un `Dialog` centrado (no un `Sheet`
+lateral — pedido explícito: "una subpantalla que aparece en medio", con animación de
+apertura/cierre ya incluida en el primitivo instalado por `bunx --bun shadcn@latest
+add dialog`, sin construirla a mano) con **dos comprobaciones distintas**, no una sola:
 
-- El árbol **completo sin podar** de ese final (componente `ArbolCompleto`, lista
-  recursiva simple — no una tabla TanStack aparte, no hace falta ordenar/filtrar un
-  único árbol ya acotado a un artículo).
-- Una cabecera de verificación: **coste A1 declarado** (F30026) vs. **suma de
-  componentes recompuesta hasta materia prima** (`costeAcumulado()`: para cada nodo,
-  `Σ cantidad_hijo × coste(hijo)`, recursivo — la operación inversa a como JDE calcula
-  su propio coste A1, así que en teoría debería coincidir), con un badge de
-  ✓ coincide / ⚠ descuadre (tolerancia 0,01 €) / ⚠ cálculo incompleto (si algún
-  componente por el camino no tiene fila en F30026, la suma parcial no es de fiar).
+- **Global** (cabecera del Dialog): coste A1 declarado (F30026) del final vs. suma de
+  TODOS sus componentes recompuesta hasta materia prima (`costeDesdeHojas()`: para
+  cada hoja, `cantidad_acumulada × su_coste`, recursivo — la operación inversa a como
+  JDE calcula su propio coste A1). Si algún componente no tiene coste A1, cuenta como
+  0 en la suma **y no bloquea el cálculo** — se avisa aparte de cuáles son (pedido
+  explícito del usuario: "si algún componente no tiene coste, se indica pero la suma
+  se puede hacer igual").
+- **Local, por nivel** (dentro del árbol, `NodoDespiece`): cada nodo CON hijos lleva
+  su propia línea de comprobación — ¿sus componentes DIRECTOS (con el coste declarado
+  de cada uno, sin bajar más) suman su propio coste A1 declarado? Esto es lo que
+  permite ver en qué nivel exacto empieza un descuadre (ej. el "10" cuadra pero el
+  "11" que lo usa no), sin tener que interpretar solo el número global de arriba.
 
-El botón usa `e.stopPropagation()` — sin eso, el clic también dispara el
-`onClick` de la fila entera (desplegar/plegar) a la vez que abre el Sheet.
+El árbol es una lista recursiva simple (`NodoDespiece`), no una tabla TanStack aparte
+— un único árbol ya acotado a un artículo, sin necesidad de ordenar/filtrar.
+
+El botón "Ver despiece completo" usa `e.stopPropagation()` — sin eso, el clic también
+dispara el `onClick` de la fila entera (desplegar/plegar) a la vez que abre el Dialog.
+
+**Portal del Dialog y del Sheet corregidos**: ambos primitivos (`components/nova/ui/dialog.tsx`,
+`components/nova/ui/sheet.tsx`) se parchearon con `useNovaPortalContainer()` — mismo
+bug ya corregido en popover/select/navigation-menu (el `Portal` escapa de
+`[data-nova-theme]` a `document.body` por defecto y hereda los tokens del sistema
+viejo). El Sheet no se había parcheado antes porque, hasta este panel, nadie lo
+usaba de verdad en una rama mergeada — sigue viviendo en el menú móvil del `Header`
+(`topbar-02/header/index.tsx`).
 
 ### 4.3 Decimales del coste
 

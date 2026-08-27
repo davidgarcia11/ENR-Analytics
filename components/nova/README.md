@@ -201,6 +201,26 @@ de intentar un script inline propio.
   gana el estilo por defecto del primitivo por debajo (bug real: la píldora activa del
   nav quedaba casi ilegible al abrir el desplegable, ver `docs/compras.md` §8 punto 10).
 
+- **`components/nova/portal-container.tsx`** (`NovaPortalProvider`/`useNovaPortalContainer`)
+  corrige un bug real: los primitivos de Base UI que usan `*Primitive.Portal` escapan
+  por defecto a `document.body` — fuera de `[data-nova-theme]`, heredan los tokens del
+  sistema viejo (visto primero como un botón "Aplicar" en rojo corporativo dentro de un
+  `Sheet`, en vez del negro casi-negro de Nova). Cada página Nova envuelve su contenido en
+  `<NovaPortalProvider container={portalContainerRef}>` (`portalContainerRef` apunta al
+  div raíz `[data-nova-theme]`), y cada primitivo con Portal debe pasarle
+  `container={useNovaPortalContainer()}`. Parcheados: `popover.tsx`, `select.tsx`,
+  `navigation-menu.tsx`, `dialog.tsx`, `sheet.tsx` (el `Combobox`, si se instala,
+  necesitará el mismo tratamiento). **Al instalar cualquier primitivo nuevo con
+  `*Primitive.Portal` — Tooltip, Menu, HoverCard..., hay que aplicar el mismo patrón antes
+  de darlo por terminado**, no solo cuando el bug se vea a simple vista (el `Sheet` estuvo
+  meses sin el parche porque nadie lo había usado de verdad todavía en una rama mergeada).
+- **`Dialog` instalado** (`bunx --bun shadcn@latest add dialog`, panel de coste A1): trae
+  animación de apertura/cierre (fade+zoom) ya incluida en el primitivo — no hace falta
+  añadirla a mano. El `sm:max-w-sm` por defecto es para diálogos de confirmación pequeños;
+  para un modal grande centrado (ej. un panel de detalle/verificación), sobreescribe el
+  ancho vía `className` en `<DialogContent>` (`w-[90vw] max-w-3xl` o similar) en vez de
+  tocar el primitivo compartido.
+
 ## Cómo construir el siguiente panel Nova
 
 Checklist basada en lo que realmente se usó/decidió construyendo `/compras` (detalle
