@@ -847,6 +847,7 @@ Cada panel tiene su documentación específica en la carpeta `docs/`:
 | Comparativa SERES vs JDE | `/comparativa-seres` | [docs/seres-jde-comparativa.md](docs/seres-jde-comparativa.md) |
 | Consulta de stock por escaneo (FEFO, Reflex) | `/consulta-stock-pda` | [docs/consulta-stock-pda.md](docs/consulta-stock-pda.md) |
 | Compras (previsión de ventas vs. venta real, rediseño sobre sistema Nova) | `/compras` | [docs/compras.md](docs/compras.md) |
+| Coste A1 y despiece recursivo de materiales (sistema Nova) | `/coste-a1` | [docs/coste-a1.md](docs/coste-a1.md) |
 
 ### API externa — `GET /api/jde-orders`
 
