@@ -13,11 +13,11 @@
 // - La vigencia de la línea de BOM (IXEFFF/IXEFFT) se evalúa contra la FECHA DE LA
 //   PREVISIÓN (mes a mes), no contra "hoy" — si la previsión es de enero, se usa
 //   la lista de materiales vigente en enero, aunque hoy ya no lo esté.
-// No está en lib/panels.ts/`screens` todavía (panel en construcción) — acceso
-// restringido a admin a mano, igual que produccion-v2.
 import { NextRequest, NextResponse } from 'next/server';
 import { getDbConnection } from '@/lib/db';
 import { parseJdeDate, getDayOfYear } from '@/lib/utils';
+import { requireScreenAccess } from '@/lib/permissions';
+import { getDb } from '@/lib/sqlite';
 import { verifySession } from '@/lib/auth';
 
 const PLANTA = 10999;
@@ -55,12 +55,9 @@ interface MaterialAgg {
 }
 
 export async function GET(req: NextRequest) {
-  // Gate manual de admin: panel sin registrar todavía en lib/panels.ts/`screens`
-  // (no hay requireScreenAccess que aplicar a un panel que no existe ahí).
-  const user = await verifySession();
-  if (!user || user.role !== 'admin') {
-    return NextResponse.json({ error: 'No autorizado' }, { status: 403 });
-  }
+  const denied = await requireScreenAccess('mrp');
+  if (denied) return denied;
+  const startTime = Date.now();
 
   const { searchParams } = new URL(req.url);
   const now = new Date();
@@ -237,6 +234,19 @@ export async function GET(req: NextRequest) {
         };
       })
       .sort((a, b) => b.cantidad - a.cantidad);
+
+    // Registrar consulta en logs (nunca bloquea la respuesta) — mismo patrón que
+    // /api/compras. result_count = materiales distintos a comprar.
+    try {
+      const user = await verifySession().catch(() => null);
+      const filters = { startDate: startDateStr, endDate: endDateStr, parentArticle: parentFilter };
+      const db = getDb();
+      db.prepare(
+        'INSERT INTO query_logs (user_id, username, source, filters, result_count, execution_time_ms) VALUES (?, ?, ?, ?, ?, ?)'
+      ).run(user?.id ?? null, user ? user.username : 'Invitado', 'mrp', JSON.stringify(filters), materialesOut.length, Date.now() - startTime);
+    } catch (logErr) {
+      console.error('Error logging query:', logErr);
+    }
 
     return NextResponse.json({
       materiales: materialesOut,

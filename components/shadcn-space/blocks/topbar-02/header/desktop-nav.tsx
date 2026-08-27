@@ -30,8 +30,15 @@ export function NavDropdown({
           // se aplicaba nunca al abrir el desplegable, y ganaba el gris por defecto del
           // primitivo (navigation-menu.tsx: data-open:bg-muted/50) combinado con nuestro
           // text-background, casi invisible. Bug real, no solo de modo oscuro.
+          //
+          // focus:/data-open:focus: también hace falta: navigationMenuTriggerStyle trae
+          // focus:bg-muted y data-open:focus:bg-muted, y por especificidad CSS (:focus
+          // añade una pseudo-clase) ganan al bg-foreground de aquí arriba, que nunca
+          // cubría la variante :focus. Al pulsar para CERRAR el desplegable, el botón
+          // conserva el foco del clic → se veía blanco hasta perder el foco (clic fuera
+          // de la barra). Bug real, visto en /compras y /mrp.
           active
-            ? "bg-foreground text-background hover:bg-foreground hover:text-background data-open:bg-foreground data-open:text-background data-open:hover:bg-foreground data-popup-open:bg-foreground data-popup-open:text-background data-popup-open:hover:bg-foreground"
+            ? "bg-foreground text-background hover:bg-foreground hover:text-background focus:bg-foreground focus:text-background data-open:bg-foreground data-open:text-background data-open:hover:bg-foreground data-open:focus:bg-foreground data-popup-open:bg-foreground data-popup-open:text-background data-popup-open:hover:bg-foreground data-popup-open:focus:bg-foreground"
             : "hover:bg-accent data-open:border-muted data-open:bg-accent data-popup-open:border-muted data-popup-open:bg-accent"
         )}
       >
