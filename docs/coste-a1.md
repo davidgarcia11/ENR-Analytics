@@ -80,19 +80,30 @@ BOM real no debería tener ciclos, pero uno los colgaría la petición si no se 
 
 ## 4. UI
 
+### 4.1 Informe (tabla principal) — solo 11/12
+
+El usuario pidió explícitamente que el informe no enseñe más que artículos tipo
+"11"/"12" — nada de envases/etiquetas/materia prima (10, 13, 14...) ni "10". La tabla
+principal usa `podar1112()` (`coste-a1-table.tsx`): copia el árbol de cada final
+filtrando recursivamente sus `children` a solo `tipo === "Semiterminado" || tipo ===
+"Terminado"`. Es una poda **por tipo, no por profundidad** — una cadena
+`12 → 11 → 11` se ve entera; en cuanto un nodo no es 11/12 se corta ahí (y con él,
+todo lo que cuelgue debajo, aunque más abajo hubiera otro 11 — no se espera ese caso
+en la práctica, pero si apareciera quedaría oculto del informe a propósito).
+
 Tabla jerárquica con `subRows` de **profundidad variable** (no fija como los 3
 niveles de compras o los 2 de MRP) — la API ya devuelve el árbol completo anidado,
-`coste-a1-table.tsx` solo traduce la forma a `TreeRow`, sin reconstruir niveles.
-Fila completa clicable para desplegar (mismo patrón que `hierarchical-table.tsx` y
+`coste-a1-table.tsx` solo traduce la forma (podada) a `TreeRow`. Fila completa
+clicable para desplegar (mismo patrón que `hierarchical-table.tsx` y
 `mrp-materials-table.tsx`), cabecera "Coste A1" ordenable siguiendo el patrón real de
 ShadcnSpace (`datatable-03`: `onClick`/`cursor-pointer` en la propia `<TableHead>`,
 sin `<button>` envolviendo el contenido).
 
-**Scroll interno con cabecera fija**: con 200+ artículos finales, la tabla completa
-sin acotar convertía la página en una pantalla kilométrica (más de 13.000px). El
-contenedor de la tabla lleva `max-h-[65vh] overflow-y-auto` con `<TableHeader
-className="sticky top-0">`, en vez de dejar que la página entera haga scroll — patrón
-a reutilizar en cualquier tabla futura que pueda crecer a cientos de filas raíz.
+**Sin scroll interno**: se probó una tabla con `max-h`+`overflow-y-auto` propio y
+cabecera `sticky` (para los 200+ artículos finales), pero rompía la consistencia
+visual con el resto de tablas de la app (compras, MRP), que dejan crecer la página
+entera. Se quitó — la página larga es el patrón establecido, no una tabla que se
+desliza dentro de sí misma.
 
 **Orden**: solo se reordena el nivel RAÍZ (los artículos finales), nunca con
 `getSortedRowModel` de TanStack — eso también reordenaría los hijos de cada árbol,
@@ -102,6 +113,33 @@ descolocando el orden por cantidad descendente que ya viene calculado desde la A
 **Sin selector de fecha**: a diferencia de compras/MRP, este panel no depende de un
 rango — es una foto del estado vigente hoy. El único control de recarga es el botón
 "Recalcular".
+
+### 4.2 Verificación — "Ver despiece completo" (Sheet)
+
+El informe podado no sirve para comprobar que el coste A1 del final cuadra con sus
+componentes (para eso hace falta ver TODO: 10/13/14 incluidos). Cada fila de final
+lleva un botón "Ver despiece completo" que abre un `Sheet` lateral
+(`components/nova/ui/sheet.tsx`) con:
+
+- El árbol **completo sin podar** de ese final (componente `ArbolCompleto`, lista
+  recursiva simple — no una tabla TanStack aparte, no hace falta ordenar/filtrar un
+  único árbol ya acotado a un artículo).
+- Una cabecera de verificación: **coste A1 declarado** (F30026) vs. **suma de
+  componentes recompuesta hasta materia prima** (`costeAcumulado()`: para cada nodo,
+  `Σ cantidad_hijo × coste(hijo)`, recursivo — la operación inversa a como JDE calcula
+  su propio coste A1, así que en teoría debería coincidir), con un badge de
+  ✓ coincide / ⚠ descuadre (tolerancia 0,01 €) / ⚠ cálculo incompleto (si algún
+  componente por el camino no tiene fila en F30026, la suma parcial no es de fiar).
+
+El botón usa `e.stopPropagation()` — sin eso, el clic también dispara el
+`onClick` de la fila entera (desplegar/plegar) a la vez que abre el Sheet.
+
+### 4.3 Decimales del coste
+
+El coste (`IECSL`/10000) puede tener hasta 4 decimales con significado real.
+Redondear a 2 (como el resto de importes en € de la app) perdía precisión de verdad
+(ej. `0,6454 €` se veía como `0,65 €`) — aquí `euros()` usa
+`maximumFractionDigits: 4` en vez de 2.
 
 ---
 
