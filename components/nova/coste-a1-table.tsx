@@ -67,8 +67,12 @@ function colorFamilia(familia: string): string {
 function numeroEs(v: number): string {
   return v.toLocaleString("es-ES", { maximumFractionDigits: 2 });
 }
+// El coste sale de dividir IECSL entre 10000 (F30026) — hasta 4 decimales con
+// significado real. Redondear a 2 como el resto de importes de la app perdía
+// precisión real (ej. 0,6454 € se veía como 0,65 €), así que aquí se muestran
+// todos los decimales que tenga, no solo 2.
 function euros(v: number): string {
-  return `${v.toLocaleString("es-ES", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €`;
+  return `${v.toLocaleString("es-ES", { minimumFractionDigits: 2, maximumFractionDigits: 4 })} €`;
 }
 
 function toTreeRow(n: DespieceNode, id: string, esRaiz: boolean): TreeRow {
@@ -243,15 +247,11 @@ export default function CosteA1Table({ data }: { data: DespieceNode[] }) {
       </div>
 
       <div className="overflow-hidden rounded-xl border border-border">
-        {/* max-h + overflow propios (no solo el overflow-x-auto interno de <Table>):
-            con 200+ artículos finales la página entera se volvía kilométrica — mejor
-            un scroll interno con cabecera fija (sticky), como cualquier tabla de datos
-            larga, que obligar a hacer scroll de toda la pantalla para ver la última fila. */}
-        <div className="max-h-[65vh] overflow-y-auto overflow-x-auto">
+        <div className="overflow-x-auto">
           <Table>
-            <TableHeader className="sticky top-0 z-10">
+            <TableHeader>
               {table.getHeaderGroups().map((hg) => (
-                <TableRow key={hg.id} className="bg-muted/40 hover:bg-muted/40">
+                <TableRow key={hg.id} className="bg-muted/40">
                   {hg.headers.map((h) => {
                     const sortable = h.column.id === "coste";
                     return (
