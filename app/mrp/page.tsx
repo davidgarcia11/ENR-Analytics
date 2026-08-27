@@ -2,8 +2,6 @@
 // planta 10999) → cuánto hay que comprar de cada material. Ver /api/mrp y
 // ClickUp #869eq7nqd para la lógica completa (explosión recursiva en cascada,
 // vigencia del BOM evaluada por mes de previsión, no por "hoy").
-// WIP: panel en construcción, no está en lib/panels.ts/`screens` — acceso
-// restringido a admin a mano, mismo patrón que produccion-v2.
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -41,7 +39,6 @@ interface MrpResponse {
 export default function MrpPage() {
   const router = useRouter();
   const [sessionUser, setSessionUser] = useState<SessionUser | null>(null);
-  const [checking, setChecking] = useState(true);
 
   const [mode, setMode] = useState<ThemeMode>("system");
   const [systemPrefersDark, setSystemPrefersDark] = useState(false);
@@ -54,19 +51,15 @@ export default function MrpPage() {
   }, []);
   const effectiveTheme = mode === "system" ? (systemPrefersDark ? "dark" : "light") : mode;
 
+  // Mismo patrón que el resto de paneles (ver app/compras/page.tsx) — solo para
+  // mostrar quién ha entrado y poder cerrar sesión desde la cabecera. El control de
+  // acceso real ya lo hace requireScreenAccess('mrp') en api/mrp/route.ts.
   useEffect(() => {
     fetch("/api/auth/me")
       .then((r) => (r.ok ? r.json() : null))
-      .then((user) => {
-        if (!user || user.role !== "admin") {
-          router.push("/login");
-          return;
-        }
-        setSessionUser(user);
-        setChecking(false);
-      })
-      .catch(() => router.push("/login"));
-  }, [router]);
+      .then(setSessionUser)
+      .catch(() => setSessionUser(null));
+  }, []);
 
   const logout = async () => {
     await fetch("/api/auth/logout", { method: "POST" });
@@ -141,8 +134,6 @@ export default function MrpPage() {
 
   const portalContainerRef = useRef<HTMLDivElement>(null);
 
-  if (checking) return null;
-
   const stats = data
     ? [
         { title: "Artículos con previsión", value: data.meta.articulosPrevistos.toLocaleString("es-ES"), subValue: "En el rango seleccionado" },
@@ -157,13 +148,6 @@ export default function MrpPage() {
         <div className="md:m-2 md:rounded-xl md:outline md:outline-border md:shadow-sm md:overflow-hidden bg-background">
           <Header user={sessionUser} onLogout={logout} mode={mode} onModeChange={setMode} />
           <main className="mx-auto max-w-7xl space-y-4 p-4 md:p-6">
-            <div>
-              <h1 className="text-xl font-semibold text-foreground">Explosión de compras (WIP)</h1>
-              <p className="text-sm text-muted-foreground">
-                Previsión × lista de materiales → qué comprar de cada material. Solo visible para admin.
-              </p>
-            </div>
-
             <div className="flex flex-wrap items-center justify-between gap-2">
               <div className="flex flex-wrap items-center gap-2">
                 <MonthRangePicker value={range} onChange={setRange} />

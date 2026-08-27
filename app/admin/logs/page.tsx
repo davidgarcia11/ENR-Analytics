@@ -67,6 +67,7 @@ const SOURCE_LABELS: Record<string, string> = {
   'comparativa_seres': 'Comparativa SERES',
   'consulta_stock_pda': 'Consulta Stock PDA',
   'compras': 'Compras',
+  'mrp': 'Explosión de compras',
 }
 
 // Umbral en ms para marcar consultas lentas
