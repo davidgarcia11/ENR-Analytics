@@ -181,6 +181,14 @@ function ChartRenderer({ type }: { type?: ChartType }) {
 // components/nova/README.md y el modo de datos de ejemplo del panel.
 type StatisticsProps = {
   data?: Statistics[];
+  /** Nº de columnas en pantallas lg — 4 por defecto (igual que antes de este prop). */
+  columns?: 2 | 3 | 4;
+};
+
+const COLUMNS_CLASS: Record<2 | 3 | 4, string> = {
+  2: "lg:grid-cols-2",
+  3: "lg:grid-cols-3",
+  4: "lg:grid-cols-4",
 };
 
 const defaultStatisticsData: Statistics[] = [
@@ -212,11 +220,11 @@ const defaultStatisticsData: Statistics[] = [
   },
 ];
 
-export default function Statistic({ data = defaultStatisticsData }: StatisticsProps) {
+export default function Statistic({ data = defaultStatisticsData, columns = 4 }: StatisticsProps) {
   return (
     <div className="py-4">
       <div className="mx-auto w-full">
-        <div className="grid lg:grid-cols-4 sm:grid-cols-2 grid-cols-1 gap-6">
+        <div className={cn("grid sm:grid-cols-2 grid-cols-1 gap-6", COLUMNS_CLASS[columns])}>
           {data.map((item, index) => (
             <Card key={index} className="p-6">
               <CardContent className="p-0">
