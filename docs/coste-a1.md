@@ -183,16 +183,22 @@ Dos ajustes más, tras ver la v4 con datos reales:
   ve entrando en ese componente concreto). `TIPO_COLOR` se mantiene para la tabla
   del INFORME principal (`buildColumns`), que no ha cambiado — el ruido señalado era
   del modal, no del informe.
-- **Tamaño fijo, no según el contenido**: pedido explícito ("no me gusta que cambie
-  de tamaño según lo que muestra"). La zona de la mini-tabla dentro de
-  `TarjetaActual` va envuelta en `<ScrollArea className="h-[300px]">`
-  (`components/nova/ui/scroll-area.tsx`, ya instalado — scrollbar fina,
-  `bg-border`, prácticamente imperceptible) con una altura FIJA, no `max-h`: un nodo
-  con pocos componentes deja hueco en blanco debajo en vez de encoger la tarjeta: la
-  tarjeta mide igual en todos los niveles. Si algún nodo excepcional tuviera más
-  componentes de los que caben en esa altura, `ScrollArea` entra en juego solo ahí
-  — decisión explícita del usuario: "en ese caso sí que muestre, pero que se vea una
-  barra de scroll casi imperceptible", en vez de truncar la lista.
+- **Tamaño fijo, no según el contenido** (probado y luego revertido): se probó una
+  altura FIJA con `ScrollArea` (`components/nova/ui/scroll-area.tsx`) para que la
+  tarjeta midiera igual en todos los niveles. Feedback tras verlo: "al final que no
+  sea tamaño fijo el componente emergente" — se quitó `ScrollArea` y la altura fija;
+  la tarjeta vuelve a ajustarse al número de componentes de cada nodo (más alta en
+  un "12" con 8 componentes, compacta en un "10" con 2). Sigue sin haber scroll en
+  el caso normal porque solo se pinta un nodo a la vez — la comprobación de si haría
+  falta scroll en un caso extremo (un nodo con muchísimos componentes) queda
+  pendiente de que se dé el caso real, no resuelta de antemano.
+
+### 4.2.3 Columna "Cantidad" quitada del informe
+
+Pedido explícito: la tabla principal (el informe, no el modal de verificación) ya no
+tiene columna "Cantidad" — se queda en Artículo / Familia / Coste A1. La cantidad
+sigue viéndose en el modal (mini-tabla de `TarjetaActual`), donde sí tiene sentido
+(cantidad de cada componente por unidad de su padre).
 
 El botón "Ver despiece completo" usa `e.stopPropagation()` — sin eso, el clic también
 dispara el `onClick` de la fila entera (desplegar/plegar) a la vez que abre el Dialog.

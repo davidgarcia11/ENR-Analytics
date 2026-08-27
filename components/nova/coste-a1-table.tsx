@@ -21,7 +21,6 @@ import { Button } from "@/components/nova/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/nova/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/nova/ui/dialog";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/nova/ui/card";
-import { ScrollArea } from "@/components/nova/ui/scroll-area";
 import { Breadcrumb, BreadcrumbItem, BreadcrumbLink, BreadcrumbList, BreadcrumbPage, BreadcrumbSeparator } from "@/components/nova/ui/breadcrumb";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/nova/ui/table";
 import { cn } from "@/lib/utils";
@@ -188,52 +187,49 @@ function TarjetaActual({
       </CardHeader>
 
       <CardContent className="flex flex-col gap-3">
-        {/* Alto FIJO (no max-h): la tarjeta ocupa siempre el mismo tamaño al
-            navegar entre niveles, no salte según cuántas filas tenga cada uno.
-            ScrollArea (scrollbar fina, bg-border) solo entra en juego si un nodo
-            tiene más componentes de los que caben — caso raro, no el habitual. */}
+        {/* Sin alto fijo: la tarjeta se ajusta al número de componentes de cada
+            nodo (pedido explícito, "que no sea tamaño fijo"). Sigue sin haber
+            scroll en el caso normal porque solo se pinta UN nodo a la vez. */}
         <div className="overflow-hidden rounded-lg border border-border">
-          <ScrollArea className="h-[300px]">
-            <Table>
-              <TableHeader>
-                <TableRow className="bg-muted/40 hover:bg-muted/40">
-                  <TableHead className="h-7 px-3 text-xs text-muted-foreground">Componente</TableHead>
-                  <TableHead className="h-7 px-3 text-right text-xs text-muted-foreground">Cantidad</TableHead>
-                  <TableHead className="h-7 px-3 text-right text-xs text-muted-foreground">Coste</TableHead>
-                  <TableHead className="h-7 px-3 text-right text-xs text-muted-foreground">Subtotal</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {node.children.map((c, i) => {
-                  const drilable = c.children.length > 0;
-                  return (
-                    <TableRow
-                      key={`${c.codigo}-${i}`}
-                      onClick={drilable ? () => onEntrar(c) : undefined}
-                      className={drilable ? "cursor-pointer" : undefined}
-                    >
-                      <TableCell className="px-3 py-1.5">
-                        <span className="flex items-center gap-1.5">
-                          {drilable && <ChevronRight size={13} className="shrink-0 text-muted-foreground" />}
-                          <span className={cn("truncate text-foreground", !drilable && "pl-[19px]")}>{c.descripcion || "(sin descripción)"}</span>
-                          <span className="shrink-0 text-xs text-muted-foreground">{c.tipo}</span>
-                        </span>
-                      </TableCell>
-                      <TableCell className="px-3 py-1.5 text-right tabular-nums text-muted-foreground">
-                        {numeroEs(c.cantidad)} <span className="text-xs">{c.um}</span>
-                      </TableCell>
-                      <TableCell className="px-3 py-1.5 text-right tabular-nums text-muted-foreground">
-                        {c.costeA1 != null ? euros(c.costeA1) : "—"}
-                      </TableCell>
-                      <TableCell className="px-3 py-1.5 text-right font-medium tabular-nums text-foreground">
-                        {euros(c.cantidad * (c.costeA1 ?? 0))}
-                      </TableCell>
-                    </TableRow>
-                  );
-                })}
-              </TableBody>
-            </Table>
-          </ScrollArea>
+          <Table>
+            <TableHeader>
+              <TableRow className="bg-muted/40 hover:bg-muted/40">
+                <TableHead className="h-7 px-3 text-xs text-muted-foreground">Componente</TableHead>
+                <TableHead className="h-7 px-3 text-right text-xs text-muted-foreground">Cantidad</TableHead>
+                <TableHead className="h-7 px-3 text-right text-xs text-muted-foreground">Coste</TableHead>
+                <TableHead className="h-7 px-3 text-right text-xs text-muted-foreground">Subtotal</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {node.children.map((c, i) => {
+                const drilable = c.children.length > 0;
+                return (
+                  <TableRow
+                    key={`${c.codigo}-${i}`}
+                    onClick={drilable ? () => onEntrar(c) : undefined}
+                    className={drilable ? "cursor-pointer" : undefined}
+                  >
+                    <TableCell className="px-3 py-1.5">
+                      <span className="flex items-center gap-1.5">
+                        {drilable && <ChevronRight size={13} className="shrink-0 text-muted-foreground" />}
+                        <span className={cn("truncate text-foreground", !drilable && "pl-[19px]")}>{c.descripcion || "(sin descripción)"}</span>
+                        <span className="shrink-0 text-xs text-muted-foreground">{c.tipo}</span>
+                      </span>
+                    </TableCell>
+                    <TableCell className="px-3 py-1.5 text-right tabular-nums text-muted-foreground">
+                      {numeroEs(c.cantidad)} <span className="text-xs">{c.um}</span>
+                    </TableCell>
+                    <TableCell className="px-3 py-1.5 text-right tabular-nums text-muted-foreground">
+                      {c.costeA1 != null ? euros(c.costeA1) : "—"}
+                    </TableCell>
+                    <TableCell className="px-3 py-1.5 text-right font-medium tabular-nums text-foreground">
+                      {euros(c.cantidad * (c.costeA1 ?? 0))}
+                    </TableCell>
+                  </TableRow>
+                );
+              })}
+            </TableBody>
+          </Table>
         </div>
 
         <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg bg-muted/40 px-3 py-2 text-sm">
@@ -317,18 +313,6 @@ function buildColumns(sortBy: SortBy, sortDir: "asc" | "desc", onVerDespiece: (c
           <Badge className={colorFamilia(row.original.familia)}>{row.original.familiaDescripcion}</Badge>
         ) : (
           <span className="text-muted-foreground">—</span>
-        ),
-    }),
-    columnHelper.display({
-      id: "cantidad",
-      header: () => <span className="block text-right">Cantidad</span>,
-      cell: ({ row }) =>
-        row.original.esRaiz ? (
-          <span className="block text-right text-muted-foreground">—</span>
-        ) : (
-          <span className="block text-right tabular-nums text-muted-foreground">
-            {numeroEs(row.original.cantidad)} <span className="text-xs">{row.original.um}</span>
-          </span>
         ),
     }),
     columnHelper.display({
@@ -503,7 +487,7 @@ export default function CosteA1Table({ data }: { data: DespieceNode[] }) {
               ))}
               {filtered.length === 0 && (
                 <TableRow className="hover:bg-transparent">
-                  <TableCell colSpan={5}>
+                  <TableCell colSpan={4}>
                     <div className="flex flex-col items-center gap-2 py-10 text-center">
                       <SearchX size={28} className="text-muted-foreground" />
                       <p className="font-medium text-foreground">Sin resultados</p>
