@@ -121,23 +121,22 @@ const columnHelper = createColumnHelper<TreeRow>();
 
 type SortBy = "cantidad" | "familia";
 
-// Cabecera ordenable — icono fijo (no ArrowUpDown neutro) porque el orden nunca
-// está "sin aplicar": siempre hay una columna y dirección activas por defecto.
-function SortableHeader({ label, active, dir, align = "left", onClick }: { label: string; active: boolean; dir: "asc" | "desc"; align?: "left" | "right"; onClick: () => void }) {
+// Contenido de una cabecera ordenable — SIN onClick propio ni <button>: el patrón
+// real de ShadcnSpace (bloque datatable-03) pone el click en la propia <TableHead>
+// (cursor-pointer + onClick={header.column.getToggleSortingHandler()}), no en un
+// elemento envuelto dentro. Aquí replicamos ese mismo sitio para el onClick (ver
+// el render de <TableHeader> más abajo), y esto solo pinta la etiqueta + icono.
+function SortableHeaderLabel({ label, active, dir, align = "left" }: { label: string; active: boolean; dir: "asc" | "desc"; align?: "left" | "right" }) {
   return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={cn("flex items-center gap-1 text-muted-foreground hover:text-foreground", align === "right" && "ml-auto")}
-    >
+    <span className={cn("flex items-center gap-1", align === "right" && "justify-end")}>
       {align === "right" && label}
       {active ? (dir === "asc" ? <ArrowUp size={12} /> : <ArrowDown size={12} />) : <ArrowDown size={12} className="opacity-30" />}
       {align === "left" && label}
-    </button>
+    </span>
   );
 }
 
-function buildColumns(sortBy: SortBy, sortDir: "asc" | "desc", toggleSort: (col: SortBy) => void) {
+function buildColumns(sortBy: SortBy, sortDir: "asc" | "desc") {
   return [
   columnHelper.display({
     id: "material",
@@ -174,9 +173,7 @@ function buildColumns(sortBy: SortBy, sortDir: "asc" | "desc", toggleSort: (col:
   }),
   columnHelper.display({
     id: "familia",
-    header: () => (
-      <SortableHeader label="Familia" active={sortBy === "familia"} dir={sortDir} onClick={() => toggleSort("familia")} />
-    ),
+    header: () => <SortableHeaderLabel label="Familia" active={sortBy === "familia"} dir={sortDir} />,
     cell: ({ row }) =>
       row.original.tipo === "material" && row.original.familia ? (
         <Badge className={colorFamilia(row.original.familia)}>{row.original.familiaDescripcion}</Badge>
@@ -184,9 +181,7 @@ function buildColumns(sortBy: SortBy, sortDir: "asc" | "desc", toggleSort: (col:
   }),
   columnHelper.display({
     id: "cantidad",
-    header: () => (
-      <SortableHeader label="Cantidad a comprar" active={sortBy === "cantidad"} dir={sortDir} align="right" onClick={() => toggleSort("cantidad")} />
-    ),
+    header: () => <SortableHeaderLabel label="Cantidad a comprar" active={sortBy === "cantidad"} dir={sortDir} align="right" />,
     cell: ({ row }) => (
       <span className={cn("block text-right tabular-nums", row.original.tipo === "material" ? "font-medium text-foreground" : "text-muted-foreground")}>
         {numeroEs(row.original.cantidad)} <span className="text-xs font-normal text-muted-foreground">{row.original.um}</span>
@@ -237,7 +232,7 @@ export default function MrpMaterialsTable({ data }: { data: Material[] }) {
   };
 
   const treeData = useMemo(() => toTree(sorted), [sorted]);
-  const columns = useMemo(() => buildColumns(sortBy, sortDir, toggleSort), [sortBy, sortDir]);
+  const columns = useMemo(() => buildColumns(sortBy, sortDir), [sortBy, sortDir]);
 
   const table = useReactTable({
     data: treeData,
@@ -283,11 +278,18 @@ export default function MrpMaterialsTable({ data }: { data: Material[] }) {
             <TableHeader>
               {table.getHeaderGroups().map((hg) => (
                 <TableRow key={hg.id} className="bg-muted/40">
-                  {hg.headers.map((h) => (
-                    <TableHead key={h.id} className="h-9 px-4 text-muted-foreground">
-                      {h.isPlaceholder ? null : flexRender(h.column.columnDef.header, h.getContext())}
-                    </TableHead>
-                  ))}
+                  {hg.headers.map((h) => {
+                    const sortable = h.column.id === "familia" || h.column.id === "cantidad";
+                    return (
+                      <TableHead
+                        key={h.id}
+                        className={cn("h-9 px-4 text-muted-foreground", sortable && "cursor-pointer select-none")}
+                        onClick={sortable ? () => toggleSort(h.column.id as SortBy) : undefined}
+                      >
+                        {h.isPlaceholder ? null : flexRender(h.column.columnDef.header, h.getContext())}
+                      </TableHead>
+                    );
+                  })}
                 </TableRow>
               ))}
             </TableHeader>
