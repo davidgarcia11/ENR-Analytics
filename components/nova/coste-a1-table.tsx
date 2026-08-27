@@ -21,6 +21,7 @@ import { Button } from "@/components/nova/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/nova/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/nova/ui/dialog";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/nova/ui/card";
+import { ScrollArea } from "@/components/nova/ui/scroll-area";
 import { Breadcrumb, BreadcrumbItem, BreadcrumbLink, BreadcrumbList, BreadcrumbPage, BreadcrumbSeparator } from "@/components/nova/ui/breadcrumb";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/nova/ui/table";
 import { cn } from "@/lib/utils";
@@ -180,66 +181,68 @@ function TarjetaActual({
         <div className="flex items-center justify-between gap-3">
           <div className="flex min-w-0 items-center gap-2">
             <CardTitle className="truncate">{node.descripcion || "(sin descripción)"}</CardTitle>
-            <Badge className={cn("shrink-0 font-normal", TIPO_COLOR[node.tipo])}>{node.tipo}</Badge>
+            <Badge variant="outline" className="shrink-0 font-normal">{node.tipo}</Badge>
           </div>
           <span className="shrink-0 font-mono text-xs text-muted-foreground">{node.codigo}</span>
         </div>
       </CardHeader>
 
       <CardContent className="flex flex-col gap-3">
+        {/* Alto FIJO (no max-h): la tarjeta ocupa siempre el mismo tamaño al
+            navegar entre niveles, no salte según cuántas filas tenga cada uno.
+            ScrollArea (scrollbar fina, bg-border) solo entra en juego si un nodo
+            tiene más componentes de los que caben — caso raro, no el habitual. */}
         <div className="overflow-hidden rounded-lg border border-border">
-          <Table>
-            <TableHeader>
-              <TableRow className="bg-muted/40 hover:bg-muted/40">
-                <TableHead className="h-7 px-3 text-xs text-muted-foreground">Componente</TableHead>
-                <TableHead className="h-7 px-3 text-right text-xs text-muted-foreground">Cantidad</TableHead>
-                <TableHead className="h-7 px-3 text-right text-xs text-muted-foreground">Coste</TableHead>
-                <TableHead className="h-7 px-3 text-right text-xs text-muted-foreground">Subtotal</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {node.children.map((c, i) => {
-                const drilable = c.children.length > 0;
-                return (
-                  <TableRow
-                    key={`${c.codigo}-${i}`}
-                    onClick={drilable ? () => onEntrar(c) : undefined}
-                    className={drilable ? "cursor-pointer" : undefined}
-                  >
-                    <TableCell className="px-3 py-1.5">
-                      <span className="flex items-center gap-2">
-                        {drilable && <ChevronRight size={13} className="shrink-0 text-muted-foreground" />}
-                        <span className={cn("text-foreground", !drilable && "pl-[21px]")}>{c.descripcion || "(sin descripción)"}</span>
-                        <Badge className={cn("shrink-0 font-normal", TIPO_COLOR[c.tipo])}>{c.tipo}</Badge>
-                      </span>
-                    </TableCell>
-                    <TableCell className="px-3 py-1.5 text-right tabular-nums text-muted-foreground">
-                      {numeroEs(c.cantidad)} <span className="text-xs">{c.um}</span>
-                    </TableCell>
-                    <TableCell className="px-3 py-1.5 text-right tabular-nums text-muted-foreground">
-                      {c.costeA1 != null ? euros(c.costeA1) : "—"}
-                    </TableCell>
-                    <TableCell className="px-3 py-1.5 text-right font-medium tabular-nums text-foreground">
-                      {euros(c.cantidad * (c.costeA1 ?? 0))}
-                    </TableCell>
-                  </TableRow>
-                );
-              })}
-            </TableBody>
-          </Table>
+          <ScrollArea className="h-[300px]">
+            <Table>
+              <TableHeader>
+                <TableRow className="bg-muted/40 hover:bg-muted/40">
+                  <TableHead className="h-7 px-3 text-xs text-muted-foreground">Componente</TableHead>
+                  <TableHead className="h-7 px-3 text-right text-xs text-muted-foreground">Cantidad</TableHead>
+                  <TableHead className="h-7 px-3 text-right text-xs text-muted-foreground">Coste</TableHead>
+                  <TableHead className="h-7 px-3 text-right text-xs text-muted-foreground">Subtotal</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {node.children.map((c, i) => {
+                  const drilable = c.children.length > 0;
+                  return (
+                    <TableRow
+                      key={`${c.codigo}-${i}`}
+                      onClick={drilable ? () => onEntrar(c) : undefined}
+                      className={drilable ? "cursor-pointer" : undefined}
+                    >
+                      <TableCell className="px-3 py-1.5">
+                        <span className="flex items-center gap-1.5">
+                          {drilable && <ChevronRight size={13} className="shrink-0 text-muted-foreground" />}
+                          <span className={cn("truncate text-foreground", !drilable && "pl-[19px]")}>{c.descripcion || "(sin descripción)"}</span>
+                          <span className="shrink-0 text-xs text-muted-foreground">{c.tipo}</span>
+                        </span>
+                      </TableCell>
+                      <TableCell className="px-3 py-1.5 text-right tabular-nums text-muted-foreground">
+                        {numeroEs(c.cantidad)} <span className="text-xs">{c.um}</span>
+                      </TableCell>
+                      <TableCell className="px-3 py-1.5 text-right tabular-nums text-muted-foreground">
+                        {c.costeA1 != null ? euros(c.costeA1) : "—"}
+                      </TableCell>
+                      <TableCell className="px-3 py-1.5 text-right font-medium tabular-nums text-foreground">
+                        {euros(c.cantidad * (c.costeA1 ?? 0))}
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
+              </TableBody>
+            </Table>
+          </ScrollArea>
         </div>
 
-        <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg bg-muted/40 px-3 py-2">
-          <span className="text-sm text-muted-foreground">
-            Coste declarado: <span className="font-semibold text-foreground">{node.costeA1 != null ? euros(node.costeA1) : "—"}</span>
-            {" · "}Componentes suman: <span className="font-semibold text-foreground">{euros(sumaDirecta)}</span>
-            {faltanDirectos.length > 0 && (
-              <span className="ml-1.5 text-amber-600">
-                ({faltanDirectos.length} sin coste, contado{faltanDirectos.length > 1 ? "s" : ""} como 0)
-              </span>
-            )}
+        <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg bg-muted/40 px-3 py-2 text-sm">
+          <span className="text-muted-foreground">
+            Declarado <span className="font-semibold text-foreground">{node.costeA1 != null ? euros(node.costeA1) : "—"}</span>
+            {" · "}Suma <span className="font-semibold text-foreground">{euros(sumaDirecta)}</span>
+            {faltanDirectos.length > 0 && <span className="ml-1 text-amber-600">· {faltanDirectos.length} sin coste</span>}
           </span>
-          {node.costeA1 != null ? <Descuadre valor={sumaDirecta - node.costeA1} /> : <span className="text-xs text-muted-foreground">Sin coste propio para comparar</span>}
+          {node.costeA1 != null ? <Descuadre valor={sumaDirecta - node.costeA1} /> : <span className="text-xs text-muted-foreground">Sin coste propio</span>}
         </div>
       </CardContent>
     </Card>
@@ -531,30 +534,20 @@ export default function CosteA1Table({ data }: { data: DespieceNode[] }) {
               <DialogDescription className="font-mono text-xs">{verDespieceNode.codigo}</DialogDescription>
             </DialogHeader>
 
-            <div className="flex flex-col gap-2 border-b border-border bg-muted/30 p-5">
-              <p className="text-xs font-medium text-muted-foreground">Comprobación global — coste declarado del final vs. suma de todos sus componentes hasta materia prima</p>
+            <div className="flex flex-col gap-1.5 border-b border-border bg-muted/30 p-5">
+              <p className="text-xs font-medium text-muted-foreground">Comprobación global</p>
               <div className="flex flex-wrap items-center justify-between gap-3 text-sm">
                 <span className="text-muted-foreground">
-                  Coste A1 declarado (F30026): <span className="font-semibold tabular-nums text-foreground">{verDespieceNode.costeA1 != null ? euros(verDespieceNode.costeA1) : "—"}</span>
+                  Declarado <span className="font-semibold tabular-nums text-foreground">{verDespieceNode.costeA1 != null ? euros(verDespieceNode.costeA1) : "—"}</span>
                   {" · "}
-                  Suma de componentes: <span className="font-semibold tabular-nums text-foreground">{euros(verificacion.suma)}</span>
+                  Suma <span className="font-semibold tabular-nums text-foreground">{euros(verificacion.suma)}</span>
+                  {verificacion.faltantes.length > 0 && <span className="ml-1 text-amber-600">· {verificacion.faltantes.length} sin coste</span>}
                 </span>
                 {verDespieceNode.costeA1 != null && <Descuadre valor={descuadreGlobal ?? 0} />}
               </div>
-              {verificacion.faltantes.length > 0 && (
-                <div className="flex items-start gap-1.5 text-xs text-amber-600">
-                  <CircleAlert size={13} className="mt-0.5 shrink-0" />
-                  <span>
-                    {verificacion.faltantes.length} componente{verificacion.faltantes.length > 1 ? "s" : ""} sin coste A1 en F30026 — contado{verificacion.faltantes.length > 1 ? "s" : ""} como 0 en la suma, no bloquea el cálculo: {verificacion.faltantes.map((f) => f.descripcion || f.codigo).join(", ")}
-                  </span>
-                </div>
-              )}
             </div>
 
             <div className="p-5">
-              <p className="mb-3 text-xs font-medium text-muted-foreground">
-                Despiece — pulsa un componente con flecha para ver de qué está hecho
-              </p>
               <TarjetaActual
                 node={nodoActual}
                 ruta={rutaAncestros}

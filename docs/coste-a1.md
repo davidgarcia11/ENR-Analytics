@@ -169,6 +169,31 @@ compacto que el resto de la app (`gap-3`/`py-1.5` en vez de `gap-4`/`py-2`) para
 quepa sin scroll incluso un nodo con 8-10 componentes directos en un viewport normal
 (comprobado con `agent-browser` a 1440×900).
 
+### 4.2.2 Ruido visual y tamaño fijo — segunda ronda de feedback
+
+Dos ajustes más, tras ver la v4 con datos reales:
+
+- **Menos color/texto**: los badges de tipo (`Terminado`/`Semiterminado`/...) por
+  fila de la mini-tabla se quitan — quedan como texto gris pequeño (`c.tipo`), no
+  una píldora de color repetida en cada línea. En la cabecera de la tarjeta el
+  badge del nodo actual pasa a `variant="outline"` (borde, sin relleno de color) en
+  vez del `TIPO_COLOR` de 5 tonos. Los textos de comprobación (global y local) se
+  acortan a `Declarado X · Suma Y [· N sin coste]` — sin la frase explicativa larga
+  ni el listado de nombres de componentes sin coste (si hace falta ese detalle, se
+  ve entrando en ese componente concreto). `TIPO_COLOR` se mantiene para la tabla
+  del INFORME principal (`buildColumns`), que no ha cambiado — el ruido señalado era
+  del modal, no del informe.
+- **Tamaño fijo, no según el contenido**: pedido explícito ("no me gusta que cambie
+  de tamaño según lo que muestra"). La zona de la mini-tabla dentro de
+  `TarjetaActual` va envuelta en `<ScrollArea className="h-[300px]">`
+  (`components/nova/ui/scroll-area.tsx`, ya instalado — scrollbar fina,
+  `bg-border`, prácticamente imperceptible) con una altura FIJA, no `max-h`: un nodo
+  con pocos componentes deja hueco en blanco debajo en vez de encoger la tarjeta: la
+  tarjeta mide igual en todos los niveles. Si algún nodo excepcional tuviera más
+  componentes de los que caben en esa altura, `ScrollArea` entra en juego solo ahí
+  — decisión explícita del usuario: "en ese caso sí que muestre, pero que se vea una
+  barra de scroll casi imperceptible", en vez de truncar la lista.
+
 El botón "Ver despiece completo" usa `e.stopPropagation()` — sin eso, el clic también
 dispara el `onClick` de la fila entera (desplegar/plegar) a la vez que abre el Dialog.
 
