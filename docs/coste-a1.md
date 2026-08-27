@@ -130,21 +130,44 @@ add dialog`, sin construirla a mano) con **dos comprobaciones distintas**, no un
   0 en la suma **y no bloquea el cálculo** — se avisa aparte de cuáles son (pedido
   explícito del usuario: "si algún componente no tiene coste, se indica pero la suma
   se puede hacer igual").
-- **Local, por nivel** (dentro del árbol, `NodoDespiece`): cada nodo CON hijos es su
-  propia **tarjeta** (`Card` de `components/nova/ui/card.tsx`) con una mini-tabla de
+- **Local, por nivel** (`TarjetaActual`): el nodo que se está viendo en cada momento
+  es una **tarjeta** (`Card` de `components/nova/ui/card.tsx`) con una mini-tabla de
   sus componentes DIRECTOS (con el coste declarado de cada uno, sin bajar más, +
   subtotal por línea) y una barra de comprobación al pie — ¿esos componentes suman su
   propio coste A1 declarado? Esto es lo que permite ver en qué nivel exacto empieza
   un descuadre (ej. el "10" cuadra pero el "11" que lo usa no), sin tener que
   interpretar solo el número global de arriba.
 
-Los nodos sin componentes propios (materia prima, hojas del árbol) no llevan tarjeta
-vacía — se ven como fila dentro de la mini-tabla de su padre. Cada hijo que a su vez
-tiene su propio desglose anida su tarjeta dentro, con una guía de indentación
-(`border-l-2`) — el árbol se lee como bloques apilados, no como una lista continua de
-texto (pedido explícito tras la primera versión: "separar por cada desglose su
-resumen en recuadros"). El modal es ancho (`max-w-5xl`, `w-[92vw]`) para que la
-mini-tabla de cada tarjeta tenga sitio de sobra.
+### 4.2.1 Navegación por niveles (drill-down), sin scroll — iteración de diseño
+
+Versiones probadas y descartadas, en orden, cada una por feedback directo del
+usuario tras verla con datos reales:
+
+1. Árbol completo indentado en una lista continua (texto suelto bajo cada nodo) →
+   "se hace pesado, separar por cada desglose su resumen en recuadros".
+2. Tarjetas anidadas dentro de su padre (`border-l-2` + sangría, todo el árbol de
+   golpe) → el padding se acumulaba en cada nivel, seguía pesando a partir del 3er
+   nivel.
+3. Tarjetas independientes en grid de 2 columnas, todo el árbol de golpe, con
+   `Breadcrumb` (`components/nova/ui/breadcrumb.tsx`) mostrando la ruta de cada una
+   → mejor, pero para verlo entero hacía falta scroll dentro del modal (vertical) y
+   a veces horizontal — rechazado explícitamente: "no quiero que haya deslizables
+   ni de arriba para abajo ni de izquierda a derecha".
+4. **Actual — drill-down de una tarjeta a la vez**: el modal solo pinta el nodo
+   "actual" (`nodoActual`, estado `caminoActual: DespieceNode[]` = ruta desde la
+   raíz). Pulsar un componente con desglose propio (`children.length > 0`, marcado
+   con `<ChevronRight>`) sustituye la tarjeta por la suya; los componentes sin
+   desglose (materia prima) no son clicables. El `Breadcrumb` de la tarjeta hace de
+   "volver atrás": pulsar un nivel anterior recorta `caminoActual` a ese punto — el
+   mismo componente que en la v3 solo mostraba la ruta, aquí además navega.
+
+El `DialogContent` no lleva `max-h`/`overflow` — nunca hay scroll propio porque nunca
+hay más que UNA tarjeta pintada a la vez. Anclado arriba (`top-8`, no centrado
+verticalmente): con contenido más alto que el viewport, un modal centrado de verdad
+dejaba el título fuera de la pantalla nada más abrirlo. El espaciado va más
+compacto que el resto de la app (`gap-3`/`py-1.5` en vez de `gap-4`/`py-2`) para que
+quepa sin scroll incluso un nodo con 8-10 componentes directos en un viewport normal
+(comprobado con `agent-browser` a 1440×900).
 
 El botón "Ver despiece completo" usa `e.stopPropagation()` — sin eso, el clic también
 dispara el `onClick` de la fila entera (desplegar/plegar) a la vez que abre el Dialog.

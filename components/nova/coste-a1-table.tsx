@@ -6,7 +6,7 @@
 // profundidad, sin tabla anidada en una celda. La diferencia con esas dos es que
 // aquí la API ya devuelve el árbol completo anidado (children recursivos, cualquier
 // profundidad) — toTree() solo traduce la forma, no reconstruye niveles fijos.
-import { useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useState } from "react";
 import {
   useReactTable,
   createColumnHelper,
@@ -21,6 +21,7 @@ import { Button } from "@/components/nova/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/nova/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/nova/ui/dialog";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/nova/ui/card";
+import { Breadcrumb, BreadcrumbItem, BreadcrumbLink, BreadcrumbList, BreadcrumbPage, BreadcrumbSeparator } from "@/components/nova/ui/breadcrumb";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/nova/ui/table";
 import { cn } from "@/lib/utils";
 import type { DespieceNode } from "@/app/api/coste-a1/route";
@@ -125,69 +126,110 @@ function Descuadre({ valor, tono = "text" }: { valor: number; tono?: "text" | "x
   );
 }
 
-// Desglose COMPLETO dentro del modal de verificación — una TARJETA por cada nodo que
-// tiene componentes que desglosar (los que no tienen hijos, materia prima, se ven
-// como fila dentro de la mini-tabla de su padre, no llevan tarjeta propia vacía).
-// Cada tarjeta agrupa: cabecera (artículo + código), mini-tabla de sus componentes
-// DIRECTOS con subtotal, y la comprobación LOCAL de ese nivel (¿sus componentes
-// suman su propio coste declarado?) — permite ver en qué nivel exacto empieza un
-// descuadre sin tener que interpretar solo el número global de la cabecera del
-// modal. Los hijos que a su vez tienen su propio desglose anidan su tarjeta dentro,
-// con un poco de sangría — así el árbol se lee como bloques, no como una lista
-// continua de texto.
-function NodoDespiece({ node, profundidad }: { node: DespieceNode; profundidad: number }) {
-  if (node.children.length === 0) return null;
-
+// Navegación por niveles (drill-down) — nada de scroll ni vertical ni horizontal,
+// pedido explícito: solo se pinta UNA tarjeta a la vez (el nodo "actual"), con su
+// mini-tabla de componentes DIRECTOS. Pulsar un componente que a su vez tenga su
+// propio desglose (children.length > 0) sustituye la tarjeta por la suya — el
+// Breadcrumb de arriba hace de "volver atrás" (pulsar un nivel anterior recorta la
+// ruta a ese punto). Los componentes sin desglose propio (materia prima) no son
+// clicables, no tienen a dónde bajar.
+function TarjetaActual({
+  node,
+  ruta,
+  onEntrar,
+  onIrA,
+}: {
+  node: DespieceNode;
+  ruta: DespieceNode[];
+  onEntrar: (hijo: DespieceNode) => void;
+  onIrA: (indice: number) => void;
+}) {
   const sumaDirecta = node.children.reduce((s, c) => s + c.cantidad * (c.costeA1 ?? 0), 0);
   const faltanDirectos = node.children.filter((c) => c.costeA1 == null);
-  const subDesgloses = node.children.filter((c) => c.children.length > 0);
+  const cadena = [...ruta, node];
 
   return (
-    <Card className={cn("gap-4 py-4", profundidad > 0 && "bg-muted/20 shadow-none ring-border")}>
-      <CardHeader className="flex-row items-center justify-between gap-3 border-b [.border-b]:pb-4">
-        <div className="flex min-w-0 items-center gap-2">
-          <CardTitle className="truncate">{node.descripcion || "(sin descripción)"}</CardTitle>
-          <Badge className={cn("shrink-0 font-normal", TIPO_COLOR[node.tipo])}>{node.tipo}</Badge>
+    <Card className="gap-3 py-3">
+      <CardHeader className="gap-1.5 border-b [.border-b]:pb-3">
+        {ruta.length > 0 && (
+          <Breadcrumb>
+            <BreadcrumbList className="text-xs">
+              {cadena.map((a, i) => {
+                const esUltimo = i === cadena.length - 1;
+                return (
+                  <Fragment key={a.codigo}>
+                    <BreadcrumbItem className="min-w-0">
+                      {esUltimo ? (
+                        <BreadcrumbPage className="truncate text-xs">{a.descripcion || a.codigo}</BreadcrumbPage>
+                      ) : (
+                        <BreadcrumbLink
+                          render={<button type="button" onClick={() => onIrA(i)} />}
+                          className="truncate"
+                        >
+                          {a.descripcion || a.codigo}
+                        </BreadcrumbLink>
+                      )}
+                    </BreadcrumbItem>
+                    {!esUltimo && <BreadcrumbSeparator />}
+                  </Fragment>
+                );
+              })}
+            </BreadcrumbList>
+          </Breadcrumb>
+        )}
+        <div className="flex items-center justify-between gap-3">
+          <div className="flex min-w-0 items-center gap-2">
+            <CardTitle className="truncate">{node.descripcion || "(sin descripción)"}</CardTitle>
+            <Badge className={cn("shrink-0 font-normal", TIPO_COLOR[node.tipo])}>{node.tipo}</Badge>
+          </div>
+          <span className="shrink-0 font-mono text-xs text-muted-foreground">{node.codigo}</span>
         </div>
-        <span className="shrink-0 font-mono text-xs text-muted-foreground">{node.codigo}</span>
       </CardHeader>
 
-      <CardContent className="flex flex-col gap-4">
+      <CardContent className="flex flex-col gap-3">
         <div className="overflow-hidden rounded-lg border border-border">
           <Table>
             <TableHeader>
               <TableRow className="bg-muted/40 hover:bg-muted/40">
-                <TableHead className="h-8 px-3 text-xs text-muted-foreground">Componente</TableHead>
-                <TableHead className="h-8 px-3 text-right text-xs text-muted-foreground">Cantidad</TableHead>
-                <TableHead className="h-8 px-3 text-right text-xs text-muted-foreground">Coste</TableHead>
-                <TableHead className="h-8 px-3 text-right text-xs text-muted-foreground">Subtotal</TableHead>
+                <TableHead className="h-7 px-3 text-xs text-muted-foreground">Componente</TableHead>
+                <TableHead className="h-7 px-3 text-right text-xs text-muted-foreground">Cantidad</TableHead>
+                <TableHead className="h-7 px-3 text-right text-xs text-muted-foreground">Coste</TableHead>
+                <TableHead className="h-7 px-3 text-right text-xs text-muted-foreground">Subtotal</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
-              {node.children.map((c, i) => (
-                <TableRow key={`${c.codigo}-${i}`}>
-                  <TableCell className="px-3 py-2">
-                    <span className="flex items-center gap-2">
-                      <span className="text-foreground">{c.descripcion || "(sin descripción)"}</span>
-                      <Badge className={cn("shrink-0 font-normal", TIPO_COLOR[c.tipo])}>{c.tipo}</Badge>
-                    </span>
-                  </TableCell>
-                  <TableCell className="px-3 py-2 text-right tabular-nums text-muted-foreground">
-                    {numeroEs(c.cantidad)} <span className="text-xs">{c.um}</span>
-                  </TableCell>
-                  <TableCell className="px-3 py-2 text-right tabular-nums text-muted-foreground">
-                    {c.costeA1 != null ? euros(c.costeA1) : "—"}
-                  </TableCell>
-                  <TableCell className="px-3 py-2 text-right font-medium tabular-nums text-foreground">
-                    {euros(c.cantidad * (c.costeA1 ?? 0))}
-                  </TableCell>
-                </TableRow>
-              ))}
+              {node.children.map((c, i) => {
+                const drilable = c.children.length > 0;
+                return (
+                  <TableRow
+                    key={`${c.codigo}-${i}`}
+                    onClick={drilable ? () => onEntrar(c) : undefined}
+                    className={drilable ? "cursor-pointer" : undefined}
+                  >
+                    <TableCell className="px-3 py-1.5">
+                      <span className="flex items-center gap-2">
+                        {drilable && <ChevronRight size={13} className="shrink-0 text-muted-foreground" />}
+                        <span className={cn("text-foreground", !drilable && "pl-[21px]")}>{c.descripcion || "(sin descripción)"}</span>
+                        <Badge className={cn("shrink-0 font-normal", TIPO_COLOR[c.tipo])}>{c.tipo}</Badge>
+                      </span>
+                    </TableCell>
+                    <TableCell className="px-3 py-1.5 text-right tabular-nums text-muted-foreground">
+                      {numeroEs(c.cantidad)} <span className="text-xs">{c.um}</span>
+                    </TableCell>
+                    <TableCell className="px-3 py-1.5 text-right tabular-nums text-muted-foreground">
+                      {c.costeA1 != null ? euros(c.costeA1) : "—"}
+                    </TableCell>
+                    <TableCell className="px-3 py-1.5 text-right font-medium tabular-nums text-foreground">
+                      {euros(c.cantidad * (c.costeA1 ?? 0))}
+                    </TableCell>
+                  </TableRow>
+                );
+              })}
             </TableBody>
           </Table>
         </div>
 
-        <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg bg-muted/40 px-4 py-3">
+        <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg bg-muted/40 px-3 py-2">
           <span className="text-sm text-muted-foreground">
             Coste declarado: <span className="font-semibold text-foreground">{node.costeA1 != null ? euros(node.costeA1) : "—"}</span>
             {" · "}Componentes suman: <span className="font-semibold text-foreground">{euros(sumaDirecta)}</span>
@@ -199,14 +241,6 @@ function NodoDespiece({ node, profundidad }: { node: DespieceNode; profundidad: 
           </span>
           {node.costeA1 != null ? <Descuadre valor={sumaDirecta - node.costeA1} /> : <span className="text-xs text-muted-foreground">Sin coste propio para comparar</span>}
         </div>
-
-        {subDesgloses.length > 0 && (
-          <div className="flex flex-col gap-4 border-l-2 border-border pl-4">
-            {subDesgloses.map((c, i) => (
-              <NodoDespiece key={`${c.codigo}-${i}`} node={c} profundidad={profundidad + 1} />
-            ))}
-          </div>
-        )}
       </CardContent>
     </Card>
   );
@@ -329,13 +363,22 @@ export default function CosteA1Table({ data }: { data: DespieceNode[] }) {
   const [familia, setFamilia] = useState("__todas__");
   const [sortBy, setSortBy] = useState<SortBy>("coste");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
-  // Código del final cuyo despiece completo (sin podar) se ve en el Sheet — no el
+  // Código del final cuyo despiece completo (sin podar) se ve en el modal — no el
   // nodo en sí, así siempre lee el dato vivo de `data` (útil tras un Recalcular).
   const [verDespieceCodigo, setVerDespieceCodigo] = useState<string | null>(null);
   const verDespieceNode = useMemo(
     () => (verDespieceCodigo ? data.find((n) => n.codigo === verDespieceCodigo) ?? null : null),
     [data, verDespieceCodigo]
   );
+  // Ruta de navegación DENTRO del modal (drill-down, sin scroll): [raíz, ...pasos].
+  // El último elemento es el nodo que se está viendo ahora mismo. Se reinicia cada
+  // vez que se abre un final distinto (o el mismo tras un Recalcular).
+  const [caminoActual, setCaminoActual] = useState<DespieceNode[]>([]);
+  useEffect(() => {
+    setCaminoActual(verDespieceNode ? [verDespieceNode] : []);
+  }, [verDespieceCodigo, verDespieceNode]);
+  const nodoActual = caminoActual[caminoActual.length - 1] ?? null;
+  const rutaAncestros = caminoActual.slice(0, -1);
 
   const familias = useMemo(() => {
     const map = new Map<string, string>();
@@ -473,15 +516,22 @@ export default function CosteA1Table({ data }: { data: DespieceNode[] }) {
     </div>
 
     <Dialog open={verDespieceNode != null} onOpenChange={(open) => { if (!open) setVerDespieceCodigo(null); }}>
-      <DialogContent className="flex max-h-[88vh] w-[92vw] max-w-5xl flex-col gap-0 p-0 sm:max-w-5xl">
-        {verDespieceNode && verificacion && (
+      {/* Sin max-h/overflow: pedido explícito, nada de scroll ni vertical ni
+          horizontal — por eso el desglose de abajo navega de uno en uno
+          (drill-down) en vez de mostrar el árbol entero de golpe, y todo el
+          espaciado va más ajustado que en el resto de la app. Anclado arriba
+          (top-8, no centrado verticalmente): centrado de verdad, con contenido
+          más alto que el viewport, el título quedaba fuera de la pantalla nada
+          más abrirlo — con esto al menos la cabecera siempre se ve entera. */}
+      <DialogContent className="top-8 w-[92vw] max-w-3xl translate-y-0 gap-0 p-0 sm:max-w-3xl">
+        {verDespieceNode && verificacion && nodoActual && (
           <>
-            <DialogHeader className="border-b border-border p-6 pb-4">
+            <DialogHeader className="border-b border-border p-5 pb-3">
               <DialogTitle className="text-lg">{verDespieceNode.descripcion || "(sin descripción)"}</DialogTitle>
               <DialogDescription className="font-mono text-xs">{verDespieceNode.codigo}</DialogDescription>
             </DialogHeader>
 
-            <div className="flex flex-col gap-3 border-b border-border bg-muted/30 p-6">
+            <div className="flex flex-col gap-2 border-b border-border bg-muted/30 p-5">
               <p className="text-xs font-medium text-muted-foreground">Comprobación global — coste declarado del final vs. suma de todos sus componentes hasta materia prima</p>
               <div className="flex flex-wrap items-center justify-between gap-3 text-sm">
                 <span className="text-muted-foreground">
@@ -501,9 +551,16 @@ export default function CosteA1Table({ data }: { data: DespieceNode[] }) {
               )}
             </div>
 
-            <div className="flex-1 overflow-y-auto p-6">
-              <p className="mb-4 text-xs font-medium text-muted-foreground">Despiece completo — cada tarjeta lleva su propia comprobación local</p>
-              <NodoDespiece node={verDespieceNode} profundidad={0} />
+            <div className="p-5">
+              <p className="mb-3 text-xs font-medium text-muted-foreground">
+                Despiece — pulsa un componente con flecha para ver de qué está hecho
+              </p>
+              <TarjetaActual
+                node={nodoActual}
+                ruta={rutaAncestros}
+                onEntrar={(hijo) => setCaminoActual((c) => [...c, hijo])}
+                onIrA={(indice) => setCaminoActual((c) => c.slice(0, indice + 1))}
+              />
             </div>
           </>
         )}
