@@ -227,6 +227,29 @@ viejo). El Sheet no se había parcheado antes porque, hasta este panel, nadie lo
 usaba de verdad en una rama mergeada — sigue viviendo en el menú móvil del `Header`
 (`topbar-02/header/index.tsx`).
 
+### 4.2.4 Indicadores de descuadre interno (informe + filas del desglose)
+
+Pedido explícito: no basta con la comprobación global (final vs. suma hasta materia
+prima) ni con la comprobación local de un solo nivel — puede haber un descuadre
+"escondido" varios niveles más abajo que la suma global no deja ver (dos errores
+podrían compensarse por casualidad y la global "cuadrar" sin que nada esté realmente
+bien). `tieneProblemaInterno(n)` (`coste-a1-table.tsx`) recorre TODO el subárbol de
+`n` y devuelve `true` si el propio nodo o **cualquier** descendiente tiene un
+descuadre local (sus componentes directos no suman su propio coste declarado).
+
+- **Informe (tabla principal)**: si `tieneProblemaInterno(final)` es `true` sobre el
+  árbol SIN PODAR (no `podar1112(n)` — un descuadre puede estar en un "10"/"13"/"14"
+  que el informe no enseña, y aun así hay que avisar), aparece un icono de alerta
+  rojo junto al botón "Ver despiece completo". Se calcula una vez al construir
+  `treeData` y se guarda en `TreeRow.tieneProblema` (solo relleno en la fila raíz).
+- **Modal — mini-tabla de `TarjetaActual`**: cada fila con desglose propio
+  (`children.length > 0`) se pinta con un tinte de fondo — rojo
+  (`bg-[color:var(--color-destructive)]/8`) si `tieneProblemaInterno(componente)` es
+  `true`, verde (`bg-[color:var(--color-success)]/8`) si es `false`. Las filas de
+  materia prima (sin desglose propio, nada "de dentro" que comprobar) se quedan sin
+  colorear. Así, al entrar en un "11", se ve de un vistazo en qué "10" concreto
+  empieza el problema sin tener que abrir cada uno para comprobarlo.
+
 ### 4.3 Decimales del coste
 
 El coste (`IECSL`/10000) puede tener hasta 4 decimales con significado real.

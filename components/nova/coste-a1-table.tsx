@@ -39,6 +39,9 @@ interface TreeRow {
   cantidad: number;
   um: string;
   esRaiz: boolean;
+  // Solo se rellena en la fila raíz — ¿hay algún descuadre local en cualquier punto
+  // del árbol COMPLETO (sin podar), no solo en lo que enseña el informe (11/12)?
+  tieneProblema?: boolean;
   subRows?: TreeRow[];
 }
 
@@ -112,8 +115,27 @@ function costeDesdeHojas(n: DespieceNode): { suma: number; faltantes: DespieceNo
   return { suma, faltantes };
 }
 
+// Tolerancia de redondeo compartida — el coste declarado en F30026 y la suma
+// recalculada no tienen por qué llevar exactamente los mismos decimales.
+const TOLERANCIA = 0.01;
+
+// ¿Hay algún descuadre LOCAL en cualquier punto de este subárbol (el propio nodo
+// o cualquier descendiente)? No basta con mirar el total del nodo (la comprobación
+// global de costeDesdeHojas): dos descuadres internos podrían compensarse por
+// casualidad y la suma final "cuadrar" sin que nada esté realmente bien — pedido
+// explícito: "puede haber algo dentro mal pero que la suma para él coincida por
+// algún motivo extraño". Por eso se comprueba el nivel local de CADA nodo con
+// hijos del subárbol, no solo el nodo raíz.
+function tieneProblemaInterno(n: DespieceNode): boolean {
+  if (n.children.length > 0) {
+    const sumaDirecta = n.children.reduce((s, c) => s + c.cantidad * (c.costeA1 ?? 0), 0);
+    if (n.costeA1 != null && Math.abs(sumaDirecta - n.costeA1) >= TOLERANCIA) return true;
+  }
+  return n.children.some(tieneProblemaInterno);
+}
+
 function Descuadre({ valor, tono = "text" }: { valor: number; tono?: "text" | "xs" }) {
-  const cuadra = Math.abs(valor) < 0.01;
+  const cuadra = Math.abs(valor) < TOLERANCIA;
   const cls = tono === "xs" ? "text-xs" : "text-sm";
   if (cuadra) {
     return <span className={cn("flex items-center gap-1 text-[color:var(--color-success)]", cls)}><CircleCheck size={tono === "xs" ? 12 : 14} /> Coincide</span>;
@@ -203,11 +225,20 @@ function TarjetaActual({
             <TableBody>
               {node.children.map((c, i) => {
                 const drilable = c.children.length > 0;
+                // Pinta la fila según si HAY o NO algún descuadre local en cualquier
+                // punto del subárbol de este componente (no solo su propio total) —
+                // ver tieneProblemaInterno(). Solo aplica a filas con desglose propio:
+                // una hoja de materia prima no tiene nada "de dentro" que comprobar.
+                const problema = drilable ? tieneProblemaInterno(c) : null;
                 return (
                   <TableRow
                     key={`${c.codigo}-${i}`}
                     onClick={drilable ? () => onEntrar(c) : undefined}
-                    className={drilable ? "cursor-pointer" : undefined}
+                    className={cn(
+                      drilable && "cursor-pointer",
+                      problema === true && "bg-[color:var(--color-destructive)]/8 hover:bg-[color:var(--color-destructive)]/12",
+                      problema === false && "bg-[color:var(--color-success)]/8 hover:bg-[color:var(--color-success)]/12"
+                    )}
                   >
                     <TableCell className="px-3 py-1.5">
                       <span className="flex items-center gap-1.5">
@@ -245,7 +276,7 @@ function TarjetaActual({
   );
 }
 
-function toTreeRow(n: DespieceNode, id: string, esRaiz: boolean): TreeRow {
+function toTreeRow(n: DespieceNode, id: string, esRaiz: boolean, tieneProblema?: boolean): TreeRow {
   return {
     id,
     codigo: n.codigo,
@@ -257,6 +288,7 @@ function toTreeRow(n: DespieceNode, id: string, esRaiz: boolean): TreeRow {
     cantidad: n.cantidad,
     um: n.um,
     esRaiz,
+    tieneProblema,
     subRows: n.children.length > 0 ? n.children.map((c, i) => toTreeRow(c, `${id}::${i}::${c.codigo}`, false)) : undefined,
   };
 }
@@ -329,17 +361,26 @@ function buildColumns(sortBy: SortBy, sortDir: "asc" | "desc", onVerDespiece: (c
       header: () => null,
       cell: ({ row }) =>
         row.original.esRaiz ? (
-          <Button
-            variant="ghost"
-            size="sm"
-            className="gap-1.5 text-muted-foreground"
-            // Sin esto, el clic también burbujea al onClick de la <TableRow> y
-            // pliega/despliega la fila a la vez que abre el desglose completo.
-            onClick={(e) => { e.stopPropagation(); onVerDespiece(row.original.codigo); }}
-          >
-            <ListTree size={14} />
-            Ver despiece completo
-          </Button>
+          <div className="flex items-center justify-end gap-2">
+            {row.original.tieneProblema && (
+              <CircleAlert
+                size={15}
+                className="shrink-0 text-[color:var(--color-destructive)]"
+                aria-label="Hay un descuadre en algún punto del despiece completo"
+              />
+            )}
+            <Button
+              variant="ghost"
+              size="sm"
+              className="gap-1.5 text-muted-foreground"
+              // Sin esto, el clic también burbujea al onClick de la <TableRow> y
+              // pliega/despliega la fila a la vez que abre el desglose completo.
+              onClick={(e) => { e.stopPropagation(); onVerDespiece(row.original.codigo); }}
+            >
+              <ListTree size={14} />
+              Ver despiece completo
+            </Button>
+          </div>
         ) : null,
     }),
   ];
@@ -402,9 +443,12 @@ export default function CosteA1Table({ data }: { data: DespieceNode[] }) {
   };
 
   // Informe (tabla principal): podado a solo 11/12 — ver podar1112(). El desglose
-  // completo (10/13/14 incluidos) vive aparte, en el Sheet "Ver despiece completo".
+  // completo (10/13/14 incluidos) vive aparte, en el modal "Ver despiece completo".
+  // tieneProblemaInterno() se calcula SOBRE EL ÁRBOL SIN PODAR (n, no podar1112(n))
+  // — un descuadre puede estar escondido en un nivel que el informe no enseña
+  // (10/13/14), y aun así hay que avisar de que algo no cuadra dentro.
   const treeData = useMemo(
-    () => sorted.map((n, i) => toTreeRow(podar1112(n), `${i}::${n.codigo}`, true)),
+    () => sorted.map((n, i) => toTreeRow(podar1112(n), `${i}::${n.codigo}`, true, tieneProblemaInterno(n))),
     [sorted]
   );
   const columns = useMemo(() => buildColumns(sortBy, sortDir, setVerDespieceCodigo), [sortBy, sortDir]);
