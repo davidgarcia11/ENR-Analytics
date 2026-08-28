@@ -45,16 +45,11 @@ interface TreeRow {
   subRows?: TreeRow[];
 }
 
-const TIPO_COLOR: Record<string, string> = {
-  Terminado: "bg-sky-400/10 text-sky-500",
-  Semiterminado: "bg-violet-400/10 text-violet-500",
-  Semielaborado: "bg-amber-400/10 text-amber-600",
-  Comercializado: "bg-teal-400/10 text-teal-500",
-  "Materia prima": "bg-muted text-muted-foreground",
-};
-
-// Paleta fija por índice (hash del código de familia) — lista abierta, no se puede
-// tener un color por código a mano. Mismo patrón que mrp-materials-table.tsx.
+// Paleta fija por índice (hash del texto) — lista abierta, no se puede tener un
+// color por código a mano. Se reutiliza tanto para familia como para tipo/categoría
+// (F4101.IMSRP1, UDC 41/S1: 12 categorías reales, no los 4-5 valores que se asumían
+// antes por prefijo del código — ver api/coste-a1/route.ts). Mismo patrón que
+// mrp-materials-table.tsx.
 const PALETA_FAMILIA = [
   "bg-sky-400/10 text-sky-500",
   "bg-amber-400/10 text-amber-600",
@@ -318,7 +313,7 @@ function buildColumns(sortBy: SortBy, sortDir: "asc" | "desc", onVerDespiece: (c
           <span className="flex flex-col">
             <span className="flex items-center gap-2">
               <span className={cn("font-medium text-foreground", r.esRaiz && "font-semibold")}>{r.concepto}</span>
-              <Badge className={cn("font-normal", TIPO_COLOR[r.tipo])}>{r.tipo}</Badge>
+              <Badge className={cn("font-normal", colorFamilia(r.tipo))}>{r.tipo}</Badge>
             </span>
             <span className="font-mono text-xs text-muted-foreground">{r.codigo}</span>
           </span>

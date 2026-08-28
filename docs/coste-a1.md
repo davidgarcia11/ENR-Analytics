@@ -46,8 +46,8 @@ planta `10999`).
 |---|---|
 | `F3002` | Lista de materiales (BOM). `IXCMCU`=planta (`10999`), `IXKITL`=padre, `IXLITM`=componente, `IXQNTY`÷10000=cantidad, `IXUM`=unidad, `IXEFFF`/`IXEFFT`=vigencia (evaluada a **hoy**, no por mes como en MRP) |
 | `F30026` | Coste A1. `IELEDG='07'` (Coste Estándar), `IECOST='A1'` (tipo de coste), `IEMMCU=10999`, importe = `IECSL`÷10000 |
-| `F4101` | Descripción (`IMDSC1`) y familia (`IMSRP2`) — aquí se busca por **código largo** (`IMLITM`), no por el corto (`IMITM`) como en compras/MRP: evita el mapeo largo↔corto porque cada nodo del árbol puede ser un artículo distinto sin una previsión que traiga ya su código corto |
-| `prodctl.f0005` | Catálogo UDC `41/S2` — descripción real de familia, mismo patrón que compras/MRP |
+| `F4101` | Descripción (`IMDSC1`), familia (`IMSRP2`) y **categoría/tipo real** (`IMSRP1`) — aquí se busca por **código largo** (`IMLITM`), no por el corto (`IMITM`) como en compras/MRP: evita el mapeo largo↔corto porque cada nodo del árbol puede ser un artículo distinto sin una previsión que traiga ya su código corto |
+| `prodctl.f0005` | Catálogo UDC `41/S2` (familia) y `41/S1` (categoría/tipo) — descripción real, mismo patrón que compras/MRP |
 
 ### 3.1 Qué es un "artículo final" — no es simplemente "prefijo 12"
 
@@ -64,11 +64,12 @@ un "12" que normalmente se vende):
 1. **Estructural**: tiene lista de materiales propia (`IXKITL`) y **nunca** aparece
    como componente (`IXLITM`) de ninguna otra línea, en la planta `10999`. Esto
    captura el final REAL de una cadena de reprocesado.
-2. **Por tipo**: un `12` (Terminado) o `99` (Comercializado) con lista de materiales
-   propia se lista como final **siempre**, aunque también aparezca como componente
-   de otra línea — el reprocesado es una salida OCASIONAL, no la única. Ejemplo real
-   comprobado: `1210100242` se vende normalmente tal cual (su propia BOM: materia
-   prima + un "10", sin ningún "11"), pero a veces se consume como componente de
+2. **Por categoría real**: un artículo cuya categoría (`F4101.IMSRP1`) es
+   `12`/"PRODUCTO TERMINADO" y tiene lista de materiales propia se lista como final
+   **siempre**, aunque también aparezca como componente de otra línea — el
+   reprocesado es una salida OCASIONAL, no la única. Ejemplo real comprobado:
+   `1210100242` se vende normalmente tal cual (su propia BOM: materiales +
+   un "10", sin ningún "11"), pero a veces se consume como componente de
    `1110100295`, que a su vez lo consume `1110100296` (el final real de esa cadena
    de reprocesado, capturado por el caso 1). Sin el caso 2, `1210100242` quedaba
    excluido del informe por completo — solo se veía anidado dentro del despiece de
@@ -78,13 +79,35 @@ Un mismo código puede así aparecer como final por sí mismo **y** anidado dent
 despiece de otro final — no es un duplicado ni un bug, son dos hechos reales
 distintos ("si se vende tal cual" / "si se reprocesa").
 
-Los "99" entran automáticamente por el caso 2 sin caso especial en el código (mismo
-`tipoDe()` que ya resuelve el resto de tipos).
+#### 3.1.1 `tipo` — de dónde sale de verdad (no es un guess por prefijo)
 
-`tipo` de cada nodo (solo para mostrar, no afecta a la lógica de arriba): prefijo del
-código largo — `10`→Semielaborado, `11`→Semiterminado, `12`→Terminado,
-`99`→Comercializado, cualquier otro (sin lista de materiales propia, hoja del
-árbol)→Materia prima.
+Primera versión de este panel: `tipo` (y la decisión de qué es "Terminado"/qué es
+"Comercializado" en la regla de arriba) salía de adivinar por el **prefijo de 2
+dígitos del código largo** (`10`→Semielaborado, `11`→Semiterminado, `12`→Terminado,
+`99`→"Comercializado" inventado, cualquier otro→"Materia prima" por defecto).
+Pregunta directa del usuario ("¿de dónde lo sacas? hay tablas para consultar, en
+producción está el filtro") llevó a revisar `api/categories/route.ts`: el filtro
+"Categoría" de `/produccion` ya usa el campo real, `F4101.IMSRP1`, catálogo UDC
+`41/S1`. Comprobado con datos reales que el prefijo **no es fiable**:
+
+- El catálogo real tiene **12 categorías**, no las 4-5 que se asumían: además de
+  Semielaborado/Semiterminado/Terminado están Materia Prima, **Material Auxiliar**,
+  Otros Consumibles, Servicios Exteriores, Varios Venta, Variedades Materia Prima,
+  Portes y Servicios, Mejoras I+D, Proyectos I+D. No existe ninguna categoría real
+  llamada "Comercializado" — era inventada.
+- De 9 artículos con prefijo `99` usados en las listas de materiales de la planta,
+  **8 tienen `IMSRP1='12'`** (PRODUCTO TERMINADO real) y solo 1 tiene `IMSRP1='99'`
+  (PROYECTOS I+D) — el prefijo `99` no predice la categoría real en absoluto.
+- Hay excepciones sueltas en otros prefijos también (algún `13`/`14` con `IMSRP1`
+  distinto al prefijo).
+
+Ahora `tipo` sale de `F4101.IMSRP1` resuelto contra el catálogo UDC `41/S1`
+(`tipoDescMap` en `api/coste-a1/route.ts`, mismo patrón que `familiaDescMap`,
+con `capitalizarFrase()` porque el catálogo viene en MAYÚSCULAS — mismo caso que
+familia, ver `docs/compras.md` §3.2). La
+regla de "final por categoría" compara directamente contra el código `'12'`, no
+contra una etiqueta de texto. Un artículo sin fila en F4101 (no debería pasar con
+datos reales, pero por si acaso) cae en `"Sin categoría"`.
 
 ### 3.2 Corte de ciclos
 

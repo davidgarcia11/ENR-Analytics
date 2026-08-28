@@ -11,21 +11,30 @@
 //   1) Estructural: tiene lista de materiales propia (aparece como IXKITL) y NUNCA
 //      aparece como componente (IXLITM) de ninguna otra línea. Esto ya captura el
 //      final real de una cadena de reprocesado (ver caso 2).
-//   2) Por tipo: un "12" (Terminado) o "99" (Comercializado) con lista de
-//      materiales propia SIEMPRE se lista como final, aunque también aparezca como
-//      componente de otra línea — un "12" que normalmente se vende tal cual puede
-//      reprocesarse solo A VECES (confirmado en datos reales: 1210100242 se vende
-//      normalmente, pero también se consume como componente de 1110100295, que a su
-//      vez lo consume 1110100296 — la cadena de reprocesado). El reprocesado es una
-//      salida ocasional, no la única, así que el "12"/"99" original tiene que salir
-//      también por su cuenta con su propio despiece (caso 1 ya captura aparte el
-//      final de la cadena de reprocesado, 1110100296 en el ejemplo). Un mismo
-//      código puede así aparecer como final por sí mismo Y anidado dentro del
-//      despiece de otro final — no es un duplicado, son dos hechos reales
-//      distintos ("si se vende tal cual" / "si se reprocesa").
+//   2) Por tipo: un artículo cuya categoría real es "PRODUCTO TERMINADO" (ver más
+//      abajo de dónde sale) y tiene lista de materiales propia SIEMPRE se lista
+//      como final, aunque también aparezca como componente de otra línea — un "12"
+//      que normalmente se vende tal cual puede reprocesarse solo A VECES
+//      (confirmado en datos reales: 1210100242 se vende normalmente, pero también
+//      se consume como componente de 1110100295, que a su vez lo consume
+//      1110100296 — la cadena de reprocesado). El reprocesado es una salida
+//      ocasional, no la única, así que el "12" original tiene que salir también
+//      por su cuenta con su propio despiece (caso 1 ya captura aparte el final de
+//      la cadena de reprocesado, 1110100296 en el ejemplo). Un mismo código puede
+//      así aparecer como final por sí mismo Y anidado dentro del despiece de otro
+//      final — no es un duplicado, son dos hechos reales distintos ("si se vende
+//      tal cual" / "si se reprocesa").
 // - Vigencia del BOM: evaluada a HOY (no hay una fecha de previsión que ancle el
 //   panel, a diferencia de MRP) — foto del estado actual de las listas de
 //   materiales, no histórica.
+// - Tipo de artículo (Terminado/Semiterminado/.../Materia prima): NO es un guess por
+//   prefijo del código largo — es el campo real F4101.IMSRP1 ("Categoría", UDC
+//   41/S1), el mismo campo que ya usa el filtro "Categoría" de /produccion
+//   (api/categories/route.ts, field=srp1). Comprobado con datos reales que el
+//   prefijo NO es fiable del todo: casi todos los "99" (8 de 9) tienen SRP1='12'
+//   (PRODUCTO TERMINADO), no una categoría "Comercializado" que ni existe en el
+//   catálogo real — y hay excepciones sueltas en otros prefijos (13/14 con SRP1
+//   distinto al prefijo). Ver docs/coste-a1.md §3.1.
 import { NextRequest, NextResponse } from 'next/server';
 import { getDbConnection } from '@/lib/db';
 import { getDayOfYear } from '@/lib/utils';
@@ -34,15 +43,10 @@ import { getDb } from '@/lib/sqlite';
 import { verifySession } from '@/lib/auth';
 
 const PLANTA = 10999;
-const TIPO_LABEL: Record<string, string> = {
-  '10': 'Semielaborado',
-  '11': 'Semiterminado',
-  '12': 'Terminado',
-  '99': 'Comercializado',
-};
-function tipoDe(codigo: string): string {
-  return TIPO_LABEL[codigo.slice(0, 2)] || 'Materia prima';
-}
+const TIPO_TERMINADO = '12'; // F4101.IMSRP1 = '12' -> catálogo UDC 41/S1 "PRODUCTO TERMINADO"
+// UDC 41/S1 viene en MAYÚSCULAS en el catálogo (mismo caso que familia, 41/S2) —
+// mismo tratamiento sentence-case que docs/compras.md §3.2, no se muestra a gritos.
+const capitalizarFrase = (s: string) => (s.length ? s.charAt(0) + s.slice(1).toLowerCase() : s);
 
 function hoyJde(): number {
   const hoy = new Date();
@@ -51,7 +55,7 @@ function hoyJde(): number {
 
 interface BomRow { K: string; L: string; QTY: number; UM: string }
 interface BomLine { componente: string; qty: number; um: string }
-interface MetaRow { LARGO: string; DESCRIPCION: string; FAMILIA: string }
+interface MetaRow { LARGO: string; DESCRIPCION: string; FAMILIA: string; TIPO_COD: string }
 interface CostRow { LARGO: string; COSTE_RAW: number }
 
 export interface DespieceNode {
@@ -96,17 +100,31 @@ export async function GET(req: NextRequest) {
       padres.add(r.K);
     }
 
-    // C) Finales = tienen lista de materiales propia y (nunca son componente de nada
-    // O son tipo Terminado/Comercializado — ver comentario de cabecera, caso 2).
-    const finales = Array.from(padres)
-      .filter((p) => !esComponenteDeAlgo.has(p) || tipoDe(p) === 'Terminado' || tipoDe(p) === 'Comercializado')
+    // C) Categoría real (F4101.IMSRP1) de los artículos con BOM propia — hace falta
+    // ANTES de decidir los finales (caso 2 de la cabecera), no solo para mostrar.
+    const padresArr = Array.from(padres);
+    const padresPlaceholders = padresArr.map((_, i) => `:pp${i}`).join(', ');
+    const padresBinds: Record<string, string> = {};
+    padresArr.forEach((v, i) => { padresBinds[`pp${i}`] = v; });
+    const tipoPadresResult = await conn.execute(
+      `SELECT TRIM(IMLITM) AS LARGO, TRIM(IMSRP1) AS TIPO_COD FROM F4101 WHERE TRIM(IMLITM) IN (${padresPlaceholders})`,
+      padresBinds
+    );
+    const tipoPadresMap = new Map(
+      (tipoPadresResult.rows as { LARGO: string; TIPO_COD: string }[]).map((r) => [r.LARGO, r.TIPO_COD])
+    );
+
+    // D) Finales = tienen lista de materiales propia y (nunca son componente de nada
+    // O su categoría real es "PRODUCTO TERMINADO" — ver comentario de cabecera, caso 2).
+    const finales = padresArr
+      .filter((p) => !esComponenteDeAlgo.has(p) || tipoPadresMap.get(p) === TIPO_TERMINADO)
       .sort();
 
     if (finales.length === 0) {
       return NextResponse.json({ finales: [], meta: { totalFinales: 0, articulosDistintos: 0 } });
     }
 
-    // D) Construir el árbol de cada final (con corte de ciclos — un BOM real no
+    // E) Construir el árbol de cada final (con corte de ciclos — un BOM real no
     // debería tener ninguno, pero un ciclo aquí colgaría la petición si no se corta).
     interface RawNode { codigo: string; cantidad: number; um: string; children: RawNode[] }
     function construir(codigo: string, cantidad: number, um: string, visitados: Set<string>): RawNode {
@@ -122,7 +140,7 @@ export async function GET(req: NextRequest) {
     }
     const arboles = finales.map((f) => construir(f, 1, '', new Set([f])));
 
-    // E) Códigos distintos en todos los árboles (para los lookups en lote).
+    // F) Códigos distintos en todos los árboles (para los lookups en lote).
     const codigosDistintos = new Set<string>();
     function recolectar(n: RawNode) { codigosDistintos.add(n.codigo); n.children.forEach(recolectar); }
     arboles.forEach(recolectar);
@@ -131,15 +149,17 @@ export async function GET(req: NextRequest) {
     const binds: Record<string, string> = {};
     codigos.forEach((v, i) => { binds[`c${i}`] = v; });
 
-    // F) Descripción + familia (F4101, por código LARGO — evita el mapeo largo/corto).
+    // G) Descripción + familia + categoría/tipo real (F4101, por código LARGO —
+    // evita el mapeo largo/corto). IMSRP1 = categoría real (ver comentario de
+    // cabecera) — mismo campo que el filtro "Categoría" de /produccion.
     const metaResult = await conn.execute(
-      `SELECT TRIM(IMLITM) AS LARGO, TRIM(IMDSC1) AS DESCRIPCION, TRIM(IMSRP2) AS FAMILIA
+      `SELECT TRIM(IMLITM) AS LARGO, TRIM(IMDSC1) AS DESCRIPCION, TRIM(IMSRP2) AS FAMILIA, TRIM(IMSRP1) AS TIPO_COD
        FROM F4101 WHERE TRIM(IMLITM) IN (${placeholders})`,
       binds
     );
     const metaMap = new Map((metaResult.rows as MetaRow[]).map((r) => [r.LARGO, r]));
 
-    // G) Coste A1 (F30026), por código LARGO.
+    // H) Coste A1 (F30026), por código LARGO.
     const costResult = await conn.execute(
       `SELECT TRIM(IELITM) AS LARGO, IECSL AS COSTE_RAW
        FROM F30026
@@ -149,16 +169,24 @@ export async function GET(req: NextRequest) {
     );
     const costMap = new Map((costResult.rows as CostRow[]).map((r) => [r.LARGO, r.COSTE_RAW / 10000]));
 
-    // H) Catálogo de familia (UDC 41/S2) — mismo patrón que /api/compras y /api/mrp.
+    // I) Catálogo de familia (UDC 41/S2) y de categoría/tipo (UDC 41/S1) — mismo
+    // patrón que /api/compras y /api/mrp. Ambos vienen en MAYÚSCULAS del catálogo
+    // (docs/compras.md §3.2), de ahí capitalizarFrase().
     const familiaCatalogResult = await conn.execute(
       `SELECT TRIM(DRKY) AS CODE, TRIM(DRDL01) AS DESCRIPCION FROM prodctl.f0005 WHERE TRIM(DRSY) = '41' AND TRIM(DRRT) = 'S2' AND TRIM(DRKY) IS NOT NULL`
     );
     const familiaDescMap = new Map(
-      (familiaCatalogResult.rows as { CODE: string; DESCRIPCION: string }[]).map((r) => [r.CODE, r.DESCRIPCION])
+      (familiaCatalogResult.rows as { CODE: string; DESCRIPCION: string }[]).map((r) => [r.CODE, capitalizarFrase(r.DESCRIPCION)])
+    );
+    const tipoCatalogResult = await conn.execute(
+      `SELECT TRIM(DRKY) AS CODE, TRIM(DRDL01) AS DESCRIPCION FROM prodctl.f0005 WHERE TRIM(DRSY) = '41' AND TRIM(DRRT) = 'S1' AND TRIM(DRKY) IS NOT NULL`
+    );
+    const tipoDescMap = new Map(
+      (tipoCatalogResult.rows as { CODE: string; DESCRIPCION: string }[]).map((r) => [r.CODE, capitalizarFrase(r.DESCRIPCION)])
     );
 
-    // I) RawNode -> DespieceNode, resolviendo meta/coste/familia. Hijos ordenados por
-    // cantidad descendente (los componentes más relevantes primero).
+    // J) RawNode -> DespieceNode, resolviendo meta/coste/familia/tipo. Hijos
+    // ordenados por cantidad descendente (los componentes más relevantes primero).
     function enriquecer(n: RawNode): DespieceNode {
       const meta = metaMap.get(n.codigo);
       const familia = meta?.FAMILIA || '';
@@ -167,7 +195,7 @@ export async function GET(req: NextRequest) {
         descripcion: meta?.DESCRIPCION || '',
         familia,
         familiaDescripcion: familiaDescMap.get(familia) || familia || 'Sin familia',
-        tipo: tipoDe(n.codigo),
+        tipo: (meta?.TIPO_COD && tipoDescMap.get(meta.TIPO_COD)) || 'Sin categoría',
         costeA1: costMap.get(n.codigo) ?? null,
         cantidad: Math.round(n.cantidad * 1000) / 1000,
         um: n.um,
