@@ -46,7 +46,7 @@ planta `10999`).
 |---|---|
 | `F3002` | Lista de materiales (BOM). `IXCMCU`=planta (`10999`), `IXKITL`=padre, `IXLITM`=componente, `IXQNTY`÷10000=cantidad, `IXUM`=unidad, `IXEFFF`/`IXEFFT`=vigencia (evaluada a **hoy**, no por mes como en MRP) |
 | `F30026` | Coste A1. `IELEDG='07'` (Coste Estándar), `IECOST='A1'` (tipo de coste), `IEMMCU=10999`, importe = `IECSL`÷10000 |
-| `F4101` | Descripción (`IMDSC1`), familia (`IMSRP2`) y **categoría/tipo real** (`IMSRP1`) — aquí se busca por **código largo** (`IMLITM`), no por el corto (`IMITM`) como en compras/MRP: evita el mapeo largo↔corto porque cada nodo del árbol puede ser un artículo distinto sin una previsión que traiga ya su código corto |
+| `F4101` | Descripción (`IMDSC1`), familia (`IMSRP2`), **categoría/tipo real** (`IMSRP1`) y **obsoleto** (`IMSTKT = 'O'`, mismo campo que `/caducados`) — aquí se busca por **código largo** (`IMLITM`), no por el corto (`IMITM`) como en compras/MRP: evita el mapeo largo↔corto porque cada nodo del árbol puede ser un artículo distinto sin una previsión que traiga ya su código corto |
 | `prodctl.f0005` | Catálogo UDC `41/S2` (familia) y `41/S1` (categoría/tipo) — descripción real, mismo patrón que compras/MRP |
 
 ### 3.1 Qué es un "artículo final" — no es simplemente "prefijo 12"
@@ -161,6 +161,24 @@ descolocando el orden por cantidad descendente que ya viene calculado desde la A
 **Sin selector de fecha**: a diferencia de compras/MRP, este panel no depende de un
 rango — es una foto del estado vigente hoy. El único control de recarga es el botón
 "Recalcular".
+
+#### 4.1.1 Obsoletos — ocultos por defecto, botón para verlos
+
+Pregunta directa del usuario: "tengo que quitar los artículos obsoletos, no sé si
+lo tenemos en cuenta". Ya existía el campo en el proyecto — `F4101.IMSTKT = 'O'`,
+mismo campo que usa `/caducados` (`api/caducados/route.ts`) para el maestro de
+artículo (no confundir con stock/palet obsoleto, que es un concepto distinto sobre
+F41021). No se usaba en ningún panel de la familia JDE (`/produccion`, `/compras`,
+MRP, coste-a1) hasta ahora.
+
+La API (`api/coste-a1/route.ts`) siempre devuelve **todos** los finales, con el
+flag `DespieceNode.obsoleto`. El filtrado es en el frontend, mismo patrón que
+búsqueda/familia: ocultos por defecto (pedido explícito: "no quiero que aparezcan
+los O"), con un botón "Mostrar obsoletos (N)" en la barra de filtros que los revela
+con un badge rojo "Obsoleto" junto al tipo — el botón solo aparece si hay al menos
+uno oculto (`obsoletosOcultos > 0`). Alcance: solo afecta a qué **finales** se
+listan; un artículo obsoleto que aparezca como *componente* dentro del despiece de
+un final activo no se toca (sigue siendo parte real de esa receta).
 
 ### 4.2 Verificación — "Ver despiece completo" (Dialog centrado)
 

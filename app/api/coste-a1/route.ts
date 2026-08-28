@@ -35,6 +35,10 @@
 //   (PRODUCTO TERMINADO), no una categoría "Comercializado" que ni existe en el
 //   catálogo real — y hay excepciones sueltas en otros prefijos (13/14 con SRP1
 //   distinto al prefijo). Ver docs/coste-a1.md §3.1.
+// - Obsoletos: F4101.IMSTKT = 'O' (mismo campo que ya usa /caducados). La API
+//   siempre devuelve TODOS los finales con el flag `obsoleto` — el filtrado
+//   (ocultos por defecto, botón "Mostrar obsoletos" para verlos) es en el
+//   frontend, igual que el resto de filtros de esta tabla (búsqueda, familia).
 import { NextRequest, NextResponse } from 'next/server';
 import { getDbConnection } from '@/lib/db';
 import { getDayOfYear } from '@/lib/utils';
@@ -55,7 +59,7 @@ function hoyJde(): number {
 
 interface BomRow { K: string; L: string; QTY: number; UM: string }
 interface BomLine { componente: string; qty: number; um: string }
-interface MetaRow { LARGO: string; DESCRIPCION: string; FAMILIA: string; TIPO_COD: string }
+interface MetaRow { LARGO: string; DESCRIPCION: string; FAMILIA: string; TIPO_COD: string; STKT: string }
 interface CostRow { LARGO: string; COSTE_RAW: number }
 
 export interface DespieceNode {
@@ -67,6 +71,7 @@ export interface DespieceNode {
   tipoCod: string; // código crudo de F4101.IMSRP1 ('10'/'11'/'12'/...) — para lógica
   // (podar1112 en el frontend), nunca comparar por el texto de `tipo` (cambia si
   // cambia el catálogo).
+  obsoleto: boolean; // F4101.IMSTKT = 'O' — mismo campo que ya usa /caducados
   costeA1: number | null;
   cantidad: number; // cantidad de este artículo por unidad de su padre directo (1 en la raíz)
   um: string;
@@ -152,11 +157,12 @@ export async function GET(req: NextRequest) {
     const binds: Record<string, string> = {};
     codigos.forEach((v, i) => { binds[`c${i}`] = v; });
 
-    // G) Descripción + familia + categoría/tipo real (F4101, por código LARGO —
-    // evita el mapeo largo/corto). IMSRP1 = categoría real (ver comentario de
-    // cabecera) — mismo campo que el filtro "Categoría" de /produccion.
+    // G) Descripción + familia + categoría/tipo real + obsoleto (F4101, por código
+    // LARGO — evita el mapeo largo/corto). IMSRP1 = categoría real (ver comentario
+    // de cabecera) — mismo campo que el filtro "Categoría" de /produccion. IMSTKT =
+    // 'O' -> obsoleto, mismo campo que ya usa /caducados (api/caducados/route.ts).
     const metaResult = await conn.execute(
-      `SELECT TRIM(IMLITM) AS LARGO, TRIM(IMDSC1) AS DESCRIPCION, TRIM(IMSRP2) AS FAMILIA, TRIM(IMSRP1) AS TIPO_COD
+      `SELECT TRIM(IMLITM) AS LARGO, TRIM(IMDSC1) AS DESCRIPCION, TRIM(IMSRP2) AS FAMILIA, TRIM(IMSRP1) AS TIPO_COD, TRIM(IMSTKT) AS STKT
        FROM F4101 WHERE TRIM(IMLITM) IN (${placeholders})`,
       binds
     );
@@ -200,6 +206,7 @@ export async function GET(req: NextRequest) {
         familiaDescripcion: familiaDescMap.get(familia) || familia || 'Sin familia',
         tipo: (meta?.TIPO_COD && tipoDescMap.get(meta.TIPO_COD)) || 'Sin categoría',
         tipoCod: meta?.TIPO_COD || '',
+        obsoleto: meta?.STKT === 'O',
         costeA1: costMap.get(n.codigo) ?? null,
         cantidad: Math.round(n.cantidad * 1000) / 1000,
         um: n.um,

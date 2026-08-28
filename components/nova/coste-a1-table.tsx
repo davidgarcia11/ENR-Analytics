@@ -14,7 +14,7 @@ import {
   getCoreRowModel,
   getExpandedRowModel,
 } from "@tanstack/react-table";
-import { ArrowDown, ArrowUp, CircleAlert, CircleCheck, ChevronDown, ChevronRight, ListTree, SearchX } from "lucide-react";
+import { ArrowDown, ArrowUp, CircleAlert, CircleCheck, ChevronDown, ChevronRight, Eye, EyeOff, ListTree, SearchX } from "lucide-react";
 import { Input } from "@/components/nova/ui/input";
 import { Badge } from "@/components/nova/ui/badge";
 import { Button } from "@/components/nova/ui/button";
@@ -39,6 +39,7 @@ interface TreeRow {
   cantidad: number;
   um: string;
   esRaiz: boolean;
+  obsoleto: boolean;
   // Solo se rellena en la fila raíz — ¿hay algún descuadre local en cualquier punto
   // del árbol COMPLETO (sin podar), no solo en lo que enseña el informe (11/12)?
   tieneProblema?: boolean;
@@ -287,6 +288,7 @@ function toTreeRow(n: DespieceNode, id: string, esRaiz: boolean, tieneProblema?:
     cantidad: n.cantidad,
     um: n.um,
     esRaiz,
+    obsoleto: n.obsoleto,
     tieneProblema,
     subRows: n.children.length > 0 ? n.children.map((c, i) => toTreeRow(c, `${id}::${i}::${c.codigo}`, false)) : undefined,
   };
@@ -318,6 +320,7 @@ function buildColumns(sortBy: SortBy, sortDir: "asc" | "desc", onVerDespiece: (c
             <span className="flex items-center gap-2">
               <span className={cn("font-medium text-foreground", r.esRaiz && "font-semibold")}>{r.concepto}</span>
               <Badge className={cn("font-normal", colorFamilia(r.tipo))}>{r.tipo}</Badge>
+              {r.obsoleto && <Badge variant="destructive" className="font-normal">Obsoleto</Badge>}
             </span>
             <span className="font-mono text-xs text-muted-foreground">{r.codigo}</span>
           </span>
@@ -388,6 +391,9 @@ function buildColumns(sortBy: SortBy, sortDir: "asc" | "desc", onVerDespiece: (c
 export default function CosteA1Table({ data }: { data: DespieceNode[] }) {
   const [search, setSearch] = useState("");
   const [familia, setFamilia] = useState("__todas__");
+  // Ocultos por defecto — pedido explícito: "no quiero que aparezcan los O, que
+  // haya un botón que se pueda mostrar los Obsoletos si quieren".
+  const [mostrarObsoletos, setMostrarObsoletos] = useState(false);
   const [sortBy, setSortBy] = useState<SortBy>("coste");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
   // Código del final cuyo despiece completo (sin podar) se ve en el modal — no el
@@ -413,14 +419,17 @@ export default function CosteA1Table({ data }: { data: DespieceNode[] }) {
     return Array.from(map.entries()).sort((a, b) => a[1].localeCompare(b[1]));
   }, [data]);
 
+  const obsoletosOcultos = useMemo(() => data.filter((n) => n.obsoleto).length, [data]);
+
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
     return data.filter((n) => {
       const matchQ = !q || n.codigo.toLowerCase().includes(q) || n.descripcion.toLowerCase().includes(q);
       const matchFamilia = familia === "__todas__" || n.familia === familia;
-      return matchQ && matchFamilia;
+      const matchObsoleto = mostrarObsoletos || !n.obsoleto;
+      return matchQ && matchFamilia && matchObsoleto;
     });
-  }, [data, search, familia]);
+  }, [data, search, familia, mostrarObsoletos]);
 
   // Orden manual del nivel RAÍZ únicamente — getSortedRowModel de TanStack también
   // reordenaría los hijos de cada árbol por el mismo criterio, descolocando el orden
@@ -487,6 +496,17 @@ export default function CosteA1Table({ data }: { data: DespieceNode[] }) {
             ))}
           </SelectContent>
         </Select>
+        {obsoletosOcultos > 0 && (
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-8 gap-1.5 text-muted-foreground"
+            onClick={() => setMostrarObsoletos((v) => !v)}
+          >
+            {mostrarObsoletos ? <EyeOff size={14} /> : <Eye size={14} />}
+            {mostrarObsoletos ? "Ocultar" : "Mostrar"} obsoletos ({obsoletosOcultos})
+          </Button>
+        )}
         <span className="text-sm text-muted-foreground">{filtered.length} de {data.length} artículos finales</span>
       </div>
 
