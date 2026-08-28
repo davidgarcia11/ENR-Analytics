@@ -64,6 +64,9 @@ export interface DespieceNode {
   familia: string;
   familiaDescripcion: string;
   tipo: string;
+  tipoCod: string; // código crudo de F4101.IMSRP1 ('10'/'11'/'12'/...) — para lógica
+  // (podar1112 en el frontend), nunca comparar por el texto de `tipo` (cambia si
+  // cambia el catálogo).
   costeA1: number | null;
   cantidad: number; // cantidad de este artículo por unidad de su padre directo (1 en la raíz)
   um: string;
@@ -196,6 +199,7 @@ export async function GET(req: NextRequest) {
         familia,
         familiaDescripcion: familiaDescMap.get(familia) || familia || 'Sin familia',
         tipo: (meta?.TIPO_COD && tipoDescMap.get(meta.TIPO_COD)) || 'Sin categoría',
+        tipoCod: meta?.TIPO_COD || '',
         costeA1: costMap.get(n.codigo) ?? null,
         cantidad: Math.round(n.cantidad * 1000) / 1000,
         um: n.um,

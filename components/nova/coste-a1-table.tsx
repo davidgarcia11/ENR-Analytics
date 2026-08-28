@@ -81,11 +81,15 @@ function euros(v: number): string {
 // envases/etiquetas/materia prima (10, 13, 14...). Poda recursiva por TIPO, no por
 // profundidad: una cadena 12 → 11 → 11 sigue viéndose entera, pero en cuanto un nodo
 // no es 11/12 se corta ahí (y con él, todo lo que cuelgue debajo).
+// Compara por `tipoCod` (código real de F4101.IMSRP1: '11'/'12'), NUNCA por el texto
+// de `tipo` — ese texto sale del catálogo UDC 41/S1 y puede no ser literalmente
+// "Semiterminado"/"Terminado" (bug real: con el texto la poda dejaba de encontrar
+// coincidencias en cuanto el tipo pasó a resolverse desde el catálogo).
 function podar1112(n: DespieceNode): DespieceNode {
   return {
     ...n,
     children: n.children
-      .filter((c) => c.tipo === "Semiterminado" || c.tipo === "Terminado")
+      .filter((c) => c.tipoCod === "11" || c.tipoCod === "12")
       .map(podar1112),
   };
 }

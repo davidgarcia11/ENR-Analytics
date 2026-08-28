@@ -124,11 +124,20 @@ BOM real no debería tener ciclos, pero uno los colgaría la petición si no se 
 El usuario pidió explícitamente que el informe no enseñe más que artículos tipo
 "11"/"12" — nada de envases/etiquetas/materia prima (10, 13, 14...) ni "10". La tabla
 principal usa `podar1112()` (`coste-a1-table.tsx`): copia el árbol de cada final
-filtrando recursivamente sus `children` a solo `tipo === "Semiterminado" || tipo ===
-"Terminado"`. Es una poda **por tipo, no por profundidad** — una cadena
-`12 → 11 → 11` se ve entera; en cuanto un nodo no es 11/12 se corta ahí (y con él,
-todo lo que cuelgue debajo, aunque más abajo hubiera otro 11 — no se espera ese caso
-en la práctica, pero si apareciera quedaría oculto del informe a propósito).
+filtrando recursivamente sus `children` a solo `tipoCod === "11" || tipoCod ===
+"12"`. Es una poda **por tipo, no por profundidad** — una cadena `12 → 11 → 11` se ve
+entera; en cuanto un nodo no es 11/12 se corta ahí (y con él, todo lo que cuelgue
+debajo, aunque más abajo hubiera otro 11 — no se espera ese caso en la práctica,
+pero si apareciera quedaría oculto del informe a propósito).
+
+**Compara por `tipoCod` (código crudo de `F4101.IMSRP1`), nunca por el texto de
+`tipo`** — bug real: cuando `tipo` pasó a resolverse contra el catálogo UDC `41/S1`
+(§3.1.1), el texto real es "Producto terminado"/"Producto semiterminado" (con
+"Producto" delante), no "Terminado"/"Semiterminado" como antes por prefijo —
+`podar1112()` comparaba contra esas cadenas literales y dejó de encontrar
+coincidencias de la noche a la mañana: el informe se quedó sin nada desplegable.
+`tipoCod` existe justo para esto — la lógica no debe depender de un texto que sale
+de un catálogo y puede cambiar de redacción.
 
 Tabla jerárquica con `subRows` de **profundidad variable** (no fija como los 3
 niveles de compras o los 2 de MRP) — la API ya devuelve el árbol completo anidado,
