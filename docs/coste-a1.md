@@ -57,13 +57,29 @@ como componente de otro artículo (otro "11" o "12") para revenderlo transformad
 Confirmado en datos reales: de 256 artículos "12" con lista de materiales propia,
 1 aparece también como componente de otra línea.
 
-Por eso la regla para decidir "esto es un final, se vende tal cual" es **estructural**,
-no por prefijo: un artículo es final si tiene lista de materiales propia (aparece
-como `IXKITL`) y **nunca** aparece como componente (`IXLITM`) de ninguna otra línea,
-en la planta `10999`. Así entran automáticamente los "99" (producto comercializado)
-si califican, sin caso especial — y el "12" reprocesado del ejemplo queda
-correctamente excluido de la lista de finales (su árbol se ve colgando del artículo
-que sí lo consume).
+La regla de "esto es un final" combina DOS casos, no solo el estructural (corregido
+tras revisar el ejemplo real con el usuario — la primera versión excluía por error
+un "12" que normalmente se vende):
+
+1. **Estructural**: tiene lista de materiales propia (`IXKITL`) y **nunca** aparece
+   como componente (`IXLITM`) de ninguna otra línea, en la planta `10999`. Esto
+   captura el final REAL de una cadena de reprocesado.
+2. **Por tipo**: un `12` (Terminado) o `99` (Comercializado) con lista de materiales
+   propia se lista como final **siempre**, aunque también aparezca como componente
+   de otra línea — el reprocesado es una salida OCASIONAL, no la única. Ejemplo real
+   comprobado: `1210100242` se vende normalmente tal cual (su propia BOM: materia
+   prima + un "10", sin ningún "11"), pero a veces se consume como componente de
+   `1110100295`, que a su vez lo consume `1110100296` (el final real de esa cadena
+   de reprocesado, capturado por el caso 1). Sin el caso 2, `1210100242` quedaba
+   excluido del informe por completo — solo se veía anidado dentro del despiece de
+   `1110100296`, nunca por su cuenta.
+
+Un mismo código puede así aparecer como final por sí mismo **y** anidado dentro del
+despiece de otro final — no es un duplicado ni un bug, son dos hechos reales
+distintos ("si se vende tal cual" / "si se reprocesa").
+
+Los "99" entran automáticamente por el caso 2 sin caso especial en el código (mismo
+`tipoDe()` que ya resuelve el resto de tipos).
 
 `tipo` de cada nodo (solo para mostrar, no afecta a la lógica de arriba): prefijo del
 código largo — `10`→Semielaborado, `11`→Semiterminado, `12`→Terminado,

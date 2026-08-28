@@ -7,13 +7,22 @@
 // Lógica confirmada con el usuario (ver ClickUp #869eq7vnp):
 // - Coste A1: F30026, IELEDG='07' (Coste Estándar), IECOST='A1', IEMMCU=10999,
 //   importe = IECSL / 10000.
-// - "Artículo final" (el que se vende) NO es simplemente "prefijo 12": un artículo
-//   ya fabricado (12, o incluso 99) puede reprocesarse y consumirse como componente
-//   de OTRO artículo (confirmado en datos reales: 1 caso de 256 "12"). Por eso la
-//   regla es estructural, no por prefijo: un artículo es "final" si tiene lista de
-//   materiales propia (aparece como IXKITL) y NUNCA aparece como componente
-//   (IXLITM) de ninguna otra línea, en la planta 10999. Así entran también los "99"
-//   (producto comercializado) si califican, sin caso especial.
+// - "Artículo final" (el que se vende) — dos casos, no uno:
+//   1) Estructural: tiene lista de materiales propia (aparece como IXKITL) y NUNCA
+//      aparece como componente (IXLITM) de ninguna otra línea. Esto ya captura el
+//      final real de una cadena de reprocesado (ver caso 2).
+//   2) Por tipo: un "12" (Terminado) o "99" (Comercializado) con lista de
+//      materiales propia SIEMPRE se lista como final, aunque también aparezca como
+//      componente de otra línea — un "12" que normalmente se vende tal cual puede
+//      reprocesarse solo A VECES (confirmado en datos reales: 1210100242 se vende
+//      normalmente, pero también se consume como componente de 1110100295, que a su
+//      vez lo consume 1110100296 — la cadena de reprocesado). El reprocesado es una
+//      salida ocasional, no la única, así que el "12"/"99" original tiene que salir
+//      también por su cuenta con su propio despiece (caso 1 ya captura aparte el
+//      final de la cadena de reprocesado, 1110100296 en el ejemplo). Un mismo
+//      código puede así aparecer como final por sí mismo Y anidado dentro del
+//      despiece de otro final — no es un duplicado, son dos hechos reales
+//      distintos ("si se vende tal cual" / "si se reprocesa").
 // - Vigencia del BOM: evaluada a HOY (no hay una fecha de previsión que ancle el
 //   panel, a diferencia de MRP) — foto del estado actual de las listas de
 //   materiales, no histórica.
@@ -87,8 +96,11 @@ export async function GET(req: NextRequest) {
       padres.add(r.K);
     }
 
-    // C) Finales = tienen lista de materiales propia y nunca son componente de nada.
-    const finales = Array.from(padres).filter((p) => !esComponenteDeAlgo.has(p)).sort();
+    // C) Finales = tienen lista de materiales propia y (nunca son componente de nada
+    // O son tipo Terminado/Comercializado — ver comentario de cabecera, caso 2).
+    const finales = Array.from(padres)
+      .filter((p) => !esComponenteDeAlgo.has(p) || tipoDe(p) === 'Terminado' || tipoDe(p) === 'Comercializado')
+      .sort();
 
     if (finales.length === 0) {
       return NextResponse.json({ finales: [], meta: { totalFinales: 0, articulosDistintos: 0 } });
