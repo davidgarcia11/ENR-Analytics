@@ -4,7 +4,7 @@
 // VIGENTE HOY, no histórica por mes (a diferencia de MRP). Ver ClickUp #869eq7vnp.
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { Download, Loader2, RefreshCw } from "lucide-react";
@@ -13,7 +13,8 @@ import Header from "@/components/shadcn-space/blocks/topbar-02/header";
 import { type ThemeMode } from "@/components/nova/mode-toggle";
 import { NovaPortalProvider } from "@/components/nova/portal-container";
 import Statistics from "@/components/shadcn-space/blocks/statistics-04/statistics";
-import CosteA1Table, { type DespieceNode } from "@/components/nova/coste-a1-table";
+import CosteA1Table, { CosteA1FilterBar, useCosteA1Filters, type DespieceNode } from "@/components/nova/coste-a1-table";
+import CosteA1DesglosePanel from "@/components/nova/coste-a1-desglose-panel";
 import { Button } from "@/components/nova/ui/button";
 import { Toaster } from "@/components/nova/ui/sonner";
 
@@ -65,6 +66,9 @@ export default function CosteA1Page() {
 
   const [data, setData] = useState<CosteA1Response | null>(null);
   const [loading, setLoading] = useState(false);
+  // Artículo final elegido en la tabla (clic en una fila raíz) — su desglose se
+  // ve en el panel de la derecha, ver components/nova/coste-a1-desglose-panel.tsx.
+  const [selectedCodigo, setSelectedCodigo] = useState<string | null>(null);
 
   const fetchData = useCallback(async () => {
     setLoading(true);
@@ -77,6 +81,11 @@ export default function CosteA1Page() {
       }
       const json: CosteA1Response = await res.json();
       setData(json);
+      // Selecciona el primer artículo final por defecto (o lo mantiene si sigue
+      // presente tras un Recalcular).
+      setSelectedCodigo((actual) =>
+        actual && json.finales.some((n) => n.codigo === actual) ? actual : json.finales[0]?.codigo ?? null
+      );
       toast.success(`${json.finales.length} artículos finales calculados`, { id });
     } catch (err) {
       console.error("Error cargando coste A1:", err);
@@ -115,6 +124,16 @@ export default function CosteA1Page() {
     XLSX.writeFile(wb, `Coste_A1_${new Date().toISOString().slice(0, 10)}.xlsx`);
   };
 
+  const selectedNode = useMemo(
+    () => (data && selectedCodigo ? data.finales.find((n) => n.codigo === selectedCodigo) ?? null : null),
+    [data, selectedCodigo]
+  );
+
+  // Estado de filtros de la tabla (buscador, familia, obsoletos) — se muestra arriba
+  // de los KPI (junto a Recalcular/Exportar, igual que /compras) pero lo consume la
+  // tabla, más abajo; de ahí el hook compartido en vez de tenerlo dentro de la tabla.
+  const filtros = useCosteA1Filters(data?.finales ?? []);
+
   const portalContainerRef = useRef<HTMLDivElement>(null);
 
   const conCoste = data ? data.finales.filter((n) => n.costeA1 != null) : [];
@@ -133,13 +152,15 @@ export default function CosteA1Page() {
       <NovaPortalProvider container={portalContainerRef}>
         <div className="md:m-2 md:rounded-xl md:outline md:outline-border md:shadow-sm md:overflow-hidden bg-background">
           <Header user={sessionUser} onLogout={logout} mode={mode} onModeChange={setMode} />
+          {/* Mismo ancho que el resto de paneles (max-w-7xl, igual que /compras) */}
           <main className="mx-auto max-w-7xl space-y-4 p-4 md:p-6">
-            <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="flex flex-wrap items-center gap-2">
               <Button size="sm" variant="outline" className="gap-1.5" onClick={() => fetchData()} disabled={loading}>
                 {loading ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
                 Recalcular
               </Button>
-              <Button size="sm" className="gap-1.5" onClick={exportToExcel} disabled={!data || data.finales.length === 0}>
+              <CosteA1FilterBar filtros={filtros} />
+              <Button size="sm" className="ml-auto gap-1.5" onClick={exportToExcel} disabled={!data || data.finales.length === 0}>
                 <Download size={14} />
                 Exportar
               </Button>
@@ -150,7 +171,20 @@ export default function CosteA1Page() {
             ) : (
               <>
                 <Statistics data={stats} columns={4} />
-                <CosteA1Table data={data.finales} />
+                {/* Vuelta a 2/3-1/3: el ancho exterior de tabla/panel no debía
+                    tocarse ("el componente completo fuera igual de grande, ni
+                    más ni menos") — probar 3/5-2/5 dejaba la tabla sin verse
+                    entera sin deslizar. El sitio de más para el desglose sale
+                    de reducir el margen INTERNO del panel, no de ensancharlo
+                    por fuera — ver CosteA1DesglosePanel. */}
+                <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
+                  <div className="lg:col-span-2">
+                    <CosteA1Table filtros={filtros} selectedCodigo={selectedCodigo} onSelectCodigo={setSelectedCodigo} />
+                  </div>
+                  <div className="lg:col-span-1">
+                    <CosteA1DesglosePanel node={selectedNode} />
+                  </div>
+                </div>
               </>
             )}
           </main>
