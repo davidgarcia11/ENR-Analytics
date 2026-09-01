@@ -34,9 +34,10 @@ planta `10999`).
 
 | Archivo | Descripción |
 |---|---|
-| `app/coste-a1/page.tsx` | Página cliente — KPIs, botón Recalcular/Exportar, layout a 2 columnas (tabla + panel de desglose) |
-| `app/api/coste-a1/route.ts` | API Route — construye los árboles y resuelve coste/descripción/familia |
-| `components/nova/coste-a1-table.tsx` | Tabla jerárquica (columna izquierda, TanStack Table v8, `subRows` de profundidad variable) + buscador + filtro de familia + orden por coste/nombre + selección del artículo que se ve en el panel de desglose |
+| `app/coste-a1/page.tsx` | Página cliente — KPIs, botón Recalcular/Exportar, layout a 2 columnas (tabla + panel de desglose), pide `startDate`/`endDate` a la API con el `monthRange` de los filtros |
+| `app/api/coste-a1/route.ts` | API Route — construye los árboles, resuelve coste/descripción/familia y la producción real por final en el rango de fechas pedido (ver §3.3) |
+| `components/nova/coste-a1-table.tsx` | Tabla jerárquica (columna izquierda, TanStack Table v8, `subRows` de profundidad variable) + buscador + filtro de familia + `MonthRangePicker`/"Filtrar" + orden por coste/nombre + selección del artículo que se ve en el panel de desglose |
+| `components/nova/month-range-picker.tsx` | Selector de rango de meses (reutilizado tal cual de `/compras`) — usado aquí para pedir la producción real |
 | `components/nova/coste-a1-desglose-panel.tsx` | Panel de desglose (columna derecha) — selector plano (`tabs-08`) con el artículo final + cada "11"/"10" del árbol completo por código, detalle (descripción/tipo/Coincide + lista de materiales) del nodo elegido (ver §4.2) |
 | `components/nova/coste-a1-shared.tsx` | Helpers compartidos entre tabla y panel: formateo (`euros`), poda 11/12 (`podar1112`), comprobación de coste (`estadoLocal`, `estadoSubarbol`, `Descuadre` — ver §4.2.4) |
 
@@ -117,6 +118,53 @@ datos reales, pero por si acaso) cae en `"Sin categoría"`.
 BOM real no debería tener ciclos, pero uno los colgaría la petición si no se corta
 (mismo patrón que el `explode()` de `/api/mrp`).
 
+### 3.3 Producción real por artículo final, en un rango de fechas
+
+Pedido explícito: "hay que sacar un filtro por meses, y sacar la producción de
+cada artículo padre, en ese rango, esto ya lo hacemos en el panel de producción,
+de ahí sabrás qué campos de fechas usar". Mismas tablas que `/api/production`
+(`F55TAR12` → `F4801` → `F4111`), pero simplificado: **solo para los finales**
+(no para cada nodo del árbol), agregado directamente por artículo (no por
+orden/turno/hora — no hace falta ese desglose aquí) y **sin** el filtro de
+merma (`ILDCT='IS'`) — solo producción real, `ILDCT='IC'`.
+
+| Tabla | Uso |
+|---|---|
+| `F55TAR12` | Tareas de producción — `TODOCO`=orden, `TO55TAREA`=fecha (formato custom, `MOD(TO55TAREA,100000)` compara solo año+día juliano, sin el prefijo de sub-línea). Deduplicado (`MAX(TO55TAREA) GROUP BY TODOCO, MOD(...)`) — mismo motivo que en `/api/production`: registros antiguos/nuevos pueden coexistir para la misma orden+fecha |
+| `F4801` | Orden de fabricación — `WADOCO`=orden, `WAAITM`=artículo **LARGO** (mismo código que usa el resto de este panel, `F4101.IMLITM` — comprobado que son el mismo espacio de códigos), `WAITM`=artículo **CORTO** (para cruzar con F41002/F4101.IMUOM1) |
+| `F4111` | Item Ledger — `ILDOC`=orden, `ILTRDJ`=fecha del movimiento, `ILDCT='IC'`=producción real, `ILTRQT`÷100=cantidad, `ILTRUM`=unidad del movimiento |
+| `F41002` | Conversión de unidades — `UMITM`=artículo CORTO, `UMUM`→`UMRUM` con factor `UMCONV`÷10000000 |
+
+**Cruce código largo↔corto**: los finales se identifican por código LARGO
+(`IMLITM`, ver §3), pero F4801/F4111/F41002 trabajan con código CORTO
+(`WAITM`/`IMITM`). La consulta de metadatos (paso G) ya pide `IMLITM` para
+TODOS los códigos del árbol — se le añade `IMITM` a la misma consulta (gratis,
+mismo viaje a Oracle) y solo se usa para los finales al cruzar con producción.
+
+**Conversión de unidades — duplicada a propósito, no compartida.** Un mismo
+artículo puede tener producción registrada en más de una UM (kg, unidades...)
+dentro del rango — hace falta convertir todo a una unidad común (la primaria
+del artículo, `F4101.IMUOM1`) antes de sumar, con la misma búsqueda BFS de
+hasta 3 niveles que ya usa `/api/production` (`getConversionFactor`). Esa
+lógica está **copiada**, no importada de un módulo compartido: `/api/production`
+es "el endpoint más complejo" de la app (CLAUDE.md pide especial cuidado al
+tocarlo) y esta consulta no necesitaba modificarlo para nada — la duplicación
+(~35 líneas) es el precio de no arriesgar ese archivo.
+
+**Rango de fechas**: `startDate`/`endDate` ('YYYY-MM-DD'), mismo formato y
+mismo default (mes en curso) que `/api/compras`. El frontend nunca manda días
+sueltos — el selector (`MonthRangePicker`, componente ya existente,
+reutilizado tal cual de `/compras`) solo deja elegir MESES completos. La
+conversión a formato JDE (`fechaAJdeProduccion()`) NO lleva el prefijo
+`100000 +` que sí lleva `hoyJde()` (usado para la vigencia del BOM) — se
+compara contra `MOD(TO55TAREA, 100000)`, que ya le quita ese mismo prefijo a
+la fecha de producción, así que el rango tampoco debe llevarlo (si lo llevara,
+la comparación nunca cuadraría).
+
+`produccion` (número, en la unidad primaria del artículo) solo se rellena en
+la raíz de `DespieceNode` — `undefined` en el resto del árbol, no se pide
+desglose de producción por componente.
+
 ---
 
 ## 4. UI
@@ -192,14 +240,17 @@ versiones anteriores de este documento ya no existen — la familia se puede fil
 desde el desplegable de la barra de herramientas, y el desglose se abre por
 selección de fila (§4.0), no por botón.
 
-**Producción, Coste Real y Desviación son valores ficticios** — pedido explícito del
-usuario ("rellena con datos ficticios porque no lo sé todavía"): Producción se
-muestra fija a `0`, Coste Real igual al Coste Teórico y Desviación en `0,0 %`, sin
-ninguna variación aleatoria que pudiera parecer un análisis real. Un aviso en texto
-gris bajo la barra de herramientas lo deja explícito. Cuando exista una fuente real
-para estos tres campos, sustituir el cálculo inline de `coste-a1-table.tsx` (no hay
-ningún campo nuevo en `DespieceNode` ni en la API — se computan en el render a partir
-de `costeA1`) y del mismo modo en `coste-a1-desglose-panel.tsx` (§4.2.1).
+**Producción ya es un dato real** (ver §3.3) — `DespieceNode.produccion`, solo en
+la raíz. **Coste Real y Desviación siguen siendo ficticios** — pedido explícito
+original del usuario ("rellena con datos ficticios porque no lo sé todavía"):
+Coste Real se muestra igual al Coste Teórico y Desviación en `0,0 %`, sin
+ninguna variación aleatoria que pudiera parecer un análisis real. Un aviso en
+texto gris bajo la barra de herramientas lo deja explícito (actualizado al
+quitar Producción de la lista de campos ficticios). Cuando exista una fuente
+real para estos dos campos, sustituir el cálculo inline de `coste-a1-table.tsx`
+(no hay ningún campo nuevo en `DespieceNode` para ellos, a diferencia de
+`produccion` — se computan en el render a partir de `costeA1`) y del mismo modo
+en `coste-a1-desglose-panel.tsx` (§4.2.1).
 
 **Con scroll interno (`ScrollArea`)**: al contrario que el resto de tablas de la app
 (compras, MRP, que dejan crecer la página entera), esta tabla va envuelta en el
@@ -213,6 +264,15 @@ alto fijo distinta a la tomada en su día para el Dialog de verificación (§4.2
 hasta abajo, que sea un componente con Scroll Area"), porque ahora convive con el
 panel de desglose al lado y una tabla que empujara la página hacia abajo descolocaría
 esa columna.
+
+**`px-3` en `TableHead`/`TableCell`, no `px-4`** — pedido explícito tras añadir la
+producción real (§3.3): con el `0` fijo de antes, las 5 columnas cabían casi
+siempre sin deslizar; con números reales de hasta 6 cifras en Producción (p. ej.
+"37.506", visto filtrando enero-septiembre 2026, con algún obsoleto incluido por
+tener producción en el rango) la tabla se quedaba un poco más ancha que el
+contenedor, cortando la columna Desviación por el borde derecho. Mismo ajuste
+(menos margen interno, no menos columnas) que ya se hizo en el panel de
+desglose por el mismo motivo — ver §4.2.1bis.
 
 **Diseño de la cabecera fija, calcado de `scroll-area-01`**: pedido explícito tras
 ver la primera versión ("que sea igual de diseño la tabla que has hecho ahora" —
@@ -295,11 +355,15 @@ donde nunca convive con un `ScrollArea` propio).
 descolocando el orden por cantidad descendente que ya viene calculado desde la API
 (mismo cuidado que el orden manual de `mrp-materials-table.tsx` con los meses).
 
-**Sin selector de fecha**: a diferencia de compras/MRP, este panel no depende de un
-rango — es una foto del estado vigente hoy. El único control de recarga es el botón
+**Vigencia del BOM/coste, sin selector de fecha**: la lista de materiales y el
+coste A1 siguen siendo una foto del estado vigente **hoy** — a diferencia de
+compras/MRP, no dependen de ningún rango. El rango de fechas que sí existe
+(`MonthRangePicker`, ver §4.1.1 y §3.3) es solo para la producción real y para
+decidir qué obsoletos se ven — no recalcula el árbol ni el coste. El único
+control para recargar TODO (árbol, costes, producción) es el botón
 "Recalcular".
 
-#### 4.1.1 Obsoletos — ocultos por defecto, botón para verlos
+#### 4.1.1 Obsoletos — visibles solo si tuvieron producción en el rango elegido
 
 Pregunta directa del usuario: "tengo que quitar los artículos obsoletos, no sé si
 lo tenemos en cuenta". Ya existía el campo en el proyecto — `F4101.IMSTKT = 'O'`,
@@ -308,14 +372,26 @@ artículo (no confundir con stock/palet obsoleto, que es un concepto distinto so
 F41021). No se usaba en ningún panel de la familia JDE (`/produccion`, `/compras`,
 MRP, coste-a1) hasta ahora.
 
-La API (`api/coste-a1/route.ts`) siempre devuelve **todos** los finales, con el
-flag `DespieceNode.obsoleto`. El filtrado es en el frontend, mismo patrón que
-búsqueda/familia: ocultos por defecto (pedido explícito: "no quiero que aparezcan
-los O"), con un botón "Mostrar obsoletos (N)" en la barra de filtros que los revela
-con un badge rojo "Obsoleto" junto al tipo — el botón solo aparece si hay al menos
-uno oculto (`obsoletosOcultos > 0`). Alcance: solo afecta a qué **finales** se
-listan; un artículo obsoleto que aparezca como *componente* dentro del despiece de
-un final activo no se toca (sigue siendo parte real de esa receta).
+**Primera versión — ocultos por defecto, botón "Mostrar obsoletos (N)".** Un
+filtro puramente manual: todos ocultos salvo que el usuario pulsara el botón,
+sin relación con ningún dato de producción (que en ese momento no existía en
+este panel).
+
+**Revertido a petición explícita, al añadir la producción real (§3.3): "en vez
+de poner lo de obsoletos como está ahora, tiene que salir en la tabla ese
+artículo obsoleto solo si ha tenido producción en ese rango de fechas".** El
+botón manual desaparece — el filtrado ahora es automático y depende del
+`MonthRangePicker`: un obsoleto se ve SOLO si `produccion > 0` en el rango
+elegido (razonamiento: si se ha seguido fabricando en ese periodo, aunque esté
+marcado obsoleto en el maestro, interesa verlo; si no, no aporta nada tenerlo
+en la lista). La API (`api/coste-a1/route.ts`) sigue devolviendo **todos** los
+finales, con `obsoleto` y `produccion` — el filtro sigue siendo del frontend,
+mismo patrón que búsqueda/familia (`matchObsoleto = !n.obsoleto ||
+(n.produccion ?? 0) > 0` en `useCosteA1Filters`), solo que ya no hay ningún
+estado manual de por medio. Un obsoleto visible sigue mostrando el mismo badge
+rojo "Obsoleto" junto al tipo. Alcance: solo afecta a qué **finales** se
+listan; un artículo obsoleto que aparezca como *componente* dentro del despiece
+de un final activo no se toca (sigue siendo parte real de esa receta).
 
 ### 4.2 Panel de desglose — selector plano de códigos + detalle del nodo elegido
 

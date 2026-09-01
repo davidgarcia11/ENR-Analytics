@@ -24,7 +24,7 @@ import {
   getCoreRowModel,
   getExpandedRowModel,
 } from "@tanstack/react-table";
-import { ArrowDown, ArrowUp, CircleAlert, ChevronDown, ChevronRight, Eye, EyeOff, SearchX } from "lucide-react";
+import { ArrowDown, ArrowUp, CircleAlert, ChevronDown, ChevronRight, SearchX } from "lucide-react";
 import { Input } from "@/components/nova/ui/input";
 import { Badge } from "@/components/nova/ui/badge";
 import { Button } from "@/components/nova/ui/button";
@@ -33,6 +33,7 @@ import { ScrollArea } from "@/components/nova/ui/scroll-area";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/nova/ui/card";
 import { TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/nova/ui/table";
 import { cn } from "@/lib/utils";
+import MonthRangePicker, { type MonthRange } from "./month-range-picker";
 import { estadoSubarbol, euros, podar1112, type DespieceNode, type EstadoDescuadre } from "./coste-a1-shared";
 
 export type { DespieceNode };
@@ -47,6 +48,9 @@ interface TreeRow {
   costeA1: number | null;
   esRaiz: boolean;
   obsoleto: boolean;
+  // Solo tiene valor real en la fila raíz — igual que en DespieceNode, producción
+  // real (F4111) del artículo final en el rango de fechas pedido.
+  produccion?: number;
   // Solo se rellena en la fila raíz — estado del árbol COMPLETO (sin podar), no solo
   // de lo que enseña el informe (11/12). Ver coste-a1-shared.ts (estadoSubarbol).
   estado?: EstadoDescuadre;
@@ -64,6 +68,7 @@ function toTreeRow(n: DespieceNode, id: string, esRaiz: boolean, estado?: Estado
     costeA1: n.costeA1,
     esRaiz,
     obsoleto: n.obsoleto,
+    produccion: n.produccion,
     estado,
     subRows: n.children.length > 0 ? n.children.map((c, i) => toTreeRow(c, `${id}::${i}::${c.codigo}`, false)) : undefined,
   };
@@ -73,14 +78,28 @@ type SortBy = "coste" | "nombre";
 
 // --- Filtros: estado + derivados, compartido entre CosteA1FilterBar y CosteA1Table ---
 
+// Mes en curso — mismo default que envía la API sin startDate/endDate
+// (app/api/coste-a1/route.ts) y que usa MonthRangePicker/api-compras.
+function mesActual(): MonthRange {
+  const hoy = new Date();
+  const fin = new Date(hoy.getFullYear(), hoy.getMonth() + 1, 0);
+  return {
+    startDate: `${hoy.getFullYear()}-${String(hoy.getMonth() + 1).padStart(2, "0")}-01`,
+    endDate: `${fin.getFullYear()}-${String(fin.getMonth() + 1).padStart(2, "0")}-${String(fin.getDate()).padStart(2, "0")}`,
+  };
+}
+
 export function useCosteA1Filters(data: DespieceNode[]) {
   const [search, setSearch] = useState("");
   const [familia, setFamilia] = useState("__todas__");
-  // Ocultos por defecto — pedido explícito: "no quiero que aparezcan los O, que
-  // haya un botón que se pueda mostrar los Obsoletos si quieren".
-  const [mostrarObsoletos, setMostrarObsoletos] = useState(false);
   const [sortBy, setSortBy] = useState<SortBy>("coste");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
+  // Rango de meses para la producción real — pedido explícito, sustituye al botón
+  // "Mostrar obsoletos": ya no se elige a mano, un artículo obsoleto se ve en la
+  // tabla SOLO si tuvo producción en este rango (ver `filtered` más abajo). Estado
+  // "no reactivo" a propósito — cambiar el rango no dispara ninguna consulta hasta
+  // pulsar "Filtrar" (mismo patrón que /compras, MonthRangePicker no lo impone).
+  const [monthRange, setMonthRange] = useState<MonthRange>(mesActual);
 
   const familias = useMemo(() => {
     const map = new Map<string, string>();
@@ -88,17 +107,20 @@ export function useCosteA1Filters(data: DespieceNode[]) {
     return Array.from(map.entries()).sort((a, b) => a[1].localeCompare(b[1]));
   }, [data]);
 
-  const obsoletosOcultos = useMemo(() => data.filter((n) => n.obsoleto).length, [data]);
-
+  // Un obsoleto solo se ve si tuvo producción real (> 0) en el rango de fechas
+  // pedido a la API — pedido explícito: "en vez de poner lo de obsoletos como está
+  // ahora, tiene que salir en la tabla ese artículo obsoleto solo si ha tenido
+  // producción en ese rango de fechas". `produccion` viene de la API (solo en la
+  // raíz, ver DespieceNode) — `?? 0` cubre el caso sin rango pedido todavía.
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
     return data.filter((n) => {
       const matchQ = !q || n.codigo.toLowerCase().includes(q) || n.descripcion.toLowerCase().includes(q);
       const matchFamilia = familia === "__todas__" || n.familia === familia;
-      const matchObsoleto = mostrarObsoletos || !n.obsoleto;
+      const matchObsoleto = !n.obsoleto || (n.produccion ?? 0) > 0;
       return matchQ && matchFamilia && matchObsoleto;
     });
-  }, [data, search, familia, mostrarObsoletos]);
+  }, [data, search, familia]);
 
   // Orden manual del nivel RAÍZ únicamente — getSortedRowModel de TanStack también
   // reordenaría los hijos de cada árbol por el mismo criterio, descolocando el orden
@@ -131,8 +153,8 @@ export function useCosteA1Filters(data: DespieceNode[]) {
   );
 
   return {
-    search, setSearch, familia, setFamilia, mostrarObsoletos, setMostrarObsoletos,
-    sortBy, sortDir, toggleSort, familias, obsoletosOcultos, filtered, treeData,
+    search, setSearch, familia, setFamilia, monthRange, setMonthRange,
+    sortBy, sortDir, toggleSort, familias, filtered, treeData,
     totalCount: data.length,
   };
 }
@@ -142,8 +164,11 @@ export type CosteA1Filters = ReturnType<typeof useCosteA1Filters>;
 // --- Barra de filtros: arriba de los KPI, junto a Recalcular/Exportar (mismo orden
 // que /compras — todos los controles antes de las tarjetas KPI) ---
 
-export function CosteA1FilterBar({ filtros }: { filtros: CosteA1Filters }) {
-  const { search, setSearch, familia, setFamilia, familias, mostrarObsoletos, setMostrarObsoletos, obsoletosOcultos, filtered, totalCount } = filtros;
+// `onFiltrarFechas`: dispara la consulta a la API con el `monthRange` actual —
+// vive en la página (app/coste-a1/page.tsx), no aquí, porque cambia lo que se
+// PIDE al servidor, no un filtro puramente local como búsqueda/familia.
+export function CosteA1FilterBar({ filtros, onFiltrarFechas }: { filtros: CosteA1Filters; onFiltrarFechas: () => void }) {
+  const { search, setSearch, familia, setFamilia, familias, monthRange, setMonthRange, filtered, totalCount } = filtros;
   return (
     <>
       <Input
@@ -165,17 +190,10 @@ export function CosteA1FilterBar({ filtros }: { filtros: CosteA1Filters }) {
           ))}
         </SelectContent>
       </Select>
-      {obsoletosOcultos > 0 && (
-        <Button
-          variant="outline"
-          size="sm"
-          className="h-8 gap-1.5 text-muted-foreground"
-          onClick={() => setMostrarObsoletos((v) => !v)}
-        >
-          {mostrarObsoletos ? <EyeOff size={14} /> : <Eye size={14} />}
-          {mostrarObsoletos ? "Ocultar" : "Mostrar"} obsoletos ({obsoletosOcultos})
-        </Button>
-      )}
+      <MonthRangePicker value={monthRange} onChange={setMonthRange} />
+      <Button variant="outline" size="sm" className="h-8" onClick={onFiltrarFechas}>
+        Filtrar
+      </Button>
       <span className="text-sm text-muted-foreground">{filtered.length} de {totalCount} artículos finales</span>
     </>
   );
@@ -243,13 +261,19 @@ function buildColumns(sortBy: SortBy, sortDir: "asc" | "desc") {
         </span>
       ),
     }),
-    // Producción y Coste Real: placeholder fijo, aún no hay fuente de datos real
-    // (pedido explícito) — Coste Real se muestra igual al Coste Teórico y
-    // Producción a 0, para no insinuar un análisis que todavía no existe.
+    // Producción real (F4111, ILDCT='IC') del artículo final en el rango de fechas
+    // del filtro — pedido explícito, ya no es un placeholder. Solo tiene valor en
+    // la fila raíz (`produccion` viene `undefined` en los componentes, ver
+    // DespieceNode); Coste Real y Desviación SIGUEN siendo ficticios (pedido
+    // aparte, sin fuente de datos real todavía — ver subtítulo de la cabecera).
     columnHelper.display({
       id: "produccion",
       header: () => <span className="block text-right">Producción</span>,
-      cell: () => <span className="block text-right tabular-nums text-muted-foreground">0</span>,
+      cell: ({ row }) => (
+        <span className={cn("block text-right tabular-nums", row.original.esRaiz ? "text-foreground" : "text-muted-foreground")}>
+          {row.original.produccion != null ? row.original.produccion.toLocaleString("es-ES", { maximumFractionDigits: 2 }) : "—"}
+        </span>
+      ),
     }),
     columnHelper.display({
       id: "costeReal",
@@ -306,7 +330,7 @@ export default function CosteA1Table({
       <CardHeader className="px-6 pt-6">
         <CardTitle className="text-lg font-medium text-foreground">Coste por artículo final</CardTitle>
         <p className="text-sm font-normal text-muted-foreground">
-          Pulsa una fila raíz para ver su desglose. Producción y Coste Real son ficticios.
+          Pulsa una fila raíz para ver su desglose. Coste Real y Desviación son ficticios.
         </p>
       </CardHeader>
       <CardContent className="overflow-hidden rounded-b-xl border-t border-border p-0">
@@ -330,7 +354,7 @@ export default function CosteA1Table({
                     return (
                       <TableHead
                         key={h.id}
-                        className={cn("h-9 bg-muted/40 px-4 text-muted-foreground", sortable && "cursor-pointer select-none")}
+                        className={cn("h-9 bg-muted/40 px-3 text-muted-foreground", sortable && "cursor-pointer select-none")}
                         onClick={sortable ? () => toggleSort(h.column.id as SortBy) : undefined}
                       >
                         {h.isPlaceholder ? null : flexRender(h.column.columnDef.header, h.getContext())}
@@ -366,8 +390,14 @@ export default function CosteA1Table({
                       seleccionada && "bg-primary/[0.06] hover:bg-primary/[0.09]"
                     )}
                   >
+                    {/* px-3 (no px-4) — pedido explícito: con la producción real
+                        (Enero-Septiembre 2026: números de hasta 6 cifras, p. ej.
+                        "37.506", frente al "0" fijo de antes) la tabla dejaba de
+                        caber sin deslizar, cortando un poco la columna Desviación.
+                        Mismo ajuste que ya se hizo en el panel de desglose para el
+                        mismo problema (menos margen interno, no menos columnas). */}
                     {row.getVisibleCells().map((cell) => (
-                      <TableCell key={cell.id} className="h-12 px-4 py-0 align-middle">
+                      <TableCell key={cell.id} className="h-12 px-3 py-0 align-middle">
                         {flexRender(cell.column.columnDef.cell, cell.getContext())}
                       </TableCell>
                     ))}

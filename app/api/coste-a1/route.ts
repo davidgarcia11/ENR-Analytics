@@ -37,8 +37,26 @@
 //   distinto al prefijo). Ver docs/coste-a1.md §3.1.
 // - Obsoletos: F4101.IMSTKT = 'O' (mismo campo que ya usa /caducados). La API
 //   siempre devuelve TODOS los finales con el flag `obsoleto` — el filtrado
-//   (ocultos por defecto, botón "Mostrar obsoletos" para verlos) es en el
-//   frontend, igual que el resto de filtros de esta tabla (búsqueda, familia).
+//   (un obsoleto solo se ve en la tabla si tuvo producción en el rango de
+//   fechas elegido, ver `produccion` más abajo) es en el frontend, igual que
+//   el resto de filtros de esta tabla (búsqueda, familia).
+// - Producción real por artículo final, en un rango de fechas (`startDate`/
+//   `endDate`, 'YYYY-MM-DD', mismo formato y mismo default —mes en curso— que
+//   `/api/compras`; sin ellos, mes en curso): mismo patrón que
+//   `/api/production` (F55TAR12 deduplicado → F4801 → F4111, `ILDCT='IC'`,
+//   `ILTRQT`/100) pero SOLO para los finales (no para cada nodo del árbol, ni
+//   desglosado por orden/turno/hora) y agregando por artículo con conversión
+//   de unidades (F41002, factor BFS hasta 3 niveles) a la unidad primaria de
+//   cada artículo (F4101.IMUOM1) — un mismo artículo puede tener producción
+//   registrada en más de una UM. La lógica de conversión está DUPLICADA a
+//   propósito desde `app/api/production/route.ts` en vez de compartida: ese
+//   endpoint es "el más complejo" de la app (CLAUDE.md pide especial cuidado
+//   al tocarlo) y esta consulta no necesita modificarlo para nada. Los
+//   artículos finales se identifican aquí por código LARGO (`IMLITM`, ver
+//   comentario más abajo), pero F4801/F4111/F41002 trabajan con el código
+//   CORTO (`WAITM`/`IMITM`) — el cruce sale de `F4101.IMITM`, añadido a la
+//   consulta de metadatos (paso G) solo para los finales, no para todo el
+//   árbol.
 import { NextRequest, NextResponse } from 'next/server';
 import { getDbConnection } from '@/lib/db';
 import { getDayOfYear } from '@/lib/utils';
@@ -57,9 +75,21 @@ function hoyJde(): number {
   return 100000 + (hoy.getFullYear() - 2000) * 1000 + getDayOfYear(hoy);
 }
 
+// Suma de años+día juliano SIN el prefijo `100000 +` de `hoyJde()` — a propósito:
+// se compara contra `MOD(TO55TAREA, 100000)` (mismo patrón que
+// `app/api/production/route.ts`), que ya le quita ese mismo prefijo a la fecha
+// de producción antes de comparar, así que aquí tampoco debe llevarlo.
+function fechaAJdeProduccion(fecha: Date): number {
+  return (fecha.getFullYear() - 2000) * 1000 + getDayOfYear(fecha);
+}
+
 interface BomRow { K: string; L: string; QTY: number; UM: string }
 interface BomLine { componente: string; qty: number; um: string }
-interface MetaRow { LARGO: string; DESCRIPCION: string; FAMILIA: string; TIPO_COD: string; STKT: string }
+// CORTO (F4101.IMITM) solo hace falta para cruzar con producción (F4801/F4111/
+// F41002, que trabajan con código corto) — se pide para TODOS los códigos del
+// árbol (misma consulta que el resto de metadatos) pero solo se usa para los
+// finales.
+interface MetaRow { LARGO: string; CORTO: string; DESCRIPCION: string; FAMILIA: string; TIPO_COD: string; STKT: string }
 interface CostRow { LARGO: string; COSTE_RAW: number }
 
 export interface DespieceNode {
@@ -75,6 +105,11 @@ export interface DespieceNode {
   costeA1: number | null;
   cantidad: number; // cantidad de este artículo por unidad de su padre directo (1 en la raíz)
   um: string;
+  // Producción real (F4111, ILDCT='IC') en el rango de fechas pedido — SOLO
+  // presente en los nodos raíz (artículos finales), `undefined` en el resto del
+  // árbol (no se pide desglose de producción por componente). Ver comentario de
+  // cabecera del archivo.
+  produccion?: number;
   children: DespieceNode[];
 }
 
@@ -82,6 +117,19 @@ export async function GET(req: NextRequest) {
   const denied = await requireScreenAccess('coste_a1');
   if (denied) return denied;
   const startTime = Date.now();
+  const { searchParams } = new URL(req.url);
+
+  // Rango de fechas para la producción real — mismo formato ('YYYY-MM-DD') y
+  // mismo default (mes en curso) que `/api/compras`. El frontend solo deja
+  // elegir MESES completos (`MonthRangePicker`), nunca días sueltos.
+  const hoy = new Date();
+  const inicioMesActual = `${hoy.getFullYear()}-${String(hoy.getMonth() + 1).padStart(2, '0')}-01`;
+  const finMesActualDate = new Date(hoy.getFullYear(), hoy.getMonth() + 1, 0);
+  const finMesActual = `${finMesActualDate.getFullYear()}-${String(finMesActualDate.getMonth() + 1).padStart(2, '0')}-${String(finMesActualDate.getDate()).padStart(2, '0')}`;
+  const startDateStr = searchParams.get('startDate') || inicioMesActual;
+  const endDateStr = searchParams.get('endDate') || finMesActual;
+  const startJdeProd = fechaAJdeProduccion(new Date(startDateStr));
+  const endJdeProd = fechaAJdeProduccion(new Date(endDateStr));
 
   let conn;
   try {
@@ -161,12 +209,121 @@ export async function GET(req: NextRequest) {
     // LARGO — evita el mapeo largo/corto). IMSRP1 = categoría real (ver comentario
     // de cabecera) — mismo campo que el filtro "Categoría" de /produccion. IMSTKT =
     // 'O' -> obsoleto, mismo campo que ya usa /caducados (api/caducados/route.ts).
+    // IMITM (código CORTO) se pide aquí de paso, junto al resto — solo se usa
+    // después para los finales, al cruzar con producción (F4801/F4111/F41002).
     const metaResult = await conn.execute(
-      `SELECT TRIM(IMLITM) AS LARGO, TRIM(IMDSC1) AS DESCRIPCION, TRIM(IMSRP2) AS FAMILIA, TRIM(IMSRP1) AS TIPO_COD, TRIM(IMSTKT) AS STKT
+      `SELECT TRIM(IMLITM) AS LARGO, TRIM(IMITM) AS CORTO, TRIM(IMDSC1) AS DESCRIPCION, TRIM(IMSRP2) AS FAMILIA, TRIM(IMSRP1) AS TIPO_COD, TRIM(IMSTKT) AS STKT
        FROM F4101 WHERE TRIM(IMLITM) IN (${placeholders})`,
       binds
     );
     const metaMap = new Map((metaResult.rows as MetaRow[]).map((r) => [r.LARGO, r]));
+
+    // G.1) Producción real (F4111, ILDCT='IC') de cada FINAL en el rango de fechas
+    // — mismo patrón que /api/production (F55TAR12 deduplicado → F4801 → F4111),
+    // simplificado: sin sub-línea/hora/merma, agregado directamente por artículo
+    // (WAAITM, código LARGO — F4801 lo usa igual que el filtro de artículo de
+    // /api/production) en vez de por orden/día/turno. Conversión de unidades
+    // (F41002) porque un mismo artículo puede tener producción registrada en más
+    // de una UM — ver comentario de cabecera.
+    const produccionMap = new Map<string, number>(); // código LARGO -> cantidad en UM primaria
+    const finalesCortos = Array.from(
+      new Set(finales.map((f) => metaMap.get(f)?.CORTO).filter((c): c is string => !!c))
+    );
+    if (finalesCortos.length > 0) {
+      const finalesPlaceholders = finales.map((_, i) => `:fl${i}`).join(', ');
+      const finalesBinds: Record<string, string> = {};
+      finales.forEach((v, i) => { finalesBinds[`fl${i}`] = v; });
+
+      const prodResult = await conn.execute(
+        `SELECT TRIM(A.WAAITM) AS WAAITM, TRIM(A.WAITM) AS WAITM, C.ILTRUM,
+           SUM(CASE WHEN C.ILDCT = 'IC' THEN C.ILTRQT ELSE 0 END) AS QTY
+         FROM (
+           SELECT TODOCO, MAX(TO55TAREA) as TO55TAREA
+           FROM F55TAR12
+           GROUP BY TODOCO, MOD(TO55TAREA, 100000)
+         ) B
+         INNER JOIN F4801 A ON A.WADOCO = B.TODOCO
+         LEFT JOIN F4111 C ON C.ILDOC = A.WADOCO
+           AND MOD(C.ILTRDJ, 100000) = MOD(B.TO55TAREA, 100000)
+           AND C.ILDCT = 'IC'
+         WHERE MOD(B.TO55TAREA, 100000) >= :startJdeProd AND MOD(B.TO55TAREA, 100000) <= :endJdeProd
+           AND TRIM(A.WAAITM) IN (${finalesPlaceholders})
+         GROUP BY A.WADOCO, B.TO55TAREA, A.WAAITM, A.WAITM, C.ILTRUM`,
+        { startJdeProd, endJdeProd, ...finalesBinds }
+      );
+      const prodRows = prodResult.rows as { WAAITM: string; WAITM: string; ILTRUM: string | null; QTY: number }[];
+
+      if (prodRows.length > 0) {
+        // Unidad primaria (F4101.IMUOM1) y conversiones (F41002), por código CORTO
+        // — mismo patrón que /api/production.
+        const cortosImplicados = Array.from(new Set(prodRows.map((r) => r.WAITM).filter(Boolean)));
+        const cortosPlaceholders = cortosImplicados.map((_, i) => `:co${i}`).join(', ');
+        const cortosBinds: Record<string, string> = {};
+        cortosImplicados.forEach((v, i) => { cortosBinds[`co${i}`] = v; });
+
+        const primUomResult = await conn.execute(
+          `SELECT IMITM, IMUOM1 FROM F4101 WHERE IMITM IN (${cortosPlaceholders})`,
+          cortosBinds
+        );
+        const primUomMap = new Map(
+          (primUomResult.rows as { IMITM: string; IMUOM1: string }[]).map((r) => [String(r.IMITM).trim(), String(r.IMUOM1).trim()])
+        );
+
+        const convResult = await conn.execute(
+          `SELECT UMITM, UMUM, UMRUM, UMCONV FROM F41002 WHERE UMITM IN (${cortosPlaceholders})`,
+          cortosBinds
+        );
+        const conversionesPorArticulo = new Map<string, { from: string; to: string; factor: number }[]>();
+        (convResult.rows as { UMITM: string; UMUM: string; UMRUM: string; UMCONV: number }[]).forEach((r) => {
+          const id = String(r.UMITM).trim();
+          if (!conversionesPorArticulo.has(id)) conversionesPorArticulo.set(id, []);
+          conversionesPorArticulo.get(id)!.push({
+            from: String(r.UMUM).trim(),
+            to: String(r.UMRUM).trim(),
+            factor: r.UMCONV / 10000000, // JDE guarda 1.0 como 10000000
+          });
+        });
+
+        // BFS hasta 3 niveles — calcado de getConversionFactor() en
+        // app/api/production/route.ts, duplicado a propósito (ver comentario de
+        // cabecera del archivo: ese endpoint pide "especial cuidado" al tocarlo).
+        function factorConversion(codigoCorto: string, desde: string, hasta: string): number | null {
+          if (desde === hasta) return 1;
+          const conversiones = conversionesPorArticulo.get(codigoCorto) ?? [];
+          const cola: { um: string; factor: number; profundidad: number }[] = [{ um: desde, factor: 1, profundidad: 0 }];
+          const visitados = new Set([desde]);
+          while (cola.length > 0) {
+            const actual = cola.shift()!;
+            if (actual.profundidad >= 3) continue;
+            for (const paso of conversiones.filter((c) => c.from === actual.um)) {
+              const nuevoFactor = actual.factor * paso.factor;
+              if (paso.to === hasta) return nuevoFactor;
+              if (!visitados.has(paso.to)) {
+                visitados.add(paso.to);
+                cola.push({ um: paso.to, factor: nuevoFactor, profundidad: actual.profundidad + 1 });
+              }
+            }
+          }
+          return null;
+        }
+
+        for (const row of prodRows) {
+          const corto = row.WAITM;
+          const largo = row.WAAITM;
+          const umPrimaria = primUomMap.get(corto) || (row.ILTRUM ? String(row.ILTRUM).trim() : 'EA');
+          const umOrigen = row.ILTRUM ? String(row.ILTRUM).trim() : umPrimaria;
+          const cantidadCruda = (row.QTY || 0) / 100; // ILTRQT viene ×100
+          let cantidadFinal = cantidadCruda;
+          if (umOrigen !== umPrimaria) {
+            const factor = factorConversion(corto, umOrigen, umPrimaria);
+            // Sin ruta de conversión conocida -> se suma sin convertir (mismo
+            // comportamiento que /api/production en el mismo caso).
+            if (factor !== null) cantidadFinal = cantidadCruda * factor;
+          }
+          produccionMap.set(largo, (produccionMap.get(largo) ?? 0) + cantidadFinal);
+        }
+      }
+    }
 
     // H) Coste A1 (F30026), por código LARGO.
     const costResult = await conn.execute(
@@ -217,6 +374,12 @@ export async function GET(req: NextRequest) {
     }
     const finalesOut = arboles.map(enriquecer).sort((a, b) => (b.costeA1 ?? -1) - (a.costeA1 ?? -1));
 
+    // `produccion` solo en la raíz (artículo final) — ver comentario del campo en
+    // DespieceNode. `enriquecer()` ya deja `produccion` como `undefined` en todo
+    // el árbol (no está en el objeto que devuelve); aquí se rellena SOLO para los
+    // finales, con lo que haya en produccionMap (0 si no tuvo producción real).
+    finalesOut.forEach((f) => { f.produccion = produccionMap.get(f.codigo) ?? 0; });
+
     // Registrar consulta en logs (nunca bloquea la respuesta) — mismo patrón que
     // /api/compras y /api/mrp.
     try {
@@ -224,7 +387,7 @@ export async function GET(req: NextRequest) {
       const db = getDb();
       db.prepare(
         'INSERT INTO query_logs (user_id, username, source, filters, result_count, execution_time_ms) VALUES (?, ?, ?, ?, ?, ?)'
-      ).run(user?.id ?? null, user ? user.username : 'Invitado', 'coste_a1', '{}', finalesOut.length, Date.now() - startTime);
+      ).run(user?.id ?? null, user ? user.username : 'Invitado', 'coste_a1', JSON.stringify({ startDate: startDateStr, endDate: endDateStr }), finalesOut.length, Date.now() - startTime);
     } catch (logErr) {
       console.error('Error logging query:', logErr);
     }

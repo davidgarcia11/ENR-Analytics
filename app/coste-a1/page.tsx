@@ -70,11 +70,22 @@ export default function CosteA1Page() {
   // ve en el panel de la derecha, ver components/nova/coste-a1-desglose-panel.tsx.
   const [selectedCodigo, setSelectedCodigo] = useState<string | null>(null);
 
+  // Estado de filtros de la tabla (buscador, familia, rango de meses) — se
+  // muestra arriba de los KPI (junto a Recalcular/Exportar, igual que /compras)
+  // pero lo consume la tabla, más abajo; de ahí el hook compartido en vez de
+  // tenerlo dentro de la tabla. Declarado ANTES de `fetchData` — necesita leer
+  // `filtros.monthRange` para pedir la producción del rango elegido.
+  const filtros = useCosteA1Filters(data?.finales ?? []);
+
   const fetchData = useCallback(async () => {
     setLoading(true);
     const id = toast.loading("Calculando coste y despiece…");
     try {
-      const res = await fetch("/api/coste-a1");
+      const params = new URLSearchParams({
+        startDate: filtros.monthRange.startDate,
+        endDate: filtros.monthRange.endDate,
+      });
+      const res = await fetch(`/api/coste-a1?${params}`);
       if (res.status === 401 || res.status === 403) {
         router.push("/login");
         return;
@@ -93,7 +104,7 @@ export default function CosteA1Page() {
     } finally {
       setLoading(false);
     }
-  }, [router]);
+  }, [router, filtros.monthRange]);
 
   // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => { fetchData(); }, []);
@@ -129,11 +140,6 @@ export default function CosteA1Page() {
     [data, selectedCodigo]
   );
 
-  // Estado de filtros de la tabla (buscador, familia, obsoletos) — se muestra arriba
-  // de los KPI (junto a Recalcular/Exportar, igual que /compras) pero lo consume la
-  // tabla, más abajo; de ahí el hook compartido en vez de tenerlo dentro de la tabla.
-  const filtros = useCosteA1Filters(data?.finales ?? []);
-
   const portalContainerRef = useRef<HTMLDivElement>(null);
 
   const conCoste = data ? data.finales.filter((n) => n.costeA1 != null) : [];
@@ -159,7 +165,7 @@ export default function CosteA1Page() {
                 {loading ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
                 Recalcular
               </Button>
-              <CosteA1FilterBar filtros={filtros} />
+              <CosteA1FilterBar filtros={filtros} onFiltrarFechas={() => fetchData()} />
               <Button size="sm" className="ml-auto gap-1.5" onClick={exportToExcel} disabled={!data || data.finales.length === 0}>
                 <Download size={14} />
                 Exportar
