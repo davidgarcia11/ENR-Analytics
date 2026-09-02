@@ -4,6 +4,7 @@ import * as React from "react"
 import { Dialog as SheetPrimitive } from "@base-ui/react/dialog"
 
 import { cn } from "@/lib/utils"
+import { useNovaPortalContainer } from "@/components/nova/portal-container"
 import { Button } from "@/components/nova/ui/button"
 import { XIcon } from "lucide-react"
 
@@ -46,8 +47,9 @@ function SheetContent({
   side?: "top" | "right" | "bottom" | "left"
   showCloseButton?: boolean
 }) {
+  const container = useNovaPortalContainer()
   return (
-    <SheetPortal>
+    <SheetPortal container={container}>
       <SheetOverlay />
       <SheetPrimitive.Popup
         data-slot="sheet-content"
