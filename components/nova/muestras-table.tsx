@@ -70,7 +70,12 @@ export default function MuestrasTable({
     return data.filter((m) => {
       if (filtroEstado !== "todos" && m.estado !== filtroEstado) return false;
       if (!q) return true;
-      return m.articulo.toLowerCase().includes(q) || m.lote.toLowerCase().includes(q) || m.descripcion.toLowerCase().includes(q);
+      return (
+        m.articulo.toLowerCase().includes(q) ||
+        m.lote.toLowerCase().includes(q) ||
+        m.descripcion.toLowerCase().includes(q) ||
+        m.marca.toLowerCase().includes(q)
+      );
     });
   }, [data, busqueda, filtroEstado]);
 
@@ -129,7 +134,7 @@ export default function MuestrasTable({
     <div className="space-y-3">
       <div className="flex flex-wrap items-center gap-2">
         <Input
-          placeholder="Buscar por artículo, lote o descripción…"
+          placeholder="Buscar por artículo, lote, descripción o marca…"
           value={busqueda}
           onChange={(e) => setBusqueda(e.target.value)}
           className="h-8 w-64"

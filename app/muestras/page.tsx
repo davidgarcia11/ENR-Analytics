@@ -23,12 +23,6 @@ interface MuestrasResponse {
   resumen: { total: number; pendientes: number; enviados: number; completados: number };
 }
 
-function ultimos30Dias(): DateRange {
-  const end = new Date();
-  const start = new Date(end.getTime() - 29 * 86400000);
-  return { startDate: start.toISOString().slice(0, 10), endDate: end.toISOString().slice(0, 10) };
-}
-
 export default function MuestrasPage() {
   const router = useRouter();
   const [sessionUser, setSessionUser] = useState<SessionUser | null>(null);
@@ -58,16 +52,18 @@ export default function MuestrasPage() {
     setSessionUser(null);
   };
 
-  const [range, setRange] = useState<DateRange>(ultimos30Dias);
+  // null = sin filtro de fechas (todo el histórico) — por defecto, para no esconder
+  // pendientes antiguos. Ver comentario en date-range-picker.tsx.
+  const [range, setRange] = useState<DateRange | null>(null);
   const [data, setData] = useState<MuestrasResponse | null>(null);
   const [loading, setLoading] = useState(false);
 
-  const fetchData = useCallback(async (r: DateRange) => {
+  const fetchData = useCallback(async (r: DateRange | null) => {
     setLoading(true);
     const id = toast.loading("Consultando muestras…");
     try {
-      const params = new URLSearchParams({ startDate: r.startDate, endDate: r.endDate });
-      const res = await fetch(`/api/muestras?${params.toString()}`);
+      const params = r ? new URLSearchParams({ startDate: r.startDate, endDate: r.endDate }) : null;
+      const res = await fetch(`/api/muestras${params ? `?${params.toString()}` : ""}`);
       if (res.status === 401 || res.status === 403) {
         router.push("/login");
         return;
@@ -84,7 +80,7 @@ export default function MuestrasPage() {
   }, [router]);
 
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  useEffect(() => { fetchData(range); }, []);
+  useEffect(() => { fetchData(null); }, []);
 
   const recalcularResumen = (muestras: Muestra[]) => ({
     total: muestras.length,
@@ -149,7 +145,7 @@ export default function MuestrasPage() {
         { title: "Pendientes", value: String(data.resumen.pendientes), subValue: "Sin enviar todavía" },
         { title: "Enviados", value: String(data.resumen.enviados), subValue: "En laboratorio/calidad" },
         { title: "Completados", value: String(data.resumen.completados), subValue: "Resultado recibido" },
-        { title: "Total lotes", value: String(data.resumen.total), subValue: `${range.startDate} → ${range.endDate}` },
+        { title: "Total lotes", value: String(data.resumen.total), subValue: range ? `${range.startDate} → ${range.endDate}` : "Todas las fechas" },
       ]
     : [];
 

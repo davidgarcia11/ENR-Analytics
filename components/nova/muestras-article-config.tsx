@@ -94,7 +94,9 @@ export default function MuestrasArticleConfig() {
           </SheetDescription>
         </SheetHeader>
 
-        <div className="flex flex-col gap-3 overflow-y-auto px-4 pb-4">
+        {/* pt-1.5: sin este margen, el anillo de foco del buscador (focus-visible:ring-3)
+            queda recortado por arriba por este mismo contenedor con overflow-y-auto. */}
+        <div className="flex flex-col gap-3 overflow-y-auto px-4 pt-1.5 pb-4">
           <div className="relative">
             <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
             <Input

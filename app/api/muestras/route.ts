@@ -42,12 +42,13 @@ export async function GET(req: NextRequest) {
   const session = await verifySession().catch(() => null);
 
   const { searchParams } = new URL(req.url);
-  const now = new Date();
-  const defaultEnd = now.toISOString().slice(0, 10);
-  const defaultStart = new Date(now.getTime() - 29 * 86400000).toISOString().slice(0, 10);
-  const startDateStr = searchParams.get('startDate') || defaultStart;
-  const endDateStr = searchParams.get('endDate') || defaultEnd;
-  const { startJde, endJde } = jdeBoundsFromDates(startDateStr, endDateStr);
+  // Sin filtro de fechas por defecto: el listado por defecto es "Pendientes" (ver
+  // muestras-table.tsx) y un pendiente no deja de serlo por ser antiguo — restringir
+  // a los últimos 30 días por defecto escondía pendientes reales. Las fechas solo se
+  // aplican si el usuario las elige explícitamente y pulsa "Filtrar".
+  const startDateStr = searchParams.get('startDate');
+  const endDateStr = searchParams.get('endDate');
+  const hasDateFilter = !!(startDateStr && endDateStr);
 
   let conn;
   try {
@@ -63,11 +64,12 @@ export async function GET(req: NextRequest) {
       INNER JOIN F4101 M ON M.IMITM = C.ILITM AND TRIM(M.IMSRP1) = '12'
       INNER JOIN F4108 L ON L.IOITM = C.ILITM
       WHERE C.ILDCT = 'IC'
-        AND C.ILTRDJ BETWEEN :startJde AND :endJde
+        ${hasDateFilter ? 'AND C.ILTRDJ BETWEEN :startJde AND :endJde' : ''}
         AND TRIM(L.IORLOT) IS NOT NULL
       ORDER BY ARTICULO, LOTE
     `;
-    const result = await conn.execute(sql, { startJde, endJde });
+    const binds = hasDateFilter ? jdeBoundsFromDates(startDateStr!, endDateStr!) : {};
+    const result = await conn.execute(sql, binds);
     const rows = result.rows as MuestraRow[];
 
     // Descripción de marca (F4101.IMSRP4) contra el catálogo UDC 41/S4 — mismo
@@ -115,7 +117,7 @@ export async function GET(req: NextRequest) {
 
     // Registrar consulta en logs (nunca bloquea la respuesta) — mismo patrón que el resto de paneles.
     try {
-      const filters = { startDate: startDateStr, endDate: endDateStr };
+      const filters = hasDateFilter ? { startDate: startDateStr, endDate: endDateStr } : { startDate: null, endDate: null };
       db.prepare(
         'INSERT INTO query_logs (user_id, username, source, filters, result_count, execution_time_ms) VALUES (?, ?, ?, ?, ?, ?)'
       ).run(session?.id ?? null, session ? session.username : 'Invitado', 'muestras', JSON.stringify(filters), muestras.length, Date.now() - startTime);
