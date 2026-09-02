@@ -90,7 +90,7 @@ export default function MuestrasArticleConfig() {
           <SheetDescription>
             Si esta lista está vacía, todo el mundo ve todos los artículos tipo Producto
             terminado. En cuanto añades uno, el panel se restringe a esta lista para
-            todos los usuarios (menos admin).
+            todos los usuarios, incluido admin.
           </SheetDescription>
         </SheetHeader>
 

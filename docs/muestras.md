@@ -214,10 +214,13 @@ concreto — no ligado a un rol, para poder dárselo a una sola persona sin tene
 un rol nuevo solo para eso (petición explícita: *"¿y si quiero que un usuario concreto
 tenga eso?"*).
 
-`admin` siempre puede configurar la lista, igual que siempre tiene acceso a cualquier
-pantalla (`canAccessPanel`). Un usuario con `can_configure_muestras = 1` pero sin rol
-admin **sigue viendo el listado de `/muestras` restringido** a la lista que él mismo
-configura (no hay bypass especial al consultar, solo al editar la configuración) — si
+`admin` siempre puede **configurar** la lista (igual que siempre tiene acceso a
+cualquier pantalla, `canAccessPanel`), pero a diferencia del resto de restricciones
+del proyecto, **aquí no hay bypass de admin al consultar el listado**: si hay una
+lista configurada, se aplica también a admin — petición explícita del usuario ("no
+puede ser que el admin vea todos los artículos, querrá ver los que se hayan
+configurado para que salgan"). Cualquiera con `can_configure_muestras = 1` (admin o
+no) sigue viendo `/muestras` restringido a la lista que él mismo configura — si
 necesita ver algo fuera de esa lista, lo añade él mismo.
 
 ## 9. Registro del panel — checklist seguido

@@ -98,14 +98,14 @@ export async function GET(req: NextRequest) {
       };
     });
 
-    // Lista global de artículos visibles (admin la ve siempre entera; para el resto,
-    // si hay lista configurada, se restringe — ver docs/muestras.md §"Configuración").
-    if (session?.role !== 'admin') {
-      const allowlist = getArticleAllowlist();
-      if (allowlist.length > 0) {
-        const allowed = new Set(allowlist.map((a) => a.articulo));
-        muestras = muestras.filter((m) => allowed.has(m.articulo));
-      }
+    // Lista global de artículos visibles — se aplica a TODO el mundo, admin incluido
+    // (petición explícita: si se ha configurado una lista, es porque eso es lo que se
+    // quiere ver, también quien la configuró — no tiene sentido que admin siga viendo
+    // el universo entero). Sin excepción de rol aquí, a diferencia de otras pantallas.
+    const allowlist = getArticleAllowlist();
+    if (allowlist.length > 0) {
+      const allowed = new Set(allowlist.map((a) => a.articulo));
+      muestras = muestras.filter((m) => allowed.has(m.articulo));
     }
 
     const resumen = {
