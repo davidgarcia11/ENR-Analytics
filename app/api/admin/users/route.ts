@@ -10,7 +10,7 @@ export async function GET() {
   }
 
   const db = getDb();
-  const users = db.prepare('SELECT id, username, role, name, surname, default_plant AS defaultPlant, created_at FROM users ORDER BY id').all();
+  const users = db.prepare('SELECT id, username, role, name, surname, default_plant AS defaultPlant, can_configure_muestras AS canConfigureMuestras, created_at FROM users ORDER BY id').all();
   return NextResponse.json(users);
 }
 

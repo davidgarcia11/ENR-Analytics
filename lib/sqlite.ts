@@ -93,6 +93,31 @@ export function getDb(): Database.Database {
       mensajes TEXT NOT NULL,
       created_at TEXT DEFAULT (datetime('now'))
     );
+
+    -- Estado editable de /muestras (pendiente/enviado/completado) + observación libre por
+    -- lote. No viene de JDE: es una capa propia sobre el listado de producción real
+    -- (F4111/F4101/F4108), igual que jde_status_descriptions es una capa propia sobre datos
+    -- de JDE. Clave natural (articulo, lote), no id autoincremental: un solo registro por
+    -- combinación, se actualiza con upsert (ON CONFLICT) en vez de buscar-y-editar.
+    CREATE TABLE IF NOT EXISTS sample_tracking (
+      articulo TEXT NOT NULL,
+      lote TEXT NOT NULL,
+      estado TEXT NOT NULL DEFAULT 'pendiente',
+      observacion TEXT NOT NULL DEFAULT '',
+      updated_by TEXT,
+      updated_at TEXT DEFAULT (datetime('now')),
+      PRIMARY KEY (articulo, lote)
+    );
+
+    -- Lista global de artículos visibles en /muestras (si está vacía, se ven todos —
+    -- comportamiento abierto por defecto hasta que admin/responsable la configuran).
+    -- NO es por usuario: es una única lista compartida, editable por admin y por
+    -- cualquier usuario con users.can_configure_muestras = 1 (ver más abajo).
+    CREATE TABLE IF NOT EXISTS sample_article_filter (
+      articulo TEXT PRIMARY KEY,
+      descripcion TEXT NOT NULL DEFAULT '',
+      created_at TEXT DEFAULT (datetime('now'))
+    );
   `);
 
   // Migración: añadir columna must_change_password si no existe (para BDs creadas antes de esta versión)
@@ -108,6 +133,12 @@ export function getDb(): Database.Database {
   }
   if (!columns.some(c => c.name === 'default_plant')) {
     _db.exec("ALTER TABLE users ADD COLUMN default_plant TEXT NOT NULL DEFAULT ''");
+  }
+  // Permiso suelto (no un rol): quién puede editar sample_article_filter además de
+  // admin. Se marca por usuario individual desde /admin, no por rol — petición
+  // explícita del usuario ("si quiero que un usuario concreto tenga eso").
+  if (!columns.some(c => c.name === 'can_configure_muestras')) {
+    _db.exec("ALTER TABLE users ADD COLUMN can_configure_muestras INTEGER NOT NULL DEFAULT 0");
   }
 
   // Migración: añadir columna source a query_logs si no existe

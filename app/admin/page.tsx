@@ -23,6 +23,7 @@ interface User {
   name: string
   surname: string
   defaultPlant: string
+  canConfigureMuestras: boolean
   created_at: string
 }
 
@@ -245,6 +246,21 @@ export default function AdminPage() {
     } catch { toast("Error al resetear", "error") }
   }
 
+  // Permiso suelto (no un rol): quién puede editar la lista de artículos de /muestras
+  // además de admin. Se alterna con un solo clic, sin entrar en modo edición del resto
+  // de datos del usuario — ver docs/muestras.md.
+  const toggleMuestrasConfig = async (u: User) => {
+    try {
+      const res = await fetch(`/api/admin/users/${u.id}/muestras-config`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ enabled: !u.canConfigureMuestras }),
+      })
+      if (!res.ok) { toast("Error al actualizar el permiso", "error"); return }
+      setUsers(prev => prev.map(x => x.id === u.id ? { ...x, canConfigureMuestras: !u.canConfigureMuestras } : x))
+    } catch { toast("Error al actualizar el permiso", "error") }
+  }
+
   const startEdit = (u: User) => {
     setEditUserId(u.id); setEditName(u.name || ""); setEditSurname(u.surname || "")
     setEditUsername(u.username); setEditRole(u.role); setEditDefaultPlant(u.defaultPlant || "")
@@ -453,6 +469,7 @@ export default function AdminPage() {
                         <TableHead className="font-bold text-secondary-foreground">Planta</TableHead>
                         <TableHead className="font-bold text-secondary-foreground">Creado</TableHead>
                         <TableHead className="font-bold text-secondary-foreground text-right">Acciones</TableHead>
+                        <TableHead className="font-bold text-secondary-foreground text-center" title="Puede editar la lista de artículos visibles en /muestras, además de admin">Responsable Muestras</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
@@ -480,7 +497,7 @@ export default function AdminPage() {
                                 {PLANTS.map(p => <option key={p.id} value={p.id}>{p.label}</option>)}
                               </select>
                             </TableCell>
-                            <TableCell colSpan={2}>
+                            <TableCell colSpan={3}>
                               <div className="flex items-center gap-2">
                                 <Button size="sm" onClick={saveEdit} className="text-xs font-semibold h-8">Guardar</Button>
                                 <Button size="sm" variant="ghost" onClick={() => setEditUserId(null)} className="text-muted-foreground h-8 text-xs">Cancelar</Button>
@@ -511,12 +528,22 @@ export default function AdminPage() {
                                 <Trash2 className="h-4 w-4" />
                               </Button>
                             </TableCell>
+                            <TableCell className="text-center">
+                              <input
+                                type="checkbox"
+                                checked={u.role === 'admin' ? true : u.canConfigureMuestras}
+                                disabled={u.role === 'admin'}
+                                onChange={() => toggleMuestrasConfig(u)}
+                                className="h-4 w-4 rounded border-input accent-primary disabled:opacity-50"
+                                title={u.role === 'admin' ? 'admin siempre puede configurar /muestras' : 'Puede editar la lista de artículos de /muestras'}
+                              />
+                            </TableCell>
                           </TableRow>
                         )
                       ))}
                       {resetUserId && (
                         <TableRow className="bg-amber-50 border-amber-200">
-                          <TableCell colSpan={7}>
+                          <TableCell colSpan={8}>
                             <div className="flex items-center gap-3">
                               <span className="text-sm font-medium text-amber-700">Nueva contraseña para &quot;{users.find(u => u.id === resetUserId)?.username}&quot;:</span>
                               <Input type="password" value={resetPassword} onChange={e => setResetPassword(e.target.value)} placeholder="Nueva contraseña" className="h-8 w-[200px] text-sm" autoFocus onKeyDown={e => e.key === 'Enter' && resetUserPassword(resetUserId)} />
