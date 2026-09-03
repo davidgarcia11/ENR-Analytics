@@ -23,6 +23,7 @@ interface User {
   name: string
   surname: string
   defaultPlant: string
+  canConfigureMuestras: boolean
   created_at: string
 }
 
@@ -45,12 +46,19 @@ interface Screen {
   config: ScreenConfig
 }
 
-type Tab = 'usuarios' | 'roles' | 'pantallas' | 'estados-jde'
+type Tab = 'usuarios' | 'roles' | 'pantallas' | 'estados-jde' | 'muestras'
 
 interface JdeStatus {
   code: string
   description: string
   updated_at?: string
+}
+
+interface MuestrasSyncState {
+  lastSyncedAt: string | null
+  candidatosSincronizados: number
+  error: string | null
+  articulosConfigurados: number
 }
 
 // Derivado de la fuente única de paneles — nunca declarar esta lista a mano aquí.
@@ -112,6 +120,10 @@ export default function AdminPage() {
   const [jdeStatusSuccess, setJdeStatusSuccess] = useState("")
   const [jdeStatusError, setJdeStatusError] = useState("")
 
+  // ─── Muestras (sincronización manual) ─────────────────────────────────────────
+  const [muestrasSync, setMuestrasSync] = useState<MuestrasSyncState | null>(null)
+  const [syncingMuestras, setSyncingMuestras] = useState(false)
+
   useEffect(() => { checkAuth() }, [])
 
   const checkAuth = async () => {
@@ -125,6 +137,7 @@ export default function AdminPage() {
       loadRoles()
       loadScreens()
       loadJdeStatuses()
+      loadMuestrasSync()
     } catch {
       router.push("/login")
     }
@@ -146,6 +159,31 @@ export default function AdminPage() {
       const res = await fetch("/api/admin/roles")
       if (res.ok) setRoles(await res.json())
     } finally { setLoadingRoles(false) }
+  }
+
+  const loadMuestrasSync = async () => {
+    try {
+      const res = await fetch("/api/admin/muestras-sync")
+      if (res.ok) setMuestrasSync(await res.json())
+    } catch { /* silencioso */ }
+  }
+
+  // La sincronización real se dispara sola (al cambiar la lista de artículos y cada
+  // 30 min de fondo, ver lib/muestras.ts) — este botón es solo un "hazlo ya", y como
+  // ya no va por tramos, la petición termina cuando termina de verdad (sin polling).
+  const syncMuestrasNow = async () => {
+    setSyncingMuestras(true)
+    try {
+      const res = await fetch("/api/admin/muestras-sync", { method: "POST" })
+      const data = await res.json()
+      if (!res.ok) { toast(data.error || "Error al sincronizar", "error"); return }
+      toast(`Sincronizado — ${data.rows} lotes traídos`, "success")
+      loadMuestrasSync()
+    } catch {
+      toast("Error al sincronizar", "error")
+    } finally {
+      setSyncingMuestras(false)
+    }
   }
 
   const loadScreens = async () => {
@@ -243,6 +281,21 @@ export default function AdminPage() {
       setResetUserId(null); setResetPassword("")
       toast("Contraseña reseteada. El usuario deberá cambiarla al iniciar sesión.", "success")
     } catch { toast("Error al resetear", "error") }
+  }
+
+  // Permiso suelto (no un rol): quién puede editar la lista de artículos de /muestras
+  // además de admin. Se alterna con un solo clic, sin entrar en modo edición del resto
+  // de datos del usuario — ver docs/muestras.md.
+  const toggleMuestrasConfig = async (u: User) => {
+    try {
+      const res = await fetch(`/api/admin/users/${u.id}/muestras-config`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ enabled: !u.canConfigureMuestras }),
+      })
+      if (!res.ok) { toast("Error al actualizar el permiso", "error"); return }
+      setUsers(prev => prev.map(x => x.id === u.id ? { ...x, canConfigureMuestras: !u.canConfigureMuestras } : x))
+    } catch { toast("Error al actualizar el permiso", "error") }
   }
 
   const startEdit = (u: User) => {
@@ -373,6 +426,7 @@ export default function AdminPage() {
             { value: 'roles', label: 'Roles' },
             { value: 'pantallas', label: 'Pantallas' },
             { value: 'estados-jde', label: 'Estados JDE' },
+            { value: 'muestras', label: 'Muestras' },
           ]}
         />
 
@@ -453,6 +507,7 @@ export default function AdminPage() {
                         <TableHead className="font-bold text-secondary-foreground">Planta</TableHead>
                         <TableHead className="font-bold text-secondary-foreground">Creado</TableHead>
                         <TableHead className="font-bold text-secondary-foreground text-right">Acciones</TableHead>
+                        <TableHead className="font-bold text-secondary-foreground text-center" title="Puede editar la lista de artículos visibles en /muestras, además de admin">Responsable Muestras</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
@@ -480,7 +535,7 @@ export default function AdminPage() {
                                 {PLANTS.map(p => <option key={p.id} value={p.id}>{p.label}</option>)}
                               </select>
                             </TableCell>
-                            <TableCell colSpan={2}>
+                            <TableCell colSpan={3}>
                               <div className="flex items-center gap-2">
                                 <Button size="sm" onClick={saveEdit} className="text-xs font-semibold h-8">Guardar</Button>
                                 <Button size="sm" variant="ghost" onClick={() => setEditUserId(null)} className="text-muted-foreground h-8 text-xs">Cancelar</Button>
@@ -511,12 +566,22 @@ export default function AdminPage() {
                                 <Trash2 className="h-4 w-4" />
                               </Button>
                             </TableCell>
+                            <TableCell className="text-center">
+                              <input
+                                type="checkbox"
+                                checked={u.role === 'admin' ? true : u.canConfigureMuestras}
+                                disabled={u.role === 'admin'}
+                                onChange={() => toggleMuestrasConfig(u)}
+                                className="h-4 w-4 rounded border-input accent-primary disabled:opacity-50"
+                                title={u.role === 'admin' ? 'admin siempre puede configurar /muestras' : 'Puede editar la lista de artículos de /muestras'}
+                              />
+                            </TableCell>
                           </TableRow>
                         )
                       ))}
                       {resetUserId && (
                         <TableRow className="bg-amber-50 border-amber-200">
-                          <TableCell colSpan={7}>
+                          <TableCell colSpan={8}>
                             <div className="flex items-center gap-3">
                               <span className="text-sm font-medium text-amber-700">Nueva contraseña para &quot;{users.find(u => u.id === resetUserId)?.username}&quot;:</span>
                               <Input type="password" value={resetPassword} onChange={e => setResetPassword(e.target.value)} placeholder="Nueva contraseña" className="h-8 w-[200px] text-sm" autoFocus onKeyDown={e => e.key === 'Enter' && resetUserPassword(resetUserId)} />
@@ -760,6 +825,57 @@ export default function AdminPage() {
                       ))}
                     </TableBody>
                   </Table>
+                )}
+              </CardContent>
+            </Card>
+          </div>
+        )}
+
+        {/* ── Pestaña Muestras (sincronización de la caché de /muestras) ────────
+            El panel /muestras nunca consulta Oracle en directo — lee de sample_candidates
+            (SQLite), que se sincroniza sola al cambiar la lista de artículos visibles y
+            cada 30 min de fondo. Este botón solo fuerza esa misma sincronización ya
+            mismo. Ver docs/muestras.md. */}
+        {activeTab === 'muestras' && (
+          <div className="space-y-4">
+            <Card accent>
+              <CardHeader>
+                <CardTitle className="text-sm font-bold text-secondary-foreground flex items-center gap-2">
+                  <FileText className="h-4 w-4 text-primary" aria-hidden="true" />
+                  Sincronización de Muestras
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <p className="text-xs text-muted-foreground">
+                  El panel <strong>/muestras</strong> se sincroniza solo: al cambiar la lista de &quot;Artículos visibles&quot;
+                  y cada 30 minutos de fondo. Este botón solo sirve para forzarlo ahora mismo.
+                </p>
+
+                {!muestrasSync ? (
+                  <Spinner label="Cargando estado..." className="py-4" />
+                ) : muestrasSync.articulosConfigurados === 0 ? (
+                  <div className="flex items-center gap-3">
+                    <Badge variant="outline">Sin artículos configurados</Badge>
+                    <span className="text-sm text-muted-foreground">
+                      Añade al menos uno en &quot;Artículos visibles&quot; (dentro de /muestras) para que haya algo que sincronizar.
+                    </span>
+                  </div>
+                ) : (
+                  <div className="flex flex-wrap items-center gap-3">
+                    <Badge variant={muestrasSync.error ? 'destructive' : muestrasSync.lastSyncedAt ? 'success' : 'outline'}>
+                      {muestrasSync.error ? 'Error' : muestrasSync.lastSyncedAt ? 'Al día' : 'Sin sincronizar todavía'}
+                    </Badge>
+                    <span className="text-sm text-muted-foreground">
+                      {muestrasSync.articulosConfigurados} artículo{muestrasSync.articulosConfigurados === 1 ? '' : 's'} configurado{muestrasSync.articulosConfigurados === 1 ? '' : 's'}
+                      {muestrasSync.lastSyncedAt && ` · última sincronización: ${new Date(muestrasSync.lastSyncedAt).toLocaleString('es-ES')} · ${muestrasSync.candidatosSincronizados.toLocaleString('es-ES')} lotes`}
+                    </span>
+                    {muestrasSync.error && <span className="text-sm text-red-600">{muestrasSync.error}</span>}
+
+                    <Button size="sm" onClick={syncMuestrasNow} disabled={syncingMuestras} className="font-semibold ml-auto">
+                      {syncingMuestras ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+                      Sincronizar ahora
+                    </Button>
+                  </div>
                 )}
               </CardContent>
             </Card>

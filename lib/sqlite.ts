@@ -93,7 +93,70 @@ export function getDb(): Database.Database {
       mensajes TEXT NOT NULL,
       created_at TEXT DEFAULT (datetime('now'))
     );
+
+    -- Estado editable de /muestras (pendiente/enviado/completado) + observación libre por
+    -- lote. No viene de JDE: es una capa propia sobre el listado de producción real
+    -- (F4111/F4101/F4108), igual que jde_status_descriptions es una capa propia sobre datos
+    -- de JDE. Clave natural (articulo, lote), no id autoincremental: un solo registro por
+    -- combinación, se actualiza con upsert (ON CONFLICT) en vez de buscar-y-editar.
+    CREATE TABLE IF NOT EXISTS sample_tracking (
+      articulo TEXT NOT NULL,
+      lote TEXT NOT NULL,
+      estado TEXT NOT NULL DEFAULT 'pendiente',
+      observacion TEXT NOT NULL DEFAULT '',
+      updated_by TEXT,
+      updated_at TEXT DEFAULT (datetime('now')),
+      PRIMARY KEY (articulo, lote)
+    );
+
+    -- Lista global de artículos visibles en /muestras (si está vacía, se ven todos —
+    -- comportamiento abierto por defecto hasta que admin/responsable la configuran).
+    -- NO es por usuario: es una única lista compartida, editable por admin y por
+    -- cualquier usuario con users.can_configure_muestras = 1 (ver más abajo).
+    CREATE TABLE IF NOT EXISTS sample_article_filter (
+      articulo TEXT PRIMARY KEY,
+      descripcion TEXT NOT NULL DEFAULT '',
+      created_at TEXT DEFAULT (datetime('now'))
+    );
+
+    -- Caché local de /muestras: qué combinaciones artículo+lote ha producido JDE
+    -- (F4111.ILDCT='IC', tipo 12) PARA LOS ARTÍCULOS CONFIGURADOS EN
+    -- sample_article_filter. El panel SIEMPRE lee de aquí, nunca de Oracle en directo.
+    -- fecha_jde = F4111.ILTRDJ, solo informativo (para el filtro de fechas del panel) —
+    -- ver docs/muestras.md §"Caché y sincronización" para el porqué de este diseño.
+    CREATE TABLE IF NOT EXISTS sample_candidates (
+      articulo TEXT NOT NULL,
+      lote TEXT NOT NULL,
+      descripcion TEXT NOT NULL DEFAULT '',
+      marca TEXT NOT NULL DEFAULT '',
+      fecha_jde INTEGER,
+      updated_at TEXT DEFAULT (datetime('now')),
+      PRIMARY KEY (articulo, lote)
+    );
+
+    -- Estado de la sincronización de sample_candidates. Fila única (id=1). Sin marca de
+    -- agua ni backfill por tramos: la sincronización siempre trae TODO el histórico de
+    -- los artículos configurados de una vez (rápido — filtrar por artículo permite a
+    -- Oracle usar un índice que sin ese filtro no usaba, ver docs/muestras.md), así que
+    -- nunca hace falta llevar la cuenta de "hasta dónde se llegó".
+    CREATE TABLE IF NOT EXISTS sample_sync_state (
+      id INTEGER PRIMARY KEY CHECK (id = 1),
+      last_synced_at TEXT,
+      candidatos_sincronizados INTEGER NOT NULL DEFAULT 0,
+      last_error TEXT
+    );
+    INSERT OR IGNORE INTO sample_sync_state (id) VALUES (1);
   `);
+
+  // Migración: BDs creadas con el esquema anterior (backfill por tramos) no tienen
+  // last_synced_at/last_error todavía.
+  const syncStateCols = _db.prepare("PRAGMA table_info(sample_sync_state)").all() as { name: string }[];
+  if (!syncStateCols.some(c => c.name === 'last_synced_at')) {
+    _db.exec("ALTER TABLE sample_sync_state ADD COLUMN last_synced_at TEXT");
+  }
+  if (!syncStateCols.some(c => c.name === 'last_error')) {
+    _db.exec("ALTER TABLE sample_sync_state ADD COLUMN last_error TEXT");
+  }
 
   // Migración: añadir columna must_change_password si no existe (para BDs creadas antes de esta versión)
   const columns = _db.prepare("PRAGMA table_info(users)").all() as { name: string }[];
@@ -108,6 +171,12 @@ export function getDb(): Database.Database {
   }
   if (!columns.some(c => c.name === 'default_plant')) {
     _db.exec("ALTER TABLE users ADD COLUMN default_plant TEXT NOT NULL DEFAULT ''");
+  }
+  // Permiso suelto (no un rol): quién puede editar sample_article_filter además de
+  // admin. Se marca por usuario individual desde /admin, no por rol — petición
+  // explícita del usuario ("si quiero que un usuario concreto tenga eso").
+  if (!columns.some(c => c.name === 'can_configure_muestras')) {
+    _db.exec("ALTER TABLE users ADD COLUMN can_configure_muestras INTEGER NOT NULL DEFAULT 0");
   }
 
   // Migración: añadir columna source a query_logs si no existe
