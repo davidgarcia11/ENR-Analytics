@@ -144,7 +144,7 @@ export default function MuestrasPage() {
   const stats = data
     ? [
         { title: "Pendientes", value: String(data.resumen.pendientes), subValue: "Sin enviar todavía", valueClassName: ESTADO_TEXT_COLOR.pendiente },
-        { title: "Enviados", value: String(data.resumen.enviados), subValue: "En laboratorio/calidad", valueClassName: ESTADO_TEXT_COLOR.enviado },
+        { title: "Enviados", value: String(data.resumen.enviados), subValue: "En laboratorio", valueClassName: ESTADO_TEXT_COLOR.enviado },
         { title: "Completados", value: String(data.resumen.completados), subValue: "Resultado recibido", valueClassName: ESTADO_TEXT_COLOR.completado },
         { title: "Total lotes", value: String(data.resumen.total), subValue: range ? `${range.startDate} → ${range.endDate}` : "Todas las fechas" },
       ]
