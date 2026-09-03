@@ -120,10 +120,10 @@ export function getDb(): Database.Database {
     );
 
     -- Caché local de /muestras: qué combinaciones artículo+lote ha producido JDE
-    -- (F4111.ILDCT='IC', tipo 12). El panel SIEMPRE lee de aquí, nunca de Oracle en
-    -- directo — evita repetir en cada carga una consulta que en rangos amplios es
-    -- lenta o inestable en este JDE (ver docs/muestras.md §"Caché y sincronización").
-    -- fecha_jde = F4111.ILTRDJ (fecha de negocio, puede ir "hacia atrás").
+    -- (F4111.ILDCT='IC', tipo 12) PARA LOS ARTÍCULOS CONFIGURADOS EN
+    -- sample_article_filter. El panel SIEMPRE lee de aquí, nunca de Oracle en directo.
+    -- fecha_jde = F4111.ILTRDJ, solo informativo (para el filtro de fechas del panel) —
+    -- ver docs/muestras.md §"Caché y sincronización" para el porqué de este diseño.
     CREATE TABLE IF NOT EXISTS sample_candidates (
       articulo TEXT NOT NULL,
       lote TEXT NOT NULL,
@@ -134,35 +134,28 @@ export function getDb(): Database.Database {
       PRIMARY KEY (articulo, lote)
     );
 
-    -- Estado de la sincronización de sample_candidates. Fila única (id=1).
-    -- last_synced_jde usa F4111.ILTRDJ, no ILCRDJ — probado contra Oracle real que
-    -- filtrar por ILCRDJ es sistemáticamente lento (60-70s incluso para 1 día y 0
-    -- filas), aunque en teoría fuera la marca de agua "correcta" (nunca retrocede).
-    -- Con ILTRDJ + margen de solape en cada sync (ver lib/muestras.ts) se cubre el
-    -- caso real sin ese coste. Detalle completo en docs/muestras.md.
-    -- last_synced_jde: marca de agua del repaso INCREMENTAL (cada 30 min, ver
-    -- lib/muestras.ts). backfill_cursor_jde: progreso del backfill HISTÓRICO — campo
-    -- separado a propósito: si compartieran uno, el repaso incremental (que solo mira
-    -- los últimos días) podría avanzar la marca y hacer que un backfill interrumpido
-    -- "se salte" todo el histórico pendiente al reanudarlo.
+    -- Estado de la sincronización de sample_candidates. Fila única (id=1). Sin marca de
+    -- agua ni backfill por tramos: la sincronización siempre trae TODO el histórico de
+    -- los artículos configurados de una vez (rápido — filtrar por artículo permite a
+    -- Oracle usar un índice que sin ese filtro no usaba, ver docs/muestras.md), así que
+    -- nunca hace falta llevar la cuenta de "hasta dónde se llegó".
     CREATE TABLE IF NOT EXISTS sample_sync_state (
       id INTEGER PRIMARY KEY CHECK (id = 1),
-      last_synced_jde INTEGER NOT NULL DEFAULT 0,
-      backfill_cursor_jde INTEGER NOT NULL DEFAULT 0,
-      backfill_status TEXT NOT NULL DEFAULT 'pending',
-      backfill_started_at TEXT,
-      backfill_completed_at TEXT,
-      backfill_progress TEXT,
-      backfill_error TEXT,
-      candidatos_sincronizados INTEGER NOT NULL DEFAULT 0
+      last_synced_at TEXT,
+      candidatos_sincronizados INTEGER NOT NULL DEFAULT 0,
+      last_error TEXT
     );
     INSERT OR IGNORE INTO sample_sync_state (id) VALUES (1);
   `);
 
-  // Migración: añadir backfill_cursor_jde si no existe (BDs creadas antes de este campo)
-  const syncStateColumns = _db.prepare("PRAGMA table_info(sample_sync_state)").all() as { name: string }[];
-  if (!syncStateColumns.some(c => c.name === 'backfill_cursor_jde')) {
-    _db.exec("ALTER TABLE sample_sync_state ADD COLUMN backfill_cursor_jde INTEGER NOT NULL DEFAULT 0");
+  // Migración: BDs creadas con el esquema anterior (backfill por tramos) no tienen
+  // last_synced_at/last_error todavía.
+  const syncStateCols = _db.prepare("PRAGMA table_info(sample_sync_state)").all() as { name: string }[];
+  if (!syncStateCols.some(c => c.name === 'last_synced_at')) {
+    _db.exec("ALTER TABLE sample_sync_state ADD COLUMN last_synced_at TEXT");
+  }
+  if (!syncStateCols.some(c => c.name === 'last_error')) {
+    _db.exec("ALTER TABLE sample_sync_state ADD COLUMN last_error TEXT");
   }
 
   // Migración: añadir columna must_change_password si no existe (para BDs creadas antes de esta versión)

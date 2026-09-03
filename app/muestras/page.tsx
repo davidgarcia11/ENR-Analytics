@@ -11,7 +11,7 @@ import Header from "@/components/shadcn-space/blocks/topbar-02/header";
 import { type ThemeMode } from "@/components/nova/mode-toggle";
 import { NovaPortalProvider } from "@/components/nova/portal-container";
 import Statistics from "@/components/shadcn-space/blocks/statistics-04/statistics";
-import MuestrasTable, { type Muestra, type Estado } from "@/components/nova/muestras-table";
+import MuestrasTable, { type Muestra, type Estado, ESTADO_LABEL, ESTADO_TEXT_COLOR } from "@/components/nova/muestras-table";
 import MuestrasArticleConfig from "@/components/nova/muestras-article-config";
 import DateRangePicker, { type DateRange } from "@/components/nova/date-range-picker";
 import { Button } from "@/components/nova/ui/button";
@@ -21,6 +21,7 @@ interface SessionUser { id: number; username: string; role: string; name: string
 interface MuestrasResponse {
   muestras: Muestra[];
   resumen: { total: number; pendientes: number; enviados: number; completados: number };
+  sinConfigurar?: boolean;
 }
 
 export default function MuestrasPage() {
@@ -105,7 +106,7 @@ export default function MuestrasPage() {
     })
       .then((res) => {
         if (!res.ok) throw new Error();
-        if (patch.estado) toast.success(`${articulo} · ${lote} → ${patch.estado}`);
+        if (patch.estado) toast.success(`${articulo} · ${lote} → ${ESTADO_LABEL[patch.estado]}`);
       })
       .catch(() => {
         toast.error("No se ha podido guardar el cambio");
@@ -130,7 +131,7 @@ export default function MuestrasPage() {
         body: JSON.stringify({ items, estado }),
       });
       if (!res.ok) throw new Error();
-      toast.success(`${items.length} lote${items.length === 1 ? "" : "s"} → ${estado}`);
+      toast.success(`${items.length} lote${items.length === 1 ? "" : "s"} → ${ESTADO_LABEL[estado]}`);
     } catch {
       toast.error("No se ha podido aplicar el cambio masivo");
       fetchData(range);
@@ -142,9 +143,9 @@ export default function MuestrasPage() {
 
   const stats = data
     ? [
-        { title: "Pendientes", value: String(data.resumen.pendientes), subValue: "Sin enviar todavía" },
-        { title: "Enviados", value: String(data.resumen.enviados), subValue: "En laboratorio/calidad" },
-        { title: "Completados", value: String(data.resumen.completados), subValue: "Resultado recibido" },
+        { title: "Pendientes", value: String(data.resumen.pendientes), subValue: "Sin enviar todavía", valueClassName: ESTADO_TEXT_COLOR.pendiente },
+        { title: "Enviados", value: String(data.resumen.enviados), subValue: "En laboratorio/calidad", valueClassName: ESTADO_TEXT_COLOR.enviado },
+        { title: "Completados", value: String(data.resumen.completados), subValue: "Resultado recibido", valueClassName: ESTADO_TEXT_COLOR.completado },
         { title: "Total lotes", value: String(data.resumen.total), subValue: range ? `${range.startDate} → ${range.endDate}` : "Todas las fechas" },
       ]
     : [];
@@ -168,6 +169,13 @@ export default function MuestrasPage() {
 
             {!data ? (
               <p className="text-muted-foreground">Cargando…</p>
+            ) : data.sinConfigurar ? (
+              <div className="flex flex-col items-center gap-2 py-16 text-center text-muted-foreground">
+                <p className="text-sm">
+                  Todavía no hay artículos configurados para este panel.
+                  {puedeConfigurar ? " Añade al menos uno con el botón \"Artículos visibles\" de arriba." : " Pide a un responsable que configure la lista."}
+                </p>
+              </div>
             ) : (
               <>
                 <Statistics data={stats} columns={4} />

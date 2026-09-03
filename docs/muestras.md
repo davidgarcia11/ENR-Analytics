@@ -19,68 +19,139 @@ Origen: ClickUp `[Muestras] Crear panel de control de muestras pendientes/enviad
 
 ```
 app/muestras/page.tsx                       # Página (client component, Nova)
-app/api/muestras/route.ts                   # GET (listado) + PATCH (estado/observación, individual o masivo)
-app/api/muestras/config/route.ts            # GET/POST/DELETE — lista global de artículos visibles
+app/api/muestras/route.ts                   # GET (listado, lee la caché local) + PATCH (estado/observación, individual o masivo)
+app/api/muestras/config/route.ts            # GET/POST/DELETE — lista global de artículos visibles; POST dispara runFullSync()
+app/api/admin/muestras-sync/route.ts        # GET (estado) + POST (botón "Sincronizar ahora" manual, admin)
 app/api/admin/users/[id]/muestras-config/route.ts  # Activa/desactiva can_configure_muestras de un usuario
-lib/muestras.ts                             # Helpers compartidos (allowlist, permiso de configuración)
+lib/muestras.ts                             # runFullSync, ensureSyncScheduler, allowlist, permiso de configuración
 components/nova/muestras-table.tsx          # Tabla: búsqueda/filtro local, selección múltiple, paginación
 components/nova/muestras-article-config.tsx # Sheet de configuración de artículos visibles
 components/nova/date-range-picker.tsx       # Selector de fechas (día a día, estilo /produccion)
 components/shadcn-space/pagination/pagination-02.tsx  # Pagination 02 - Premium Ribbon (ShadcnSpace), parametrizado
 lib/panels.ts                               # Entrada 'muestras' (fuente única de paneles)
-lib/sqlite.ts                               # Tablas sample_tracking, sample_article_filter; users.can_configure_muestras
+lib/sqlite.ts                               # Tablas sample_tracking, sample_article_filter, sample_candidates, sample_sync_state; users.can_configure_muestras
 components/shadcn-space/blocks/topbar-02/data.ts  # 'muestras' en el grupo Apps del nav
-app/admin/page.tsx                          # Columna "Responsable Muestras" en la tabla de Usuarios
+app/admin/page.tsx                          # Columna "Responsable Muestras" en Usuarios + pestaña "Muestras" (sincronización manual)
 app/admin/logs/page.tsx                     # Etiqueta 'muestras' -> 'Muestras' en SOURCE_LABELS
 ```
 
-## 3. Origen de datos JDE
+## 3. Origen de datos JDE y caché local
 
-No hay ninguna tabla de "muestras" en JDE — el listado se construye cruzando tres
-tablas ya usadas en otros paneles de este dashboard:
+No hay ninguna tabla de "muestras" en JDE. El panel **nunca consulta Oracle en
+directo** — siempre lee de `sample_candidates` (SQLite), una caché local mantenida por
+`lib/muestras.ts` (`runFullSync`). Motivo (medido contra Oracle real, no supuesto):
+
+- Sin filtrar por artículo, `F4111` solo tiene un índice sobre `ILDCT` — cualquier
+  consulta (con o sin fecha) obliga a repasar los ~544.000 movimientos "IC" de toda la
+  empresa antes de poder filtrar nada más. Sin límite de fechas, esto **rompe la
+  conexión a Oracle** (probado: 3+ minutos sin terminar). Acotado por fecha, sigue
+  constando varios segundos a decenas de segundos, inestable.
+- Cruzar con `F4108` (Lot Master) para sacar el lote, sin ningún filtro de fecha en el
+  lado del lote, es otro cuello de botella aparte (13,6s en un tramo de 1 día, medido).
+- **Filtrando por los artículos concretos de la lista de "Artículos visibles"** (10-15
+  en la práctica), Oracle sí puede usar un índice que combina tipo de movimiento +
+  artículo (`F4111_14`) — el histórico **completo**, sin ningún límite de fecha, de un
+  puñado de artículos tarda segundos, no minutos (medido: 6 artículos, todo el
+  histórico, 6,4s). Por eso la sincronización siempre va filtrada por esa lista — ver
+  §"Caché y sincronización" más abajo.
 
 | Tabla | Uso | Campos |
 |---|---|---|
-| `F4111` | Item Ledger (movimientos de inventario) | `ILDCT` (tipo de movimiento, `'IC'`=producción real — mismo campo/valor que `/produccion` y `/coste-a1`), `ILTRDJ` (fecha JDE del movimiento), `ILITM` (artículo **corto**), `ILLITM` (artículo **largo**, el que se muestra en pantalla) |
-| `F4101` | Maestro de artículos | `IMITM` (corto, join), `IMDSC1` (descripción), `IMSRP1` (categoría/tipo real — filtro `= '12'`, Producto terminado, catálogo UDC `41/S1`, mismo campo/valor que `docs/coste-a1.md` §3.1), `IMSRP4` (marca — mismo campo que el filtro "Marca" de `/produccion`, `FilterPanel.tsx`, catálogo UDC `41/S4`) |
-| `F4108` | Lot Master | `IOITM` (artículo **corto**, join), `IORLOT` (lote — ver §4) |
+| `F4111` | Item Ledger (movimientos de inventario) | `ILDCT` (tipo de movimiento, `'IC'`=producción real — mismo campo/valor que `/produccion` y `/coste-a1`), `ILTRDJ` (fecha JDE del movimiento), `ILLITM` (artículo **largo**, el que se muestra en pantalla y el que se usa para filtrar), `ILLOTN` (SSCC del palet + lote concatenados — ver §4) |
+| `F4101` | Maestro de artículos | `IMITM` (corto, join con `F4111.ILITM`), `IMDSC1` (descripción), `IMSRP1` (categoría/tipo real, `= '12'` = Producto terminado — solo como filtro de seguridad, ya no hace falta para nada más porque la propia lista de artículos configurados ya son todos tipo 12), `IMSRP4` (marca — mismo campo que el filtro "Marca" de `/produccion`, `FilterPanel.tsx`, catálogo UDC `41/S4`) |
 
-Query base (`app/api/muestras/route.ts`):
+Query de sincronización (`lib/muestras.ts`, `runFullSync`) — `:a0, :a1, ...` son los
+artículos de `sample_article_filter`, sin ningún límite de fecha:
 
 ```sql
 SELECT DISTINCT
   TRIM(C.ILLITM) AS ARTICULO,
   TRIM(M.IMDSC1) AS DESCRIPCION,
   TRIM(M.IMSRP4) AS MARCA_COD,
-  SUBSTR(TRIM(L.IORLOT), 1, 5) AS LOTE
+  SUBSTR(TRIM(C.ILLOTN), INSTR(TRIM(C.ILLOTN), '_') + 1, 5) AS LOTE,
+  C.ILTRDJ AS FECHA_JDE
 FROM F4111 C
 INNER JOIN F4101 M ON M.IMITM = C.ILITM AND TRIM(M.IMSRP1) = '12'
-INNER JOIN F4108 L ON L.IOITM = C.ILITM
 WHERE C.ILDCT = 'IC'
-  AND C.ILTRDJ BETWEEN :startJde AND :endJde
-  AND TRIM(L.IORLOT) IS NOT NULL
+  AND TRIM(C.ILLITM) IN (:a0, :a1, ...)
+  AND INSTR(TRIM(C.ILLOTN), '_') > 0
 ```
 
-**Por qué no hace falta pasar por `F4801`** (a diferencia de `/produccion`): no se
-necesita el número de orden ni la sub-línea/turno, solo qué se produjo y de qué lote —
-`F4111` ya tiene todo lo necesario (tipo de movimiento, fecha, artículo) sin el
-`F55TAR12`/`TO55TAREA` que complica la query de `/produccion`.
+**Ya NO se cruza con `F4108`** (versión anterior de este panel sí lo hacía) — el lote
+sale directo de `F4111.ILLOTN` (ver §4), y quitar ese cruce elimina uno de los dos
+cuellos de botella descritos arriba.
 
-**Cruce por código CORTO, no largo**: `F4108.IOITM` (corto) con `F4111.ILITM` (corto) —
-evita pasar por `F4101` para convertir corto↔largo, a diferencia de `/coste-a1` que
-necesita el largo porque busca por `F4101.IMLITM`. El artículo que se enseña en pantalla
-es igualmente el largo (`F4111.ILLITM`, directo, sin conversión).
+La descripción de marca se resuelve con una consulta suelta al catálogo UDC `41/S4`
+(`prodctl.f0005`, `DRSY='41'`, `DRRT='S4'`) — no con un `LEFT JOIN` por fila, que tiene
+el mismo problema de rendimiento que el cruce a `F4108` (medido: 70s en un tramo de 90
+días). Mismo patrón (consulta aparte + mapa en memoria) que la familia en `/mrp` y
+`/coste-a1`.
 
-La descripción de marca se resuelve contra el catálogo UDC `41/S4` (`prodctl.f0005`,
-`DRSY='41'`, `DRRT='S4'`), mismo patrón que la familia en `/mrp` y `/coste-a1`.
+## 4. Regla del lote (`F4111.ILLOTN`)
 
-## 4. Regla del lote (`F4108.IORLOT`)
+`ILLOTN` es un campo compuesto: `<SSCC del palet>_<lote>`, por ejemplo
+`984365783310659485_26153102`. El SSCC de la izquierda a veces sale recortado (le
+faltan dígitos) si el lote de la derecha es largo, pero **el lote de la derecha
+siempre sale completo**. La regla (confirmada con datos reales) es: todo lo que hay
+después del primer `_`, y de eso, **los 5 primeros caracteres empezando por la
+izquierda** — `SUBSTR(TRIM(ILLOTN), INSTR(TRIM(ILLOTN), '_') + 1, 5)`. En el ejemplo
+de arriba, el lote es `26153` (y coincide con el propio `ILTRDJ` de esa fila, `YYDDD`).
 
-`IORLOT` puede venir en formato compuesto `AAJJJ-AAAAA` — **solo se usan los 5 primeros
-caracteres empezando por la izquierda** (`SUBSTR(TRIM(IORLOT), 1, 5)`, petición
-explícita del usuario). El `SELECT DISTINCT` sobre `(ARTICULO, LOTE)` ya deduplica: un
-lote puede tener varias líneas en `F4108`/`F4111` pero aparece una sola vez en el
-listado.
+El `SELECT DISTINCT` sobre `(ARTICULO, LOTE)` ya deduplica: un lote puede tener varias
+líneas en `F4111` (varios palets) pero aparece una sola vez en el listado.
+
+## 4bis. Caché y sincronización (`sample_candidates`, `lib/muestras.ts`)
+
+```sql
+CREATE TABLE sample_candidates (
+  articulo TEXT NOT NULL,
+  lote TEXT NOT NULL,
+  descripcion TEXT NOT NULL DEFAULT '',
+  marca TEXT NOT NULL DEFAULT '',
+  fecha_jde INTEGER,          -- ILTRDJ, solo para el filtro de fechas del panel (en memoria, no vuelve a Oracle)
+  updated_at TEXT DEFAULT (datetime('now')),
+  PRIMARY KEY (articulo, lote)
+);
+
+CREATE TABLE sample_sync_state (        -- fila única (id=1)
+  id INTEGER PRIMARY KEY CHECK (id = 1),
+  last_synced_at TEXT,
+  candidatos_sincronizados INTEGER NOT NULL DEFAULT 0,
+  last_error TEXT
+);
+```
+
+**`runFullSync()`** trae SIEMPRE el histórico completo de los artículos que haya en
+`sample_article_filter` (nunca "solo lo nuevo") — sin marca de agua, sin backfill por
+tramos, sin distinguir tipos de fecha JDE. Como cada sincronización vuelve a traer todo,
+nunca se puede perder una corrección tardía de JDE por antigua que sea la fecha que
+lleve, sea cual sea el campo de fecha que la registre — no hay ningún límite de fecha
+del que depender para eso.
+
+Se dispara en tres momentos:
+1. **Al cambiar la lista de artículos** (`POST /api/muestras/config`, ver §6) —
+   síncrono, la petición espera a que termine (segundos) antes de responder.
+2. **Cada 30 minutos**, de fondo (`ensureSyncScheduler`, `setInterval` de servidor —
+   sin cron externo, este proyecto no tiene nada así montado; se registra una sola vez
+   por proceso, llamado de forma barata desde `GET /api/muestras`).
+3. **Manualmente**, botón "Sincronizar ahora" en `/admin` → pestaña Muestras
+   (`POST /api/admin/muestras-sync`) — por si acaso, no hace falta para el
+   funcionamiento normal.
+
+**Si `sample_article_filter` está vacía** (antes de que admin/responsable configure
+algún artículo — el único momento en que esto pasa en la práctica), `runFullSync` no
+hace nada: sincronizar sin filtrar por artículo es precisamente la consulta
+lenta/inestable que se quería evitar. `GET /api/muestras` devuelve `sinConfigurar: true`
+y el panel avisa de que hace falta configurar artículos primero, en vez de intentar
+mostrar el universo entero.
+
+**Quitar un artículo de la lista** no borra sus filas de `sample_candidates` — se
+quedan tal cual, simplemente dejan de sincronizarse y quedan ocultas (el filtro por
+lista ya las esconde). Si se vuelve a añadir el mismo artículo más adelante, la
+siguiente sincronización trae de golpe tanto lo que ya había como lo que se haya
+producido mientras estuvo fuera — no se pierde nada por el camino. El estado y la
+observación de sus lotes (`sample_tracking`, tabla totalmente aparte, ver §5) tampoco
+se tocan nunca por esto, así que reaparecen tal cual al reconfigurar el artículo.
 
 ## 5. Estado y observación — capa propia (SQLite)
 
@@ -109,19 +180,24 @@ UPDATE`) — un lote nuevo aparece en la tabla la primera vez que se edita, no a
 
 ### `GET /api/muestras?startDate=YYYY-MM-DD&endDate=YYYY-MM-DD`
 
-Por defecto, últimos 30 días. Devuelve:
+Lee de la caché local (`sample_candidates`), nunca de Oracle. Sin `startDate`/`endDate`,
+sin límite de fechas (todo lo sincronizado) — ver §4bis para por qué no hace falta.
+Devuelve:
 
 ```json
 {
   "muestras": [
     { "articulo": "...", "descripcion": "...", "marca": "...", "lote": "...", "estado": "pendiente", "observacion": "" }
   ],
-  "resumen": { "total": 0, "pendientes": 0, "enviados": 0, "completados": 0 }
+  "resumen": { "total": 0, "pendientes": 0, "enviados": 0, "completados": 0 },
+  "sinConfigurar": false
 }
 ```
 
-Registra la consulta en `query_logs` con `source: 'muestras'`, igual que el resto de
-paneles.
+`sinConfigurar: true` (y `muestras: []`) cuando `sample_article_filter` está vacía —
+ver §4bis. Registra la consulta en `query_logs` con `source: 'muestras'`, igual que el
+resto de paneles. También llama a `ensureSyncScheduler()` (idempotente) para asegurar
+que el repaso de 30 min está registrado.
 
 ### `PATCH /api/muestras`
 
@@ -142,18 +218,29 @@ inyección, pero se valida igualmente en el límite de la API — ver
 ### `GET/POST/DELETE /api/muestras/config` — lista de artículos visibles
 
 Lista **global** (no por usuario — ver §8.1) de qué artículos aparecen en `/muestras`.
-Si está vacía, no hay restricción (se ven todos los artículos tipo "12"). En cuanto
-tiene al menos uno, `GET /api/muestras` restringe el listado a esa lista para todo el
-mundo excepto `admin`.
+**Si está vacía, no se ve nada** (ya no "se ven todos" — cambio deliberado respecto a la
+primera versión, ver §4bis: sin lista no hay nada sincronizado, y sincronizar sin
+filtrar por artículo es justo la consulta inviable).
 
 - `GET ?q=texto` → `{ allowlist, results }`. Sin `q`, solo devuelve `allowlist` (la lista
   actual). Con `q`, además busca en `F4101` (mismo filtro `IMSRP1='12'`) por código o
   descripción, máx. 30 resultados, para elegir qué añadir.
-- `POST { articulo, descripcion }` → añade (upsert) un artículo a la lista.
-- `DELETE ?articulo=...` → lo quita.
+- `POST { articulo, descripcion }` → añade (upsert) un artículo a la lista y dispara
+  `runFullSync()` de forma síncrona (la petición espera esos segundos) — así el
+  artículo recién añadido aparece en `/muestras` sin esperar al repaso de 30 min.
+- `DELETE ?articulo=...` → lo quita de la lista (no borra sus filas de la caché, ver
+  §4bis) — no dispara sincronización, no hay nada nuevo que traer.
 
 Gate propio (`requireMuestrasConfigAccess` en `lib/muestras.ts`, no `requireScreenAccess`):
 `admin`, o cualquier usuario con `users.can_configure_muestras = 1`.
+
+### `GET/POST /api/admin/muestras-sync` — sincronización manual (admin)
+
+Botón "Sincronizar ahora" de `/admin` → pestaña Muestras. `GET` devuelve
+`{ lastSyncedAt, candidatosSincronizados, error, articulosConfigurados }`; `POST` llama
+a `runFullSync()` y espera a que termine (ya no hace falta barra de progreso ni
+polling, como en la primera versión con backfill por tramos — con la lista de
+artículos configurada, tarda segundos).
 
 ## 7. UI (Nova)
 
@@ -161,6 +248,10 @@ Gate propio (`requireMuestrasConfigAccess` en `lib/muestras.ts`, no `requireScre
   Dashboards: es una herramienta operativa donde el usuario actúa, no una vista
   analítica — ver comentario en `components/shadcn-space/blocks/topbar-02/data.ts`).
 - KPIs (`statistics-04`, 4 tarjetas): Pendientes / Enviados / Completados / Total lotes.
+  El número grande de cada KPI de estado lleva el mismo color que ese estado en la
+  tabla (`ESTADO_TEXT_COLOR`, exportado desde `muestras-table.tsx` para no duplicar la
+  paleta) — requirió añadir `valueClassName` a `statistics-04/statistics.tsx` (no
+  existía en esta rama; sí en el WIP de `/produccion-v2`, de donde se copió el patrón).
 - **Sin gráfico**: herramienta de checklist operativo, no analítica — se añade si
   luego hace falta ver tendencia en el tiempo.
 - Rango de fechas: `components/nova/date-range-picker.tsx` — mismo `<input type="date">`
@@ -174,7 +265,11 @@ Gate propio (`requireMuestrasConfigAccess` en `lib/muestras.ts`, no `requireScre
     de estado por defecto: "Pendiente"** (petición explícita) — el usuario cambia a
     Enviado/Completado/Todos si quiere.
   - Estado se edita con un `Select` por fila (color de fondo distinto por estado) y
-    observación con un `Input` por fila que guarda al perder el foco (`onBlur`).
+    observación con un `Input` por fila que guarda al perder el foco (`onBlur`). El
+    texto del estado siempre sale con mayúscula inicial (`ESTADO_LABEL`, no el valor
+    crudo `pendiente`/`enviado`/`completado`) — también en los toasts de `page.tsx`,
+    que reutilizan el mismo `ESTADO_LABEL` exportado desde `muestras-table.tsx` en vez
+    de tener su propia copia.
   - **Selección múltiple**: checkbox por fila + checkbox de cabecera (selecciona la
     página actual). Si hay más lotes filtrados que los de la página, aparece un enlace
     "Seleccionar los N lotes filtrados" para extender la selección a todo lo filtrado,
@@ -228,9 +323,10 @@ necesita ver algo fuera de esa lista, lo añade él mismo.
 1. `lib/panels.ts` → entrada `muestras` (fuente única de paneles, ver comentario en el
    propio archivo).
 2. `components/shadcn-space/blocks/topbar-02/data.ts` → `muestras` en `APP_KEYS`.
-3. `lib/sqlite.ts` → tablas `sample_tracking`, `sample_article_filter`, columna
-   `users.can_configure_muestras` (se siembra automáticamente `screens` desde `PANELS`,
-   pública por defecto, restringible desde `/admin`).
+3. `lib/sqlite.ts` → tablas `sample_tracking`, `sample_article_filter`,
+   `sample_candidates`, `sample_sync_state`, columna `users.can_configure_muestras`
+   (se siembra automáticamente `screens` desde `PANELS`, pública por defecto,
+   restringible desde `/admin`).
 4. `app/api/muestras/route.ts` → `requireScreenAccess('muestras')`, logging en
    `query_logs` con `source: 'muestras'`.
 5. `app/admin/logs/page.tsx` → etiqueta `'muestras'` → `'Muestras'` en `SOURCE_LABELS`.
@@ -239,8 +335,8 @@ necesita ver algo fuera de esa lista, lo añade él mismo.
 
 - **Export a Excel**: no incluido — se añade si hace falta compartir el listado fuera
   de la app (patrón ya usado en `/mrp` y `/compras` con `xlsx`, fácil de replicar).
-- **Filtro por planta**: la planta del lote está disponible en `F4108.IOMCU` pero no se
-  usa todavía (ni como columna ni como filtro) — se añade si se pide.
+- **Filtro por planta**: ya no se cruza con `F4108` (§3), así que la planta del lote no
+  está disponible en la caché actual — habría que añadirla desde otra tabla si se pide.
 - **Gráfico/tendencia temporal**: ver §7, decisión deliberada de la v1.
 - **Historial de quién añadió/quitó un artículo de la lista** (§6): `sample_article_filter`
   no guarda auditoría de cambios, solo el estado actual — se añade si hace falta trazar

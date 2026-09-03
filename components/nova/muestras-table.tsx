@@ -28,7 +28,9 @@ export interface Muestra {
   observacion: string;
 }
 
-const ESTADO_LABEL: Record<Estado, string> = {
+// Exportados para que page.tsx use el mismo texto/color en los KPIs y en los toasts
+// (petición explícita: primera letra en mayúscula, y el color del estado en el KPI).
+export const ESTADO_LABEL: Record<Estado, string> = {
   pendiente: "Pendiente",
   enviado: "Enviado",
   completado: "Completado",
@@ -40,6 +42,13 @@ const ESTADO_COLOR: Record<Estado, string> = {
   pendiente: "bg-amber-400/10 text-amber-600 border-amber-400/20",
   enviado: "bg-sky-400/10 text-sky-500 border-sky-400/20",
   completado: "bg-teal-400/10 text-teal-600 border-teal-400/20",
+};
+
+// Solo el color de texto, para el número grande de los KPIs (page.tsx).
+export const ESTADO_TEXT_COLOR: Record<Estado, string> = {
+  pendiente: "text-amber-600",
+  enviado: "text-sky-500",
+  completado: "text-teal-600",
 };
 
 const PAGE_SIZE = 50;

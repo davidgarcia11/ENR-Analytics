@@ -54,13 +54,11 @@ interface JdeStatus {
   updated_at?: string
 }
 
-interface MuestrasBackfillState {
-  status: 'pending' | 'running' | 'completed' | 'failed'
-  startedAt: string | null
-  completedAt: string | null
-  progress: string | null
-  error: string | null
+interface MuestrasSyncState {
+  lastSyncedAt: string | null
   candidatosSincronizados: number
+  error: string | null
+  articulosConfigurados: number
 }
 
 // Derivado de la fuente única de paneles — nunca declarar esta lista a mano aquí.
@@ -122,9 +120,9 @@ export default function AdminPage() {
   const [jdeStatusSuccess, setJdeStatusSuccess] = useState("")
   const [jdeStatusError, setJdeStatusError] = useState("")
 
-  // ─── Muestras (backfill histórico) ────────────────────────────────────────────
-  const [muestrasBackfill, setMuestrasBackfill] = useState<MuestrasBackfillState | null>(null)
-  const [startingBackfill, setStartingBackfill] = useState(false)
+  // ─── Muestras (sincronización manual) ─────────────────────────────────────────
+  const [muestrasSync, setMuestrasSync] = useState<MuestrasSyncState | null>(null)
+  const [syncingMuestras, setSyncingMuestras] = useState(false)
 
   useEffect(() => { checkAuth() }, [])
 
@@ -139,7 +137,7 @@ export default function AdminPage() {
       loadRoles()
       loadScreens()
       loadJdeStatuses()
-      loadMuestrasBackfill()
+      loadMuestrasSync()
     } catch {
       router.push("/login")
     }
@@ -163,35 +161,30 @@ export default function AdminPage() {
     } finally { setLoadingRoles(false) }
   }
 
-  const loadMuestrasBackfill = async () => {
+  const loadMuestrasSync = async () => {
     try {
-      const res = await fetch("/api/admin/muestras-backfill")
-      if (res.ok) setMuestrasBackfill(await res.json())
-    } catch { /* silencioso, se reintenta con el polling */ }
+      const res = await fetch("/api/admin/muestras-sync")
+      if (res.ok) setMuestrasSync(await res.json())
+    } catch { /* silencioso */ }
   }
 
-  const startMuestrasBackfill = async () => {
-    setStartingBackfill(true)
+  // La sincronización real se dispara sola (al cambiar la lista de artículos y cada
+  // 30 min de fondo, ver lib/muestras.ts) — este botón es solo un "hazlo ya", y como
+  // ya no va por tramos, la petición termina cuando termina de verdad (sin polling).
+  const syncMuestrasNow = async () => {
+    setSyncingMuestras(true)
     try {
-      const res = await fetch("/api/admin/muestras-backfill", { method: "POST" })
+      const res = await fetch("/api/admin/muestras-sync", { method: "POST" })
       const data = await res.json()
-      if (!res.ok) { toast(data.error || "Error al iniciar el backfill", "error"); return }
-      if (data.started === false) toast(data.reason || "Ya hay un backfill en curso", "error")
-      loadMuestrasBackfill()
+      if (!res.ok) { toast(data.error || "Error al sincronizar", "error"); return }
+      toast(`Sincronizado — ${data.rows} lotes traídos`, "success")
+      loadMuestrasSync()
     } catch {
-      toast("Error al iniciar el backfill", "error")
+      toast("Error al sincronizar", "error")
     } finally {
-      setStartingBackfill(false)
+      setSyncingMuestras(false)
     }
   }
-
-  // Mientras el backfill está en curso, refresca el estado cada pocos segundos —
-  // el trabajo real corre en el servidor (fire-and-forget), aquí solo se consulta.
-  useEffect(() => {
-    if (activeTab !== 'muestras' || muestrasBackfill?.status !== 'running') return
-    const id = setInterval(loadMuestrasBackfill, 3000)
-    return () => clearInterval(id)
-  }, [activeTab, muestrasBackfill?.status])
 
   const loadScreens = async () => {
     setLoadingScreens(true)
@@ -838,64 +831,49 @@ export default function AdminPage() {
           </div>
         )}
 
-        {/* ── Pestaña Muestras (backfill histórico de la caché de /muestras) ────
+        {/* ── Pestaña Muestras (sincronización de la caché de /muestras) ────────
             El panel /muestras nunca consulta Oracle en directo — lee de sample_candidates
-            (SQLite), que se llena aquí una vez (por tramos) y luego se mantiene sola con
-            un repaso automático cada 30 min. Ver docs/muestras.md. */}
+            (SQLite), que se sincroniza sola al cambiar la lista de artículos visibles y
+            cada 30 min de fondo. Este botón solo fuerza esa misma sincronización ya
+            mismo. Ver docs/muestras.md. */}
         {activeTab === 'muestras' && (
           <div className="space-y-4">
             <Card accent>
               <CardHeader>
                 <CardTitle className="text-sm font-bold text-secondary-foreground flex items-center gap-2">
                   <FileText className="h-4 w-4 text-primary" aria-hidden="true" />
-                  Sincronización histórica de Muestras
+                  Sincronización de Muestras
                 </CardTitle>
               </CardHeader>
               <CardContent className="space-y-4">
                 <p className="text-xs text-muted-foreground">
-                  Carga inicial, de una sola vez, del histórico de producción que alimenta el panel <strong>/muestras</strong>.
-                  Va por tramos contra Oracle (puede tardar varios minutos en total) — a partir de aquí, el propio servidor
-                  se mantiene al día solo cada 30 minutos, sin necesidad de repetir esto.
+                  El panel <strong>/muestras</strong> se sincroniza solo: al cambiar la lista de &quot;Artículos visibles&quot;
+                  y cada 30 minutos de fondo. Este botón solo sirve para forzarlo ahora mismo.
                 </p>
 
-                {!muestrasBackfill ? (
+                {!muestrasSync ? (
                   <Spinner label="Cargando estado..." className="py-4" />
+                ) : muestrasSync.articulosConfigurados === 0 ? (
+                  <div className="flex items-center gap-3">
+                    <Badge variant="outline">Sin artículos configurados</Badge>
+                    <span className="text-sm text-muted-foreground">
+                      Añade al menos uno en &quot;Artículos visibles&quot; (dentro de /muestras) para que haya algo que sincronizar.
+                    </span>
+                  </div>
                 ) : (
                   <div className="flex flex-wrap items-center gap-3">
-                    <Badge variant={
-                      muestrasBackfill.status === 'completed' ? 'success'
-                        : muestrasBackfill.status === 'failed' ? 'destructive'
-                        : muestrasBackfill.status === 'running' ? 'info' : 'outline'
-                    }>
-                      {muestrasBackfill.status === 'pending' && 'Sin ejecutar todavía'}
-                      {muestrasBackfill.status === 'running' && 'En curso…'}
-                      {muestrasBackfill.status === 'completed' && 'Completado'}
-                      {muestrasBackfill.status === 'failed' && 'Falló'}
+                    <Badge variant={muestrasSync.error ? 'destructive' : muestrasSync.lastSyncedAt ? 'success' : 'outline'}>
+                      {muestrasSync.error ? 'Error' : muestrasSync.lastSyncedAt ? 'Al día' : 'Sin sincronizar todavía'}
                     </Badge>
+                    <span className="text-sm text-muted-foreground">
+                      {muestrasSync.articulosConfigurados} artículo{muestrasSync.articulosConfigurados === 1 ? '' : 's'} configurado{muestrasSync.articulosConfigurados === 1 ? '' : 's'}
+                      {muestrasSync.lastSyncedAt && ` · última sincronización: ${new Date(muestrasSync.lastSyncedAt).toLocaleString('es-ES')} · ${muestrasSync.candidatosSincronizados.toLocaleString('es-ES')} lotes`}
+                    </span>
+                    {muestrasSync.error && <span className="text-sm text-red-600">{muestrasSync.error}</span>}
 
-                    {muestrasBackfill.status === 'running' && muestrasBackfill.progress && (
-                      <span className="text-sm text-secondary-foreground flex items-center gap-1.5">
-                        <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
-                        {muestrasBackfill.progress}
-                      </span>
-                    )}
-                    {muestrasBackfill.status === 'completed' && muestrasBackfill.completedAt && (
-                      <span className="text-sm text-muted-foreground">
-                        {new Date(muestrasBackfill.completedAt).toLocaleString('es-ES')} — {muestrasBackfill.candidatosSincronizados.toLocaleString('es-ES')} lotes cargados
-                      </span>
-                    )}
-                    {muestrasBackfill.status === 'failed' && muestrasBackfill.error && (
-                      <span className="text-sm text-red-600">{muestrasBackfill.error}</span>
-                    )}
-
-                    <Button
-                      size="sm"
-                      onClick={startMuestrasBackfill}
-                      disabled={startingBackfill || muestrasBackfill.status === 'running'}
-                      className="font-semibold ml-auto"
-                    >
-                      {startingBackfill ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
-                      {muestrasBackfill.status === 'completed' ? 'Volver a sincronizar' : 'Sincronizar histórico'}
+                    <Button size="sm" onClick={syncMuestrasNow} disabled={syncingMuestras} className="font-semibold ml-auto">
+                      {syncingMuestras ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+                      Sincronizar ahora
                     </Button>
                   </div>
                 )}

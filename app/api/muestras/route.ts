@@ -2,12 +2,12 @@
 // laboratorio/calidad (pendiente / enviado / completado). Ver ClickUp #869etmf6d.
 //
 // El listado NUNCA consulta Oracle en directo — lee de sample_candidates (SQLite),
-// una caché local de qué combinaciones artículo+lote ha producido JDE (F4111.ILDCT='IC',
-// F4101.IMSRP1='12' = Producto terminado), mantenida al día por lib/muestras.ts
-// (backfill histórico a mano desde /admin + repaso incremental automático cada 30 min).
-// Ver docs/muestras.md §"Caché y sincronización" para el porqué (una consulta en vivo
-// sin acotar por fecha rompe la conexión a Oracle; acotada sigue costando varios
-// segundos por el cruce a F4108, que aquí ya no hace falta).
+// una caché local mantenida por lib/muestras.ts (runFullSync): todo el histórico de
+// los artículos configurados en "Artículos visibles", resincronizado al cambiar esa
+// lista y cada 30 min de fondo. Si la lista está vacía, no hay nada sincronizado
+// todavía — se avisa con sinConfigurar en vez de intentar mostrar el universo entero
+// (esa consulta sin filtrar por artículo es la que rompía la conexión a Oracle). Ver
+// docs/muestras.md §"Caché y sincronización".
 //
 // Estado y observación NO viven en JDE — son una capa propia en SQLite
 // (sample_tracking, clave (articulo, lote)) que se cruza aquí con la caché de JDE.
@@ -50,6 +50,18 @@ export async function GET(req: NextRequest) {
 
   try {
     const db = getDb();
+
+    // Sin artículos configurados no hay nada sincronizado — avisar en vez de intentar
+    // mostrar todo (esa consulta sin filtrar por artículo es la que resulta inviable).
+    const allowlist = getArticleAllowlist();
+    if (allowlist.length === 0) {
+      return NextResponse.json({
+        muestras: [],
+        resumen: { total: 0, pendientes: 0, enviados: 0, completados: 0 },
+        sinConfigurar: true,
+      });
+    }
+
     const candidateRows = db.prepare('SELECT articulo, lote, descripcion, marca, fecha_jde FROM sample_candidates').all() as CandidateRow[];
 
     let rows = candidateRows;
@@ -74,15 +86,12 @@ export async function GET(req: NextRequest) {
       };
     });
 
-    // Lista global de artículos visibles — se aplica a TODO el mundo, admin incluido
-    // (petición explícita: si se ha configurado una lista, es porque eso es lo que se
-    // quiere ver, también quien la configuró — no tiene sentido que admin siga viendo
-    // el universo entero). Sin excepción de rol aquí, a diferencia de otras pantallas.
-    const allowlist = getArticleAllowlist();
-    if (allowlist.length > 0) {
-      const allowed = new Set(allowlist.map((a) => a.articulo));
-      muestras = muestras.filter((m) => allowed.has(m.articulo));
-    }
+    // Filtra por si sample_candidates tiene filas de un artículo ya quitado de la
+    // lista (se dejan sin sincronizar pero no se borran, ver docs/muestras.md) — se
+    // aplica a TODO el mundo, admin incluido (petición explícita: si se ha configurado
+    // una lista, es porque eso es lo que se quiere ver, también quien la configuró).
+    const allowed = new Set(allowlist.map((a) => a.articulo));
+    muestras = muestras.filter((m) => allowed.has(m.articulo));
 
     const resumen = {
       total: muestras.length,

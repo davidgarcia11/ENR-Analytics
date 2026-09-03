@@ -7,7 +7,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getDbConnection } from '@/lib/db';
 import { getDb } from '@/lib/sqlite';
-import { getArticleAllowlist, requireMuestrasConfigAccess } from '@/lib/muestras';
+import { getArticleAllowlist, requireMuestrasConfigAccess, runFullSync } from '@/lib/muestras';
 
 export async function GET(req: NextRequest) {
   const denied = await requireMuestrasConfigAccess();
@@ -60,7 +60,12 @@ export async function POST(req: NextRequest) {
 
   const db = getDb();
   db.prepare('INSERT INTO sample_article_filter (articulo, descripcion) VALUES (?, ?) ON CONFLICT(articulo) DO UPDATE SET descripcion = excluded.descripcion').run(articulo, descripcion);
-  return NextResponse.json({ ok: true });
+
+  // Resincroniza al momento (todo el histórico de la lista ya actualizada) — con el
+  // filtro por artículo esto tarda segundos, así que no hace falta esperar al repaso
+  // de 30 min para ver el artículo recién añadido en /muestras.
+  const sync = await runFullSync();
+  return NextResponse.json({ ok: true, sync });
 }
 
 export async function DELETE(req: NextRequest) {

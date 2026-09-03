@@ -23,6 +23,8 @@ type Statistics = {
   subValue: string;
   badgeColor?: string;
   badgeValue?: string;
+  /** Clase Tailwind para colorear el valor grande (p.ej. el color de un estado). */
+  valueClassName?: string;
   chartType?: ChartType;
 };
 
@@ -233,7 +235,7 @@ export default function Statistic({ data = defaultStatisticsData, columns = 4 }:
                     <p className="text-sm text-muted-foreground">
                       {item.title}
                     </p>
-                    <p className="text-2xl font-semibold text-card-foreground">
+                    <p className={cn("text-2xl font-semibold text-card-foreground", item.valueClassName)}>
                       {item.value}
                     </p>
                     <div className="flex items-center gap-1.5">
