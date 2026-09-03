@@ -150,7 +150,7 @@ export default function MuestrasTable({
         />
         <Select value={filtroEstado} onValueChange={(v) => setFiltroEstado(v as Estado | "todos")}>
           <SelectTrigger size="sm" className="w-40">
-            <SelectValue />
+            <SelectValue>{(v: Estado | "todos") => (v === "todos" ? "Todos los estados" : ESTADO_LABEL[v])}</SelectValue>
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="todos">Todos los estados</SelectItem>
@@ -169,7 +169,7 @@ export default function MuestrasTable({
           <span className="text-sm font-medium">{seleccion.size} seleccionado{seleccion.size === 1 ? "" : "s"}</span>
           <Select value={bulkEstado} onValueChange={(v) => setBulkEstado(v as Estado)}>
             <SelectTrigger size="sm" className="w-40">
-              <SelectValue />
+              <SelectValue>{(v: Estado) => ESTADO_LABEL[v]}</SelectValue>
             </SelectTrigger>
             <SelectContent>
               {ESTADOS.map((e) => (
@@ -233,7 +233,7 @@ export default function MuestrasTable({
                     <TableCell>
                       <Select value={m.estado} onValueChange={(v) => onUpdate(m.articulo, m.lote, { estado: v as Estado })}>
                         <SelectTrigger size="sm" className={cn("w-32", ESTADO_COLOR[m.estado])}>
-                          <SelectValue />
+                          <SelectValue>{(v: Estado) => ESTADO_LABEL[v]}</SelectValue>
                         </SelectTrigger>
                         <SelectContent>
                           {ESTADOS.map((e) => (
