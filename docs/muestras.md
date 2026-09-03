@@ -281,12 +281,17 @@ artículos configurada, tarda segundos).
   - Búsqueda y filtro de estado son **locales** (sobre los datos ya cargados). **Filtro
     de estado por defecto: "Pendiente"** (petición explícita) — el usuario cambia a
     Enviado/Completado/Todos si quiere.
-  - Estado se edita con un `Select` por fila (color de fondo distinto por estado) y
-    observación con un `Input` por fila que guarda al perder el foco (`onBlur`). El
-    texto del estado siempre sale con mayúscula inicial (`ESTADO_LABEL`, no el valor
-    crudo `pendiente`/`enviado`/`completado`) — también en los toasts de `page.tsx`,
-    que reutilizan el mismo `ESTADO_LABEL` exportado desde `muestras-table.tsx` en vez
-    de tener su propia copia.
+  - Estado se edita con un `Select` por fila y observación con un `Input` por fila que
+    guarda al perder el foco (`onBlur`). El texto del estado siempre sale con mayúscula
+    inicial (`ESTADO_LABEL`, no el valor crudo `pendiente`/`enviado`/`completado`) —
+    también en los toasts de `page.tsx`, que reutilizan el mismo `ESTADO_LABEL`
+    exportado desde `muestras-table.tsx` en vez de tener su propia copia.
+  - Los tres `Select` de estado (filtro de cabecera, barra de selección múltiple y el de
+    cada fila) siguen el patrón oficial ShadcnSpace **"Select 03 - Select with status"**
+    (`@shadcn-space/select-03`, petición explícita): un `CircleIcon` de `lucide-react`
+    relleno con el color del estado (`ESTADO_DOT_COLOR`, formato `text-x fill-x`) delante
+    de la etiqueta, tanto en el trigger cerrado como en cada opción del desplegable — en
+    vez del fondo/borde de color en el trigger que se usó al principio.
   - **Selección múltiple**: checkbox por fila + checkbox de cabecera (selecciona la
     página actual). Si hay más lotes filtrados que los de la página, aparece un enlace
     "Seleccionar los N lotes filtrados" para extender la selección a todo lo filtrado,

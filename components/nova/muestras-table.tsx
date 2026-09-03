@@ -13,7 +13,7 @@
 // explícita: que se "parezcan" en colores/tamaños/componentes compartidos aunque el
 // contenido de cada tabla sea distinto.
 import { useEffect, useMemo, useState } from "react";
-import { SearchX, Loader2 } from "lucide-react";
+import { SearchX, Loader2, CircleIcon } from "lucide-react";
 import { Input } from "@/components/nova/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/nova/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/nova/ui/table";
@@ -44,11 +44,12 @@ export const ESTADO_LABEL: Record<Estado, string> = {
 };
 
 // Colores fijos (enum cerrado de 3 estados, a diferencia de la familia/marca de otras
-// tablas Nova que usan una paleta por hash porque la lista no es cerrada).
-const ESTADO_COLOR: Record<Estado, string> = {
-  pendiente: "bg-amber-400/10 text-amber-600 border-amber-400/20",
-  enviado: "bg-sky-400/10 text-sky-500 border-sky-400/20",
-  completado: "bg-teal-400/10 text-teal-600 border-teal-400/20",
+// tablas Nova que usan una paleta por hash porque la lista no es cerrada). Formato
+// "text-x fill-x" para el CircleIcon del Select con estado (ShadcnSpace Select 03).
+const ESTADO_DOT_COLOR: Record<Estado, string> = {
+  pendiente: "text-amber-500 fill-amber-500",
+  enviado: "text-sky-500 fill-sky-500",
+  completado: "text-teal-600 fill-teal-600",
 };
 
 // Solo el color de texto, para el número grande de los KPIs (page.tsx).
@@ -165,12 +166,16 @@ export default function MuestrasTable({
             />
             <Select value={filtroEstado} onValueChange={(v) => setFiltroEstado(v as Estado | "todos")}>
               <SelectTrigger size="sm" className="w-40">
+                {filtroEstado !== "todos" && <CircleIcon className={cn("size-2", ESTADO_DOT_COLOR[filtroEstado])} />}
                 <SelectValue>{(v: Estado | "todos") => (v === "todos" ? "Todos los estados" : ESTADO_LABEL[v])}</SelectValue>
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="todos">Todos los estados</SelectItem>
                 {ESTADOS.map((e) => (
-                  <SelectItem key={e} value={e}>{ESTADO_LABEL[e]}</SelectItem>
+                  <SelectItem key={e} value={e}>
+                    <CircleIcon className={cn("size-2", ESTADO_DOT_COLOR[e])} />
+                    {ESTADO_LABEL[e]}
+                  </SelectItem>
                 ))}
               </SelectContent>
             </Select>
@@ -182,11 +187,15 @@ export default function MuestrasTable({
             <span className="text-sm font-medium">{seleccion.size} seleccionado{seleccion.size === 1 ? "" : "s"}</span>
             <Select value={bulkEstado} onValueChange={(v) => setBulkEstado(v as Estado)}>
               <SelectTrigger size="sm" className="w-40">
+                <CircleIcon className={cn("size-2", ESTADO_DOT_COLOR[bulkEstado])} />
                 <SelectValue>{(v: Estado) => ESTADO_LABEL[v]}</SelectValue>
               </SelectTrigger>
               <SelectContent>
                 {ESTADOS.map((e) => (
-                  <SelectItem key={e} value={e}>{ESTADO_LABEL[e]}</SelectItem>
+                  <SelectItem key={e} value={e}>
+                    <CircleIcon className={cn("size-2", ESTADO_DOT_COLOR[e])} />
+                    {ESTADO_LABEL[e]}
+                  </SelectItem>
                 ))}
               </SelectContent>
             </Select>
@@ -245,12 +254,16 @@ export default function MuestrasTable({
                       <TableCell className="h-12 px-4 py-0 align-middle text-muted-foreground">{m.lote}</TableCell>
                       <TableCell className="h-12 px-4 py-0 align-middle">
                         <Select value={m.estado} onValueChange={(v) => onUpdate(m.articulo, m.lote, { estado: v as Estado })}>
-                          <SelectTrigger size="sm" className={cn("w-32", ESTADO_COLOR[m.estado])}>
+                          <SelectTrigger size="sm" className="w-32">
+                            <CircleIcon className={cn("size-2", ESTADO_DOT_COLOR[m.estado])} />
                             <SelectValue>{(v: Estado) => ESTADO_LABEL[v]}</SelectValue>
                           </SelectTrigger>
                           <SelectContent>
                             {ESTADOS.map((e) => (
-                              <SelectItem key={e} value={e}>{ESTADO_LABEL[e]}</SelectItem>
+                              <SelectItem key={e} value={e}>
+                                <CircleIcon className={cn("size-2", ESTADO_DOT_COLOR[e])} />
+                                {ESTADO_LABEL[e]}
+                              </SelectItem>
                             ))}
                           </SelectContent>
                         </Select>
