@@ -32,7 +32,7 @@ lib/panels.ts                               # Entrada 'muestras' (fuente única 
 lib/sqlite.ts                               # Tablas sample_tracking, sample_article_filter, sample_candidates, sample_sync_state; users.can_configure_muestras
 components/shadcn-space/blocks/topbar-02/data.ts  # 'muestras' en el grupo Apps del nav
 app/admin/page.tsx                          # Columna "Responsable Muestras" en Usuarios + pestaña "Muestras" (sincronización manual)
-app/admin/logs/page.tsx                     # Etiqueta 'muestras' -> 'Muestras' en SOURCE_LABELS
+app/admin/logs/page.tsx                     # Fuentes 'muestras'/'muestras-sync' en SOURCE_LABELS + resumen de filtros de sincronización
 ```
 
 ## 3. Origen de datos JDE y caché local
@@ -137,6 +137,15 @@ Se dispara en tres momentos:
 3. **Manualmente**, botón "Sincronizar ahora" en `/admin` → pestaña Muestras
    (`POST /api/admin/muestras-sync`) — por si acaso, no hace falta para el
    funcionamiento normal.
+
+**Cada ejecución queda registrada** en `query_logs` (mismo sistema de logs que el resto
+de paneles, `/admin/logs`), fuente `muestras-sync` — no solo la última: cada
+sincronización real (no las que no hacen nada por lista vacía) inserta una fila nueva,
+con quién/qué la disparó (`trigger`: `scheduled`/`config-change`/`manual`, y el usuario
+si lo hay), cuántos artículos había configurados, cuántos lotes trajo (`result_count`),
+cuánto tardó (`execution_time_ms`) y el error si falló. `sample_sync_state` (arriba)
+sigue existiendo aparte, solo para el vistazo rápido del estado actual en `/admin` — el
+historial completo de todas las sincronizaciones vive en `query_logs`.
 
 **Si `sample_article_filter` está vacía** (antes de que admin/responsable configure
 algún artículo — el único momento en que esto pasa en la práctica), `runFullSync` no
@@ -329,7 +338,9 @@ necesita ver algo fuera de esa lista, lo añade él mismo.
    restringible desde `/admin`).
 4. `app/api/muestras/route.ts` → `requireScreenAccess('muestras')`, logging en
    `query_logs` con `source: 'muestras'`.
-5. `app/admin/logs/page.tsx` → etiqueta `'muestras'` → `'Muestras'` en `SOURCE_LABELS`.
+5. `app/admin/logs/page.tsx` → etiquetas `'muestras'` → `'Muestras'` y `'muestras-sync'`
+   → `'Muestras (sincronización)'` en `SOURCE_LABELS`, más un caso especial en
+   `summarizeFilters` para mostrar el disparador/artículos/error de cada sincronización.
 
 ## 10. Fuera de alcance en esta primera versión
 

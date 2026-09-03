@@ -7,6 +7,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getDbConnection } from '@/lib/db';
 import { getDb } from '@/lib/sqlite';
+import { verifySession } from '@/lib/auth';
 import { getArticleAllowlist, requireMuestrasConfigAccess, runFullSync } from '@/lib/muestras';
 
 export async function GET(req: NextRequest) {
@@ -64,7 +65,8 @@ export async function POST(req: NextRequest) {
   // Resincroniza al momento (todo el histórico de la lista ya actualizada) — con el
   // filtro por artículo esto tarda segundos, así que no hace falta esperar al repaso
   // de 30 min para ver el artículo recién añadido en /muestras.
-  const sync = await runFullSync();
+  const user = await verifySession().catch(() => null);
+  const sync = await runFullSync({ trigger: 'config-change', userId: user?.id, username: user?.username });
   return NextResponse.json({ ok: true, sync });
 }
 

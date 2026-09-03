@@ -29,7 +29,8 @@ export async function GET() {
 export async function POST() {
   const denied = await requireAdmin();
   if (denied) return denied;
-  const result = await runFullSync();
+  const user = await verifySession();
+  const result = await runFullSync({ trigger: 'manual', userId: user?.id, username: user?.username });
   if (!result.ok) {
     return NextResponse.json({ error: result.error }, { status: 500 });
   }

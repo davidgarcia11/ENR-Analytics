@@ -58,15 +58,42 @@ function updateSyncState(patch: Partial<SyncStateRow>) {
 
 interface CandidateRow { ARTICULO: string; DESCRIPCION: string; MARCA_COD: string; LOTE: string; FECHA_JDE: number }
 
+export type SyncTrigger = 'scheduled' | 'config-change' | 'manual';
+
+interface SyncMeta {
+  trigger: SyncTrigger;
+  userId?: number | null;
+  username?: string | null;
+}
+
+// Registra CADA sincronización (no solo la última) en query_logs — mismo sistema de
+// logs que el resto de paneles (/admin/logs), fuente propia 'muestras-sync' para no
+// mezclarla con 'muestras' (que registra vistas del panel, no sincronizaciones).
+// Nunca bloquea ni rompe runFullSync si falla — mismo criterio que el resto del proyecto.
+function logSyncRun(meta: SyncMeta, result: { ok: boolean; rows?: number; error?: string }, durationMs: number, articulosConfigurados: number) {
+  try {
+    const db = getDb();
+    const filters = { trigger: meta.trigger, articulosConfigurados, error: result.error ?? null };
+    const username = meta.username || (meta.trigger === 'scheduled' ? 'Sistema (automático)' : 'Invitado');
+    db.prepare(
+      'INSERT INTO query_logs (user_id, username, source, filters, result_count, execution_time_ms) VALUES (?, ?, ?, ?, ?, ?)'
+    ).run(meta.userId ?? null, username, 'muestras-sync', JSON.stringify(filters), result.rows ?? 0, durationMs);
+  } catch (logErr) {
+    console.error('Error registrando log de sincronización de muestras:', logErr);
+  }
+}
+
 // Sincronización completa: todo el histórico de los artículos configurados en
 // sample_article_filter. Si la lista está vacía, no hace nada (sería la consulta
-// lenta/inestable sin filtrar por artículo — ver comentario de cabecera).
-export async function runFullSync(): Promise<{ ok: boolean; rows?: number; error?: string }> {
+// lenta/inestable sin filtrar por artículo — ver comentario de cabecera) — y no se
+// registra en el log, no ha pasado nada que valga la pena contar.
+export async function runFullSync(meta: SyncMeta = { trigger: 'scheduled' }): Promise<{ ok: boolean; rows?: number; error?: string }> {
   const allowlist = getArticleAllowlist();
   if (allowlist.length === 0) {
     return { ok: true, rows: 0 };
   }
 
+  const startTime = Date.now();
   let conn;
   try {
     conn = await getDbConnection();
@@ -115,12 +142,16 @@ export async function runFullSync(): Promise<{ ok: boolean; rows?: number; error
 
     const total = (db.prepare('SELECT COUNT(*) AS n FROM sample_candidates').get() as { n: number }).n;
     updateSyncState({ last_synced_at: new Date().toISOString(), candidatos_sincronizados: total, last_error: null });
-    return { ok: true, rows: rows.length };
+    const outcome = { ok: true, rows: rows.length };
+    logSyncRun(meta, outcome, Date.now() - startTime, allowlist.length);
+    return outcome;
   } catch (err: any) {
     const message = String(err?.message || err);
     console.error('[muestras] Error sincronizando:', err);
     updateSyncState({ last_error: message });
-    return { ok: false, error: message };
+    const outcome = { ok: false, error: message };
+    logSyncRun(meta, outcome, Date.now() - startTime, allowlist.length);
+    return outcome;
   } finally {
     if (conn) {
       try { await conn.close(); } catch (e) { console.error('Error cerrando conexión Oracle:', e); }
@@ -136,7 +167,7 @@ let schedulerStarted = false;
 export function ensureSyncScheduler(): void {
   if (schedulerStarted) return;
   schedulerStarted = true;
-  setInterval(() => { runFullSync().catch((err) => console.error('[muestras] sync programado falló:', err)); }, SYNC_INTERVAL_MS);
+  setInterval(() => { runFullSync({ trigger: 'scheduled' }).catch((err) => console.error('[muestras] sync programado falló:', err)); }, SYNC_INTERVAL_MS);
 }
 
 // Lista global de artículos visibles en /muestras (si está vacía, no hay nada
