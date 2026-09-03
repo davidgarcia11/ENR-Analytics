@@ -1,24 +1,36 @@
 # Documentación — Panel de Compras (`/compras`)
 
-> Documentación específica del panel de comparativa previsión de ventas vs. venta real.
-> Ver [DOCUMENTACION.md](../DOCUMENTACION.md) para la documentación base del proyecto.
+> Panel de comparativa previsión de ventas vs. venta real, rediseñado sobre el sistema de
+> diseño **Nova** (ShadcnSpace) — sustituye a la versión anterior (basada en
+> `components/ui/`, sin jerarquía Familia›Canal›Artículo). Esa versión anterior queda
+> documentada en [`docs/compras-v1-historico.md`](./compras-v1-historico.md) — tiene
+> conocimiento de JDE que sigue vigente aquí (mapeo artículo largo/corto, filtro
+> `SDNXTR`, recordatorio anual de `COLEDG_VIGENTE`...). Ver
+> [DOCUMENTACION.md](../DOCUMENTACION.md) para la base del proyecto y
+> [`components/nova/README.md`](../components/nova/README.md) para el sistema de diseño
+> Nova (aislamiento, configuración, decisiones de instalación) — es el primer panel real
+> construido con Nova, sirve de referencia para los siguientes.
 
 ---
 
 ## 1. Descripción general
 
-Panel pensado para el director de compras: compara, por artículo y por mes (o rango de fechas),
-la previsión de ventas presupuestada para el año en curso (JDE) frente a lo realmente vendido, para
-anticipar necesidades de compra. La comparación principal es en **Unidades** (previsto vs. real,
-a petición del usuario); Kg, Importe y Precio unitario acompañan como pestañas adicionales. Primera
-entrega de lo que será un área de análisis de compras más amplia — en el futuro se añadirán más
-análisis y probablemente agrupación por familia (el campo `familia` ya viaja en cada fila de la API
-para que sea trivial añadirlo).
+Mismo objetivo de negocio que la versión anterior (anticipar necesidades de compra
+comparando previsión JDE vs. venta real), con dos cambios de fondo:
 
-**Acceso configurable** — público por defecto (`is_public=1`), igual que el resto de paneles. El
-administrador puede restringirlo a roles específicos desde `/admin` → pestaña Pantallas.
+- **Jerarquía en vez de tabla plana**: Familia › Canal › Artículo, con drill-down real
+  (expandir/colapsar) en lugar de filtros de artículo/marca sueltos.
+- **UI construida sobre Nova** (`[data-nova-theme]`, ver README de Nova) en vez del
+  sistema de componentes `components/ui/`.
 
-**Navegación:** dropdown "Paneles ▾" en la barra superior (clave `compras`).
+Este panel es también el banco de pruebas de Nova: la mayoría de decisiones documentadas
+aquí (estructura de página, nav con caja redondeada, selector de meses propio, cabecera
+compartida) aplican igual al construir el próximo panel Nova, no solo a compras.
+
+**Acceso**: `requireScreenAccess('compras')`, misma entrada `compras` de `screens` que
+tenía la versión anterior. **Logging de consultas**: sí, en `query_logs` con
+`source: 'compras'` (mismo source que la versión anterior, para que `/admin/logs` muestre
+continuidad — ver §7.1).
 
 ---
 
@@ -26,217 +38,174 @@ administrador puede restringirlo a roles específicos desde `/admin` → pestañ
 
 | Archivo | Descripción |
 |---|---|
-| `app/compras/page.tsx` | Página cliente — filtros, 4 KPI cards con gauge, gráfico de tendencia, Tabs, tabla de detalle |
-| `app/api/compras/route.ts` | API Route servidor — consulta F3460/F4105/F4211/F4101/F554101, agregación y cálculo de desviaciones |
+| `app/compras/page.tsx` | Página cliente — toolbar (selector de meses + tabs de unidad + exportar), KPIs, gráficos, tabla jerárquica |
+| `app/api/compras/route.ts` | API Route servidor — agregación bottom-up Familia›Canal›Artículo, modo real y modo `?mock=1` |
+| `components/nova/hierarchical-table.tsx` | Tabla jerárquica (TanStack Table v8, `subRows`) + píldoras de ruta (`DrillPills`) |
+| `components/nova/deviation-by-family-chart.tsx` | Gráfico de desviación por familia (barras divergentes desde el centro, sin Recharts) |
+| `components/nova/month-range-picker.tsx` | Selector de rango de meses completos (sin día) |
+| `components/nova/mode-toggle.tsx` | Selector Claro/Oscuro/Sistema |
+| `components/shadcn-space/blocks/topbar-02/` | Header compartido (nav por dropdowns, perfil, notificaciones) — bloque del catálogo ShadcnSpace |
+| `components/shadcn-space/blocks/statistics-04/` | Tarjetas KPI (bloque del catálogo) |
+| `components/shadcn-space/blocks/chart-15/` | Gráfico de barras agrupadas de evolución mensual (bloque del catálogo, adaptado) |
 
 ---
 
 ## 3. Esquema Oracle/JDE
 
-Cuatro tablas sin precedente en el resto del proyecto:
+Reutiliza las mismas tablas que la versión anterior (`F3460`, `F4211`, `F4105`,
+`F554101`, `F4101`), más dos consultas nuevas al catálogo UDC (`prodctl.f0005`) para
+resolver códigos a descripciones:
 
-| Tabla | Descripción | Campos usados |
+| Tabla | Uso | Diferencia con la versión anterior |
 |---|---|---|
-| `F3460` | Previsión de ventas (presupuesto) | `MFMCU` (planta, filtro fijo `10999` = planta de presupuestos), `MFLITM` (artículo largo/visible), `MFITM` (artículo corto, solo para F4101/F554101), `MFDRQJ` (fecha JDE, siempre fin de mes = previsión de todo ese mes), `MFFQT` (cantidad, ÷100) |
-| `F4105` | Coste de artículo | `COMCU` (almacén, filtro fijo `10999`), `COLEDG` (tipo de coste, ver §3.1), `COLITM` (artículo largo), `COUNCS` (coste unitario, ÷10000) |
-| `F4211` | Ventas reales (pedidos de venta, ya usada en `api/orders`) | `SDAITM` (artículo largo/visible), `SDITM` (artículo corto, solo para F4101/F554101), `SDADDJ` (fecha real de envío — filtro `!=0`), `SDDCTO` (tipo de documento — filtro `!='ST'`), `SDUORG` (cantidad, ÷100), `SDUPRC` (precio unitario, ÷10000) — **sin** filtro `SDNXTR` (ver §3.3) |
-| `F554101` | Extensión del maestro de artículos (gramaje) | `AAITM` (artículo corto, = `IMITM`/`MFITM`/`SDITM`), `AAZE03` (gramos por unidad, directo — ver §3.2) |
+| `F3460` | Previsión (`MFDRQJ`, `MFFQT`) | Igual, más `MFDRQJ` ahora usado para bucket mensual (antes solo se sumaba el periodo completo) |
+| `F4211` | Venta real (`SDADDJ`, `SDSOQS`, `SDUPRC`) | Mismo filtro (`SDDCTO != 'ST'`, `SDADDJ != 0`). Campo de cantidad cambiado de `SDUORG` (el que usaba la versión anterior) a `SDSOQS` |
+| `F4105` | Coste (`COUNCS`, `COLEDG_VIGENTE` constante) | Igual |
+| `F4101` | Familia (`IMSRP2`) | **Antes se mostraba el código crudo** (`IMSRP2`, ej. `"101"`) sin resolver. Ahora se resuelve contra `prodctl.f0005` (UDC `41`/`S2`) — bug real encontrado solo con datos reales, ver §8 |
+| `F554101` | Canal (`AAZE06`) + gramaje (`AAZE03`) | Antes no había canal — se usaba **Marca** (`F4101.IMSRP4`) como segunda dimensión. Ahora se usa **Canal**, un campo distinto (ver §3.1) |
+| `prodctl.f0005` | Catálogo UDC — `41/S2` (familia), `17/B6` (canal) | Nuevo. Resuelve código → descripción legible, nunca se muestra el código crudo |
 
-### 3.1 Artículo "largo" vs. "corto"
+### 3.1 Canal (actual) no es Marca (versión anterior) — son campos distintos
 
-**Bug real encontrado al probar contra JDE en producción** (no se habría visto sin datos reales):
-`F4101` (descripción/familia del artículo) se indexa por el **artículo corto** (`IMITM`), no por el
-largo/visible que usa el resto de filtros de la app. `F3460` y `F4211` tienen ambos códigos en
-columnas distintas:
+**Importante para quien compare contra la versión anterior**: aquella agrupaba/filtraba
+por **Marca** (`F4101.IMSRP4`). Este panel agrupa por **Canal** (`F554101.AAZE06`). No es
+el mismo dato con otro nombre — son dos UDC distintos del maestro de artículos,
+confirmados contra el esquema real. Canal es un atributo del **artículo** (como el
+gramaje), no del cliente que compra — un artículo pertenece a un único canal, y sus
+ventas se atribuyen íntegramente a él, independientemente de quién lo compre.
+**Pendiente de validar con comercial** que este supuesto sea correcto de cara a negocio.
 
-- `F3460`: `MFLITM` (largo, clave de agrupación) / `MFITM` (corto, solo para cruzar F4101)
-- `F4211`: `SDAITM` (largo, clave de agrupación) / `SDITM` (corto, solo para cruzar F4101) — mismo
-  patrón que `app/api/orders/route.ts` (`LEFT JOIN F4101 E ON E.IMITM = A.SDITM`)
-- `F4105`: `COLITM` es el artículo **largo** (mismo espacio que `MFLITM`/`SDAITM`), no requiere
-  traducción a corto.
+### 3.2 Casing de los catálogos UDC — no es simétrico
 
-`api/compras/route.ts` mantiene un `shortItemMap` (largo → corto) construido a partir de las propias
-filas de F3460/F4211, y lo usa únicamente para la consulta a F4101.
+`prodctl.f0005.DRDL01` (descripción) viene ya bien formateada para el catálogo de canal
+(`17/B6`, ej. `"Mercadona LPC"`), pero **en mayúsculas** para el de familia (`41/S2`, ej.
+`"TORTILLA"`) — comprobado empíricamente, no es un patrón general de JDE. Por eso
+`capitalizarFrase()` (sentence-case, no Title Case: `"Preparados a base de patata"`, no
+`"Preparados A Base De Patata"`) se aplica **solo** a `familiaLabels`, nunca a
+`canalLabels` — aplicarlo ahí mangling acrónimos reales como `"LPC"`.
 
-### 3.2 Sin conversión de unidades — Kg por gramaje, no por UM
-
-"Unidades"/"precio unitario" usan las cantidades tal cual vienen de JDE (`MFFQT`/`SDUORG`, solo
-÷100), sin ninguna conversión de unidad de medida — no está necesariamente en la misma unidad entre
-artículos distintos, es una simplificación deliberada.
-
-Una primera versión de este panel probó a convertir a Kg con `F4101.IMUOM1` + `F41002` (mismo patrón
-BFS que `app/api/production/route.ts`), pero se descartó: el enfoque correcto para este panel es el
-**gramaje del artículo** (`F554101.AAZE03`), igual que hace `/produccion` para su filtro de gramaje
-(ver más abajo cómo se relaciona con el artículo). `AAZE03` es directamente el nº de **gramos por
-unidad** (confirmado por el usuario, no requiere parsear la descripción de `prodctl.f0005`), así que:
+### 3.3 Importe (€) — misma fórmula asimétrica que la versión anterior
 
 ```
-kg = cantidad * (AAZE03 / 1000)
+previsto = unidades_previstas × coste_unitario_fijo   (F4105.COUNCS, foto sin mes propio)
+real     = Σ (SDSOQS/100 × SDUPRC/10000)              (línea a línea, NUNCA unidades_reales × coste)
 ```
 
-Se aplica el mismo gramaje a previsto y a real — es una propiedad del artículo, no de la transacción,
-así que a diferencia del antiguo enfoque por `F41002` no hace falta resolverlo línea a línea ni
-manejar distintas UOM de origen.
-
-**Relación artículo → gramaje** (la misma que usa `/produccion` para su filtro de gramaje, ver
-`docs/produccion.md`): `F554101.AAITM = IMITM` (artículo corto) → `AAZE03` (gramos). En
-`api/compras/route.ts` se consulta con los mismos artículos cortos que ya se resuelven para F4101
-(`shortItemMap`), sin necesitar un tercer mapa de traducción.
-
-`ponytail:` si en el futuro `AAZE03` resulta no ser fiable como número puro para algún artículo (ver
-edge case en §5), el patrón de conversión por `F41002`/BFS sigue disponible en
-`app/api/production/route.ts` líneas ~304-378 como alternativa.
-
-### 3.3 Filtro por tipo de documento y fecha de envío, sin filtro `SDNXTR`
-
-A petición del usuario, `F4211` se filtra con `TRIM(SDDCTO) != 'ST'` (excluye ese tipo de documento)
-y `SDADDJ != 0` (descarta líneas sin fecha de envío real). La fecha de referencia para el rango
-también es `SDADDJ` (fecha real de envío), no `SDPDDJ` (fecha de pedido), para que el mes en el que
-se contabiliza una venta sea el mes en que efectivamente salió, no el mes en que se pidió.
-
-**Bug real encontrado al comparar contra JDE en vivo**: la primera versión reutilizaba el filtro
-`SDNXTR != 999` de `app/api/orders/route.ts` sin validar que encajara aquí. Consultando directamente
-F4211 se confirmó que sin ese filtro `SDADDJ` tiene datos repartidos por todo el año (mínimo 2 de
-enero, máximo el día de hoy), pero con `SDNXTR != 999` el mínimo saltaba a mediados de julio y el
-número de filas caía de ~165.000 a ~3.100 — ese filtro estaba descartando casi todo el histórico.
-`SDNXTR` (estado del pedido) tiene sentido para `/preparacion-pedidos` (que quiere pedidos
-*pendientes*, excluyendo los ya cerrados/históricos), pero para "venta real ya sucedida" el filtro
-correcto es el opuesto: no filtrar por `SDNXTR` en absoluto (confirmado con el usuario).
-
-**Cambio posterior (confirmado con el usuario):** el filtro `SDDELN != 0` (con albarán) se sustituyó
-por `SDDCTO != 'ST'` + `SDADDJ != 0` — el criterio de "venta real" pasa a ser tipo de documento y
-fecha de envío informada, no la existencia de albarán. Constante `TIPO_DOC_EXCLUIDO = 'ST'` en
-`app/api/compras/route.ts`.
-
-### 3.4 Constante `COLEDG_VIGENTE` (tipo de coste)
-
-`F4105.COLEDG` identifica qué "libro de costes" usar, y **JDE lo cambia cada año** (`P6` = 2026).
-No hay un patrón fiable confirmado (ej. no se sabe con certeza si 2027 será `P7`), así que en
-`app/api/compras/route.ts` es una constante nombrada:
-
-```ts
-const COLEDG_VIGENTE = 'P6';
-```
-
-**Hay que actualizarla a mano cada enero.** Marcada con comentario `ponytail:` en el propio código.
-Si en el futuro se confirma un patrón año→código, se puede calcular dinámicamente; hasta entonces,
-mejor una constante explícita que una fórmula adivinada.
+Igual que antes (§4 de `docs/compras-v1-historico.md`): el precio de venta real no es el
+coste presupuestado, así que el importe real nunca sale de multiplicar cantidad×coste.
 
 ---
 
-## 4. Cálculo de las desviaciones
+## 4. Agregación bottom-up (`aggregate()` en `api/compras/route.ts`)
 
-Se agregan filas de F3460 y F4211 en JS por clave `` `${item}|${yyyy}-${mm}` `` (no `FULL OUTER JOIN`
-en Oracle — mismo patrón que `orders/route.ts` y `production/route.ts` con `Map`s en JS). Por cada
-artículo+mes:
+Artículo → Canal → Familia → Total, en las 3 unidades (Unidades/Kg/Importe) y en series
+mensuales, con una única función `aggregate()` usada **tanto para datos reales como para
+el modo `?mock=1`** — los totales cuadran por construcción en ambos casos, no hay dos
+implementaciones que puedan desincronizarse.
 
-```
-qtyPrevisto        = MFFQT/100                                    // null si no hay fila F3460 ese mes
-costeUnitarioPrevisto = hasPrevisto ? COUNCS/10000 : null          // ver nota abajo
-importePrevisto    = qtyPrevisto * costeUnitarioPrevisto
-kgPrevisto         = qtyPrevisto * (AAZE03/1000)                  // null si no hay gramaje (F554101)
+- Un artículo sin gramaje (`F554101.AAZE03` nulo/no numérico) se excluye de las sumas de
+  Kg en todos los niveles que lo contienen; se reporta en `resumen.articulosSinGramaje`.
+- Un artículo sin coste (`F4105`) se excluye igual de las sumas de Importe; se reporta en
+  `resumen.articulosSinCoste`.
+- **A diferencia de la versión anterior, no hay avisos por artículo+mes**
+  (`"Sin previsión este mes"`, `"Sin venta este mes"`...) — solo estas dos listas a nivel
+  de artículo completo. Gap conocido, ver §9.
 
-// Real: agregado línea a línea de F4211 (solo líneas con SDDCTO != 'ST' y SDADDJ != 0)
-importeLinea  = (SDUORG/100) * (SDUPRC/10000)
-qtyReal            = Σ (SDUORG/100)
-importeReal        = Σ importeLinea
-precioMedioReal    = importeReal / qtyReal   // media ponderada, no promedio simple de precios de línea
-kgReal             = qtyReal * (AAZE03/1000)                      // mismo gramaje que el previsto (propiedad del artículo)
+### 4.1 Orden de familias
 
-desviacionImporte = importeReal - importePrevisto
-desviacionPrecio  = precioMedioReal - costeUnitarioPrevisto
-desviacionKg      = kgReal - kgPrevisto
-```
-
-Todas las desviaciones (`abs` y `pct`) son `null` (nunca `0`/`Infinity`) cuando falta un lado del
-cálculo — distingue "sin dato" de "desviación real de -100%". Cada fila lleva un array `avisos`
-explicando qué falta (`"Sin coste F4105"`, `"Sin gramaje (F554101)"`, `"Sin previsión este mes"`,
-`"Sin venta este mes"`).
-
-`resumen` en la respuesta de la API agrega **totales** (no promedia los `%` de cada fila), y
-`resumen.porMes` reagrupa los mismos totales solo por mes (ignorando artículo) para alimentar el
-gráfico de tendencia.
-
-### 4.1 Nota de UX: color de las desviaciones
-
-Si un valor real mayor que el previsto es "bueno" o "malo" no es simétrico entre pestañas — en
-Importe, vender de más suele ser positivo, pero en Precio no está claro (¿vender más caro que el
-coste presupuestado es bueno o simplemente distinto?). Para no asumir un juicio de negocio no
-confirmado con el director de compras, la UI muestra las desviaciones en **color neutro**, solo con
-flecha ↑/↓ y el signo del número — sin verde/rojo de "bien/mal".
+`FAMILIA_ORDEN` fija el orden de visualización (no alfabético), para que tabla y gráfico
+de desviación se puedan leer fila a fila. Familias fuera de esa lista van al final,
+alfabéticas entre sí.
 
 ---
 
-## 5. Edge cases
+## 5. Modo de datos de ejemplo (`?mock=1`)
 
-- **Sin coste F4105** para un artículo → `importePrevisto` y desviación de precio quedan `null`.
-- **Venta real sin previsión ese mes, o previsión sin venta real** → el lado que falta queda `null`,
-  nunca `0` (evita un `-100%`/`Infinity` engañoso). El coste (`F4105`) es una foto por artículo sin
-  mes propio — si el mes no tiene fila en F3460, **tampoco** se muestra `precioUnitario` previsto,
-  aunque el artículo sí tenga coste, para no contradecir el aviso "Sin previsión este mes" (bug real
-  visto en pantalla: salía el € /ud pero con el aviso de "sin previsión").
-- **F4105 con más de una fila** para el mismo `COLITM`+`COLEDG` (no debería pasar) → se toma la
-  primera y se emite `console.warn`.
-- **Sin gramaje en F554101, o `AAZE03` no numérico/0** para un artículo → `kgPrevisto`/`kgReal`
-  quedan `null` (parseado con `Number()`; si sale `NaN` o ≤0 se descarta), aviso `"Sin gramaje
-  (F554101)"`. El resto de métricas (Unidades/Importe/Precio) no se ven afectadas.
-- **Cambio de año** → ver §3.4, la constante `COLEDG_VIGENTE` es el único mecanismo de aviso, no hay
-  validación automática.
+Generado con la misma función `aggregate()` que el camino real, sobre una campaña fija
+sep-2025→ago-2026 (`CAMPANA`/`MOCK_CANAL_LABELS` hardcodeados **solo** en la rama mock).
+Pensado para desarrollar la interacción de los 3 niveles sin depender de Oracle.
+
+**No hay botón en la UI para activarlo** (decisión del usuario: el panel siempre pide
+datos reales). Sigue accesible solo por URL (`/api/compras?mock=1`) para depuración
+puntual — no se ha quitado del backend porque es inofensivo y sin él se perdería la
+garantía de "misma función para ambos caminos". **No genera entrada en `query_logs`**
+(el logging solo corre en la rama de datos reales, ver §7.1).
 
 ---
 
-## 6. UI — patrones visuales
+## 6. UI — patrones Nova (referencia para el próximo panel)
 
-Inspirado en un dashboard SaaS de analítica compartido por el usuario (tema oscuro en el original,
-adaptado a los tokens en claro del proyecto — el dark mode global queda como iniciativa aparte, ver
-`DECISIONS.md`):
-
-- **KPI en gráfico de arco** (`RadialBarChart` de `recharts`, ya dependencia del proyecto): cada una
-  de las 4 `DesviacionCard` (Unidades/Kg/Importe/Precio) muestra un gauge de "% cumplimiento"
-  (`real/previsto`, capado visualmente a 0-150%), junto a un icono en círculo y dos `Badge` con los
-  valores previsto/real. Unidades va primero — es la comparación principal que pidió el usuario.
-- **Gráfico de tendencia mensual** (`LineChart` de recharts): dos líneas (previsto/real) de la
-  métrica de la pestaña activa, mismos colores que `app/admin/logs/page.tsx`
-  (`#D30B15` real, `#6b7280` previsto).
-- **Tabla de detalle** restilizada con icono + artículo a la izquierda, previsto/real/desviación
-  alineados a la derecha (patrón tipo "Sources"/"Browsers" del dashboard de inspiración).
-- **Selector de periodo compartido** (`PeriodPresetSelect`, local a la página): un mismo estado
-  global (`periodPreset`) se renderiza en la cabecera de cada card — no son rangos independientes
-  por card, cambiar cualquiera actualiza el mismo `startDate`/`endDate` de toda la página, para no
-  fragmentar la comparativa entre pestañas.
-
-No se creó ningún componente nuevo en `components/ui/` para esto — todo vive local en
-`app/compras/page.tsx` (`DesviacionCard`, `PeriodPresetSelect`), reutilizando `Card`/`CardHeader`/
-`CardTitle`/`CardContent`/`Badge` ya existentes.
-
-### 6.1 Exportación a Excel
-
-Botón "Excel" en la barra de filtros (mismo estilo que el resto de paneles — borde/texto verde,
-icono `Download`, deshabilitado si `rows.length === 0`). Genera un único `.xlsx` con `XLSX.writeFile`
-(librería `xlsx`, ya dependencia del proyecto) con 3 hojas:
-
-- **Resumen**: título y periodo/filtros aplicados (fila combinada), y una tabla Previsto/Real/
-  Desviación (abs y %) para las 4 métricas (Unidades, Kg, Importe, Precio medio), más la lista de
-  artículos sin gramaje si aplica.
-- **Tendencia mensual**: una fila por mes con las 4 métricas (previsto/real), igual que alimenta el
-  gráfico de tendencia.
-- **Detalle**: una fila por artículo+mes con las 4 métricas completas (previsto, real, desviación
-  abs y %) y avisos — **no solo la pestaña activa**, a diferencia de la tabla en pantalla.
-
-`ponytail:` la librería `xlsx` (versión community, no Pro) no soporta escribir color de fondo ni
-negrita en las celdas — comprobado directamente inspeccionando el `.xlsx` generado. El "formato
-bonito" se limita a lo que sí soporta al escribir: number format nativo de Excel (`€`, `%`, miles),
-anchos de columna (`!cols`) y celdas combinadas para el título (`!merges`). Si en el futuro hace
-falta cabecera con color/negrita de verdad, la alternativa es cambiar de librería (ej.
-`xlsx-js-style`, mismo API) — decisión tomada con el usuario de no añadir esa dependencia por ahora.
-
-### 6.2 Presets — fechas opcionales
-
-`<PresetPanel>` se usa con `dateFields={['startDate', 'endDate']}` (ver `docs/design-system.md` §5):
-al guardar un preset aparece el checkbox "Incluir fechas" (desmarcado por defecto, igual que en
-producción); si no se marca, el preset guarda solo los artículos y marcas seleccionados, sin fechas.
-Al cargar un preset sin fechas, `applyPresetFilters` mantiene el rango de fechas ya puesto en pantalla
-en vez de vaciarlo.
+- **Estructura de página**: fondo `bg-sidebar` (gris muy claro) + caja `bg-background`
+  con `rounded-xl outline outline-border shadow-sm overflow-hidden` envolviendo header +
+  contenido, con `m-2` en desktop. Es el patrón `Sidebar variant="inset"` de shadcn
+  (`SidebarProvider` con `has-data-[variant=inset]:bg-sidebar` + `SidebarInset` con
+  `bg-background` + margen/radio), replicado a mano porque este panel no usa un sidebar
+  real — confirmado leyendo el proyecto completo de ShadcnSpace (`layout.tsx` +
+  `sidebar.tsx`), no adivinado.
+- **Nav con caja bordeada propia**: la fila de dropdowns (`topbar-02`) va envuelta en
+  `rounded-lg border border-border px-2 py-2`, separada del bloque logo/iconos de arriba
+  (que no tiene ninguna línea divisoria) — mismo patrón que
+  `layout/horizontal/header/index.tsx` del proyecto ShadcnSpace descargado.
+- **Tabla jerárquica** (`hierarchical-table.tsx`): árbol real con `subRows` de TanStack
+  Table (no un panel de detalle aparte), acordeón de un solo camino abierto a la vez.
+  Fila resaltada al expandir reutiliza el selector `has-aria-expanded:bg-muted/50` ya
+  incluido en el `Table` primitivo (poniendo `aria-expanded` en el botón de toggle) — no
+  hace falta CSS nuevo. Filas siempre blancas, nunca tintadas por umbral (pedido
+  explícito: "no quiero que se vea la fila verdosa en ningún momento").
+- **Píldoras de ruta** (`DrillPills`, dentro de `hierarchical-table.tsx`): sincronizadas
+  con el mismo estado `drill` que filtra el gráfico de evolución mensual — un solo punto
+  de verdad, no dos estados que puedan desincronizarse.
+- **Gráfico de desviación por familia**: no es un chart de Recharts con ejes — son divs
+  (pista `bg-muted` de ancho completo + relleno de color desde el centro), más simple y
+  más fácil de ajustar pixel a pixel que forzar Recharts a un diseño sin ejes reales.
+- **Selector de meses**: dos `<Select>` (Mes + Año) por extremo dentro de un `Popover`,
+  **no** `<input type="month">` nativo — el calendario que abre el navegador (en inglés,
+  con su propio estilo) desentonaba con el resto del panel. Ver `month-range-picker.tsx`.
+- **Filtrado explícito, no reactivo**: cambiar el rango de meses en el selector solo
+  actualiza el estado local (`range`) — no dispara ninguna consulta a Oracle hasta que se
+  pulsa el botón **"Filtrar"** (al lado del selector, mismo estilo que "Exportar"). Evita
+  una consulta por cada clic en el popover. Por defecto se carga el **mes en curso** (mismo
+  default que `api/compras/route.ts` sin `startDate`/`endDate`).
+- **Recarga sin vaciar la pantalla**: al filtrar, `data` nunca se pone a `null` — se sigue
+  viendo el desglose anterior mientras llega la respuesta nueva. El feedback de "cargando"
+  es un toast (`sonner`, `components/nova/ui/sonner.tsx` + `<Toaster />` montado en la
+  página) que pasa a éxito/error según la respuesta, no un estado de carga que tape el
+  contenido.
+- **Exportación a Excel**: mismo patrón de `xlsx` que la versión anterior (§6.1 de
+  `docs/compras-v1-historico.md`, number format nativo, sin color/negrita), adaptado a 3
+  hojas (Resumen por familia, Tendencia mensual, Detalle familia›canal›artículo) y a las
+  3 unidades.
+- **Header compartido (`topbar-02`) conectado a la sesión real**: el bloque instalado tal
+  cual traía logo/avatar/notificaciones de ejemplo (en inglés, sin ninguna conexión a la
+  app). `<Header>` acepta `user`/`onLogout`/`onPresetsClick` — la página los obtiene con
+  el mismo patrón que el resto de paneles (`fetch('/api/auth/me')` +
+  `POST /api/auth/logout`, ver `app/caducados/page.tsx`). El dropdown de perfil muestra
+  iniciales + nombre/usuario/rol reales (no hay página de perfil todavía, se queda en el
+  propio dropdown), enlaza a `/admin`+`/admin/logs` solo si `role === 'admin'`, y tiene un
+  item deshabilitado "Suscripciones de notificaciones" (idea futura, sin implementar —
+  tarea ClickUp en la lista "Plataforma y administración"). El dropdown de notificaciones
+  muestra un estado vacío real ("No hay notificaciones todavía") — no hay sistema de
+  notificaciones construido aún. Se quitó el selector de idioma del bloque original (app
+  solo en español, no tenía ninguna función real).
+- **Nav filtrado por permisos reales**: el bloque instalado renderizaba siempre todos los
+  paneles de `lib/panels.ts` en "Dashboards"/"Apps", sin comprobar sesión ni rol — bug
+  real corregido. `<Header>` hace ahora `fetch('/api/screen-permissions')` (mismo
+  endpoint y misma regla `canAccessPanel` que `components/Navbar.tsx`) y `getNavData()`
+  (`topbar-02/data.ts`) filtra cada panel por `is_public`/`allowed_roles`/rol admin; un
+  grupo sin ningún panel visible desaparece entero (no se queda vacío). El grupo
+  **"Maestros" solo se muestra si `role === 'admin'`** — antes era visible para
+  cualquiera, solo con sus items deshabilitados.
+- **Claro / Oscuro / Sistema**: pedido explícitamente por el usuario. `ModeToggle`
+  (`components/nova/mode-toggle.tsx`) en la cabecera; el estado `mode` vive en la página
+  (`useState`, no persiste entre recargas — el proyecto no usa `localStorage` en
+  componentes) y se traduce a `effectiveTheme` con `window.matchMedia
+  ('prefers-color-scheme: dark')` cuando `mode === "system"`. `app/nova-theme.css`
+  redefine la variante `dark:` de Tailwind para que dependa de
+  `[data-nova-theme="dark"]` en vez del SO directamente — necesario porque los
+  primitivos instalados ya traen clases `dark:` sueltas. Detalle completo en
+  `components/nova/README.md` §"Claro/Oscuro/Sistema" (incluye un aviso de FOUC
+  conocido y sin resolver: el primer render siempre es claro, aunque el SO esté en
+  oscuro).
 
 ---
 
@@ -244,153 +213,135 @@ en vez de vaciarlo.
 
 | Parámetro | Tipo | Notas |
 |---|---|---|
-| `startDate` | string `YYYY-MM-DD`, opcional | Default: día 1 del mes en curso (ver §11, no el año — rendimiento) |
+| `startDate` | string `YYYY-MM-DD`, opcional | Default: día 1 del mes en curso |
 | `endDate` | string `YYYY-MM-DD`, opcional | Default: último día del mes en curso |
-| `item` | string, repetible, opcional | Filtro por uno o varios artículos (código largo/visible) |
-| `marca` | string, repetible, opcional | Filtro por Marca (`F4101.IMSRP4`, mismo campo que el filtro Marca de `/produccion`). Ver nota abajo sobre cuándo se aplica. |
+| `mock` | `"1"`, opcional | Devuelve `aggregate()` sobre datos de ejemplo, ignora Oracle. Solo por URL, sin botón en la UI (ver §5) |
+| `umbral` | number, opcional | % de desviación para `resumen.familiasFueraDeUmbral`. Default `10` |
 
-Respuesta (resumida, ver también `app/api/compras/route.ts`):
+Respuesta (resumida — ver `app/api/compras/route.ts` para el detalle completo de
+`mensual.*`):
 
 ```json
 {
-  "filters": { "startDate": "2026-01-01", "endDate": "2026-12-31", "items": [], "marcas": [] },
-  "rows": [
+  "mock": false,
+  "familias": [
     {
-      "item": "12345", "descripcion": "...", "familia": "COCIDOS", "marca": "01",
-      "anio": 2026, "mes": 7, "mesLabel": "2026-07",
-      "gramaje": 500,
-      "previsto": { "cantidad": 5000, "precioUnitario": 3.42, "importe": 17100, "kg": 2500 },
-      "real": { "cantidad": 4820, "precioUnitario": 3.55, "importe": 17111, "kg": 2410 },
-      "desviacion": {
-        "cantidad": { "abs": -180, "pct": -3.6 },
-        "kg": { "abs": -90, "pct": -3.6 },
-        "importe": { "abs": 11, "pct": 0.06 },
-        "precio": { "abs": 0.13, "pct": 3.8 }
-      },
-      "avisos": []
+      "tipo": "familia", "familia": "Tortilla",
+      "unidades": { "previsto": 605200, "real": 653170, "desviacionAbs": 47970, "desviacionPct": 7.9 },
+      "kg": { "previsto": 425640, "real": 461510, "desviacionAbs": 35870, "desviacionPct": 8.4 },
+      "importe": { "previsto": 1417832, "real": 1523940, "desviacionAbs": 106108, "desviacionPct": 7.5 },
+      "canales": [
+        {
+          "tipo": "canal", "canal": "HOR", "canalLabel": "Horeca",
+          "unidades": { "...": "..." }, "kg": { "...": "..." }, "importe": { "...": "..." },
+          "articulos": [
+            { "tipo": "articulo", "item": "1210100009", "descripcion": "TORT CHORIZO 600g FR BF",
+              "unidades": { "...": "..." }, "kg": { "...": "..." }, "importe": { "...": "..." } }
+          ]
+        }
+      ]
     }
   ],
   "resumen": {
-    "totalCantidadPrevisto": 320000, "totalCantidadReal": 305500, "desviacionCantidadPct": -4.53,
-    "totalKgPrevisto": 160000, "totalKgReal": 152750, "desviacionKgPct": -4.53,
-    "totalImportePrevisto": 1250000, "totalImporteReal": 1198000, "desviacionImportePct": -4.16,
-    "precioMedioPrevisto": 3.90, "precioMedioReal": 3.92, "desviacionPrecioPct": 0.51,
-    "porMes": [
-      { "mesLabel": "2026-01", "importePrevisto": 98000, "importeReal": 91000, "cantidadPrevisto": 25000, "cantidadReal": 23400, "kgPrevisto": 12500, "kgReal": 11700, "precioPrevisto": 3.92, "precioReal": 3.89 }
-    ],
-    "articulosSinGramaje": ["1210100014", "1210100059"]
+    "unidades": { "...": "..." }, "kg": { "...": "..." }, "importe": { "...": "..." },
+    "totalFamilias": 6, "familiasFueraDeUmbral": 2, "umbralPct": 10,
+    "articulosSinGramaje": [], "articulosSinCoste": []
+  },
+  "mensual": {
+    "total": [ { "sortKey": "2025-09", "mes": "sep", "previsto": 57500, "real": 65300, "importeReal": 0 } ],
+    "totalKg": [ "..." ], "totalImporte": [ "..." ],
+    "porFamilia": { "Tortilla": [ "..." ] },
+    "porFamiliaCanal": { "Tortilla::HOR": [ "..." ] },
+    "kgPorFamilia": { "...": "..." }, "kgPorFamiliaCanal": { "...": "..." },
+    "importePorFamilia": { "...": "..." }, "importePorFamiliaCanal": { "...": "..." }
   }
 }
 ```
 
-`gramaje` (en cada fila) y `resumen.articulosSinGramaje` alimentan el popover de la tarjeta KPI de
-Kg descrito en §13.1 — `gramaje` es `null` cuando el artículo no tiene fila en `F554101` o `AAZE03`
-no es un número válido (`> 0`).
+La clave de `porFamiliaCanal`/etc. es `` `${familia}::${canal ?? '__sin_canal__'}` `` — el
+mismo sentinel en la API, en `toTree()` de `hierarchical-table.tsx` y en el estado `drill`
+de la página, para que tabla, píldoras y gráfico mensual nunca se desincronicen.
 
-### 7.1 Filtro por Marca — se aplica después de construir `rows`, no en Oracle
+### 7.1 Logging de consultas
 
-A diferencia de `item` (que sí reduce lo que se pide a F3460/F4211/F4105), el filtro `marca` se
-resuelve **igual que `familia`**: ambos vienen de `F4101.IMSRP2`/`IMSRP4`, que solo se cruza *después*
-de saber qué artículos aparecieron en la previsión/venta real de ese rango de fechas (ver §3.1, el
-`shortItemMap`). Por eso `marcas` filtra el array `rows` ya construido, antes de llamar a
-`buildResumen()` — así que reduce lo mostrado en KPIs/tabla, pero no acelera la consulta a Oracle (el
-coste de F3460/F4211 para el rango de fechas se paga igual, con o sin filtro de marca).
-
-El desplegable de Marca en `app/compras/page.tsx` reutiliza `/api/categories?field=srp4&screen=compras`
-(mismo endpoint que ya usa `/produccion`), no una consulta propia.
+Cada consulta con datos reales (no `?mock=1`) inserta un registro en `query_logs`
+(SQLite) con `source = 'compras'` — el mismo source que usaba la versión anterior, para
+que `/admin/logs` muestre continuidad en vez de un panel nuevo. `filters` guarda
+`{ startDate, endDate, umbralPct }` (todavía no hay filtro de artículo/canal en la UI,
+ver §9), `result_count` cuenta los artículos hoja del árbol devuelto (equivalente a "filas"
+en la versión anterior). El logging nunca bloquea la respuesta (try/catch independiente),
+igual que en el resto de paneles.
 
 ---
 
-## 8. Logging de consultas
+## 8. Historial de bugs reales encontrados (solo visibles con datos reales)
 
-Cada consulta inserta un registro en `query_logs` (SQLite) con `source = 'compras'` y
-`filters: { startDate, endDate, items, marcas }`. El logging nunca bloquea la respuesta (try/catch
-independiente), igual que en el resto de paneles.
+Ninguno de estos se habría detectado con el modo mock (que ya tenía los nombres escritos
+a mano):
 
----
-
-## 9. Registro del panel
-
-- `lib/panels.ts` → entrada `compras` en `PANELS` (icono `ShoppingCart`) — fuente única que alimenta Navbar, portada, login y permisos de admin (ver `docs/design-system.md` §5.1).
-- `lib/sqlite.ts` → seed en la tabla `screens` (`is_public=1` por defecto).
-
----
-
-## 10. Historial de bugs reales encontrados probando contra JDE
-
-Ninguno de estos se habría detectado sin probar el panel contra la base de datos real:
-
-1. Columna de fecha de F3460 mal escrita (`MQDRQJ` → `MFDRQJ`).
-2. F4101 se indexa por el artículo corto (`MFITM`/`SDITM`), no por el largo (`MFLITM`/`SDAITM`) —
-   la descripción/familia salían vacías en silencio.
-3. Los presets de periodo (`Mes anterior`, etc.) calculaban la fecha con `toISOString()`, que la
-   desplaza un día hacia atrás en husos horarios con offset positivo (ej. Europe/Madrid).
-4. (Ver §3.2/§3.3) Se quitó la conversión a Kg y se cambió el filtro de venta real a solo pedidos
-   con albarán (`SDDELN`) y fecha de envío real (`SDADDJ`), a petición del usuario, mientras se
-   revisan cifras que seguían pareciendo raras incluso tras corregir 1-2.
-5. El filtro `SDNXTR != 999` (heredado de `api/orders/route.ts`, pensado para "pedidos pendientes")
-   descartaba casi todo el histórico real de F4211 (de ~165.000 filas a ~3.100 en 2026) porque aquí
-   el sentido es el contrario: se quiere venta ya sucedida, no pedidos abiertos. Se quitó ese filtro
-   por completo (ver §3.3).
-6. El filtro `SDDELN != 0` (con albarán) se sustituyó por `SDDCTO != 'ST'` + `SDADDJ != 0`, a
-   petición del usuario (ver §3.3).
-
----
-
-## 11. Rendimiento — por qué el rango por defecto es "este mes" y no "el año"
-
-Al quitar el filtro `SDNXTR` (punto 5 arriba), la consulta a F4211 pasó de ~3.100 a ~165.000 filas
-para el año completo. Medido directamente contra JDE: la query de F4211 sola tarda **~150 segundos**
-para un año completo (la consulta posterior a F4101, con ~166 artículos distintos, tarda 337ms — no
-es el cuello de botella). Muy probablemente falta un índice adecuado para `SDDCTO != 'ST' AND
-SDADDJ != 0 AND SDADDJ BETWEEN ...` y Oracle hace un escaneo completo de tabla.
-
-Decisión (con el usuario): en vez de tocar índices de Oracle (fuera de alcance de este panel, lo
-gestionaría el DBA/administrador JDE), el rango por defecto de `app/compras/page.tsx` y de
-`app/api/compras/route.ts` (cuando se llama sin `startDate`/`endDate`) es **el mes en curso**, no el
-año — rápido (unos miles de filas). El usuario puede ampliar el rango manualmente sabiendo que un
-año completo puede tardar minutos.
-
-`ponytail:` si el año completo se vuelve un caso de uso habitual (no solo puntual), la solución de
-fondo es un índice en Oracle sobre `F4211(SDADDJ, SDDCTO)` o similar — pedirlo al equipo de JDE/DBA,
-no intentar compensarlo con más código aquí.
+1. **Familia mostraba el código crudo** (`"101"`) en vez de la descripción —
+   `F4101.IMSRP2` es un código UDC, no texto libre. Corregido resolviendo contra
+   `prodctl.f0005` (§3.2).
+2. **Familia `106` resuelve a `"Producto comercializado"`**, no `"Otros"` como asumía
+   `FAMILIA_ORDEN` — discrepancia detectada, pendiente de decisión del usuario sobre si
+   renombrar o mantener ambas etiquetas.
+3. **Canal es atributo del artículo, no del cliente** — se comprobó explícitamente contra
+   el esquema real que `AAZE06` vive en `F554101` (extensión de artículo), no en ninguna
+   tabla de cliente/pedido.
+4. **`toLocaleString('es-ES')` no pone separador de miles** en este runtime Node/Bun (falta
+   ICU completo) — confirmado con prueba directa. Se usa un formateador manual
+   (`numeroEs()`, regex) en vez de `Intl`. **Posible bug latente en el resto de la app**
+   (todos los demás paneles usan el mismo patrón `toLocaleString('es-ES')`) — señalado, no
+   investigado ni corregido fuera de este panel.
+5. **Nav activo por `startsWith` de texto** marcaba "Dashboards" en negro estando en
+   `/compras-v2` (nombre de la ruta mientras convivía en paralelo, antes de sustituir a la
+   versión anterior) solo porque el string empieza por `/compras`, sin que esa ruta
+   estuviera realmente enlazada en `data.ts`. Corregido a coincidencia exacta o de
+   segmento (`pathname === href || pathname.startsWith(href + '/')`).
+6. **Línea negra en el header** (`border-b` sin color explícito cae en `currentColor`
+   dentro de `[data-nova-theme]`) — corregido con un reset `border-color: var(--border)`
+   en `app/nova-theme.css` (mismo problema que ya tenía resuelto el sistema viejo en
+   `globals.css`, pero el scope Nova necesitaba el suyo).
+7. **`@tanstack/react-table` resolvía a v9** (API incompatible con el código instalado,
+   que usa `useReactTable` de v8) — fijado a `^8` en `package.json` (ver README de Nova).
+8. **Dependencias huérfanas** (`chart`, `motion`) y 3 bloques de catálogo instalados y
+   nunca usados (`dashboard-shell-03`, `datatable-12`, `statistics-01`) — explorados y
+   retirados antes del primer PR, sin haber sido personalizados (ver README de Nova).
+9. **El nav no filtraba por permisos** — `topbar-02` tal cual instalado mostraba
+   siempre todos los paneles de `lib/panels.ts` en "Dashboards"/"Apps", y el grupo
+   "Maestros" era visible para cualquier usuario (solo sus items estaban
+   deshabilitados). Corregido: `<Header>` consulta `/api/screen-permissions` y filtra
+   con la misma regla que `components/Navbar.tsx`; "Maestros" solo se muestra a `admin`.
+10. **Píldora activa del nav casi ilegible al abrir el desplegable** — `desktop-nav.tsx`
+    marcaba el estado abierto con `data-[state=open]:...` (convención de Radix), pero el
+    primitivo de navegación instalado es Base UI, que usa `data-open`/`data-popup-open`.
+    Con el atributo equivocado el override nunca se aplicaba al abrir, y ganaba el
+    `data-open:bg-muted/50` gris del primitivo por defecto combinado con nuestro
+    `text-background` — texto casi invisible (bug real en ambos temas, no solo en
+    oscuro, más visible en oscuro por el pedido explícito de modo oscuro). Corregido a
+    `data-open:`/`data-popup-open:`, igual que ya usaba correctamente el propio
+    primitivo.
 
 ---
 
-## 12. Bug: precio previsto visible junto con aviso "Sin previsión este mes"
+## 9. Diferencias conocidas con la versión anterior (gaps, no decisiones cerradas)
 
-`F4105` (coste) es una foto por artículo sin mes propio — no depende de si ese mes tiene fila en
-F3460. La primera versión buscaba el coste sin comprobar `hasPrevisto`, así que un mes sin previsión
-de cantidad igualmente mostraba un `precioUnitario` previsto (el coste "de fondo" del artículo),
-contradiciendo el aviso "Sin previsión este mes". Corregido: si no hay previsión de cantidad ese mes,
-tampoco se muestra precio previsto, aunque el artículo tenga coste en F4105.
+| | Versión anterior (`docs/compras-v1-historico.md`) | Actual (`/compras`) |
+|---|---|---|
+| Segunda dimensión | Marca (`IMSRP4`) | Canal (`AAZE06`) — campo distinto, ver §3.1 |
+| Precio unitario (€/ud) | Sí, con su propia desviación | **No existe** — solo importe total agregado |
+| Avisos granulares por artículo+mes | Sí (`"Sin previsión este mes"`, etc.) | **No** — solo 2 listas a nivel de artículo completo |
+| Filtro por artículo/marca en la UI | Sí | **No** — sin ningún filtro en la barra todavía |
+
+Logging de consultas y registro en navegación/`lib/panels.ts`: ya resueltos (§7.1) — este
+panel es ahora el `/compras` real, no hay diferencia en esos dos puntos.
 
 ---
 
-## 13. Kg por gramaje (F554101), no por conversión de UM
+## 10. Idea futura registrada (no implementada)
 
-A petición del usuario, se reintroduce la comparación en Kg — pero con un enfoque distinto al de la
-primera versión (§3.2): en vez de convertir unidades de medida vía `F4101.IMUOM1` + `F41002`, se usa
-el **gramaje del artículo** (`F554101.AAZE03`, gramos por unidad, directo), el mismo campo que usa
-`/produccion` para su filtro de gramaje (`AAITM = IMITM`, cruzado con `prodctl.f0005` DRSY='17'/
-DRRT='B3' solo para la etiqueta legible — aquí no hace falta la etiqueta, solo el número).
-
-Ventaja sobre el enfoque anterior: el gramaje es una propiedad fija del artículo (no depende de la
-unidad de la transacción), así que no hace falta resolver conversión línea a línea ni manejar
-distintas `SDUOM` de origen — simplemente `kg = cantidad * (AAZE03/1000)`, igual para previsto y
-real. Ver fórmulas completas en §4 y esquema en §3.2.
-
-Unidades sigue siendo la pestaña principal (primera); Kg se añadió como segunda pestaña/KPI.
-
-### 13.1 Visibilidad de artículos sin gramaje
-
-Cada fila lleva el gramaje crudo (`gramaje: number | null`) y el aviso `"Sin gramaje (F554101)"`
-cuando falta — pero depender solo del icono de aviso fila a fila no es cómodo para detectarlo de un
-vistazo. `resumen.articulosSinGramaje` (array de códigos de artículo largo, sin duplicados) se
-calcula en el servidor recorriendo `rows` una vez construidas.
-
-La tarjeta KPI de **Kg** muestra un aviso compacto ("N sin gramaje") cuando la lista no está vacía;
-al **pulsarlo** (no solo al pasar el ratón) se abre un `Popover` (`components/ui/popover.tsx`, mismo
-componente que `MermaCellPopover.tsx`) con la lista completa de artículos — código + descripción,
-esta última cruzada en cliente contra `rows` (no requiere otra llamada a la API, la descripción ya
-viaja en cada fila).
+Selector de "modo de comparativa" (hoy: Previsión vs. Venta real; futuro posible: Venta
+real vs. Venta real año anterior), para no tener que crear un dashboard nuevo por cada
+tipo de comparativa — mismo panel, mismo gráfico/tabla, cambia solo la fuente de datos.
+Tarea ClickUp: lista "Compras" (ENR Analytics), "[Compras] Rediseño de compras-v2 sobre
+sistema Nova...". Sin fecha de inicio, sin diseño de datos aún.

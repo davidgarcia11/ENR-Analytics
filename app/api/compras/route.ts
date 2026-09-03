@@ -1,353 +1,593 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getDbConnection } from '@/lib/db';
 import { parseJdeDate, getDayOfYear } from '@/lib/utils';
+import { requireScreenAccess } from '@/lib/permissions';
 import { getDb } from '@/lib/sqlite';
 import { verifySession } from '@/lib/auth';
-import { requireScreenAccess } from '@/lib/permissions';
 
-// ponytail: tipo de coste vigente en F4105 (COLEDG). JDE lo cambia cada año (P6=2026)
-// y no hay un patrón año->código confirmado. Actualizar a mano cada enero.
-// Ver docs/compras.md.
-const COLEDG_VIGENTE = 'P6';
+// Panel de Compras (previsión vs. venta real): jerarquía Familia > Canal > Artículo,
+// sobre el sistema Nova (ShadcnSpace) — sustituye a la versión anterior (agrupada por
+// Familia/Marca, sin jerarquía). Ver components/nova/README.md (mecanismo de aislamiento
+// visual), docs/compras.md (documentación completa) y docs/compras-v1-historico.md
+// (conocimiento JDE de la versión anterior que sigue vigente aquí: mapeo artículo
+// largo/corto, filtro SDNXTR, COLEDG_VIGENTE...) para el porqué de cada campo:
+//
+// - Familia: F4101.IMSRP2 es un CÓDIGO (ej. "101"), validado contra UDC 41/S2 —
+//   resuelto contra prodctl.f0005 (getCanalLabels-style), nunca el código crudo.
+// - Canal: F554101.AAZE06, validado contra UDC 17/B6 — es un atributo del ARTÍCULO
+//   (como el gramaje), no del cliente. Un artículo pertenece a un único canal; sus
+//   ventas se atribuyen íntegramente a él, independientemente del cliente que compre.
+//   PENDIENTE DE VALIDAR CON COMERCIAL.
+// - Previsión: F3460 (artículo × mes, planta 10999). MFAN8 (cliente) existe en la
+//   tabla pero vale 0 en todas las filas de esta planta — sin desglose de cliente,
+//   pero SÍ hereda canal y familia (vía el artículo).
+// - Venta real: F4211, mismo filtro que la versión anterior (SDDCTO != 'ST', SDADDJ != 0).
+// - Kg: F554101.AAZE03 (gramos/unidad). Si un artículo no tiene gramaje, su kg queda
+//   `null` y se excluye de las sumas de kg — se reporta en `articulosSinGramaje`.
+// - Importe (€): previsto = unidades previstas × coste unitario fijo (F4105.COUNCS,
+//   una foto por artículo sin mes propio, igual que la versión anterior);
+//   real = línea a línea (F4211.SDSOQS × SDUPRC), NUNCA unidades reales × coste — el
+//   precio de venta real no es el coste presupuestado. Si un artículo no tiene fila en
+//   F4105, su importe PREVISTO queda a 0 (no hay con qué calcularlo) — se reporta en
+//   `articulosSinCoste` — pero su importe REAL se suma con normalidad: no depende del
+//   coste, solo de F4211. (Bug real corregido: antes se excluía también el real.)
+// - Mensual (para "Evolución mensual"): misma lógica de abajo arriba, por mes, a 3
+//   niveles (total, por familia, por familia+canal) en unidades, kg e importe.
+//
+// Modo de datos de ejemplo: ?mock=1 devuelve una jerarquía completa generada en código
+// (sin tocar Oracle). Usa la MISMA función de agregación que el camino real. Solo
+// accesible por URL — no hay botón en la UI (decisión del usuario).
 
 const PLANTA_PRESUPUESTOS = 10999;
-const TIPO_DOC_EXCLUIDO = 'ST'; // F4211.SDDCTO — excluido de "venta real" a petición del usuario
+const TIPO_DOC_EXCLUIDO = 'ST';
+const UMBRAL_DEFAULT_PCT = 10;
+// ponytail: tipo de coste vigente en F4105 (COLEDG). JDE lo cambia cada año (P6=2026)
+// y no hay un patrón año->código confirmado. Actualizar a mano cada enero — mismo
+// mecanismo que api/compras/route.ts (v1), ver docs/compras.md §3.4.
+const COLEDG_VIGENTE = 'P6';
 
+// Orden fijo de familias (no alfabético) para que tabla y gráfico de desviación se
+// puedan cruzar fila a fila. Familias que aparezcan en los datos pero no en esta lista
+// (nuevas, o "Sin familia") van al final, alfabéticas entre sí — nunca se descartan.
+const FAMILIA_ORDEN = ['Tortilla', 'Pimiento asado', 'Preparados a base de patata', 'Migas', 'Verduras', 'Otros'];
+function ordenFamilia(familia: string): number {
+  const i = FAMILIA_ORDEN.indexOf(familia);
+  return i === -1 ? FAMILIA_ORDEN.length : i;
+}
+
+const MES_LABEL = ['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sep', 'oct', 'nov', 'dic'];
+
+interface Metric {
+  previsto: number;
+  real: number;
+  desviacionAbs: number;
+  desviacionPct: number | null;
+}
+
+function buildMetric(previsto: number, real: number): Metric {
+  const desviacionAbs = real - previsto;
+  const desviacionPct = previsto !== 0 ? (desviacionAbs / previsto) * 100 : null;
+  return { previsto, real, desviacionAbs, desviacionPct };
+}
+
+interface MesPunto {
+  sortKey: string; // 'YYYY-MM', para ordenar cronológicamente
+  mes: string; // etiqueta corta ('ene', 'feb'...) para el eje X
+  previsto: number; // unidades
+  real: number; // unidades
+  importeReal: number; // € reales del mes, acumulado línea a línea (SDUORG × SDUPRC)
+}
+
+interface ArticuloAgg {
+  item: string;
+  descripcion: string;
+  familia: string;
+  canal: string | null;
+  gramaje: number | null;
+  costeUnitario: number | null; // F4105.COUNCS — foto por artículo, sin mes propio
+  meses: MesPunto[]; // el total del periodo es la suma de estos meses (nunca un dato aparte)
+}
+
+function totalUnidades(a: ArticuloAgg) {
+  return {
+    previsto: a.meses.reduce((s, m) => s + m.previsto, 0),
+    real: a.meses.reduce((s, m) => s + m.real, 0),
+  };
+}
+
+// Importe de un artículo para el periodo completo. Asimétrico a propósito: previsto
+// sale de multiplicar (coste fijo), real sale de sumar (ya viene precio por línea) — no
+// son la misma operación, así que no se puede reutilizar totalUnidades()+multiplicar
+// para los dos lados como si fuera kg.
+//
+// Bug real encontrado comparando contra la versión anterior (docs/compras-v1-historico.md):
+// aquí se descartaba TODO el importe (previsto Y real) si el artículo no tenía coste en
+// F4105, aunque el real no dependa del coste — se perdía importe real de ventas conocidas
+// solo por faltar el coste presupuestado. Ahora solo el previsto queda a 0 (sin coste no
+// hay con qué calcularlo); el real se suma siempre que haya ventas, igual que hacía la
+// versión anterior (`importeReal = b.hasReal ? b.realImporte : null`, independiente del coste).
+function totalImporteArticulo(a: ArticuloAgg): { previsto: number; real: number } {
+  const unidadesPrevisto = a.meses.reduce((s, m) => s + m.previsto, 0);
+  const importeReal = a.meses.reduce((s, m) => s + m.importeReal, 0);
+  const previsto = a.costeUnitario != null ? unidadesPrevisto * a.costeUnitario : 0;
+  return { previsto, real: importeReal };
+}
+
+// Serie mensual agregada (abajo arriba) para un subconjunto de artículos — la usan tanto
+// el total general como cada familia/canal. Un mes en el que ningún artículo del
+// subconjunto tiene fila se omite (no se rellena con 0 fantasma).
+function mensualDe(articulos: { meses: { sortKey: string; mes: string; previsto: number; real: number }[] }[]): MesPunto[] {
+  const porMes = new Map<string, { mes: string; previsto: number; real: number }>();
+  for (const a of articulos) {
+    for (const m of a.meses) {
+      const acc = porMes.get(m.sortKey) ?? { mes: m.mes, previsto: 0, real: 0 };
+      acc.previsto += m.previsto;
+      acc.real += m.real;
+      porMes.set(m.sortKey, acc);
+    }
+  }
+  return Array.from(porMes.entries())
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([sortKey, v]) => ({ sortKey, ...v, importeReal: 0 }));
+}
+
+function mensualKgDe(articulos: ArticuloAgg[]): MesPunto[] | null {
+  const conGramaje = articulos.filter((a) => a.gramaje != null);
+  if (conGramaje.length === 0) return null;
+  const enKg = conGramaje.map((a) => ({
+    ...a,
+    meses: a.meses.map((m) => ({ ...m, previsto: (m.previsto * a.gramaje!) / 1000, real: (m.real * a.gramaje!) / 1000 })),
+  }));
+  return mensualDe(enKg);
+}
+
+// Igual patrón que mensualKgDe, pero asimétrico: previsto = unidades del mes × coste
+// fijo, real = importeReal del mes ya acumulado línea a línea (no se multiplica nada).
+function mensualImporteDe(articulos: ArticuloAgg[]): MesPunto[] | null {
+  if (articulos.length === 0) return null;
+  // Mismo fix que totalImporteArticulo: no excluir el real de un mes solo porque el
+  // artículo no tenga coste — el previsto de ese mes queda a 0, el real se suma igual.
+  const enImporte = articulos.map((a) => ({
+    ...a,
+    meses: a.meses.map((m) => ({
+      ...m,
+      previsto: a.costeUnitario != null ? m.previsto * a.costeUnitario : 0,
+      real: m.importeReal,
+    })),
+  }));
+  return mensualDe(enImporte);
+}
+
+// Agregación de abajo arriba: artículo -> canal -> familia -> total, en unidades, kg,
+// importe y series mensuales. Es la MISMA función para datos reales y para el modo
+// mock, para que los totales cuadren por construcción en ambos casos.
+// `canalLabels`: código (AAZE06) -> descripción de la UDC 17/B6 (prodctl.f0005.DRDL01).
+function aggregate(articulos: ArticuloAgg[], umbralPct: number, canalLabels: Map<string, string>) {
+  const articulosSinGramaje = new Set<string>();
+  const articulosSinCoste = new Set<string>();
+
+  const familiaMap = new Map<string, Map<string | null, ArticuloAgg[]>>();
+  for (const a of articulos) {
+    if (!familiaMap.has(a.familia)) familiaMap.set(a.familia, new Map());
+    const canalMap = familiaMap.get(a.familia)!;
+    if (!canalMap.has(a.canal)) canalMap.set(a.canal, []);
+    canalMap.get(a.canal)!.push(a);
+    if (a.gramaje == null) articulosSinGramaje.add(a.item);
+    if (a.costeUnitario == null) articulosSinCoste.add(a.item);
+  }
+
+  const mensualPorFamilia: Record<string, MesPunto[]> = {};
+  const mensualPorFamiliaCanal: Record<string, MesPunto[]> = {};
+  const mensualKgPorFamilia: Record<string, MesPunto[] | null> = {};
+  const mensualKgPorFamiliaCanal: Record<string, MesPunto[] | null> = {};
+  const mensualImportePorFamilia: Record<string, MesPunto[] | null> = {};
+  const mensualImportePorFamiliaCanal: Record<string, MesPunto[] | null> = {};
+
+  const familias = Array.from(familiaMap.entries()).map(([familia, canalMap]) => {
+    const articulosFamilia: ArticuloAgg[] = [];
+    const canales = Array.from(canalMap.entries()).map(([canal, arts]) => {
+      articulosFamilia.push(...arts);
+      const articulosRow = arts.map((a) => {
+        const t = totalUnidades(a);
+        const unidades = buildMetric(t.previsto, t.real);
+        const kg = a.gramaje != null ? buildMetric((t.previsto * a.gramaje) / 1000, (t.real * a.gramaje) / 1000) : null;
+        const importeTotal = totalImporteArticulo(a);
+        const importe = buildMetric(importeTotal.previsto, importeTotal.real);
+        return { tipo: 'articulo' as const, item: a.item, descripcion: a.descripcion, gramaje: a.gramaje, unidades, kg, importe };
+      });
+
+      const unidadesCanal = buildMetric(
+        articulosRow.reduce((s, r) => s + r.unidades.previsto, 0),
+        articulosRow.reduce((s, r) => s + r.unidades.real, 0)
+      );
+      const conKg = articulosRow.filter((r) => r.kg != null);
+      const kgCanal = conKg.length > 0
+        ? buildMetric(conKg.reduce((s, r) => s + r.kg!.previsto, 0), conKg.reduce((s, r) => s + r.kg!.real, 0))
+        : null;
+      const conImporte = articulosRow.filter((r) => r.importe != null);
+      const importeCanal = conImporte.length > 0
+        ? buildMetric(conImporte.reduce((s, r) => s + r.importe!.previsto, 0), conImporte.reduce((s, r) => s + r.importe!.real, 0))
+        : null;
+
+      // Mismo sentinel que components/nova/hierarchical-table.tsx (toTree) y el
+      // estado `drill` de la página — una sola forma de nombrar "sin canal" en todo
+      // el flujo tabla <-> API <-> gráfico.
+      const claveCanal = `${familia}::${canal ?? '__sin_canal__'}`;
+      mensualPorFamiliaCanal[claveCanal] = mensualDe(arts);
+      mensualKgPorFamiliaCanal[claveCanal] = mensualKgDe(arts);
+      mensualImportePorFamiliaCanal[claveCanal] = mensualImporteDe(arts);
+
+      const canalLabel = canal ? (canalLabels.get(canal) ?? canal) : 'Sin canal';
+      return { tipo: 'canal' as const, canal, canalLabel, unidades: unidadesCanal, kg: kgCanal, importe: importeCanal, articulos: articulosRow };
+    });
+
+    const unidadesFamilia = buildMetric(
+      canales.reduce((s, c) => s + c.unidades.previsto, 0),
+      canales.reduce((s, c) => s + c.unidades.real, 0)
+    );
+    const canalesConKg = canales.filter((c) => c.kg != null);
+    const kgFamilia = canalesConKg.length > 0
+      ? buildMetric(canalesConKg.reduce((s, c) => s + c.kg!.previsto, 0), canalesConKg.reduce((s, c) => s + c.kg!.real, 0))
+      : null;
+    const canalesConImporte = canales.filter((c) => c.importe != null);
+    const importeFamilia = canalesConImporte.length > 0
+      ? buildMetric(canalesConImporte.reduce((s, c) => s + c.importe!.previsto, 0), canalesConImporte.reduce((s, c) => s + c.importe!.real, 0))
+      : null;
+
+    mensualPorFamilia[familia] = mensualDe(articulosFamilia);
+    mensualKgPorFamilia[familia] = mensualKgDe(articulosFamilia);
+    mensualImportePorFamilia[familia] = mensualImporteDe(articulosFamilia);
+
+    return { tipo: 'familia' as const, familia, unidades: unidadesFamilia, kg: kgFamilia, importe: importeFamilia, canales };
+  }).sort((a, b) => ordenFamilia(a.familia) - ordenFamilia(b.familia) || a.familia.localeCompare(b.familia));
+
+  const totalU = buildMetric(
+    familias.reduce((s, f) => s + f.unidades.previsto, 0),
+    familias.reduce((s, f) => s + f.unidades.real, 0)
+  );
+  const familiasConKg = familias.filter((f) => f.kg != null);
+  const totalKg = familiasConKg.length > 0
+    ? buildMetric(familiasConKg.reduce((s, f) => s + f.kg!.previsto, 0), familiasConKg.reduce((s, f) => s + f.kg!.real, 0))
+    : null;
+  const familiasConImporte = familias.filter((f) => f.importe != null);
+  const totalImporte = familiasConImporte.length > 0
+    ? buildMetric(familiasConImporte.reduce((s, f) => s + f.importe!.previsto, 0), familiasConImporte.reduce((s, f) => s + f.importe!.real, 0))
+    : null;
+
+  const familiasFueraDeUmbral = familias.filter(
+    (f) => f.unidades.desviacionPct != null && Math.abs(f.unidades.desviacionPct) > umbralPct
+  ).length;
+
+  return {
+    familias,
+    resumen: {
+      unidades: totalU,
+      kg: totalKg,
+      importe: totalImporte,
+      totalFamilias: familias.length,
+      familiasFueraDeUmbral,
+      umbralPct,
+      articulosSinGramaje: Array.from(articulosSinGramaje).sort(),
+      articulosSinCoste: Array.from(articulosSinCoste).sort(),
+    },
+    mensual: {
+      total: mensualDe(articulos),
+      totalKg: mensualKgDe(articulos),
+      totalImporte: mensualImporteDe(articulos),
+      porFamilia: mensualPorFamilia,
+      porFamiliaCanal: mensualPorFamiliaCanal,
+      kgPorFamilia: mensualKgPorFamilia,
+      kgPorFamiliaCanal: mensualKgPorFamiliaCanal,
+      importePorFamilia: mensualImportePorFamilia,
+      importePorFamiliaCanal: mensualImportePorFamiliaCanal,
+    },
+  };
+}
+
+// --- Modo de datos de ejemplo -----------------------------------------------------
+// Reparto mensual determinista (no aleatorio, para que el mock sea estable entre
+// recargas): dos curvas de peso ligeramente distintas para previsto/real, sobre una
+// campaña sep-2025..ago-2026, así el gráfico mensual no es una simple línea recta.
+const PESO_PREV = [0.095, 0.085, 0.09, 0.10, 0.07, 0.065, 0.075, 0.08, 0.085, 0.09, 0.08, 0.085];
+const PESO_REAL = [0.10, 0.09, 0.10, 0.11, 0.065, 0.055, 0.07, 0.075, 0.09, 0.095, 0.075, 0.075];
+const CAMPANA: { sortKey: string; mes: string }[] = [
+  { sortKey: '2025-09', mes: 'sep' }, { sortKey: '2025-10', mes: 'oct' }, { sortKey: '2025-11', mes: 'nov' },
+  { sortKey: '2025-12', mes: 'dic' }, { sortKey: '2026-01', mes: 'ene' }, { sortKey: '2026-02', mes: 'feb' },
+  { sortKey: '2026-03', mes: 'mar' }, { sortKey: '2026-04', mes: 'abr' }, { sortKey: '2026-05', mes: 'may' },
+  { sortKey: '2026-06', mes: 'jun' }, { sortKey: '2026-07', mes: 'jul' }, { sortKey: '2026-08', mes: 'ago' },
+];
+
+function repartirMeses(previstoTotal: number, realTotal: number, costeUnitario: number | null): MesPunto[] {
+  return CAMPANA.map((c, i) => {
+    const previsto = Math.round(previstoTotal * PESO_PREV[i]);
+    const real = Math.round(realTotal * PESO_REAL[i]);
+    return {
+      sortKey: c.sortKey,
+      mes: c.mes,
+      previsto,
+      real,
+      // Mock: precio real = coste fijo (sin variación de precio simulada) — suficiente
+      // para validar la interacción, no para representar una desviación de precio real.
+      importeReal: costeUnitario != null ? real * costeUnitario : 0,
+    };
+  });
+}
+
+// Descripciones del catálogo UDC 17/B6 confirmadas contra el esquema real (ver
+// conversación de mapeo de datos) — hardcodeadas SOLO aquí, dentro de los datos de
+// ejemplo. El camino real nunca hardcodea esto: consulta prodctl.f0005 en vivo.
+const MOCK_CANAL_LABELS = new Map([
+  ['EXP', 'Exportación'],
+  ['HOR', 'Horeca'],
+  ['MLPC', 'Mercadona LPC'],
+  ['MLS', 'Mercadona Libre Servicio'],
+  ['RET', 'Retail'],
+]);
+
+function getMockArticulos(): ArticuloAgg[] {
+  const base = [
+    { item: '1210100009', descripcion: 'TORT CHORIZO 600g FR BF', familia: 'Tortilla', canal: 'HOR', gramaje: 600, coste: 2.1, unidadesPrevisto: 210000, unidadesReal: 228000 },
+    { item: '1210100010', descripcion: 'TORT CEBOLLA 1Kg FR BF', familia: 'Tortilla', canal: 'RET', gramaje: 1000, coste: 3.4, unidadesPrevisto: 250000, unidadesReal: 265000 },
+    { item: '1210100011', descripcion: 'TORT POMME T 500g TP GS', familia: 'Tortilla', canal: 'MLS', gramaje: 500, coste: 1.8, unidadesPrevisto: 145200, unidadesReal: 160170 },
+    { item: '1310200004', descripcion: 'PIM ASADO TIRAS 500g FR BF', familia: 'Pimiento asado', canal: 'RET', gramaje: 500, coste: 2.6, unidadesPrevisto: 22100, unidadesReal: 19370 },
+    { item: '1310200007', descripcion: 'PIM ASADO ENTERO 1Kg TP GS', familia: 'Pimiento asado', canal: 'RET', gramaje: 1000, coste: 4.2, unidadesPrevisto: 31000, unidadesReal: 25340 },
+    { item: '1310200011', descripcion: 'PIM ASADO TIRAS 800g FR BF', familia: 'Pimiento asado', canal: 'HOR', gramaje: 800, coste: 3.5, unidadesPrevisto: 85700, unidadesReal: 96030 },
+    { item: '1310200015', descripcion: 'PIM ASADO GRANEL 5Kg FR BF', familia: 'Pimiento asado', canal: null, gramaje: null, coste: null, unidadesPrevisto: 220200, unidadesReal: 252900 },
+    { item: '1410300002', descripcion: 'PREP PATATA GAJO 750g FR BF', familia: 'Preparados a base de patata', canal: 'HOR', gramaje: 750, coste: 1.5, unidadesPrevisto: 180000, unidadesReal: 181080 },
+    { item: '1410300006', descripcion: 'PREP PATATA CUBO 1Kg TP GS', familia: 'Preparados a base de patata', canal: 'MLPC', gramaje: 1000, coste: 1.9, unidadesPrevisto: 96000, unidadesReal: 96580 },
+    { item: '1510400003', descripcion: 'MIGAS TRADICIONAL 600g FR BF', familia: 'Migas', canal: 'RET', gramaje: 600, coste: 2.2, unidadesPrevisto: 140000, unidadesReal: 136360 },
+    { item: '1610500001', descripcion: 'VERDURAS SALTEADAS 500g FR BF', familia: 'Verduras', canal: 'MLS', gramaje: 500, coste: 2.0, unidadesPrevisto: 98000, unidadesReal: 109466 },
+    { item: '1610500005', descripcion: 'VERDURAS PARRILLA 400g TP GS', familia: 'Verduras', canal: 'EXP', gramaje: 400, coste: 1.7, unidadesPrevisto: 42000, unidadesReal: 46914 },
+    { item: '1710600002', descripcion: 'OTROS SURTIDO 300g FR BF', familia: 'Otros', canal: 'HOR', gramaje: 300, coste: 1.3, unidadesPrevisto: 61000, unidadesReal: 67405 },
+  ];
+  return base.map((b) => ({
+    item: b.item,
+    descripcion: b.descripcion,
+    familia: b.familia,
+    canal: b.canal,
+    gramaje: b.gramaje,
+    costeUnitario: b.coste,
+    meses: repartirMeses(b.unidadesPrevisto, b.unidadesReal, b.coste),
+  }));
+}
+
+// --- Modo real -----------------------------------------------------------------
 function jdeBoundsFromDates(startDateStr: string, endDateStr: string) {
-    const start = new Date(startDateStr);
-    const end = new Date(endDateStr);
-    const startJde = 100000 + (start.getFullYear() - 2000) * 1000 + getDayOfYear(start);
-    const endJde = 100000 + (end.getFullYear() - 2000) * 1000 + getDayOfYear(end);
-    return { startJde, endJde };
-}
-
-function monthKey(item: string, date: Date) {
-    return `${item}|${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
-}
-
-interface Bucket {
-    item: string;
-    anio: number;
-    mes: number;
-    prevQtyRaw: number;
-    hasPrevisto: boolean;
-    realImporte: number;
-    realQty: number;
-    hasReal: boolean;
+  const start = new Date(startDateStr);
+  const end = new Date(endDateStr);
+  const startJde = 100000 + (start.getFullYear() - 2000) * 1000 + getDayOfYear(start);
+  const endJde = 100000 + (end.getFullYear() - 2000) * 1000 + getDayOfYear(end);
+  return { startJde, endJde };
 }
 
 export async function GET(req: NextRequest) {
-    const denied = await requireScreenAccess('compras');
-    if (denied) return denied;
-    const startTime = Date.now();
+  const denied = await requireScreenAccess('compras');
+  if (denied) return denied;
+  const startTime = Date.now();
 
-    const { searchParams } = new URL(req.url);
-    const items = searchParams.getAll('item');
-    const marcas = searchParams.getAll('marca'); // Filtro por Marca (IMSRP4 de F4101, ver /api/categories?field=srp4)
-    const now = new Date();
-    // Default "este mes", no el año — sin filtro SDNXTR el año completo escanea ~165.000 líneas
-    // de F4211 y tarda ~2,5min (ver docs/compras.md §3.3/§11). El mes es rápido.
-    const monthStart = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-01`;
-    const monthEnd = new Date(now.getFullYear(), now.getMonth() + 1, 0);
-    const monthEndStr = `${monthEnd.getFullYear()}-${String(monthEnd.getMonth() + 1).padStart(2, '0')}-${String(monthEnd.getDate()).padStart(2, '0')}`;
-    const startDateStr = searchParams.get('startDate') || monthStart;
-    const endDateStr = searchParams.get('endDate') || monthEndStr;
-    const { startJde, endJde } = jdeBoundsFromDates(startDateStr, endDateStr);
+  const { searchParams } = new URL(req.url);
+  const umbralPct = Number(searchParams.get('umbral')) || UMBRAL_DEFAULT_PCT;
 
-    let conn;
-    try {
-        conn = await getDbConnection();
+  if (searchParams.get('mock') === '1') {
+    return NextResponse.json({ mock: true, ...aggregate(getMockArticulos(), umbralPct, MOCK_CANAL_LABELS) });
+  }
 
-        const itemBinds: any = {};
-        items.forEach((it, i) => { itemBinds[`item${i}`] = it; });
-        const itemPlaceholders = items.map((_, i) => `:item${i}`).join(', ');
+  const now = new Date();
+  const monthStart = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-01`;
+  const monthEnd = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+  const monthEndStr = `${monthEnd.getFullYear()}-${String(monthEnd.getMonth() + 1).padStart(2, '0')}-${String(monthEnd.getDate()).padStart(2, '0')}`;
+  const startDateStr = searchParams.get('startDate') || monthStart;
+  const endDateStr = searchParams.get('endDate') || monthEndStr;
+  const { startJde, endJde } = jdeBoundsFromDates(startDateStr, endDateStr);
 
-        // A) Previsión de ventas (F3460) — un valor por artículo y mes.
-        // MFLITM = artículo largo/visible (clave de agrupación, comparable a SDAITM de F4211).
-        // MFITM  = artículo corto, solo para cruzar F4101 (descripción/familia).
-        const forecastSql = `
-            SELECT TRIM(MFLITM) AS ITEM, TRIM(MFITM) AS ITEM_CORTO, MFDRQJ AS FECHA_JDE, MFFQT AS CANT_PREV_RAW
-            FROM F3460
-            WHERE MFMCU = :planta AND MFDRQJ BETWEEN :startJde AND :endJde
-            ${items.length ? `AND TRIM(MFLITM) IN (${itemPlaceholders})` : ''}
-        `;
-        // B) Coste unitario vigente (F4105) — no tiene granularidad mensual.
-        // COLITM es el artículo largo (mismo espacio que MFLITM/SDAITM), no requiere traducción a corto.
-        const costSql = `
-            SELECT TRIM(COLITM) AS ITEM, COUNCS AS COSTE_RAW
-            FROM F4105
-            WHERE COMCU = :planta AND COLEDG = :coledg
-            ${items.length ? `AND TRIM(COLITM) IN (${itemPlaceholders})` : ''}
-        `;
-        // C) Venta real (F4211) — excluye tipo de documento SDDCTO='ST' y líneas sin fecha de
-        // envío (SDADDJ!=0), fecha de envío real (SDADDJ), no fecha de pedido. SDAITM = artículo
-        // largo/visible (clave de agrupación). SDITM = artículo corto para F4101 (mismo patrón
-        // que app/api/orders/route.ts: `LEFT JOIN F4101 E ON E.IMITM = A.SDITM`).
-        // ojo: SIN filtro SDNXTR!=999 — ese filtro es propio de /preparacion-pedidos (pedidos
-        // pendientes, excluye cerrados/históricos) y aquí excluía casi todo el histórico real.
-        const salesSql = `
-            SELECT TRIM(A.SDAITM) AS ITEM, TRIM(A.SDITM) AS ITEM_CORTO, A.SDADDJ AS FECHA_JDE,
-                   A.SDUORG AS CANT_REAL_RAW, A.SDUPRC AS PRECIO_RAW
-            FROM F4211 A
-            WHERE TRIM(A.SDDCTO) != :tipoDocExcluido AND A.SDADDJ != 0
-                AND A.SDADDJ BETWEEN :startJde AND :endJde
-            ${items.length ? `AND TRIM(A.SDAITM) IN (${itemPlaceholders})` : ''}
-        `;
+  let conn;
+  try {
+    conn = await getDbConnection();
 
-        const [forecastResult, costResult, salesResult] = await Promise.all([
-            conn.execute(forecastSql, { planta: PLANTA_PRESUPUESTOS, startJde, endJde, ...itemBinds }),
-            conn.execute(costSql, { planta: PLANTA_PRESUPUESTOS, coledg: COLEDG_VIGENTE, ...itemBinds }),
-            conn.execute(salesSql, { tipoDocExcluido: TIPO_DOC_EXCLUIDO, startJde, endJde, ...itemBinds }),
-        ]);
+    // A) Previsión (F3460) — artículo largo (MFLITM) x mes, planta de presupuestos.
+    const forecastSql = `
+      SELECT TRIM(MFLITM) AS ITEM, TRIM(MFITM) AS ITEM_CORTO, MFDRQJ AS FECHA_JDE, MFFQT AS CANT_PREV_RAW
+      FROM F3460
+      WHERE MFMCU = :planta AND MFDRQJ BETWEEN :startJde AND :endJde
+    `;
+    // B) Venta real (F4211) — mismo filtro que la v1 del panel. SDUPRC = precio unitario
+    // de la línea (para importe real, NUNCA cantidad × coste presupuestado). Cantidad:
+    // SDSOQS (antes se usaba SDUORG, que era el campo de cantidad que usábamos antes).
+    const salesSql = `
+      SELECT TRIM(A.SDAITM) AS ITEM, TRIM(A.SDITM) AS ITEM_CORTO, A.SDADDJ AS FECHA_JDE,
+             A.SDSOQS AS CANT_REAL_RAW, A.SDUPRC AS PRECIO_RAW
+      FROM F4211 A
+      WHERE TRIM(A.SDDCTO) != :tipoDocExcluido AND A.SDADDJ != 0
+        AND A.SDADDJ BETWEEN :startJde AND :endJde
+    `;
 
-        const forecastRows = forecastResult.rows as any[];
-        const costRows = costResult.rows as any[];
-        const salesRows = salesResult.rows as any[];
+    const [forecastResult, salesResult] = await Promise.all([
+      conn.execute(forecastSql, { planta: PLANTA_PRESUPUESTOS, startJde, endJde }),
+      conn.execute(salesSql, { tipoDocExcluido: TIPO_DOC_EXCLUIDO, startJde, endJde }),
+    ]);
 
-        // Coste unitario previsto por artículo (foto actual, sin fecha)
-        const costMap = new Map<string, number>();
-        costRows.forEach(r => {
-            const item = String(r.ITEM).trim();
-            if (!costMap.has(item)) costMap.set(item, (r.COSTE_RAW || 0) / 10000);
-            else console.warn(`F4105: coste duplicado para item ${item} (COLEDG=${COLEDG_VIGENTE}), se usa el primero`);
-        });
+    const forecastRows = forecastResult.rows as any[];
+    const salesRows = salesResult.rows as any[];
 
-        // Mapa artículo largo -> artículo corto (para cruzar F4101, que se indexa por el corto)
-        const shortItemMap = new Map<string, string>();
-        forecastRows.forEach(r => {
-            const item = String(r.ITEM).trim();
-            const corto = String(r.ITEM_CORTO || '').trim();
-            if (item && corto && !shortItemMap.has(item)) shortItemMap.set(item, corto);
-        });
-        salesRows.forEach(r => {
-            const item = String(r.ITEM).trim();
-            const corto = String(r.ITEM_CORTO || '').trim();
-            if (item && corto && !shortItemMap.has(item)) shortItemMap.set(item, corto);
-        });
-
-        // Set de artículos cortos encontrados en previsión o venta real (F4101 se indexa por el corto)
-        const itemIds = Array.from(new Set(Array.from(shortItemMap.values()))).filter(Boolean);
-
-        if (itemIds.length === 0) {
-            return NextResponse.json({
-                filters: { startDate: startDateStr, endDate: endDateStr, items, marcas },
-                rows: [],
-                resumen: emptyResumen(),
-            });
-        }
-
-        const idBinds: any = {};
-        itemIds.forEach((id, i) => { idBinds[`id${i}`] = id; });
-        const idPlaceholders = itemIds.map((_, i) => `:id${i}`).join(', ');
-
-        // D) Metadata de artículo (descripción/familia/marca, para mostrar y filtrar en la tabla)
-        const metaSql = `SELECT TRIM(IMITM) AS ITEM, TRIM(IMDSC1) AS DESCRIPCION, TRIM(IMSRP2) AS FAMILIA, TRIM(IMSRP4) AS MARCA FROM F4101 WHERE IMITM IN (${idPlaceholders})`;
-        // E) Gramaje (F554101.AAZE03 = gramos por unidad, directo, sin pasar por la descripción
-        // de prodctl.f0005) — mismo patrón de artículo corto que usa /produccion para el filtro
-        // de gramaje (AAITM = IMITM).
-        const gramajeSql = `SELECT TRIM(AAITM) AS ITEM, TRIM(AAZE03) AS GRAMOS_RAW FROM F554101 WHERE AAITM IN (${idPlaceholders})`;
-
-        const [metaResult, gramajeResult] = await Promise.all([
-            conn.execute(metaSql, idBinds),
-            conn.execute(gramajeSql, idBinds),
-        ]);
-
-        const metaMap = new Map<string, { descripcion: string; familia: string; marca: string }>();
-        (metaResult.rows as any[]).forEach(r => {
-            metaMap.set(String(r.ITEM).trim(), {
-                descripcion: String(r.DESCRIPCION || '').trim(),
-                familia: String(r.FAMILIA || '').trim(),
-                marca: String(r.MARCA || '').trim(),
-            });
-        });
-
-        // Gramaje: AAZE03 es directamente el nº de gramos por unidad (confirmado por el usuario,
-        // no requiere parsear la descripción de prodctl.f0005).
-        const gramajeMap = new Map<string, number>();
-        (gramajeResult.rows as any[]).forEach(r => {
-            const gramos = Number(String(r.GRAMOS_RAW || '').trim());
-            if (!Number.isNaN(gramos) && gramos > 0) gramajeMap.set(String(r.ITEM).trim(), gramos);
-        });
-
-        // Acumulador por artículo+mes
-        const buckets = new Map<string, Bucket>();
-        const getBucket = (item: string, date: Date): Bucket => {
-            const key = monthKey(item, date);
-            let b = buckets.get(key);
-            if (!b) {
-                b = { item, anio: date.getFullYear(), mes: date.getMonth() + 1, prevQtyRaw: 0, hasPrevisto: false, realImporte: 0, realQty: 0, hasReal: false };
-                buckets.set(key, b);
-            }
-            return b;
-        };
-
-        forecastRows.forEach(r => {
-            const item = String(r.ITEM).trim();
-            const parsed = parseJdeDate(r.FECHA_JDE);
-            if (!parsed) return;
-            const b = getBucket(item, parsed.date);
-            b.prevQtyRaw += (r.CANT_PREV_RAW || 0);
-            b.hasPrevisto = true;
-        });
-
-        salesRows.forEach(r => {
-            const item = String(r.ITEM).trim();
-            const parsed = parseJdeDate(r.FECHA_JDE);
-            if (!parsed) return;
-            const b = getBucket(item, parsed.date);
-            const qtyLinea = (r.CANT_REAL_RAW || 0) / 100;
-            const precioLinea = (r.PRECIO_RAW || 0) / 10000;
-            b.realImporte += qtyLinea * precioLinea;
-            b.realQty += qtyLinea;
-            b.hasReal = true;
-        });
-
-        const rows = Array.from(buckets.values()).map(b => {
-            const itemCorto = shortItemMap.get(b.item) || '';
-            const meta = metaMap.get(itemCorto);
-            // El coste (F4105) es una foto por artículo sin mes propio: si este mes no hay
-            // previsión (F3460), tampoco mostramos precio previsto, para no contradecir el aviso.
-            const costeUnitarioPrevisto = b.hasPrevisto ? (costMap.get(b.item) ?? null) : null;
-            const qtyPrevisto = b.hasPrevisto ? b.prevQtyRaw / 100 : null;
-            const importePrevisto = (qtyPrevisto != null && costeUnitarioPrevisto != null) ? qtyPrevisto * costeUnitarioPrevisto : null;
-
-            const qtyReal = b.hasReal ? b.realQty : null;
-            const importeReal = b.hasReal ? b.realImporte : null;
-            const precioMedioReal = (qtyReal != null && qtyReal > 0) ? b.realImporte / qtyReal : null;
-
-            // Kg por gramaje (F554101.AAZE03, gramos/unidad) — no por conversión de UM.
-            // Mismo gramaje para previsto y real: es una propiedad del artículo, no de la transacción.
-            const gramosPorUnidad = gramajeMap.get(itemCorto) ?? null;
-            const kgPrevisto = (qtyPrevisto != null && gramosPorUnidad != null) ? qtyPrevisto * (gramosPorUnidad / 1000) : null;
-            const kgReal = (qtyReal != null && gramosPorUnidad != null) ? qtyReal * (gramosPorUnidad / 1000) : null;
-
-            const desviacionImporte = (importeReal != null && importePrevisto != null) ? importeReal - importePrevisto : null;
-            const desviacionImportePct = (importePrevisto != null && importePrevisto !== 0 && desviacionImporte != null) ? (desviacionImporte / importePrevisto) * 100 : null;
-
-            const desviacionPrecio = (precioMedioReal != null && costeUnitarioPrevisto != null) ? precioMedioReal - costeUnitarioPrevisto : null;
-            const desviacionPrecioPct = (costeUnitarioPrevisto != null && costeUnitarioPrevisto !== 0 && desviacionPrecio != null) ? (desviacionPrecio / costeUnitarioPrevisto) * 100 : null;
-
-            const desviacionCantidad = (qtyReal != null && qtyPrevisto != null) ? qtyReal - qtyPrevisto : null;
-            const desviacionCantidadPct = (qtyPrevisto != null && qtyPrevisto !== 0 && desviacionCantidad != null) ? (desviacionCantidad / qtyPrevisto) * 100 : null;
-
-            const desviacionKg = (kgReal != null && kgPrevisto != null) ? kgReal - kgPrevisto : null;
-            const desviacionKgPct = (kgPrevisto != null && kgPrevisto !== 0 && desviacionKg != null) ? (desviacionKg / kgPrevisto) * 100 : null;
-
-            const avisos: string[] = [];
-            if (!b.hasPrevisto) avisos.push('Sin previsión este mes');
-            if (!b.hasReal) avisos.push('Sin venta este mes');
-            if (b.hasPrevisto && costeUnitarioPrevisto == null) avisos.push('Sin coste F4105');
-            if ((b.hasPrevisto || b.hasReal) && gramosPorUnidad == null) avisos.push('Sin gramaje (F554101)');
-
-            return {
-                item: b.item,
-                descripcion: meta?.descripcion || '',
-                familia: meta?.familia || '',
-                marca: meta?.marca || '',
-                anio: b.anio,
-                mes: b.mes,
-                mesLabel: `${b.anio}-${String(b.mes).padStart(2, '0')}`,
-                gramaje: gramosPorUnidad,
-                previsto: { cantidad: qtyPrevisto, precioUnitario: costeUnitarioPrevisto, importe: importePrevisto, kg: kgPrevisto },
-                real: { cantidad: qtyReal, precioUnitario: precioMedioReal, importe: importeReal, kg: kgReal },
-                desviacion: {
-                    cantidad: { abs: desviacionCantidad, pct: desviacionCantidadPct },
-                    importe: { abs: desviacionImporte, pct: desviacionImportePct },
-                    precio: { abs: desviacionPrecio, pct: desviacionPrecioPct },
-                    kg: { abs: desviacionKg, pct: desviacionKgPct },
-                },
-                avisos,
-            };
-        }).sort((a, b) => a.mesLabel === b.mesLabel ? a.item.localeCompare(b.item) : a.mesLabel.localeCompare(b.mesLabel));
-
-        // Marca (IMSRP4) solo se conoce tras cruzar con F4101, igual que familia — se filtra aquí
-        // sobre las filas ya construidas, no en las queries a F3460/F4211/F4105.
-        const rowsFiltradas = marcas.length > 0 ? rows.filter(r => marcas.includes(r.marca)) : rows;
-
-        const resumen = buildResumen(rowsFiltradas);
-        // Artículos (distintos) sin gramaje en F554101, para que se puedan revisar de un vistazo
-        // en vez de tener que pasar el ratón fila a fila por el aviso.
-        resumen.articulosSinGramaje = Array.from(new Set(rowsFiltradas.filter(r => r.gramaje == null).map(r => r.item))).sort();
-
-        // Registrar consulta en logs (nunca bloquea la respuesta)
-        try {
-            const user = await verifySession().catch(() => null);
-            const filters = { startDate: startDateStr, endDate: endDateStr, items, marcas };
-            const db = getDb();
-            db.prepare(
-                'INSERT INTO query_logs (user_id, username, source, filters, result_count, execution_time_ms) VALUES (?, ?, ?, ?, ?, ?)'
-            ).run(user?.id ?? null, user ? user.username : 'Invitado', 'compras', JSON.stringify(filters), rowsFiltradas.length, Date.now() - startTime);
-        } catch (logErr) {
-            console.error('Error logging query:', logErr);
-        }
-
-        return NextResponse.json({ filters: { startDate: startDateStr, endDate: endDateStr, items, marcas }, rows: rowsFiltradas, resumen });
-    } catch (err: any) {
-        console.error('Database Error:', err);
-        return NextResponse.json({ error: err.message }, { status: 500 });
-    } finally {
-        if (conn) {
-            try { await conn.close(); } catch (e) { console.error(e); }
-        }
-    }
-}
-
-function emptyResumen() {
-    return {
-        totalCantidadPrevisto: 0, totalCantidadReal: 0, desviacionCantidadPct: null,
-        totalKgPrevisto: 0, totalKgReal: 0, desviacionKgPct: null,
-        totalImportePrevisto: 0, totalImporteReal: 0, desviacionImportePct: null,
-        precioMedioPrevisto: null, precioMedioReal: null, desviacionPrecioPct: null,
-        porMes: [] as any[],
-        articulosSinGramaje: [] as string[],
-    };
-}
-
-function buildResumen(rows: any[]) {
-    let totalImportePrevisto = 0, totalImporteReal = 0, totalCantidadPrevisto = 0, totalCantidadReal = 0;
-    let totalKgPrevisto = 0, totalKgReal = 0;
-    const porMesMap = new Map<string, { mesLabel: string; importePrevisto: number; importeReal: number; cantidadPrevisto: number; cantidadReal: number; kgPrevisto: number; kgReal: number }>();
-
-    rows.forEach(r => {
-        if (r.previsto.importe != null) totalImportePrevisto += r.previsto.importe;
-        if (r.real.importe != null) totalImporteReal += r.real.importe;
-        if (r.previsto.cantidad != null) totalCantidadPrevisto += r.previsto.cantidad;
-        if (r.real.cantidad != null) totalCantidadReal += r.real.cantidad;
-        if (r.previsto.kg != null) totalKgPrevisto += r.previsto.kg;
-        if (r.real.kg != null) totalKgReal += r.real.kg;
-
-        let m = porMesMap.get(r.mesLabel);
-        if (!m) { m = { mesLabel: r.mesLabel, importePrevisto: 0, importeReal: 0, cantidadPrevisto: 0, cantidadReal: 0, kgPrevisto: 0, kgReal: 0 }; porMesMap.set(r.mesLabel, m); }
-        if (r.previsto.importe != null) m.importePrevisto += r.previsto.importe;
-        if (r.real.importe != null) m.importeReal += r.real.importe;
-        if (r.previsto.cantidad != null) m.cantidadPrevisto += r.previsto.cantidad;
-        if (r.real.cantidad != null) m.cantidadReal += r.real.cantidad;
-        if (r.previsto.kg != null) m.kgPrevisto += r.previsto.kg;
-        if (r.real.kg != null) m.kgReal += r.real.kg;
+    // Artículo largo -> corto (F4101/F554101 se indexan por el corto, ver docs/compras.md §3.1)
+    const shortItemMap = new Map<string, string>();
+    forecastRows.forEach((r) => {
+      const item = String(r.ITEM).trim();
+      const corto = String(r.ITEM_CORTO || '').trim();
+      if (item && corto && !shortItemMap.has(item)) shortItemMap.set(item, corto);
+    });
+    salesRows.forEach((r) => {
+      const item = String(r.ITEM).trim();
+      const corto = String(r.ITEM_CORTO || '').trim();
+      if (item && corto && !shortItemMap.has(item)) shortItemMap.set(item, corto);
     });
 
-    const desviacionCantidadPct = totalCantidadPrevisto !== 0 ? ((totalCantidadReal - totalCantidadPrevisto) / totalCantidadPrevisto) * 100 : null;
-    const desviacionKgPct = totalKgPrevisto !== 0 ? ((totalKgReal - totalKgPrevisto) / totalKgPrevisto) * 100 : null;
-    const desviacionImportePct = totalImportePrevisto !== 0 ? ((totalImporteReal - totalImportePrevisto) / totalImportePrevisto) * 100 : null;
-    const precioMedioPrevisto = totalCantidadPrevisto > 0 ? totalImportePrevisto / totalCantidadPrevisto : null;
-    const precioMedioReal = totalCantidadReal > 0 ? totalImporteReal / totalCantidadReal : null;
-    const desviacionPrecioPct = (precioMedioPrevisto != null && precioMedioReal != null && precioMedioPrevisto !== 0)
-        ? ((precioMedioReal - precioMedioPrevisto) / precioMedioPrevisto) * 100 : null;
+    const longItemIds = Array.from(shortItemMap.keys());
+    const itemIds = Array.from(new Set(Array.from(shortItemMap.values()))).filter(Boolean);
+    if (itemIds.length === 0) {
+      return NextResponse.json({ mock: false, ...aggregate([], umbralPct, new Map()) });
+    }
 
-    const porMes = Array.from(porMesMap.values())
-        .sort((a, b) => a.mesLabel.localeCompare(b.mesLabel))
-        .map(m => ({
-            ...m,
-            precioPrevisto: m.cantidadPrevisto > 0 ? m.importePrevisto / m.cantidadPrevisto : null,
-            precioReal: m.cantidadReal > 0 ? m.importeReal / m.cantidadReal : null,
-        }));
+    const idBinds: any = {};
+    itemIds.forEach((id, i) => { idBinds[`id${i}`] = id; });
+    const idPlaceholders = itemIds.map((_, i) => `:id${i}`).join(', ');
 
-    return {
-        totalCantidadPrevisto, totalCantidadReal, desviacionCantidadPct,
-        totalKgPrevisto, totalKgReal, desviacionKgPct,
-        totalImportePrevisto, totalImporteReal, desviacionImportePct,
-        precioMedioPrevisto, precioMedioReal, desviacionPrecioPct,
-        porMes,
-        articulosSinGramaje: [] as string[],
+    const longIdBinds: any = {};
+    longItemIds.forEach((id, i) => { longIdBinds[`lid${i}`] = id; });
+    const longIdPlaceholders = longItemIds.map((_, i) => `:lid${i}`).join(', ');
+
+    // C) Familia (F4101.IMSRP2, UDC 41/S2 — mismo patrón que /produccion). IMSRP2 es
+    // un CÓDIGO (ej. "101"), no la descripción — mismo error que se cometió con canal,
+    // hace falta resolverlo contra el catálogo (bug real, solo visible con datos reales:
+    // el mock tenía los nombres ya escritos a mano, nunca pasó por esta ruta).
+    const metaSql = `SELECT TRIM(IMITM) AS ITEM, TRIM(IMDSC1) AS DESCRIPCION, TRIM(IMSRP2) AS FAMILIA FROM F4101 WHERE IMITM IN (${idPlaceholders})`;
+    // D) Canal (F554101.AAZE06, UDC 17/B6) + gramaje (F554101.AAZE03)
+    const extSql = `SELECT TRIM(AAITM) AS ITEM, TRIM(AAZE06) AS CANAL, TRIM(AAZE03) AS GRAMOS_RAW FROM F554101 WHERE AAITM IN (${idPlaceholders})`;
+    // E) Catálogo de canal (UDC 17/B6) — descripción real, nunca el código.
+    const canalCatalogSql = `
+      SELECT TRIM(DRKY) AS CODE, TRIM(DRDL01) AS DESCRIPCION
+      FROM prodctl.f0005
+      WHERE TRIM(DRSY) = '17' AND TRIM(DRRT) = 'B6' AND TRIM(DRKY) IS NOT NULL
+    `;
+    // F) Catálogo de familia (UDC 41/S2) — igual que el de canal.
+    const familiaCatalogSql = `
+      SELECT TRIM(DRKY) AS CODE, TRIM(DRDL01) AS DESCRIPCION
+      FROM prodctl.f0005
+      WHERE TRIM(DRSY) = '41' AND TRIM(DRRT) = 'S2' AND TRIM(DRKY) IS NOT NULL
+    `;
+    // G) Coste unitario vigente (F4105) — no tiene granularidad mensual. COLITM es el
+    // artículo LARGO (mismo espacio que MFLITM/SDAITM), no requiere traducción a corto
+    // (mismo patrón que api/compras/route.ts v1).
+    const costSql = `
+      SELECT TRIM(COLITM) AS ITEM, COUNCS AS COSTE_RAW
+      FROM F4105
+      WHERE COMCU = :planta AND COLEDG = :coledg AND TRIM(COLITM) IN (${longIdPlaceholders})
+    `;
+
+    const [metaResult, extResult, canalCatalogResult, familiaCatalogResult, costResult] = await Promise.all([
+      conn.execute(metaSql, idBinds),
+      conn.execute(extSql, idBinds),
+      conn.execute(canalCatalogSql),
+      conn.execute(familiaCatalogSql),
+      conn.execute(costSql, { planta: PLANTA_PRESUPUESTOS, coledg: COLEDG_VIGENTE, ...longIdBinds }),
+    ]);
+
+    const canalLabels = new Map<string, string>();
+    (canalCatalogResult.rows as any[]).forEach((r) => {
+      canalLabels.set(String(r.CODE).trim(), String(r.DESCRIPCION || '').trim());
+    });
+
+    // La UDC 41/S2 la tiene JDE en mayúsculas ("TORTILLA"), a diferencia de 17/B6 que
+    // ya viene bien formateada ("Horeca") — comprobado contra el esquema real. Solo
+    // capitalizamos la primera letra (frase, no Title Case: "Preparados a base de
+    // patata", no "Preparados A Base De Patata"), nunca tocamos acrónimos ajenos
+    // (por eso esto NO se aplica a canalLabels, que sí trae "Mercadona LPC" bien tal cual).
+    const capitalizarFrase = (s: string) => s.length ? s.charAt(0) + s.slice(1).toLowerCase() : s;
+    const familiaLabels = new Map<string, string>();
+    (familiaCatalogResult.rows as any[]).forEach((r) => {
+      familiaLabels.set(String(r.CODE).trim(), capitalizarFrase(String(r.DESCRIPCION || '').trim()));
+    });
+
+    const metaMap = new Map<string, { descripcion: string; familia: string }>();
+    (metaResult.rows as any[]).forEach((r) => {
+      const codigoFamilia = String(r.FAMILIA || '').trim();
+      metaMap.set(String(r.ITEM).trim(), {
+        descripcion: String(r.DESCRIPCION || '').trim(),
+        familia: codigoFamilia ? (familiaLabels.get(codigoFamilia) ?? codigoFamilia) : 'Sin familia',
+      });
+    });
+
+    const canalMap = new Map<string, string | null>();
+    const gramajeMap = new Map<string, number | null>();
+    (extResult.rows as any[]).forEach((r) => {
+      const item = String(r.ITEM).trim();
+      const canal = String(r.CANAL || '').trim();
+      canalMap.set(item, canal || null);
+      const gramos = Number(String(r.GRAMOS_RAW || '').trim());
+      gramajeMap.set(item, !Number.isNaN(gramos) && gramos > 0 ? gramos : null);
+    });
+
+    const costeMap = new Map<string, number>();
+    (costResult.rows as any[]).forEach((r) => {
+      const item = String(r.ITEM).trim();
+      if (!costeMap.has(item)) costeMap.set(item, (r.COSTE_RAW || 0) / 10000);
+    });
+
+    // Acumulador por artículo largo x mes (parseJdeDate ya resuelve el año/mes real).
+    const porArticulo = new Map<string, Map<string, { previsto: number; real: number; importeReal: number }>>();
+    const getBucket = (item: string, fechaJde: number) => {
+      const parsed = parseJdeDate(fechaJde);
+      if (!parsed) return null;
+      const sortKey = `${parsed.date.getFullYear()}-${String(parsed.date.getMonth() + 1).padStart(2, '0')}`;
+      if (!porArticulo.has(item)) porArticulo.set(item, new Map());
+      const meses = porArticulo.get(item)!;
+      if (!meses.has(sortKey)) meses.set(sortKey, { previsto: 0, real: 0, importeReal: 0 });
+      return meses.get(sortKey)!;
     };
+    forecastRows.forEach((r) => {
+      const item = String(r.ITEM).trim();
+      const b = getBucket(item, r.FECHA_JDE);
+      if (b) b.previsto += (r.CANT_PREV_RAW || 0) / 100;
+    });
+    salesRows.forEach((r) => {
+      const item = String(r.ITEM).trim();
+      const b = getBucket(item, r.FECHA_JDE);
+      if (b) {
+        const qty = (r.CANT_REAL_RAW || 0) / 100;
+        const precio = (r.PRECIO_RAW || 0) / 10000;
+        b.real += qty;
+        b.importeReal += qty * precio;
+      }
+    });
+
+    const articulos: ArticuloAgg[] = Array.from(porArticulo.entries()).map(([item, mesesMap]) => {
+      const corto = shortItemMap.get(item) || '';
+      const meta = metaMap.get(corto);
+      const meses: MesPunto[] = Array.from(mesesMap.entries())
+        .sort(([a], [b]) => a.localeCompare(b))
+        .map(([sortKey, v]) => ({ sortKey, mes: MES_LABEL[Number(sortKey.split('-')[1]) - 1], ...v }));
+      return {
+        item,
+        descripcion: meta?.descripcion || '',
+        familia: meta?.familia || 'Sin familia',
+        canal: canalMap.get(corto) ?? null,
+        gramaje: gramajeMap.get(corto) ?? null,
+        costeUnitario: costeMap.get(item) ?? null,
+        meses,
+      };
+    });
+
+    const resultado = aggregate(articulos, umbralPct, canalLabels);
+
+    // Registrar consulta en logs (nunca bloquea la respuesta) — mismo source 'compras'
+    // que la versión anterior, para que /admin/logs muestre continuidad, no un panel
+    // nuevo. result_count = artículos hoja del árbol (equivalente a las filas de la v1).
+    try {
+      const user = await verifySession().catch(() => null);
+      const filters = { startDate: startDateStr, endDate: endDateStr, umbralPct };
+      const resultCount = resultado.familias.reduce(
+        (s, f) => s + f.canales.reduce((s2, c) => s2 + c.articulos.length, 0),
+        0
+      );
+      const db = getDb();
+      db.prepare(
+        'INSERT INTO query_logs (user_id, username, source, filters, result_count, execution_time_ms) VALUES (?, ?, ?, ?, ?, ?)'
+      ).run(user?.id ?? null, user ? user.username : 'Invitado', 'compras', JSON.stringify(filters), resultCount, Date.now() - startTime);
+    } catch (logErr) {
+      console.error('Error logging query:', logErr);
+    }
+
+    return NextResponse.json({
+      mock: false,
+      filters: { startDate: startDateStr, endDate: endDateStr, umbralPct },
+      ...resultado,
+    });
+  } catch (err: any) {
+    console.error('Database Error:', err);
+    return NextResponse.json({ error: err.message }, { status: 500 });
+  } finally {
+    if (conn) {
+      try { await conn.close(); } catch (e) { console.error(e); }
+    }
+  }
 }

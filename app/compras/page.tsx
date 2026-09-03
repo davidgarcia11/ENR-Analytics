@@ -1,651 +1,409 @@
-"use client"
+// Panel de Compras (previsión vs. venta real) — rediseño sobre el sistema Nova
+// (ShadcnSpace), sustituye a la versión anterior (basada en components/ui/). Ver
+// components/nova/README.md (mecanismo de aislamiento data-nova-theme) y
+// docs/compras.md (documentación completa del panel).
+"use client";
 
-import * as React from "react"
-import { useState, useEffect, useCallback, useRef, useMemo } from "react"
-import { useRouter } from "next/navigation"
-import * as XLSX from "xlsx"
-import {
-    LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
-    RadialBarChart, RadialBar, PolarAngleAxis,
-} from "recharts"
-import { AppShell } from "@/components/AppShell"
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
-import { Button } from "@/components/ui/button"
-import { Badge } from "@/components/ui/badge"
-import { Popover, PopoverTrigger, PopoverContent } from "@/components/ui/popover"
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
-import { Spinner } from "@/components/ui/spinner"
-import { EmptyState } from "@/components/ui/empty-state"
-import { Tabs } from "@/components/ui/tabs"
-import { DatePicker } from "@/components/DatePicker"
-import { ArticleMultiSelect } from "@/components/ArticleMultiSelect"
-import { usePresets, PresetPanel, PresetQuickSelect } from "@/components/PresetPanel"
-import { useToast } from "@/components/ui/toast"
-import {
-    ShoppingCart, Euro, Tag, Boxes, Scale, Package, ArrowUp, ArrowDown, AlertTriangle, Download,
-} from "lucide-react"
-import type { LucideIcon } from "lucide-react"
+import { useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
+import * as XLSX from "xlsx";
+import { toast } from "sonner";
+import { Download, Filter, Loader2 } from "lucide-react";
+import Header from "@/components/shadcn-space/blocks/topbar-02/header";
+import { type ThemeMode } from "@/components/nova/mode-toggle";
+import Statistics from "@/components/shadcn-space/blocks/statistics-04/statistics";
+import Charts15 from "@/components/shadcn-space/blocks/chart-15/charts-15";
+import DeviationByFamilyChart from "@/components/nova/deviation-by-family-chart";
+import HierarchicalTable, { type DrillState, type FamiliaRow, type Unit } from "@/components/nova/hierarchical-table";
+import MonthRangePicker, { type MonthRange } from "@/components/nova/month-range-picker";
+import { Button } from "@/components/nova/ui/button";
+import { Tabs, TabsList, TabsTrigger } from "@/components/nova/ui/tabs";
+import { Toaster } from "@/components/nova/ui/sonner";
+
+// Mes en curso (primer día -> último día) — mismo default que api/compras/route.ts
+// cuando se llama sin startDate/endDate.
+function currentMonthRange(): MonthRange {
+  const now = new Date();
+  const y = now.getFullYear();
+  const m = now.getMonth() + 1;
+  const lastDay = new Date(y, m, 0).getDate();
+  return {
+    startDate: `${y}-${String(m).padStart(2, "0")}-01`,
+    endDate: `${y}-${String(m).padStart(2, "0")}-${String(lastDay).padStart(2, "0")}`,
+  };
+}
 
 interface SessionUser { id: number; username: string; role: string; name: string; surname: string }
 
-type Metrica = 'cantidad' | 'kg' | 'importe' | 'precio'
-type PeriodPreset = 'mes_actual' | 'mes_anterior' | 'anio_actual' | 'ultimos_3m' | 'personalizado'
-
-interface Row {
-    item: string
-    descripcion: string
-    familia: string
-    marca: string
-    mesLabel: string
-    gramaje: number | null
-    previsto: { cantidad: number | null; precioUnitario: number | null; importe: number | null; kg: number | null }
-    real: { cantidad: number | null; precioUnitario: number | null; importe: number | null; kg: number | null }
-    desviacion: {
-        cantidad: { abs: number | null; pct: number | null }
-        kg: { abs: number | null; pct: number | null }
-        importe: { abs: number | null; pct: number | null }
-        precio: { abs: number | null; pct: number | null }
-    }
-    avisos: string[]
+interface Metric {
+  previsto: number;
+  real: number;
+  desviacionAbs: number;
+  desviacionPct: number | null;
 }
 
-interface PorMes {
-    mesLabel: string
-    importePrevisto: number; importeReal: number
-    cantidadPrevisto: number; cantidadReal: number
-    kgPrevisto: number; kgReal: number
-    precioPrevisto: number | null; precioReal: number | null
+interface MesPunto {
+  sortKey: string;
+  mes: string;
+  previsto: number;
+  real: number;
 }
 
-interface Resumen {
-    totalCantidadPrevisto: number; totalCantidadReal: number; desviacionCantidadPct: number | null
-    totalKgPrevisto: number; totalKgReal: number; desviacionKgPct: number | null
-    totalImportePrevisto: number; totalImporteReal: number; desviacionImportePct: number | null
-    precioMedioPrevisto: number | null; precioMedioReal: number | null; desviacionPrecioPct: number | null
-    porMes: PorMes[]
-    articulosSinGramaje: string[]
+interface ApiResponse {
+  mock: boolean;
+  familias: FamiliaRow[];
+  resumen: {
+    unidades: Metric;
+    kg: Metric | null;
+    importe: Metric | null;
+    totalFamilias: number;
+    familiasFueraDeUmbral: number;
+    umbralPct: number;
+    articulosSinGramaje: string[];
+    articulosSinCoste: string[];
+  };
+  mensual: {
+    total: MesPunto[];
+    totalKg: MesPunto[] | null;
+    totalImporte: MesPunto[] | null;
+    porFamilia: Record<string, MesPunto[]>;
+    porFamiliaCanal: Record<string, MesPunto[]>;
+    kgPorFamilia: Record<string, MesPunto[] | null>;
+    kgPorFamiliaCanal: Record<string, MesPunto[] | null>;
+    importePorFamilia: Record<string, MesPunto[] | null>;
+    importePorFamiliaCanal: Record<string, MesPunto[] | null>;
+  };
 }
 
-const RESUMEN_VACIO: Resumen = {
-    totalCantidadPrevisto: 0, totalCantidadReal: 0, desviacionCantidadPct: null,
-    totalKgPrevisto: 0, totalKgReal: 0, desviacionKgPct: null,
-    totalImportePrevisto: 0, totalImporteReal: 0, desviacionImportePct: null,
-    precioMedioPrevisto: null, precioMedioReal: null, desviacionPrecioPct: null,
-    porMes: [],
-    articulosSinGramaje: [],
+// Manual, no Intl: este entorno no tiene datos ICU completos para 'es-ES'
+// (toLocaleString('es-ES') se queda sin separador de miles). Ver la misma nota en
+// components/nova/hierarchical-table.tsx.
+function numeroEs(v: number) {
+  const rounded = Math.round(v);
+  const sign = rounded < 0 ? "-" : "";
+  return sign + Math.abs(rounded).toString().replace(/\B(?=(\d{3})+(?!\d))/g, ".");
 }
 
-const fmtEur = (v: number) => v.toLocaleString('es-ES', { style: 'currency', currency: 'EUR', maximumFractionDigits: 0 })
-const fmtPrecioUnitario = (v: number) => `${v.toLocaleString('es-ES', { maximumFractionDigits: 2 })} €/ud`
-const fmtCantidad = (v: number) => `${v.toLocaleString('es-ES', { maximumFractionDigits: 0 })} ud`
-const fmtKg = (v: number) => `${v.toLocaleString('es-ES', { maximumFractionDigits: 0 })} kg`
+const UNIT_LABEL: Record<Unit, string> = { unidades: "Unidades", kg: "Kg", importe: "Importe" };
+function formatNum(v: number, unit: Unit) {
+  return unit === "importe" ? `${numeroEs(v)} €` : numeroEs(v);
+}
+function metricDe(unit: Unit, r: { unidades: Metric; kg: Metric | null; importe: Metric | null }) {
+  return unit === "kg" ? r.kg : unit === "importe" ? r.importe : r.unidades;
+}
 
-// Formatos numéricos nativos de Excel (ponytail: 'xlsx' no soporta colores/negrita al escribir,
-// solo number format + anchos de columna + merges — ver docs/compras.md).
-const XLS_FMT_UD = '#,##0'
-const XLS_FMT_KG = '#,##0" kg"'
-const XLS_FMT_EUR = '#,##0.00" €"'
-const XLS_FMT_PCT = '+0.00%;-0.00%'
-
-// Aplica un number format de Excel a una columna completa (por índice, 0-based) de un rango de filas.
+// Formatos numéricos nativos de Excel (mismo patrón que app/compras/page.tsx — 'xlsx'
+// no soporta colores/negrita al escribir, solo number format + anchos de columna).
+const XLS_FMT_UD = "#,##0";
+const XLS_FMT_KG = '#,##0" kg"';
+const XLS_FMT_EUR = '#,##0.00" €"';
+const XLS_FMT_PCT = "+0.00%;-0.00%";
 function setColNumFmt(ws: XLSX.WorkSheet, colIdx: number, rowCount: number, fmt: string, headerRows = 1) {
-    for (let r = 0; r < rowCount; r++) {
-        const cell = ws[XLSX.utils.encode_cell({ r: r + headerRows, c: colIdx })]
-        if (cell && typeof cell.v === 'number') cell.z = fmt
-    }
+  for (let r = 0; r < rowCount; r++) {
+    const cell = ws[XLSX.utils.encode_cell({ r: r + headerRows, c: colIdx })];
+    if (cell && typeof cell.v === "number") cell.z = fmt;
+  }
 }
 
-function presetToRange(preset: PeriodPreset): { startDate: string; endDate: string } | null {
-    const now = new Date()
-    const y = now.getFullYear()
-    const m = now.getMonth()
-    // Formateo en fecha LOCAL (no toISOString(), que convierte a UTC y desplaza el día
-    // hacia atrás en husos horarios con offset positivo, ej. Europe/Madrid).
-    const fmt = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
-    switch (preset) {
-        case 'mes_actual':
-            return { startDate: fmt(new Date(y, m, 1)), endDate: fmt(new Date(y, m + 1, 0)) }
-        case 'mes_anterior':
-            return { startDate: fmt(new Date(y, m - 1, 1)), endDate: fmt(new Date(y, m, 0)) }
-        case 'anio_actual':
-            return { startDate: `${y}-01-01`, endDate: `${y}-12-31` }
-        case 'ultimos_3m':
-            return { startDate: fmt(new Date(y, m - 2, 1)), endDate: fmt(new Date(y, m + 1, 0)) }
-        case 'personalizado':
-            return null
-    }
-}
+export default function ComprasV2Page() {
+  const router = useRouter();
+  const [drill, setDrill] = useState<DrillState>({ familia: null, canal: null, canalLabel: null });
+  const [unit, setUnit] = useState<Unit>("unidades");
+  // Por defecto, el mes en curso — el rango se aplica solo al pulsar "Filtrar", no en
+  // cada cambio del selector (evita una consulta a Oracle por cada clic).
+  const [range, setRange] = useState<MonthRange>(currentMonthRange());
+  const [data, setData] = useState<ApiResponse | null>(null);
+  const [fetching, setFetching] = useState(false);
+  const [sessionUser, setSessionUser] = useState<SessionUser | null>(null);
 
-// Desplegable compacto de periodo, compartido en la cabecera de varias cards
-// (mismo estado global, no rangos independientes por card).
-function PeriodPresetSelect({ value, onChange }: { value: PeriodPreset; onChange: (p: PeriodPreset) => void }) {
-    return (
-        <select
-            value={value}
-            onChange={(e) => onChange(e.target.value as PeriodPreset)}
-            aria-label="Periodo"
-            className="h-7 rounded-md border border-input bg-card px-2 text-xs shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-        >
-            <option value="mes_actual">Este mes</option>
-            <option value="mes_anterior">Mes anterior</option>
-            <option value="anio_actual">Este año</option>
-            <option value="ultimos_3m">Últimos 3 meses</option>
-            <option value="personalizado">Personalizado…</option>
-        </select>
-    )
-}
+  // Claro/Oscuro/Sistema — no persiste entre recargas (sin localStorage/sessionStorage,
+  // según las reglas del proyecto): siempre empieza en "system".
+  const [mode, setMode] = useState<ThemeMode>("system");
+  const [systemPrefersDark, setSystemPrefersDark] = useState(false);
+  useEffect(() => {
+    const mq = window.matchMedia("(prefers-color-scheme: dark)");
+    setSystemPrefersDark(mq.matches);
+    const handler = (e: MediaQueryListEvent) => setSystemPrefersDark(e.matches);
+    mq.addEventListener("change", handler);
+    return () => mq.removeEventListener("change", handler);
+  }, []);
+  const effectiveTheme = mode === "system" ? (systemPrefersDark ? "dark" : "light") : mode;
 
-function DesviacionCard({
-    titulo, icon: Icon, previsto, real, pct, formatValue, periodPreset, onPeriodChange, warning,
-}: {
-    titulo: string
-    icon: LucideIcon
-    previsto: number | null
-    real: number | null
-    pct: number | null
-    formatValue: (v: number) => string
-    periodPreset: PeriodPreset
-    onPeriodChange: (p: PeriodPreset) => void
-    /** Aviso opcional bajo el gauge (ej. "3 artículos sin gramaje"); al pulsar, despliega la lista. */
-    warning?: { text: string; items: { item: string; descripcion: string }[] }
-}) {
-    // % cumplimiento (real/previsto) solo alimenta el gauge visual, capado a [0,150] — no implica juicio bueno/malo
-    const pctCumplimiento = (previsto && previsto !== 0 && real != null)
-        ? Math.max(0, Math.min(150, (real / previsto) * 100))
-        : 0
-
-    return (
-        <Card accent>
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                <CardTitle className="text-sm font-bold text-secondary-foreground">{titulo}</CardTitle>
-                <PeriodPresetSelect value={periodPreset} onChange={onPeriodChange} />
-            </CardHeader>
-            <CardContent>
-                <div className="flex items-center gap-3">
-                    <div className="flex flex-col items-center flex-shrink-0">
-                        <div className="mb-1 flex h-8 w-8 items-center justify-center rounded-full bg-primary/10">
-                            <Icon className="h-4 w-4 text-primary" aria-hidden="true" />
-                        </div>
-                        <ResponsiveContainer width={80} height={48}>
-                            <RadialBarChart innerRadius="70%" outerRadius="100%" barSize={7} data={[{ value: pctCumplimiento }]} startAngle={180} endAngle={0}>
-                                <PolarAngleAxis type="number" domain={[0, 150]} tick={false} />
-                                <RadialBar background dataKey="value" cornerRadius={7} fill="#D30B15" />
-                            </RadialBarChart>
-                        </ResponsiveContainer>
-                    </div>
-                    <div className="flex flex-1 flex-col gap-1.5">
-                        <Badge className="w-fit">Previsto: {previsto != null ? formatValue(previsto) : 'Sin datos'}</Badge>
-                        <Badge className="w-fit">Real: {real != null ? formatValue(real) : 'Sin datos'}</Badge>
-                        <span className="flex items-center gap-1 text-xs font-semibold text-secondary-foreground">
-                            {pct != null && (pct >= 0 ? <ArrowUp className="h-3 w-3" aria-hidden="true" /> : <ArrowDown className="h-3 w-3" aria-hidden="true" />)}
-                            {pct != null ? `${pct >= 0 ? '+' : ''}${pct.toFixed(1)}%` : 'Sin datos'}
-                        </span>
-                        {warning && (
-                            <Popover>
-                                <PopoverTrigger asChild>
-                                    <button
-                                        type="button"
-                                        className="flex w-fit items-center gap-1 text-xs font-medium text-amber-600 hover:underline decoration-dotted underline-offset-2"
-                                    >
-                                        <AlertTriangle className="h-3 w-3 flex-shrink-0" aria-hidden="true" />
-                                        {warning.text}
-                                    </button>
-                                </PopoverTrigger>
-                                <PopoverContent className="w-[320px] p-3" align="start">
-                                    <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-                                        Artículos sin gramaje (F554101)
-                                    </p>
-                                    <ul className="max-h-64 space-y-1 overflow-y-auto text-sm">
-                                        {warning.items.map(it => (
-                                            <li key={it.item} className="flex flex-col border-b border-border pb-1 last:border-0">
-                                                <span className="font-medium">{it.item}</span>
-                                                {it.descripcion && <span className="text-xs text-muted-foreground">{it.descripcion}</span>}
-                                            </li>
-                                        ))}
-                                    </ul>
-                                </PopoverContent>
-                            </Popover>
-                        )}
-                    </div>
-                </div>
-            </CardContent>
-        </Card>
-    )
-}
-
-export default function ComprasPage() {
-    const router = useRouter()
-    const { toast } = useToast()
-    const [sessionUser, setSessionUser] = useState<SessionUser | null>(null)
-    const [showPresets, setShowPresets] = useState(false)
-    const { presets, reload: reloadPresets } = usePresets('compras')
-
-    const [tab, setTab] = useState<Metrica>('cantidad')
-    // ponytail: por defecto "este mes", no el año — sin filtro SDNXTR el año completo escanea
-    // ~165.000 líneas de F4211 y tarda ~2,5min (ver docs/compras.md §3.3/§11); el mes es rápido.
-    const [periodPreset, setPeriodPreset] = useState<PeriodPreset>('mes_actual')
-    const initialRange = presetToRange('mes_actual')!
-    const [filters, setFilters] = useState({ startDate: initialRange.startDate, endDate: initialRange.endDate })
-    const [selectedItems, setSelectedItems] = useState<string[]>([])
-    const [selectedMarcas, setSelectedMarcas] = useState<string[]>([])
-
-    const [rows, setRows] = useState<Row[]>([])
-    const [resumen, setResumen] = useState<Resumen>(RESUMEN_VACIO)
-    const [availableArticles, setAvailableArticles] = useState<{ id: string; description: string }[]>([])
-    const [availableMarcas, setAvailableMarcas] = useState<{ id: string; description: string }[]>([])
-    const [loading, setLoading] = useState(false)
-    const [error, setError] = useState<string | null>(null)
-    const [searched, setSearched] = useState(false)
-
-    const filtersRef = useRef<HTMLDivElement>(null)
-
-    useEffect(() => {
-        const checkAccess = async () => {
-            try {
-                const res = await fetch('/api/auth/me')
-                const user = res.ok ? await res.json() : null
-                if (user?.mustChangePassword) { router.push('/cambiar-contrasena'); return }
-                setSessionUser(user)
-                const screensRes = await fetch('/api/screen-permissions')
-                if (screensRes.ok) {
-                    const screens = await screensRes.json()
-                    const mine = screens['compras']
-                    if (mine && !mine.is_public) {
-                        if (!user || (user.role !== 'admin' && !mine.allowed_roles.includes(user.role))) {
-                            router.push('/login')
-                            return
-                        }
-                    }
-                }
-            } catch { }
+  const fetchData = (r: MonthRange) => {
+    setFetching(true);
+    const toastId = toast.loading("Cargando datos de compras…");
+    const params = new URLSearchParams();
+    params.set("startDate", r.startDate);
+    params.set("endDate", r.endDate);
+    fetch(`/api/compras?${params.toString()}`)
+      .then((res) => {
+        // Sin sesión (o sin permiso) requireScreenAccess('compras') devuelve 401/403
+        // con { error }, no la forma de ApiResponse — si se intenta pintar igualmente
+        // (data.resumen/data.familias undefined) la página revienta en vez de redirigir.
+        if (res.status === 401 || res.status === 403) {
+          router.push("/login");
+          return null;
         }
-        checkAccess()
-    }, [])
-
-    const logout = async () => {
-        await fetch('/api/auth/logout', { method: 'POST' })
-        setSessionUser(null)
-    }
-
-    const fetchData = useCallback(async (f: typeof filters, items: string[], marcas: string[]) => {
-        setLoading(true)
-        setError(null)
-        setSearched(true)
-        try {
-            const params = new URLSearchParams()
-            if (f.startDate) params.set('startDate', f.startDate)
-            if (f.endDate) params.set('endDate', f.endDate)
-            items.forEach(it => params.append('item', it))
-            marcas.forEach(m => params.append('marca', m))
-            const res = await fetch(`/api/compras?${params}`)
-            const data = await res.json()
-            if (!res.ok) throw new Error(data.error || `Error ${res.status}`)
-            setRows(data.rows || [])
-            setResumen(data.resumen || RESUMEN_VACIO)
-            const articleMap = new Map<string, string>()
-            ;(data.rows || []).forEach((r: Row) => { if (!articleMap.has(r.item)) articleMap.set(r.item, r.descripcion) })
-            setAvailableArticles(Array.from(articleMap, ([id, description]) => ({ id, description })))
-        } catch (err) {
-            const msg = err instanceof Error ? err.message : 'Error desconocido'
-            setError(msg)
-            toast(msg, 'error')
-        } finally {
-            setLoading(false)
+        return res.json();
+      })
+      .then((json) => {
+        if (json) {
+          setData(json);
+          toast.success("Datos actualizados", { id: toastId });
+        } else {
+          toast.dismiss(toastId);
         }
-    }, [toast])
+      })
+      .catch(() => toast.error("No se han podido cargar los datos", { id: toastId }))
+      .finally(() => setFetching(false));
+  };
 
-    // Carga inicial con el rango por defecto (año actual)
-    useEffect(() => { fetchData(filters, selectedItems, selectedMarcas) }, [])
+  // Solo al montar, con el rango por defecto — las siguientes cargas las dispara el
+  // botón "Filtrar", nunca automáticamente al cambiar el selector de meses.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => { fetchData(range); }, []);
 
-    // Opciones de Marca (IMSRP4, mismo campo/patrón que el filtro Marca de /produccion)
-    useEffect(() => {
-        fetch('/api/categories?field=srp4&screen=compras')
-            .then(res => res.ok ? res.json() : [])
-            .then(data => setAvailableMarcas(Array.isArray(data) ? data : []))
-            .catch(() => setAvailableMarcas([]))
-    }, [])
+  // Mismo patrón que el resto de paneles (ver app/caducados/page.tsx) — solo para
+  // mostrar quién ha entrado y poder cerrar sesión desde la cabecera. El control de
+  // acceso real ya lo hace requireScreenAccess('compras') en api/compras/route.ts.
+  useEffect(() => {
+    fetch("/api/auth/me")
+      .then((r) => (r.ok ? r.json() : null))
+      .then(setSessionUser)
+      .catch(() => setSessionUser(null));
+  }, []);
 
-    const handlePeriodChange = (preset: PeriodPreset) => {
-        setPeriodPreset(preset)
-        if (preset === 'personalizado') {
-            filtersRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
-            return
-        }
-        const range = presetToRange(preset)
-        if (range) {
-            setFilters(range)
-            fetchData(range, selectedItems, selectedMarcas)
-        }
+  const logout = async () => {
+    await fetch("/api/auth/logout", { method: "POST" });
+    setSessionUser(null);
+  };
+
+  const statisticsData = useMemo(() => {
+    if (!data) return undefined;
+    const m = metricDe(unit, data.resumen);
+    if (!m) return [];
+    return [
+      {
+        title: "Previsión",
+        value: formatNum(m.previsto, unit),
+        subValue: "Plan comercial aprobado",
+        badgeColor: "bg-muted",
+        badgeValue: UNIT_LABEL[unit],
+      },
+      {
+        title: "Ventas reales",
+        value: formatNum(m.real, unit),
+        subValue: "Facturado en el periodo",
+        badgeColor: m.desviacionPct != null && m.desviacionPct >= 0 ? "bg-teal-400/10" : "bg-red-500/10",
+        badgeValue: m.desviacionPct != null ? `${m.desviacionPct >= 0 ? "+" : ""}${m.desviacionPct.toFixed(1)}%` : undefined,
+      },
+      {
+        title: "Desviación",
+        value: `${m.desviacionAbs >= 0 ? "+" : ""}${formatNum(m.desviacionAbs, unit)}`,
+        subValue: "Real – previsión",
+        badgeColor: m.desviacionPct != null && m.desviacionPct >= 0 ? "bg-teal-400/10" : "bg-red-500/10",
+        badgeValue: m.desviacionPct != null ? `${m.desviacionPct >= 0 ? "+" : ""}${m.desviacionPct.toFixed(1)}%` : undefined,
+      },
+      {
+        title: "Familias fuera de umbral",
+        value: `${data.resumen.familiasFueraDeUmbral} / ${data.resumen.totalFamilias}`,
+        subValue: `Tolerancia ±${data.resumen.umbralPct}%`,
+      },
+    ];
+  }, [data, unit]);
+
+  const deviationChartData = useMemo(() => {
+    if (!data) return undefined;
+    return data.familias.map((f) => ({
+      familia: f.familia,
+      pct: metricDe(unit, f)?.desviacionPct ?? null,
+    }));
+  }, [data, unit]);
+
+  // Serie mensual del gráfico "Evolución mensual": misma fuente (mensual.*) que el
+  // resto de la pantalla, filtrada al nivel abierto (`drill`) — nunca datos aparte.
+  const monthlyChartData = useMemo(() => {
+    if (!data) return undefined;
+    const claveCanal = drill.familia && drill.canal ? `${drill.familia}::${drill.canal}` : null;
+    const porFamiliaCanal = unit === "kg" ? data.mensual.kgPorFamiliaCanal : unit === "importe" ? data.mensual.importePorFamiliaCanal : data.mensual.porFamiliaCanal;
+    const porFamilia = unit === "kg" ? data.mensual.kgPorFamilia : unit === "importe" ? data.mensual.importePorFamilia : data.mensual.porFamilia;
+    const total = unit === "kg" ? data.mensual.totalKg : unit === "importe" ? data.mensual.totalImporte : data.mensual.total;
+    let serie: MesPunto[] | null;
+    if (claveCanal) {
+      serie = porFamiliaCanal[claveCanal] ?? null;
+    } else if (drill.familia) {
+      serie = porFamilia[drill.familia] ?? null;
+    } else {
+      serie = total;
     }
+    return (serie ?? []).map((m) => ({ month: m.mes, previsto: m.previsto, real: m.real }));
+  }, [data, drill, unit]);
 
-    const applyFilters = () => {
-        setPeriodPreset('personalizado')
-        fetchData(filters, selectedItems, selectedMarcas)
-    }
+  // Exporta el desglose completo (las 3 unidades, no solo la seleccionada) a un único
+  // Excel con 3 hojas — mismo patrón que app/compras/page.tsx (v1).
+  const exportToExcel = () => {
+    if (!data) return;
+    const wb = XLSX.utils.book_new();
 
-    const clearFilters = () => {
-        const range = presetToRange('mes_actual')!
-        setPeriodPreset('mes_actual')
-        setFilters(range)
-        setSelectedItems([])
-        setSelectedMarcas([])
-        fetchData(range, [], [])
-    }
+    // --- Hoja "Resumen": una fila por familia + total ---
+    const resumenRows = data.familias.map((f) => ({
+      Familia: f.familia,
+      "Ud. Previsión": f.unidades.previsto,
+      "Ud. Real": f.unidades.real,
+      "Ud. Desv.": f.unidades.desviacionAbs,
+      "Ud. Desv. %": f.unidades.desviacionPct != null ? f.unidades.desviacionPct / 100 : "",
+      "Kg Previsión": f.kg?.previsto ?? "",
+      "Kg Real": f.kg?.real ?? "",
+      "Importe Previsión (€)": f.importe?.previsto ?? "",
+      "Importe Real (€)": f.importe?.real ?? "",
+    }));
+    resumenRows.push({
+      Familia: "TOTAL",
+      "Ud. Previsión": data.resumen.unidades.previsto,
+      "Ud. Real": data.resumen.unidades.real,
+      "Ud. Desv.": data.resumen.unidades.desviacionAbs,
+      "Ud. Desv. %": data.resumen.unidades.desviacionPct != null ? data.resumen.unidades.desviacionPct / 100 : "",
+      "Kg Previsión": data.resumen.kg?.previsto ?? "",
+      "Kg Real": data.resumen.kg?.real ?? "",
+      "Importe Previsión (€)": data.resumen.importe?.previsto ?? "",
+      "Importe Real (€)": data.resumen.importe?.real ?? "",
+    });
+    const wsResumen = XLSX.utils.json_to_sheet(resumenRows);
+    wsResumen["!cols"] = [{ wch: 28 }, { wch: 14 }, { wch: 14 }, { wch: 12 }, { wch: 12 }, { wch: 12 }, { wch: 12 }, { wch: 16 }, { wch: 16 }];
+    setColNumFmt(wsResumen, 1, resumenRows.length, XLS_FMT_UD);
+    setColNumFmt(wsResumen, 2, resumenRows.length, XLS_FMT_UD);
+    setColNumFmt(wsResumen, 3, resumenRows.length, XLS_FMT_UD);
+    setColNumFmt(wsResumen, 4, resumenRows.length, XLS_FMT_PCT);
+    setColNumFmt(wsResumen, 5, resumenRows.length, XLS_FMT_KG);
+    setColNumFmt(wsResumen, 6, resumenRows.length, XLS_FMT_KG);
+    setColNumFmt(wsResumen, 7, resumenRows.length, XLS_FMT_EUR);
+    setColNumFmt(wsResumen, 8, resumenRows.length, XLS_FMT_EUR);
+    XLSX.utils.book_append_sheet(wb, wsResumen, "Resumen");
 
-    const getPresetFilters = () => ({ startDate: filters.startDate, endDate: filters.endDate, selectedItems, selectedMarcas })
-    const applyPresetFilters = (f: Record<string, unknown>) => {
-        // Si el preset no incluye fechas (checkbox "Incluir fechas" desmarcado al guardarlo),
-        // se mantiene el rango actual en vez de vaciarlo.
-        const next = {
-            startDate: (f.startDate as string) || filters.startDate,
-            endDate: (f.endDate as string) || filters.endDate,
-        }
-        const items = (f.selectedItems as string[]) || []
-        const marcas = (f.selectedMarcas as string[]) || []
-        setPeriodPreset('personalizado')
-        setFilters(next)
-        setSelectedItems(items)
-        setSelectedMarcas(marcas)
-        fetchData(next, items, marcas)
-    }
+    // --- Hoja "Tendencia mensual": total general por mes, las 3 unidades ---
+    const kgPorMes = new Map((data.mensual.totalKg ?? []).map((m) => [m.sortKey, m]));
+    const importePorMes = new Map((data.mensual.totalImporte ?? []).map((m) => [m.sortKey, m]));
+    const tendenciaRows = data.mensual.total.map((m) => ({
+      Mes: m.mes,
+      "Ud. Previsión": m.previsto,
+      "Ud. Real": m.real,
+      "Kg Previsión": kgPorMes.get(m.sortKey)?.previsto ?? "",
+      "Kg Real": kgPorMes.get(m.sortKey)?.real ?? "",
+      "Importe Previsión (€)": importePorMes.get(m.sortKey)?.previsto ?? "",
+      "Importe Real (€)": importePorMes.get(m.sortKey)?.real ?? "",
+    }));
+    const wsTendencia = XLSX.utils.json_to_sheet(tendenciaRows);
+    wsTendencia["!cols"] = [{ wch: 10 }, { wch: 14 }, { wch: 14 }, { wch: 12 }, { wch: 12 }, { wch: 16 }, { wch: 16 }];
+    setColNumFmt(wsTendencia, 1, tendenciaRows.length, XLS_FMT_UD);
+    setColNumFmt(wsTendencia, 2, tendenciaRows.length, XLS_FMT_UD);
+    setColNumFmt(wsTendencia, 3, tendenciaRows.length, XLS_FMT_KG);
+    setColNumFmt(wsTendencia, 4, tendenciaRows.length, XLS_FMT_KG);
+    setColNumFmt(wsTendencia, 5, tendenciaRows.length, XLS_FMT_EUR);
+    setColNumFmt(wsTendencia, 6, tendenciaRows.length, XLS_FMT_EUR);
+    XLSX.utils.book_append_sheet(wb, wsTendencia, "Tendencia mensual");
 
-    // Serie de tendencia según la métrica de la pestaña activa
-    const trendData = useMemo(() => resumen.porMes.map(m => ({
-        mesLabel: m.mesLabel,
-        previsto: tab === 'cantidad' ? m.cantidadPrevisto : tab === 'kg' ? m.kgPrevisto : tab === 'importe' ? m.importePrevisto : m.precioPrevisto,
-        real: tab === 'cantidad' ? m.cantidadReal : tab === 'kg' ? m.kgReal : tab === 'importe' ? m.importeReal : m.precioReal,
-    })), [resumen, tab])
-
-    const formatMetric = tab === 'cantidad' ? fmtCantidad : tab === 'kg' ? fmtKg : tab === 'importe' ? fmtEur : fmtPrecioUnitario
-
-    // Descripción por artículo (para enriquecer la lista de "sin gramaje" con algo más que el código)
-    const articulosSinGramajeConDescripcion = useMemo(() => {
-        const descripcionPorItem = new Map<string, string>()
-        rows.forEach(r => { if (!descripcionPorItem.has(r.item)) descripcionPorItem.set(r.item, r.descripcion) })
-        return resumen.articulosSinGramaje.map(item => ({ item, descripcion: descripcionPorItem.get(item) || '' }))
-    }, [resumen, rows])
-
-    // Exporta la comparativa completa (las 4 métricas, no solo la pestaña activa) a un único Excel
-    // con 3 hojas: Resumen, Tendencia mensual y Detalle por artículo/mes.
-    const exportToExcel = () => {
-        const wb = XLSX.utils.book_new()
-
-        // --- Hoja "Resumen" ---
-        const articulosDesc = selectedItems.length > 0 ? selectedItems.join(', ') : 'Todos'
-        const marcasDesc = selectedMarcas.length > 0 ? selectedMarcas.join(', ') : 'Todas'
-        const resumenAoa: (string | number)[][] = [
-            ['Comparativa de compras — Previsión vs. Real'],
-            [`Periodo: ${filters.startDate} a ${filters.endDate}`],
-            [`Artículos: ${articulosDesc}    Marca: ${marcasDesc}`],
-            [],
-            ['Métrica', 'Previsto', 'Real', 'Desviación', 'Desviación %'],
-            ['Unidades', resumen.totalCantidadPrevisto, resumen.totalCantidadReal,
-                resumen.totalCantidadReal - resumen.totalCantidadPrevisto, (resumen.desviacionCantidadPct ?? 0) / 100],
-            ['Kg', resumen.totalKgPrevisto, resumen.totalKgReal,
-                resumen.totalKgReal - resumen.totalKgPrevisto, (resumen.desviacionKgPct ?? 0) / 100],
-            ['Importe (€)', resumen.totalImportePrevisto, resumen.totalImporteReal,
-                resumen.totalImporteReal - resumen.totalImportePrevisto, (resumen.desviacionImportePct ?? 0) / 100],
-            ['Precio medio (€/ud)', resumen.precioMedioPrevisto ?? '', resumen.precioMedioReal ?? '',
-                (resumen.precioMedioReal ?? 0) - (resumen.precioMedioPrevisto ?? 0), (resumen.desviacionPrecioPct ?? 0) / 100],
-        ]
-        if (resumen.articulosSinGramaje.length > 0) {
-            resumenAoa.push([], [`Artículos sin gramaje (Kg no calculable): ${resumen.articulosSinGramaje.join(', ')}`])
-        }
-        const wsResumen = XLSX.utils.aoa_to_sheet(resumenAoa)
-        wsResumen['!merges'] = [
-            { s: { r: 0, c: 0 }, e: { r: 0, c: 4 } },
-            { s: { r: 1, c: 0 }, e: { r: 1, c: 4 } },
-            { s: { r: 2, c: 0 }, e: { r: 2, c: 4 } },
-        ]
-        wsResumen['!cols'] = [{ wch: 22 }, { wch: 16 }, { wch: 16 }, { wch: 16 }, { wch: 14 }]
-        setColNumFmt(wsResumen, 1, 4, XLS_FMT_UD, 5)
-        setColNumFmt(wsResumen, 2, 4, XLS_FMT_UD, 5)
-        setColNumFmt(wsResumen, 3, 4, XLS_FMT_UD, 5)
-        setColNumFmt(wsResumen, 4, 4, XLS_FMT_PCT, 5)
-        XLSX.utils.book_append_sheet(wb, wsResumen, 'Resumen')
-
-        // --- Hoja "Tendencia mensual" ---
-        const tendenciaRows = resumen.porMes.map(m => ({
-            'Mes': m.mesLabel,
-            'Unidades previsto': m.cantidadPrevisto, 'Unidades real': m.cantidadReal,
-            'Kg previsto': m.kgPrevisto, 'Kg real': m.kgReal,
-            'Importe previsto (€)': m.importePrevisto, 'Importe real (€)': m.importeReal,
-            'Precio previsto (€/ud)': m.precioPrevisto ?? '', 'Precio real (€/ud)': m.precioReal ?? '',
+    // --- Hoja "Detalle": familia > canal > artículo aplanado ---
+    const detalleRows = data.familias.flatMap((f) =>
+      f.canales.flatMap((c) =>
+        c.articulos.map((a) => ({
+          Familia: f.familia,
+          Canal: c.canalLabel,
+          Artículo: a.item,
+          Descripción: a.descripcion,
+          "Ud. Previsión": a.unidades.previsto,
+          "Ud. Real": a.unidades.real,
+          "Ud. Desv. %": a.unidades.desviacionPct != null ? a.unidades.desviacionPct / 100 : "",
+          "Kg Previsión": a.kg?.previsto ?? "",
+          "Kg Real": a.kg?.real ?? "",
+          "Importe Previsión (€)": a.importe?.previsto ?? "",
+          "Importe Real (€)": a.importe?.real ?? "",
         }))
-        const wsTendencia = XLSX.utils.json_to_sheet(tendenciaRows)
-        wsTendencia['!cols'] = [{ wch: 10 }, { wch: 14 }, { wch: 14 }, { wch: 12 }, { wch: 12 }, { wch: 16 }, { wch: 16 }, { wch: 16 }, { wch: 16 }]
-        setColNumFmt(wsTendencia, 1, tendenciaRows.length, XLS_FMT_UD)
-        setColNumFmt(wsTendencia, 2, tendenciaRows.length, XLS_FMT_UD)
-        setColNumFmt(wsTendencia, 3, tendenciaRows.length, XLS_FMT_KG)
-        setColNumFmt(wsTendencia, 4, tendenciaRows.length, XLS_FMT_KG)
-        setColNumFmt(wsTendencia, 5, tendenciaRows.length, XLS_FMT_EUR)
-        setColNumFmt(wsTendencia, 6, tendenciaRows.length, XLS_FMT_EUR)
-        setColNumFmt(wsTendencia, 7, tendenciaRows.length, XLS_FMT_EUR)
-        setColNumFmt(wsTendencia, 8, tendenciaRows.length, XLS_FMT_EUR)
-        XLSX.utils.book_append_sheet(wb, wsTendencia, 'Tendencia mensual')
+      )
+    );
+    const wsDetalle = XLSX.utils.json_to_sheet(detalleRows);
+    wsDetalle["!cols"] = [
+      { wch: 22 }, { wch: 18 }, { wch: 12 }, { wch: 28 }, { wch: 12 }, { wch: 12 }, { wch: 12 }, { wch: 12 }, { wch: 12 }, { wch: 16 }, { wch: 16 },
+    ];
+    const n = detalleRows.length;
+    setColNumFmt(wsDetalle, 4, n, XLS_FMT_UD); setColNumFmt(wsDetalle, 5, n, XLS_FMT_UD);
+    setColNumFmt(wsDetalle, 6, n, XLS_FMT_PCT);
+    setColNumFmt(wsDetalle, 7, n, XLS_FMT_KG); setColNumFmt(wsDetalle, 8, n, XLS_FMT_KG);
+    setColNumFmt(wsDetalle, 9, n, XLS_FMT_EUR); setColNumFmt(wsDetalle, 10, n, XLS_FMT_EUR);
+    XLSX.utils.book_append_sheet(wb, wsDetalle, "Detalle");
 
-        // --- Hoja "Detalle" (las 4 métricas para cada artículo+mes, no solo la pestaña activa) ---
-        const detalleRows = rows.map(r => ({
-            'Mes': r.mesLabel, 'Artículo': r.item, 'Descripción': r.descripcion,
-            'Familia': r.familia, 'Marca': r.marca, 'Gramaje (g)': r.gramaje ?? '',
-            'Unid. previsto': r.previsto.cantidad ?? '', 'Unid. real': r.real.cantidad ?? '',
-            'Desv. unid.': r.desviacion.cantidad.abs ?? '', 'Desv. unid. %': r.desviacion.cantidad.pct != null ? r.desviacion.cantidad.pct / 100 : '',
-            'Kg previsto': r.previsto.kg ?? '', 'Kg real': r.real.kg ?? '',
-            'Desv. kg': r.desviacion.kg.abs ?? '', 'Desv. kg %': r.desviacion.kg.pct != null ? r.desviacion.kg.pct / 100 : '',
-            'Importe previsto (€)': r.previsto.importe ?? '', 'Importe real (€)': r.real.importe ?? '',
-            'Desv. importe (€)': r.desviacion.importe.abs ?? '', 'Desv. importe %': r.desviacion.importe.pct != null ? r.desviacion.importe.pct / 100 : '',
-            'Precio previsto (€/ud)': r.previsto.precioUnitario ?? '', 'Precio real (€/ud)': r.real.precioUnitario ?? '',
-            'Desv. precio (€/ud)': r.desviacion.precio.abs ?? '', 'Desv. precio %': r.desviacion.precio.pct != null ? r.desviacion.precio.pct / 100 : '',
-            'Avisos': r.avisos.join(', '),
-        }))
-        const wsDetalle = XLSX.utils.json_to_sheet(detalleRows)
-        wsDetalle['!cols'] = [
-            { wch: 10 }, { wch: 12 }, { wch: 28 }, { wch: 14 }, { wch: 8 }, { wch: 10 },
-            { wch: 12 }, { wch: 10 }, { wch: 10 }, { wch: 11 },
-            { wch: 11 }, { wch: 9 }, { wch: 9 }, { wch: 10 },
-            { wch: 15 }, { wch: 13 }, { wch: 13 }, { wch: 12 },
-            { wch: 15 }, { wch: 13 }, { wch: 13 }, { wch: 11 },
-            { wch: 30 },
-        ]
-        const n = detalleRows.length
-        setColNumFmt(wsDetalle, 5, n, XLS_FMT_UD)   // Gramaje
-        setColNumFmt(wsDetalle, 6, n, XLS_FMT_UD); setColNumFmt(wsDetalle, 7, n, XLS_FMT_UD); setColNumFmt(wsDetalle, 8, n, XLS_FMT_UD)
-        setColNumFmt(wsDetalle, 9, n, XLS_FMT_PCT)
-        setColNumFmt(wsDetalle, 10, n, XLS_FMT_KG); setColNumFmt(wsDetalle, 11, n, XLS_FMT_KG); setColNumFmt(wsDetalle, 12, n, XLS_FMT_KG)
-        setColNumFmt(wsDetalle, 13, n, XLS_FMT_PCT)
-        setColNumFmt(wsDetalle, 14, n, XLS_FMT_EUR); setColNumFmt(wsDetalle, 15, n, XLS_FMT_EUR); setColNumFmt(wsDetalle, 16, n, XLS_FMT_EUR)
-        setColNumFmt(wsDetalle, 17, n, XLS_FMT_PCT)
-        setColNumFmt(wsDetalle, 18, n, XLS_FMT_EUR); setColNumFmt(wsDetalle, 19, n, XLS_FMT_EUR); setColNumFmt(wsDetalle, 20, n, XLS_FMT_EUR)
-        setColNumFmt(wsDetalle, 21, n, XLS_FMT_PCT)
-        XLSX.utils.book_append_sheet(wb, wsDetalle, 'Detalle')
+    XLSX.writeFile(wb, `Compras_${range.startDate}_${range.endDate}.xlsx`);
+  };
 
-        XLSX.writeFile(wb, `Compras_${filters.startDate}_${filters.endDate}.xlsx`)
-    }
+  return (
+    <div data-nova-theme={effectiveTheme} className="min-h-screen bg-sidebar text-foreground">
+      <div className="md:m-2 md:rounded-xl md:outline md:outline-border md:shadow-sm md:overflow-hidden bg-background">
+        <Header user={sessionUser} onLogout={logout} mode={mode} onModeChange={setMode} />
+        <main className="mx-auto max-w-7xl space-y-4 p-4 md:p-6">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="flex items-center gap-2">
+              <MonthRangePicker value={range} onChange={setRange} />
+              <Button size="sm" className="gap-1.5" onClick={() => fetchData(range)} disabled={fetching}>
+                {fetching ? <Loader2 size={14} className="animate-spin" /> : <Filter size={14} />}
+                Filtrar
+              </Button>
+            </div>
+            <div className="flex items-center gap-3">
+              <Tabs value={unit} onValueChange={(v) => setUnit(v as Unit)}>
+                <TabsList>
+                  <TabsTrigger value="unidades">Unidades</TabsTrigger>
+                  <TabsTrigger value="kg">Kg</TabsTrigger>
+                  <TabsTrigger value="importe">Importe</TabsTrigger>
+                </TabsList>
+              </Tabs>
+              <Button size="sm" className="gap-1.5" onClick={exportToExcel} disabled={!data}>
+                <Download size={14} />
+                Exportar
+              </Button>
+            </div>
+          </div>
 
-    return (
-        <AppShell
-            navbar={{ currentPanel: 'compras', user: sessionUser, onLogout: logout, onPresetsClick: () => setShowPresets(s => !s) }}
-            title="Compras"
-            description="Previsión de ventas vs. venta real, por artículo y mes"
-        >
-            {showPresets && (
-                <PresetPanel
-                    screen="compras"
-                    presets={presets}
-                    onReload={reloadPresets}
-                    open={showPresets}
-                    onClose={() => setShowPresets(false)}
-                    getFilters={getPresetFilters}
-                    applyFilters={applyPresetFilters}
-                    dateFields={['startDate', 'endDate']}
-                    hint="Se guardarán los artículos y marcas seleccionados."
+          {!data ? (
+            <p className="text-muted-foreground">Cargando…</p>
+          ) : (
+            <>
+              {statisticsData && <Statistics data={statisticsData} />}
+
+              <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
+                <Charts15
+                  className="lg:col-span-2"
+                  scope={drill.canal ? `${drill.familia} · ${drill.canalLabel ?? drill.canal}` : drill.familia ?? "Todas las familias"}
+                  unit={UNIT_LABEL[unit]}
+                  data={monthlyChartData}
                 />
-            )}
+                <DeviationByFamilyChart className="lg:col-span-1" unit={UNIT_LABEL[unit]} data={deviationChartData} />
+              </div>
 
-            {/* overflow-visible: Card accent trae overflow-hidden (para la barra superior redondeada),
-                pero eso recortaba el desplegable absolute de ArticleMultiSelect. */}
-            <Card accent className="overflow-visible p-4 space-y-4" ref={filtersRef}>
-                <div className="flex flex-wrap items-end gap-3">
-                    <div className="grid gap-1.5">
-                        <label className="text-xs font-semibold text-secondary-foreground">Desde</label>
-                        <DatePicker value={filters.startDate} onChange={v => setFilters(f => ({ ...f, startDate: v }))} />
-                    </div>
-                    <div className="grid gap-1.5">
-                        <label className="text-xs font-semibold text-secondary-foreground">Hasta</label>
-                        <DatePicker value={filters.endDate} onChange={v => setFilters(f => ({ ...f, endDate: v }))} />
-                    </div>
-                    <div className="grid gap-1.5 min-w-[240px]">
-                        <label className="text-xs font-semibold text-secondary-foreground">Artículos</label>
-                        <ArticleMultiSelect articles={availableArticles} selected={selectedItems} onChange={setSelectedItems} />
-                    </div>
-                    <div className="grid gap-1.5 min-w-[170px]">
-                        <label className="text-xs font-semibold text-secondary-foreground">Marca</label>
-                        <ArticleMultiSelect articles={availableMarcas} selected={selectedMarcas} onChange={setSelectedMarcas} label="Marca" />
-                    </div>
-                    <PresetQuickSelect presets={presets} onSelect={(p) => applyPresetFilters(JSON.parse(p.filters))} />
-                    <div className="flex gap-2">
-                        <Button type="button" onClick={applyFilters}>Filtrar</Button>
-                        <Button type="button" variant="outline" onClick={clearFilters}>Limpiar</Button>
-                        <Button type="button" variant="outline" onClick={exportToExcel} disabled={rows.length === 0}
-                            className="border-green-600 text-green-700 hover:bg-green-50">
-                            <Download className="mr-2 h-4 w-4" aria-hidden="true" />
-                            Excel
-                        </Button>
-                    </div>
-                </div>
-            </Card>
+              <HierarchicalTable
+                familias={data.familias}
+                unit={unit}
+                drill={drill}
+                onDrillChange={setDrill}
+                total={{ unidades: data.resumen.unidades, kg: data.resumen.kg, importe: data.resumen.importe }}
+              />
 
-            {loading && <Spinner label="Consultando previsión y ventas..." className="py-10" />}
-
-            {!loading && searched && !error && (
-                <>
-                    <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-4">
-                        <DesviacionCard titulo="Unidades" icon={Boxes} previsto={resumen.totalCantidadPrevisto} real={resumen.totalCantidadReal}
-                            pct={resumen.desviacionCantidadPct} formatValue={fmtCantidad} periodPreset={periodPreset} onPeriodChange={handlePeriodChange} />
-                        <DesviacionCard titulo="Kg" icon={Scale} previsto={resumen.totalKgPrevisto} real={resumen.totalKgReal}
-                            pct={resumen.desviacionKgPct} formatValue={fmtKg} periodPreset={periodPreset} onPeriodChange={handlePeriodChange}
-                            warning={resumen.articulosSinGramaje.length > 0 ? {
-                                text: `${resumen.articulosSinGramaje.length} sin gramaje`,
-                                items: articulosSinGramajeConDescripcion,
-                            } : undefined} />
-                        <DesviacionCard titulo="Importe" icon={Euro} previsto={resumen.totalImportePrevisto} real={resumen.totalImporteReal}
-                            pct={resumen.desviacionImportePct} formatValue={fmtEur} periodPreset={periodPreset} onPeriodChange={handlePeriodChange} />
-                        <DesviacionCard titulo="Precio" icon={Tag} previsto={resumen.precioMedioPrevisto} real={resumen.precioMedioReal}
-                            pct={resumen.desviacionPrecioPct} formatValue={fmtPrecioUnitario} periodPreset={periodPreset} onPeriodChange={handlePeriodChange} />
-                    </div>
-
-                    <Card accent>
-                        <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                            <CardTitle className="text-sm font-bold text-secondary-foreground">Tendencia mensual</CardTitle>
-                            <PeriodPresetSelect value={periodPreset} onChange={handlePeriodChange} />
-                        </CardHeader>
-                        <CardContent>
-                            {trendData.length === 0 ? (
-                                <EmptyState icon={ShoppingCart} title="Sin datos en el rango" className="py-8" />
-                            ) : (
-                                <ResponsiveContainer width="100%" height={220}>
-                                    <LineChart data={trendData}>
-                                        <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
-                                        <XAxis dataKey="mesLabel" tick={{ fontSize: 11 }} />
-                                        <YAxis tick={{ fontSize: 11 }} />
-                                        <Tooltip />
-                                        <Line type="monotone" dataKey="previsto" name="Previsto" stroke="#6b7280" strokeWidth={2} dot={{ r: 3, fill: '#6b7280' }} />
-                                        <Line type="monotone" dataKey="real" name="Real" stroke="#D30B15" strokeWidth={2} dot={{ r: 3, fill: '#D30B15' }} />
-                                    </LineChart>
-                                </ResponsiveContainer>
-                            )}
-                        </CardContent>
-                    </Card>
-
-                    <Tabs
-                        value={tab}
-                        onValueChange={(v) => setTab(v as Metrica)}
-                        tabs={[
-                            { value: 'cantidad', label: 'Unidades' },
-                            { value: 'kg', label: 'Kg' },
-                            { value: 'importe', label: 'Importe (€)' },
-                            { value: 'precio', label: 'Precio unitario (€)' },
-                        ]}
-                    />
-
-                    <Card accent>
-                        <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                            <CardTitle className="text-sm font-bold text-secondary-foreground">Detalle por artículo</CardTitle>
-                            <PeriodPresetSelect value={periodPreset} onChange={handlePeriodChange} />
-                        </CardHeader>
-                        <CardContent>
-                            <div className="overflow-x-auto">
-                                <Table>
-                                    <TableHeader>
-                                        <TableRow className="hover:bg-transparent">
-                                            <TableHead className="font-bold text-secondary-foreground">Mes</TableHead>
-                                            <TableHead className="font-bold text-secondary-foreground">Artículo</TableHead>
-                                            <TableHead className="text-right font-bold text-secondary-foreground">Previsto</TableHead>
-                                            <TableHead className="text-right font-bold text-secondary-foreground">Real</TableHead>
-                                            <TableHead className="text-right font-bold text-secondary-foreground">Desviación</TableHead>
-                                        </TableRow>
-                                    </TableHeader>
-                                    <TableBody>
-                                        {rows.length === 0 ? (
-                                            <TableRow className="hover:bg-transparent">
-                                                <TableCell colSpan={5}>
-                                                    <EmptyState icon={ShoppingCart} title="Sin datos" description="No hay previsión ni ventas para este rango/filtro." />
-                                                </TableCell>
-                                            </TableRow>
-                                        ) : (
-                                            rows.map((r, i) => {
-                                                const d = r.desviacion[tab]
-                                                const prevVal = tab === 'cantidad' ? r.previsto.cantidad : tab === 'kg' ? r.previsto.kg : tab === 'importe' ? r.previsto.importe : r.previsto.precioUnitario
-                                                const realVal = tab === 'cantidad' ? r.real.cantidad : tab === 'kg' ? r.real.kg : tab === 'importe' ? r.real.importe : r.real.precioUnitario
-                                                return (
-                                                    <TableRow key={`${r.item}-${r.mesLabel}-${i}`}>
-                                                        <TableCell className="text-sm text-secondary-foreground">{r.mesLabel}</TableCell>
-                                                        <TableCell className="text-sm">
-                                                            <div className="flex items-center gap-2">
-                                                                <Package className="h-3.5 w-3.5 flex-shrink-0 text-muted-foreground" aria-hidden="true" />
-                                                                <div className="flex flex-col">
-                                                                    <span className="font-medium">{r.item}</span>
-                                                                    <span className="text-xs text-muted-foreground">{r.descripcion}</span>
-                                                                </div>
-                                                                {r.avisos.length > 0 && (
-                                                                    <span title={r.avisos.join(', ')}><AlertTriangle className="h-3.5 w-3.5 flex-shrink-0 text-amber-500" aria-hidden="true" /></span>
-                                                                )}
-                                                            </div>
-                                                        </TableCell>
-                                                        <TableCell className="text-right text-sm">{prevVal != null ? formatMetric(prevVal) : '—'}</TableCell>
-                                                        <TableCell className="text-right text-sm">{realVal != null ? formatMetric(realVal) : '—'}</TableCell>
-                                                        <TableCell className="text-right">
-                                                            {d.pct != null ? (
-                                                                <Badge className="ml-auto w-fit">
-                                                                    {d.pct >= 0 ? <ArrowUp className="h-3 w-3" aria-hidden="true" /> : <ArrowDown className="h-3 w-3" aria-hidden="true" />}
-                                                                    {`${d.pct >= 0 ? '+' : ''}${d.pct.toFixed(1)}%`}
-                                                                </Badge>
-                                                            ) : (
-                                                                <span className="text-xs text-muted-foreground">Sin datos</span>
-                                                            )}
-                                                        </TableCell>
-                                                    </TableRow>
-                                                )
-                                            })
-                                        )}
-                                    </TableBody>
-                                </Table>
-                            </div>
-                        </CardContent>
-                    </Card>
-                </>
-            )}
-
-            {!loading && error && (
-                <div className="flex items-center gap-3 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-red-700">
-                    <AlertTriangle className="h-5 w-5 flex-shrink-0" aria-hidden="true" />
-                    <span className="text-sm font-medium">{error}</span>
-                </div>
-            )}
-
-            {!loading && !searched && (
-                <EmptyState icon={ShoppingCart} title="Sin consulta todavía" description="Aplica un rango de fechas para ver la comparativa." className="py-16" />
-            )}
-        </AppShell>
-    )
+              {data.resumen.articulosSinGramaje.length > 0 && (
+                <p className="text-sm text-muted-foreground">
+                  {data.resumen.articulosSinGramaje.length} artículo(s) sin gramaje (F554101) — no entran en los
+                  totales de Kg: {data.resumen.articulosSinGramaje.join(", ")}
+                </p>
+              )}
+              {data.resumen.articulosSinCoste.length > 0 && (
+                <p className="text-sm text-muted-foreground">
+                  {data.resumen.articulosSinCoste.length} artículo(s) sin coste (F4105) — su importe previsto
+                  no se puede calcular (queda en 0); su importe real sí se cuenta con normalidad:{" "}
+                  {data.resumen.articulosSinCoste.join(", ")}
+                </p>
+              )}
+            </>
+          )}
+        </main>
+      </div>
+      <Toaster />
+    </div>
+  );
 }
