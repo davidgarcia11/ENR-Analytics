@@ -118,7 +118,52 @@ export function getDb(): Database.Database {
       descripcion TEXT NOT NULL DEFAULT '',
       created_at TEXT DEFAULT (datetime('now'))
     );
+
+    -- Caché local de /muestras: qué combinaciones artículo+lote ha producido JDE
+    -- (F4111.ILDCT='IC', tipo 12). El panel SIEMPRE lee de aquí, nunca de Oracle en
+    -- directo — evita repetir en cada carga una consulta que en rangos amplios es
+    -- lenta o inestable en este JDE (ver docs/muestras.md §"Caché y sincronización").
+    -- fecha_jde = F4111.ILTRDJ (fecha de negocio, puede ir "hacia atrás").
+    CREATE TABLE IF NOT EXISTS sample_candidates (
+      articulo TEXT NOT NULL,
+      lote TEXT NOT NULL,
+      descripcion TEXT NOT NULL DEFAULT '',
+      marca TEXT NOT NULL DEFAULT '',
+      fecha_jde INTEGER,
+      updated_at TEXT DEFAULT (datetime('now')),
+      PRIMARY KEY (articulo, lote)
+    );
+
+    -- Estado de la sincronización de sample_candidates. Fila única (id=1).
+    -- last_synced_jde usa F4111.ILTRDJ, no ILCRDJ — probado contra Oracle real que
+    -- filtrar por ILCRDJ es sistemáticamente lento (60-70s incluso para 1 día y 0
+    -- filas), aunque en teoría fuera la marca de agua "correcta" (nunca retrocede).
+    -- Con ILTRDJ + margen de solape en cada sync (ver lib/muestras.ts) se cubre el
+    -- caso real sin ese coste. Detalle completo en docs/muestras.md.
+    -- last_synced_jde: marca de agua del repaso INCREMENTAL (cada 30 min, ver
+    -- lib/muestras.ts). backfill_cursor_jde: progreso del backfill HISTÓRICO — campo
+    -- separado a propósito: si compartieran uno, el repaso incremental (que solo mira
+    -- los últimos días) podría avanzar la marca y hacer que un backfill interrumpido
+    -- "se salte" todo el histórico pendiente al reanudarlo.
+    CREATE TABLE IF NOT EXISTS sample_sync_state (
+      id INTEGER PRIMARY KEY CHECK (id = 1),
+      last_synced_jde INTEGER NOT NULL DEFAULT 0,
+      backfill_cursor_jde INTEGER NOT NULL DEFAULT 0,
+      backfill_status TEXT NOT NULL DEFAULT 'pending',
+      backfill_started_at TEXT,
+      backfill_completed_at TEXT,
+      backfill_progress TEXT,
+      backfill_error TEXT,
+      candidatos_sincronizados INTEGER NOT NULL DEFAULT 0
+    );
+    INSERT OR IGNORE INTO sample_sync_state (id) VALUES (1);
   `);
+
+  // Migración: añadir backfill_cursor_jde si no existe (BDs creadas antes de este campo)
+  const syncStateColumns = _db.prepare("PRAGMA table_info(sample_sync_state)").all() as { name: string }[];
+  if (!syncStateColumns.some(c => c.name === 'backfill_cursor_jde')) {
+    _db.exec("ALTER TABLE sample_sync_state ADD COLUMN backfill_cursor_jde INTEGER NOT NULL DEFAULT 0");
+  }
 
   // Migración: añadir columna must_change_password si no existe (para BDs creadas antes de esta versión)
   const columns = _db.prepare("PRAGMA table_info(users)").all() as { name: string }[];

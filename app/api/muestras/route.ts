@@ -1,25 +1,22 @@
 // Panel /muestras — control de muestras de producto terminado enviadas a
 // laboratorio/calidad (pendiente / enviado / completado). Ver ClickUp #869etmf6d.
 //
-// Origen de los lotes: producción real (F4111.ILDCT='IC') de artículos tipo "12"
-// (F4101.IMSRP1='12', Producto terminado — mismo campo/valor que usa /coste-a1, ver
-// docs/coste-a1.md §3.1) en el rango de fechas pedido, cruzados con F4108 (Lot Master)
-// por código CORTO (F4111.ILITM = F4108.IOITM) para sacar el lote — evita pasar por
-// F4101 para convertir corto↔largo. El artículo que se muestra es el código LARGO
-// (F4111.ILLITM), igual que el resto del dashboard.
-//
-// El lote real de F4108.IORLOT puede venir en formato compuesto "AAJJJ-AAAAA": solo
-// se usan los 5 primeros caracteres (petición explícita del usuario).
+// El listado NUNCA consulta Oracle en directo — lee de sample_candidates (SQLite),
+// una caché local de qué combinaciones artículo+lote ha producido JDE (F4111.ILDCT='IC',
+// F4101.IMSRP1='12' = Producto terminado), mantenida al día por lib/muestras.ts
+// (backfill histórico a mano desde /admin + repaso incremental automático cada 30 min).
+// Ver docs/muestras.md §"Caché y sincronización" para el porqué (una consulta en vivo
+// sin acotar por fecha rompe la conexión a Oracle; acotada sigue costando varios
+// segundos por el cruce a F4108, que aquí ya no hace falta).
 //
 // Estado y observación NO viven en JDE — son una capa propia en SQLite
-// (sample_tracking, clave (articulo, lote)) que se cruza aquí con el listado de JDE.
+// (sample_tracking, clave (articulo, lote)) que se cruza aquí con la caché de JDE.
 import { NextRequest, NextResponse } from 'next/server';
-import { getDbConnection } from '@/lib/db';
 import { getDayOfYear } from '@/lib/utils';
 import { requireScreenAccess } from '@/lib/permissions';
 import { getDb } from '@/lib/sqlite';
 import { verifySession } from '@/lib/auth';
-import { getArticleAllowlist } from '@/lib/muestras';
+import { getArticleAllowlist, ensureSyncScheduler } from '@/lib/muestras';
 
 const ESTADOS_VALIDOS = ['pendiente', 'enviado', 'completado'] as const;
 type Estado = typeof ESTADOS_VALIDOS[number];
@@ -32,67 +29,46 @@ function jdeBoundsFromDates(startDateStr: string, endDateStr: string) {
   return { startJde, endJde };
 }
 
-interface MuestraRow { ARTICULO: string; DESCRIPCION: string; MARCA_COD: string; LOTE: string }
+interface CandidateRow { articulo: string; lote: string; descripcion: string; marca: string; fecha_jde: number | null }
 interface SampleTrackingRow { articulo: string; lote: string; estado: Estado; observacion: string }
 
 export async function GET(req: NextRequest) {
   const denied = await requireScreenAccess('muestras');
   if (denied) return denied;
+  ensureSyncScheduler();
   const startTime = Date.now();
   const session = await verifySession().catch(() => null);
 
   const { searchParams } = new URL(req.url);
   // Sin filtro de fechas por defecto: el listado por defecto es "Pendientes" (ver
-  // muestras-table.tsx) y un pendiente no deja de serlo por ser antiguo — restringir
-  // a los últimos 30 días por defecto escondía pendientes reales. Las fechas solo se
-  // aplican si el usuario las elige explícitamente y pulsa "Filtrar".
+  // muestras-table.tsx) y un pendiente no deja de serlo por ser antiguo. Las fechas
+  // solo se aplican si el usuario las elige explícitamente y pulsa "Filtrar" — y como
+  // ahora se filtra sobre la caché local, no vuelve a tocar Oracle para eso.
   const startDateStr = searchParams.get('startDate');
   const endDateStr = searchParams.get('endDate');
   const hasDateFilter = !!(startDateStr && endDateStr);
 
-  let conn;
   try {
-    conn = await getDbConnection();
+    const db = getDb();
+    const candidateRows = db.prepare('SELECT articulo, lote, descripcion, marca, fecha_jde FROM sample_candidates').all() as CandidateRow[];
 
-    const sql = `
-      SELECT DISTINCT
-        TRIM(C.ILLITM) AS ARTICULO,
-        TRIM(M.IMDSC1) AS DESCRIPCION,
-        TRIM(M.IMSRP4) AS MARCA_COD,
-        SUBSTR(TRIM(L.IORLOT), 1, 5) AS LOTE
-      FROM F4111 C
-      INNER JOIN F4101 M ON M.IMITM = C.ILITM AND TRIM(M.IMSRP1) = '12'
-      INNER JOIN F4108 L ON L.IOITM = C.ILITM
-      WHERE C.ILDCT = 'IC'
-        ${hasDateFilter ? 'AND C.ILTRDJ BETWEEN :startJde AND :endJde' : ''}
-        AND TRIM(L.IORLOT) IS NOT NULL
-      ORDER BY ARTICULO, LOTE
-    `;
-    const binds = hasDateFilter ? jdeBoundsFromDates(startDateStr!, endDateStr!) : {};
-    const result = await conn.execute(sql, binds);
-    const rows = result.rows as MuestraRow[];
-
-    // Descripción de marca (F4101.IMSRP4) contra el catálogo UDC 41/S4 — mismo
-    // patrón que la familia en /mrp y /coste-a1.
-    const marcaCatalogResult = await conn.execute(
-      `SELECT TRIM(DRKY) AS CODE, TRIM(DRDL01) AS DESCRIPCION FROM prodctl.f0005 WHERE TRIM(DRSY) = '41' AND TRIM(DRRT) = 'S4' AND TRIM(DRKY) IS NOT NULL`
-    );
-    const marcaDescMap = new Map(
-      (marcaCatalogResult.rows as { CODE: string; DESCRIPCION: string }[]).map((r) => [r.CODE, r.DESCRIPCION])
-    );
+    let rows = candidateRows;
+    if (hasDateFilter) {
+      const { startJde, endJde } = jdeBoundsFromDates(startDateStr!, endDateStr!);
+      rows = rows.filter((r) => r.fecha_jde != null && r.fecha_jde >= startJde && r.fecha_jde <= endJde);
+    }
 
     // Capa propia de estado/observación (SQLite), cruzada por (articulo, lote).
-    const db = getDb();
     const trackingRows = db.prepare('SELECT articulo, lote, estado, observacion FROM sample_tracking').all() as SampleTrackingRow[];
     const trackingMap = new Map(trackingRows.map((t) => [`${t.articulo}::${t.lote}`, t]));
 
     let muestras = rows.map((r) => {
-      const tracking = trackingMap.get(`${r.ARTICULO}::${r.LOTE}`);
+      const tracking = trackingMap.get(`${r.articulo}::${r.lote}`);
       return {
-        articulo: r.ARTICULO,
-        descripcion: r.DESCRIPCION,
-        marca: marcaDescMap.get(r.MARCA_COD) || r.MARCA_COD || '',
-        lote: r.LOTE,
+        articulo: r.articulo,
+        descripcion: r.descripcion,
+        marca: r.marca,
+        lote: r.lote,
         estado: tracking?.estado || 'pendiente',
         observacion: tracking?.observacion || '',
       };
@@ -129,10 +105,6 @@ export async function GET(req: NextRequest) {
   } catch (error) {
     console.error('Error en /api/muestras:', error);
     return NextResponse.json({ error: 'Error al consultar las muestras' }, { status: 500 });
-  } finally {
-    if (conn) {
-      try { await conn.close(); } catch (e) { console.error('Error cerrando conexión Oracle:', e); }
-    }
   }
 }
 

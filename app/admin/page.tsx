@@ -46,12 +46,21 @@ interface Screen {
   config: ScreenConfig
 }
 
-type Tab = 'usuarios' | 'roles' | 'pantallas' | 'estados-jde'
+type Tab = 'usuarios' | 'roles' | 'pantallas' | 'estados-jde' | 'muestras'
 
 interface JdeStatus {
   code: string
   description: string
   updated_at?: string
+}
+
+interface MuestrasBackfillState {
+  status: 'pending' | 'running' | 'completed' | 'failed'
+  startedAt: string | null
+  completedAt: string | null
+  progress: string | null
+  error: string | null
+  candidatosSincronizados: number
 }
 
 // Derivado de la fuente única de paneles — nunca declarar esta lista a mano aquí.
@@ -113,6 +122,10 @@ export default function AdminPage() {
   const [jdeStatusSuccess, setJdeStatusSuccess] = useState("")
   const [jdeStatusError, setJdeStatusError] = useState("")
 
+  // ─── Muestras (backfill histórico) ────────────────────────────────────────────
+  const [muestrasBackfill, setMuestrasBackfill] = useState<MuestrasBackfillState | null>(null)
+  const [startingBackfill, setStartingBackfill] = useState(false)
+
   useEffect(() => { checkAuth() }, [])
 
   const checkAuth = async () => {
@@ -126,6 +139,7 @@ export default function AdminPage() {
       loadRoles()
       loadScreens()
       loadJdeStatuses()
+      loadMuestrasBackfill()
     } catch {
       router.push("/login")
     }
@@ -148,6 +162,36 @@ export default function AdminPage() {
       if (res.ok) setRoles(await res.json())
     } finally { setLoadingRoles(false) }
   }
+
+  const loadMuestrasBackfill = async () => {
+    try {
+      const res = await fetch("/api/admin/muestras-backfill")
+      if (res.ok) setMuestrasBackfill(await res.json())
+    } catch { /* silencioso, se reintenta con el polling */ }
+  }
+
+  const startMuestrasBackfill = async () => {
+    setStartingBackfill(true)
+    try {
+      const res = await fetch("/api/admin/muestras-backfill", { method: "POST" })
+      const data = await res.json()
+      if (!res.ok) { toast(data.error || "Error al iniciar el backfill", "error"); return }
+      if (data.started === false) toast(data.reason || "Ya hay un backfill en curso", "error")
+      loadMuestrasBackfill()
+    } catch {
+      toast("Error al iniciar el backfill", "error")
+    } finally {
+      setStartingBackfill(false)
+    }
+  }
+
+  // Mientras el backfill está en curso, refresca el estado cada pocos segundos —
+  // el trabajo real corre en el servidor (fire-and-forget), aquí solo se consulta.
+  useEffect(() => {
+    if (activeTab !== 'muestras' || muestrasBackfill?.status !== 'running') return
+    const id = setInterval(loadMuestrasBackfill, 3000)
+    return () => clearInterval(id)
+  }, [activeTab, muestrasBackfill?.status])
 
   const loadScreens = async () => {
     setLoadingScreens(true)
@@ -389,6 +433,7 @@ export default function AdminPage() {
             { value: 'roles', label: 'Roles' },
             { value: 'pantallas', label: 'Pantallas' },
             { value: 'estados-jde', label: 'Estados JDE' },
+            { value: 'muestras', label: 'Muestras' },
           ]}
         />
 
@@ -787,6 +832,72 @@ export default function AdminPage() {
                       ))}
                     </TableBody>
                   </Table>
+                )}
+              </CardContent>
+            </Card>
+          </div>
+        )}
+
+        {/* ── Pestaña Muestras (backfill histórico de la caché de /muestras) ────
+            El panel /muestras nunca consulta Oracle en directo — lee de sample_candidates
+            (SQLite), que se llena aquí una vez (por tramos) y luego se mantiene sola con
+            un repaso automático cada 30 min. Ver docs/muestras.md. */}
+        {activeTab === 'muestras' && (
+          <div className="space-y-4">
+            <Card accent>
+              <CardHeader>
+                <CardTitle className="text-sm font-bold text-secondary-foreground flex items-center gap-2">
+                  <FileText className="h-4 w-4 text-primary" aria-hidden="true" />
+                  Sincronización histórica de Muestras
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <p className="text-xs text-muted-foreground">
+                  Carga inicial, de una sola vez, del histórico de producción que alimenta el panel <strong>/muestras</strong>.
+                  Va por tramos contra Oracle (puede tardar varios minutos en total) — a partir de aquí, el propio servidor
+                  se mantiene al día solo cada 30 minutos, sin necesidad de repetir esto.
+                </p>
+
+                {!muestrasBackfill ? (
+                  <Spinner label="Cargando estado..." className="py-4" />
+                ) : (
+                  <div className="flex flex-wrap items-center gap-3">
+                    <Badge variant={
+                      muestrasBackfill.status === 'completed' ? 'success'
+                        : muestrasBackfill.status === 'failed' ? 'destructive'
+                        : muestrasBackfill.status === 'running' ? 'info' : 'outline'
+                    }>
+                      {muestrasBackfill.status === 'pending' && 'Sin ejecutar todavía'}
+                      {muestrasBackfill.status === 'running' && 'En curso…'}
+                      {muestrasBackfill.status === 'completed' && 'Completado'}
+                      {muestrasBackfill.status === 'failed' && 'Falló'}
+                    </Badge>
+
+                    {muestrasBackfill.status === 'running' && muestrasBackfill.progress && (
+                      <span className="text-sm text-secondary-foreground flex items-center gap-1.5">
+                        <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
+                        {muestrasBackfill.progress}
+                      </span>
+                    )}
+                    {muestrasBackfill.status === 'completed' && muestrasBackfill.completedAt && (
+                      <span className="text-sm text-muted-foreground">
+                        {new Date(muestrasBackfill.completedAt).toLocaleString('es-ES')} — {muestrasBackfill.candidatosSincronizados.toLocaleString('es-ES')} lotes cargados
+                      </span>
+                    )}
+                    {muestrasBackfill.status === 'failed' && muestrasBackfill.error && (
+                      <span className="text-sm text-red-600">{muestrasBackfill.error}</span>
+                    )}
+
+                    <Button
+                      size="sm"
+                      onClick={startMuestrasBackfill}
+                      disabled={startingBackfill || muestrasBackfill.status === 'running'}
+                      className="font-semibold ml-auto"
+                    >
+                      {startingBackfill ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+                      {muestrasBackfill.status === 'completed' ? 'Volver a sincronizar' : 'Sincronizar histórico'}
+                    </Button>
+                  </div>
                 )}
               </CardContent>
             </Card>
