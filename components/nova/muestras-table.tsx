@@ -169,12 +169,14 @@ export default function MuestrasTable({
                 {filtroEstado !== "todos" && <CircleIcon className={cn("size-2", ESTADO_DOT_COLOR[filtroEstado])} />}
                 <SelectValue>{(v: Estado | "todos") => (v === "todos" ? "Todos los estados" : ESTADO_LABEL[v])}</SelectValue>
               </SelectTrigger>
-              <SelectContent>
+              <SelectContent align="start" alignItemWithTrigger={false}>
                 <SelectItem value="todos">Todos los estados</SelectItem>
                 {ESTADOS.map((e) => (
                   <SelectItem key={e} value={e}>
-                    <CircleIcon className={cn("size-2", ESTADO_DOT_COLOR[e])} />
-                    {ESTADO_LABEL[e]}
+                    <div className="flex items-center gap-2">
+                      <CircleIcon className={cn("size-2", ESTADO_DOT_COLOR[e])} />
+                      <span>{ESTADO_LABEL[e]}</span>
+                    </div>
                   </SelectItem>
                 ))}
               </SelectContent>
@@ -190,11 +192,13 @@ export default function MuestrasTable({
                 <CircleIcon className={cn("size-2", ESTADO_DOT_COLOR[bulkEstado])} />
                 <SelectValue>{(v: Estado) => ESTADO_LABEL[v]}</SelectValue>
               </SelectTrigger>
-              <SelectContent>
+              <SelectContent align="start" alignItemWithTrigger={false}>
                 {ESTADOS.map((e) => (
                   <SelectItem key={e} value={e}>
-                    <CircleIcon className={cn("size-2", ESTADO_DOT_COLOR[e])} />
-                    {ESTADO_LABEL[e]}
+                    <div className="flex items-center gap-2">
+                      <CircleIcon className={cn("size-2", ESTADO_DOT_COLOR[e])} />
+                      <span>{ESTADO_LABEL[e]}</span>
+                    </div>
                   </SelectItem>
                 ))}
               </SelectContent>
@@ -258,11 +262,13 @@ export default function MuestrasTable({
                             <CircleIcon className={cn("size-2", ESTADO_DOT_COLOR[m.estado])} />
                             <SelectValue>{(v: Estado) => ESTADO_LABEL[v]}</SelectValue>
                           </SelectTrigger>
-                          <SelectContent>
+                          <SelectContent align="start" alignItemWithTrigger={false}>
                             {ESTADOS.map((e) => (
                               <SelectItem key={e} value={e}>
-                                <CircleIcon className={cn("size-2", ESTADO_DOT_COLOR[e])} />
-                                {ESTADO_LABEL[e]}
+                                <div className="flex items-center gap-2">
+                                  <CircleIcon className={cn("size-2", ESTADO_DOT_COLOR[e])} />
+                                  <span>{ESTADO_LABEL[e]}</span>
+                                </div>
                               </SelectItem>
                             ))}
                           </SelectContent>
