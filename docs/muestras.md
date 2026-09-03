@@ -269,7 +269,15 @@ artículos configurada, tarda segundos).
   explícita) — no se reutilizó `MonthRangePicker` porque es por mes completo, aquí se
   filtra por día. Por defecto últimos 30 días, con botón "Filtrar" explícito.
 - Tabla plana (`components/nova/muestras-table.tsx`, `Table` primitivo de
-  `components/nova/ui/`, no la jerárquica de `/compras`/`/mrp`):
+  `components/nova/ui/`, no la jerárquica de `/compras`/`/mrp` — estructura distinta a
+  propósito, no hace falta drill-down aquí). **Mismo tratamiento visual que
+  `hierarchical-table.tsx`** (petición explícita: que se "parezcan" aunque el contenido
+  sea distinto) — mismos componentes compartidos (`Card`/`CardHeader`/`CardContent` de
+  `components/nova/ui/`), cabecera de columnas con fondo `bg-muted/40`, alto de fila
+  `h-12`, celdas `px-4 py-0 align-middle`, borde `border-border/60`. El título ("Lotes")
+  y el contador van en `CardHeader`, igual que compras pone su título + píldoras de
+  ruta ahí; el buscador y el filtro de estado (propios de esta tabla, no de la página)
+  van en el mismo `CardHeader`, en vez de sueltos encima de la tarjeta.
   - Búsqueda y filtro de estado son **locales** (sobre los datos ya cargados). **Filtro
     de estado por defecto: "Pendiente"** (petición explícita) — el usuario cambia a
     Enviado/Completado/Todos si quiere.
