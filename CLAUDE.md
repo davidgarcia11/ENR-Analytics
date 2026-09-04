@@ -34,6 +34,7 @@ app/                          # Rutas Next.js (App Router)
   comparativa-seres/          # Panel comparativa SERES vs JDE
   consulta-stock-pda/         # Panel consulta de stock por escaneo (FEFO, Reflex/SQL Server)
   compras/                    # Panel comparativa previsión de ventas vs. venta real (director de compras) — sistema Nova
+  costes/                     # Panel de coste A1 y despiece recursivo de materiales — sistema Nova
   admin/page.tsx              # Panel de administración de usuarios
   admin/logs/page.tsx         # Logs de consultas (solo admin)
   login/page.tsx              # Login
@@ -50,8 +51,9 @@ app/                          # Rutas Next.js (App Router)
     comparativa-seres/        # GET comparativa SERES vs JDE
     consulta-stock-pda/       # GET stock FEFO por EAN escaneado (Reflex/SQL Server)
     compras/                  # GET previsión (F3460) vs venta real (F4211), coste (F4105), gramaje (F554101) — jerárquico Familia>Canal>Artículo (Nova)
+    costes/                   # GET coste A1 (F30026) + despiece recursivo (F3002) + coste real ponderado (F30026, ledger mensual) — jerárquico (Nova)
     auth/                     # login, logout, me, change-password
-    admin/                    # users CRUD, logs
+    admin/                    # users CRUD, logs, coste-a1-coledg (mapeo mes->ledger IELEDG para el coste real de /costes)
     presets/                  # CRUD presets de filtros
 lib/
   db.ts                       # Conexión Oracle (getDbConnection)
@@ -74,7 +76,7 @@ components/
   nova/                        # Sistema de diseño Nova (ShadcnSpace), AISLADO vía [data-nova-theme] — ver README propio
     ui/                        # Primitivos shadcn instalados para Nova (button, card, table, select, popover...)
     README.md                  # Mecanismo de aislamiento, configuración, decisiones — leer antes de tocar UI Nova
-  shadcn-space/blocks/          # Blocks del catálogo ShadcnSpace instalados tal cual (topbar-02, statistics-04, chart-15)
+  shadcn-space/blocks/          # Blocks del catálogo ShadcnSpace instalados tal cual (topbar-02, statistics-04, chart-15, chart-03, chart-04)
 middleware.ts                 # Protege /api/admin/* (JWT + role admin)
 docs/                         # Documentación específica por panel
   design-system.md            # SISTEMA DE DISEÑO (viejo, components/ui/) — leer antes de tocar UI de un panel que NO sea Nova
@@ -85,6 +87,7 @@ docs/                         # Documentación específica por panel
   consulta-stock-pda.md       # Panel consulta de stock por escaneo (FEFO, Reflex)
   compras.md                  # Panel comparativa previsión de ventas vs. venta real (sistema Nova) — también referencia de patrones Nova reutilizables
   compras-v1-historico.md     # Documentación de la versión anterior de /compras (código ya sustituido, conocimiento JDE aún vigente)
+  costes.md                   # Panel de coste A1 y despiece recursivo de materiales (sistema Nova)
 ```
 
 ## Convenciones de código
@@ -136,7 +139,7 @@ docs/                         # Documentación específica por panel
 - Componentes UI base en `components/ui/` (estilo shadcn simplificado): button, card (prop `accent` = borde superior rojo), input, table, popover, badge, skeleton, spinner, empty-state, dialog/ConfirmDialog, toast (`useToast`), tabs
 - Toda página de panel se monta con `<AppShell>` (`components/AppShell.tsx`) — no se repite `<main>`/`max-w-*`/`<Navbar>` sueltos
 - No hay dark mode (se quitó deliberadamente; ver `DECISIONS.md`)
-- **Excepción — sistema Nova**: `/compras` (y cualquier panel futuro que lo use explícitamente) vive en un segundo sistema de diseño, `components/nova/` + `app/nova-theme.css`, aislado por `[data-nova-theme]` — no sigue las reglas de `docs/design-system.md` (que es solo del sistema viejo). Antes de tocar su UI, lee `components/nova/README.md` y `docs/compras.md` §6
+- **Excepción — sistema Nova**: `/compras` y `/costes` (y cualquier panel futuro que lo use explícitamente) viven en un segundo sistema de diseño, `components/nova/` + `app/nova-theme.css`, aislado por `[data-nova-theme]` — no siguen las reglas de `docs/design-system.md` (que es solo del sistema viejo). Antes de tocar su UI, lee `components/nova/README.md` y `docs/compras.md` §6
 
 ### TypeScript
 - `tsconfig.json`: target ES2017, strict: true, moduleResolution: bundler
@@ -214,6 +217,7 @@ Solo cuando se pida explícitamente usar Nova (no es el sistema por defecto toda
   - Cambios en el panel comparativa SERES vs JDE → `docs/seres-jde-comparativa.md`
   - Cambios en el panel de consulta de stock por escaneo → `docs/consulta-stock-pda.md`
   - Cambios en el panel de compras o en el sistema Nova (`/compras`, `api/compras`, `components/nova/`, `components/shadcn-space/`) → `docs/compras.md` y `components/nova/README.md`
+  - Cambios en el panel de costes (`/costes`, `api/costes`, `api/admin/coste-a1-coledg`) → `docs/costes.md`
   - Nuevo panel → crear `docs/nombre-panel.md` y añadir referencia en `DOCUMENTACION.md` sección 9
 - Sugerir commit con mensaje siguiendo el estilo del proyecto (conventional + español)
 - Actualizar la tarea de ClickUp correspondiente (estado, comentario) según en qué paso del flujo Git se esté — ver `MANUAL_IA_ALIMENTAR_CLICKUP.md`

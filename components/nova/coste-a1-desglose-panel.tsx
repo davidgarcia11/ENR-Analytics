@@ -3,7 +3,7 @@
 // Panel de desglose (columna derecha de /coste-a1) — cuarto diseño de este
 // panel. Los tres anteriores (Dialog con drill-down, pila de tarjetas con
 // "peek" apilado, pestañas ANIDADAS una dentro de otra por cada nivel) se
-// documentan en docs/coste-a1.md §4.2.2. Este sustituye las pestañas anidadas
+// documentan en docs/costes.md §4.2.2. Este sustituye las pestañas anidadas
 // por UN selector PLANO ("tiene que ser laterales no?" quedó resuelto ahí,
 // pero el usuario pidió ir más lejos: "quiero que arriba... salga el selector
 // de los 11 y 10 que hay solo con el número de artículo, también salga el
@@ -355,7 +355,7 @@ export default function CosteA1DesglosePanel({ node }: { node: DespieceNode | nu
                 altura que la fila real de `tabs-08`, el `items-center`
                 interno de cada botón centra su icono respecto a las píldoras
                 de verdad, sea cual sea esa altura (bug real ya corregido en
-                una ronda anterior, ver docs/coste-a1.md §4.2.1bis). */}
+                una ronda anterior, ver docs/costes.md §4.2.1bis). */}
             <div className="relative">
               <div ref={selectorRef}>
                 <AnimatedTabs key={node.codigo} tabs={tabs} listClassName={selectorClassName} />

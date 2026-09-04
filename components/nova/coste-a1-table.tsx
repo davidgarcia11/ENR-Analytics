@@ -9,7 +9,7 @@
 //
 // El desglose completo (antes un modal aparte) vive en un panel a la derecha
 // (coste-a1-desglose-panel.tsx) — esta tabla solo selecciona QUÉ artículo final se
-// ve ahí (clic en una fila raíz), ver app/coste-a1/page.tsx.
+// ve ahí (clic en una fila raíz), ver app/costes/page.tsx.
 //
 // Filtros (buscador, familia, obsoletos) y tabla van en componentes separados —
 // `useCosteA1Filters` + `CosteA1FilterBar` + `CosteA1Table` — porque la página los
@@ -94,7 +94,7 @@ const SORT_POR_COLUMNA: Record<string, SortBy> = {
 // --- Filtros: estado + derivados, compartido entre CosteA1FilterBar y CosteA1Table ---
 
 // Mes en curso — mismo default que envía la API sin startDate/endDate
-// (app/api/coste-a1/route.ts) y que usa MonthRangePicker/api-compras.
+// (app/api/costes/route.ts) y que usa MonthRangePicker/api-compras.
 function mesActual(): MonthRange {
   const hoy = new Date();
   const fin = new Date(hoy.getFullYear(), hoy.getMonth() + 1, 0);
@@ -207,7 +207,7 @@ export type CosteA1Filters = ReturnType<typeof useCosteA1Filters>;
 // /compras — todos los controles antes de las tarjetas KPI) ---
 
 // `onFiltrarFechas`: dispara la consulta a la API con el `monthRange` actual —
-// vive en la página (app/coste-a1/page.tsx), no aquí, porque cambia lo que se
+// vive en la página (app/costes/page.tsx), no aquí, porque cambia lo que se
 // PIDE al servidor, no un filtro puramente local como búsqueda/familia.
 // `loading`: mismo dato que ya tenía la página para el botón "Recalcular" (ya
 // eliminado) — el botón "Filtrar" es ahora el único disparador de la consulta,
@@ -364,10 +364,11 @@ function buildColumns(sortBy: SortBy, sortDir: "asc" | "desc") {
         </span>
       ),
     }),
-    // Coste real: media ponderada por producción mensual de F4105.COUNCS en el
-    // rango de fechas (ver app/api/coste-a1/route.ts, apartado "Coste real").
-    // "—" cuando ningún mes del rango tiene código COLEDG configurado en
-    // /admin, o F4105 no tiene coste para ese código en esos meses.
+    // Coste real: media ponderada por producción mensual de F30026.IECSL
+    // (IECOST='A1') en el rango de fechas (ver app/api/costes/route.ts,
+    // apartado "Coste real"). "—" cuando ningún mes del rango tiene ledger
+    // configurado en /admin, o F30026 no tiene coste para ese ledger en esos
+    // meses.
     columnHelper.display({
       id: "costeReal",
       header: () => <SortableHeaderLabel label="Real" active={sortBy === "costeReal"} dir={sortDir} align="right" />,
@@ -429,7 +430,7 @@ export default function CosteA1Table({
     // suave que el borde por defecto) y sin ningún tinte de fondo propio — todo
     // igual que compras. La única diferencia estructural real es que esta tabla
     // necesita `sticky`/`backdrop-blur` en la cabecera (compras no tiene scroll
-    // interno, esta sí — pedido explícito en otra ronda, ver docs/coste-a1.md §4.1).
+    // interno, esta sí — pedido explícito en otra ronda, ver docs/costes.md §4.1).
     <Card className="p-0">
       <CardHeader className="px-6 pt-6">
         <CardTitle className="text-lg font-medium text-foreground">Coste por artículo final</CardTitle>

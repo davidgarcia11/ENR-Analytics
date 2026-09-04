@@ -94,8 +94,8 @@ export function getDb(): Database.Database {
       created_at TEXT DEFAULT (datetime('now'))
     );
 
-    -- Mapeo mes -> código COLEDG de F4105 (coste real mensual, JDE). No hay fórmula
-    -- fiable para deducir el código de cada mes (mismo problema que COLEDG_VIGENTE
+    -- Mapeo mes -> código de ledger IELEDG de F30026 (coste real mensual, JDE). No hay
+    -- fórmula fiable para deducir el código de cada mes (mismo problema que COLEDG_VIGENTE
     -- en api/compras/route.ts, pero mensual en vez de anual) — admin lo va añadiendo
     -- a mano cada mes desde /admin. Usado por /api/costes para el coste real
     -- ponderado por producción. Ver docs/costes.md.

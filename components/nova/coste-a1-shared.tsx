@@ -17,7 +17,7 @@ export function euros(v: number): string {
   return `${v.toLocaleString("es-ES", { minimumFractionDigits: 2, maximumFractionDigits: 4 })} €`;
 }
 
-// Desviación del coste real (F4105, ponderado) frente al coste teórico
+// Desviación del coste real (F30026, ponderado) frente al coste teórico
 // declarado (A1) en %. Positivo = el real sale más caro que el estándar.
 // `null` si falta cualquiera de los dos datos, o si el teórico es 0 (división
 // por cero sin sentido económico). Recibe solo los dos campos que hacen
@@ -131,8 +131,8 @@ export function Descuadre({ estado, tono = "text" }: { estado: EstadoDescuadre; 
 //
 // Agrega VARIOS finales a la vez (a diferencia de `costeReal`/`desviacionPct`,
 // que son por artículo) — mismo criterio de ponderación por producción que ya
-// usa la API para un solo artículo (ver app/api/coste-a1/route.ts, §3.4 de
-// docs/coste-a1.md), extendido para combinar varios artículos en un único
+// usa la API para un solo artículo (ver app/api/costes/route.ts, §3.4 de
+// docs/costes.md), extendido para combinar varios artículos en un único
 // punto por mes: cada final pesa según CUÁNTO se produjo de él ese mes.
 //
 // Confirmado con el usuario: el Teórico del gráfico también se pondera por
@@ -141,7 +141,7 @@ export function Descuadre({ estado, tono = "text" }: { estado: EstadoDescuadre; 
 // distintos (desviación de coste real + cambio de mix de producción) en vez
 // de aislar solo el primero. Y las dos series usan la MISMA población de
 // artículos con peso en cada mes: un final sin coste real ese mes (sin
-// `COLEDG` configurado, o sin fila en F4105) tampoco cuenta en el Teórico de
+// ledger configurado, o sin fila en F30026) tampoco cuenta en el Teórico de
 // ese mes, aunque sí tenga coste A1 — para que Real y Teórico sean
 // comparables punto a punto, no medias sobre conjuntos distintos.
 //
