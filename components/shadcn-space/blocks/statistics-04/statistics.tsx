@@ -24,6 +24,12 @@ type Statistics = {
   badgeColor?: string;
   badgeValue?: string;
   chartType?: ChartType;
+  // Color del valor según el signo del dato (ej. desviación/impacto de coste
+  // real vs. teórico) — mismos tokens que `DesviacionBadge`/`Descuadre`
+  // (coste-a1-shared.tsx): "destructive" = sobrecoste/desviación positiva,
+  // "success" = ahorro/desviación negativa. Sin `tone`, el valor se queda en
+  // el color neutro de siempre (KPIs que no son un signo, ej. Producción total).
+  tone?: "destructive" | "success";
 };
 
 type ChartType = "stackedBar" | "bar" | "area";
@@ -233,7 +239,16 @@ export default function Statistic({ data = defaultStatisticsData, columns = 4 }:
                     <p className="text-sm text-muted-foreground">
                       {item.title}
                     </p>
-                    <p className="text-2xl font-semibold text-card-foreground">
+                    <p
+                      className={cn(
+                        "text-2xl font-semibold",
+                        item.tone === "destructive"
+                          ? "text-[color:var(--color-destructive)]"
+                          : item.tone === "success"
+                            ? "text-[color:var(--color-success)]"
+                            : "text-card-foreground"
+                      )}
+                    >
                       {item.value}
                     </p>
                     <div className="flex items-center gap-1.5">

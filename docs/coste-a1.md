@@ -1,4 +1,9 @@
-# Documentación — Panel de Coste A1 (`/coste-a1`)
+# Documentación — Panel de Costes (`/coste-a1`)
+
+> Nombre mostrado en la navegación: **"Costes"** (`lib/panels.ts`) — pedido
+> explícito, antes era "Coste A1". Ruta, nombres de archivo, componentes
+> (`CosteA1Table`...) y tabla `coste_a1_coledg_mensual` no cambiaron, solo el
+> label visible.
 
 > Panel sobre el sistema **Nova** (ShadcnSpace) — para cada artículo "final" (el que
 > realmente se vende), muestra su coste A1 y el árbol completo de su lista de
@@ -34,12 +39,17 @@ planta `10999`).
 
 | Archivo | Descripción |
 |---|---|
-| `app/coste-a1/page.tsx` | Página cliente — KPIs, botón Recalcular/Exportar, layout a 2 columnas (tabla + panel de desglose), pide `startDate`/`endDate` a la API con el `monthRange` de los filtros |
+| `app/coste-a1/page.tsx` | Página cliente — KPIs, botón Exportar, layout a 2 columnas (tabla + panel de desglose), pide `startDate`/`endDate` a la API con el `monthRange` de los filtros |
 | `app/api/coste-a1/route.ts` | API Route — construye los árboles, resuelve coste/descripción/familia y la producción real por final en el rango de fechas pedido (ver §3.3) |
 | `components/nova/coste-a1-table.tsx` | Tabla jerárquica (columna izquierda, TanStack Table v8, `subRows` de profundidad variable) + buscador + filtro de familia + `MonthRangePicker`/"Filtrar" + orden por coste/nombre + selección del artículo que se ve en el panel de desglose |
 | `components/nova/month-range-picker.tsx` | Selector de rango de meses (reutilizado tal cual de `/compras`) — usado aquí para pedir la producción real |
 | `components/nova/coste-a1-desglose-panel.tsx` | Panel de desglose (columna derecha) — selector plano (`tabs-08`) con el artículo final + cada "11"/"10" del árbol completo por código, detalle (descripción/tipo/Coincide + lista de materiales) del nodo elegido (ver §4.2) |
-| `components/nova/coste-a1-shared.tsx` | Helpers compartidos entre tabla y panel: formateo (`euros`), poda 11/12 (`podar1112`), comprobación de coste (`estadoLocal`, `estadoSubarbol`, `Descuadre` — ver §4.2.4) |
+| `components/nova/coste-a1-shared.tsx` | Helpers compartidos entre tabla y panel: formateo (`euros`), poda 11/12 (`podar1112`), comprobación de coste (`estadoLocal`, `estadoSubarbol`, `Descuadre` — ver §4.2.4), desviación real vs. teórico (`desviacionPct`, píldora `DesviacionBadge` — ver §3.4, §4.1, §4.2.1), agregación mensual multi-artículo para los gráficos (`serieCosteMensual`, `serieProduccionMensual`, `formatMesCorto` — ver §3.5) |
+| `lib/sqlite.ts` | Tabla `coste_a1_coledg_mensual` (`mes` 'YYYY-MM' PK, `coledg`) — mapeo mes→código COLEDG de F4105, editable desde `/admin` (ver §3.4) |
+| `app/api/admin/coste-a1-coledg/route.ts`, `.../[mes]/route.ts` | CRUD del mapeo mes→COLEDG (protegido por `middleware.ts`, rol admin) |
+| `app/admin/page.tsx` | Pestaña "Coste real (coste-a1)" — añadir/editar/borrar el código COLEDG de cada mes |
+| `components/shadcn-space/blocks/chart-03/chart.tsx` | Bloque "Area Chart Gradient" de ShadcnSpace, editado en el sitio (mismo patrón que `chart-15` en `/compras`) — "Coste real vs. teórico por mes" (ver §3.5, §4.4) |
+| `components/shadcn-space/blocks/chart-04/chart.tsx` | Bloque "Bar Chart" de ShadcnSpace, editado en el sitio — "Producción por mes" (ver §3.5, §4.4) |
 
 ---
 
@@ -165,6 +175,189 @@ la comparación nunca cuadraría).
 la raíz de `DespieceNode` — `undefined` en el resto del árbol, no se pide
 desglose de producción por componente.
 
+### 3.4 Coste real ponderado por mes (`F4105`)
+
+Pedido explícito, tras confirmar en `/compras` de dónde sale el coste
+presupuestado: "ahora hay que sacar el coste real de todos los artículos y
+componentes... el coste real por mes son varios campos" (`COLEDG` de `F4105`:
+`'6M'`=enero 2026, `'6N'`=febrero...). A diferencia de la producción (§3.3),
+que solo se pide para los finales, el coste real se calcula para **todos los
+nodos del árbol** — `DespieceNode.costeReal: number | null`.
+
+**Un código `COLEDG` nuevo por mes, sin fórmula fiable.** Comprobado con datos
+reales (`F4105`, planta `10999`): `COUNCS` es una foto de coste por artículo,
+sin columna de mes propia — el mes lo codifica el propio valor de `COLEDG`,
+que JDE va asignando sin ningún patrón año/mes→código deducible (mismo
+problema que `COLEDG_VIGENTE` en `api/compras/route.ts`, pero mensual en vez
+de anual). En vez de hardcodear el mapeo (como hace compras), aquí vive en
+SQLite (`coste_a1_coledg_mensual`, `lib/sqlite.ts`) editable desde `/admin`
+("Coste real (coste-a1)") — cada mes que JDE genere un código nuevo, hay que
+añadirlo a mano ahí. Un mes del rango sin código configurado se ignora sin más
+(no bloquea el resto del cálculo) y se reporta en `meta.mesesSinConfigurar`
+de la respuesta de la API, para que sea visible que falta configurarlo.
+
+**Un solo mes → el valor de F4105 directamente. Varios meses → media
+ponderada por producción.** Con un único mes en el rango, no hace falta
+ponderar nada (un solo término). Con varios, cada mes pesa según cuánto se
+produjo — pero NO la producción del propio nodo (una materia prima no tiene
+órdenes de fabricación propias, F4801/F4111 no le aplican): pondera con la
+producción MENSUAL del artículo **final** (raíz) al que pertenece ese
+despiece, confirmado explícitamente con el usuario ("con la producción del
+artículo RAÍZ... cada componente hereda el peso mensual del artículo final al
+que pertenece"). Todo el árbol de un mismo final comparte los mismos pesos
+mensuales. Un mismo componente usado en dos finales distintos puede así tener
+un `costeReal` distinto en cada árbol — no es un bug, son dos ponderaciones
+distintas por diseño.
+
+Un mes sin coste en `F4105` para un código concreto se excluye del cálculo
+(ni numerador ni denominador) — no se trata como `0`. Si el peso total pesa
+`0` en todos los meses con coste disponible, se cae a una media simple entre
+esos meses en vez de devolver `null`.
+
+**Pregunta directa del usuario: "si se filtra por meses y un artículo justo
+esos meses no ha tenido producción, ¿qué coste real se pone, una media
+simple?" — sí, exactamente eso.** Este caso SÍ ocurre en la práctica, no es
+solo un "por si acaso": el filtro de obsoletos (§4.1.1) exige producción > 0
+solo para artículos MARCADOS obsoletos — un final activo con `costeA1` normal
+puede aparecer en la tabla con `produccion: 0` en el rango elegido sin
+problema (no se le exige producción para ser visible), y aun así tener coste
+real disponible en `F4105` para alguno de esos meses. En ese caso concreto,
+`sumaPesos` da `0` para TODOS los meses del rango (nada que ponderar) y
+`costeRealNodo()` cae a la media aritmética simple de los costes mensuales
+disponibles (`sumaSimple / n`) en vez de `null` — mismo criterio de "mejor un
+dato aproximado que ningún dato" que ya se aplicaba, solo que sin caveat de
+"no debería pasar": es un caso real y esperable, no un borde raro.
+
+**Verificado contra datos reales** (`agent-browser` + consultas Oracle
+directas, artículo `1210400007`, enero–mayo 2026): el `costeReal` ponderado
+que devuelve la API (`8.632498954833892`) coincide, calculado a mano a partir
+de los 5 costes mensuales de F4105 y la producción real de cada mes (sumas de
+`F55TAR12`→`F4801`→`F4111` agrupadas por mes), hasta el último decimal.
+
+**`COMCU` es `NCHAR` en Oracle — el bind va como STRING, nunca `number`.**
+Bindear `COMCU = :planta` con `planta` como número JS dispara una conversión
+implícita CHAR→NUMBER de la columna que revienta con `ORA-01722` (comprobado
+en real). El resto de columnas usadas en esta consulta (`COLITM`, `COLEDG`)
+ya se comparan con `TRIM(...)`, sin este problema.
+
+**Desviación** (`desviacionPct()`, `coste-a1-shared.tsx`): `(costeReal −
+costeA1) / costeA1 × 100`. Positivo = el coste real sale más caro que el
+estándar declarado (rojo); negativo o cero, verde. `null` si falta cualquiera
+de los dos datos o si `costeA1` es `0`.
+
+### 3.5 Gráficos mensuales — agregado de VARIOS artículos, no de uno solo
+
+Pedido explícito: dos gráficos arriba de la tabla — "Coste real vs. teórico"
+(área con gradiente) y "Producción" (barras), los dos por mes. A diferencia
+de todo lo anterior (§3.4, la tabla), que calcula el coste real de UN
+artículo, estos gráficos combinan TODOS los artículos finales que en ese
+momento pasan los filtros de la tabla (búsqueda + familia — confirmado
+explícitamente con el usuario, no el conjunto completo sin filtrar) en un
+único punto por mes.
+
+**Por eso hacen falta dos campos nuevos en `DespieceNode`, solo en la raíz**
+(mismo alcance que `produccion`): `produccionPorMes` y `costeRealPorMes`
+(`app/api/coste-a1/route.ts`) — el desglose mes a mes de cada artículo por
+separado. El único agregado que ya calculaba la API (`costeReal`, §3.4) es la
+media ponderada de TODO el rango para UN artículo; el gráfico necesita el
+detalle sin agregar de cada mes para poder combinar varios artículos él
+mismo, en el cliente (`serieCosteMensual()`/`serieProduccionMensual()`,
+`coste-a1-shared.tsx`, sobre `filtros.filtered` en `app/coste-a1/page.tsx`).
+`costeRealPorMes[i].costeReal` es el valor RAW de F4105 de ese mes (sin
+ponderar por nada) — la ponderación entre artículos la hace
+`serieCosteMensual()`.
+
+**Fórmula, para cada mes `M`, sobre los finales filtrados `i = 1..N`:**
+
+- **Producción** (barras): `Σ producción_i,M` — suma directa, es la magnitud
+  en sí, no un coste medio que ponderar.
+- **Real**: `Σ (costeReal_i,M × producción_i,M) / Σ producción_i,M` — cada
+  artículo pesa según cuánto se produjo de ÉL ese mes.
+- **Teórico**: `Σ (costeA1_i × producción_i,M) / Σ producción_i,M` — **también
+  ponderado**, aunque el coste A1 de cada artículo nunca cambia. Confirmado
+  explícitamente con el usuario ("¿aunque sea teórico lo harías ponderado
+  también?" → sí): es la misma lógica que una varianza de precio vs. volumen
+  en control de costes — si el Teórico fuera media simple y el Real
+  ponderado, la distancia entre las dos líneas mezclaría dos efectos
+  distintos (desviación real de coste + cambio de mix de producción) en vez
+  de aislar solo el primero. El resultado sí varía de un mes a otro pese a
+  que ningún artículo cambia de coste — varía el PESO de cada uno, no su
+  valor (ver también nota siguiente).
+
+**Misma población en las dos series, mes a mes**: si a un artículo le falta
+el coste real de un mes (sin `COLEDG` configurado, o sin fila en F4105 para
+ese código), NO cuenta tampoco en el Teórico de ese mes, aunque sí tenga
+coste A1 — para que Real y Teórico sean comparables punto a punto sobre
+exactamente los mismos artículos, y la diferencia entre las dos líneas sea
+solo desviación de coste, nunca un artefacto de comparar conjuntos distintos.
+`Producción` (barras) no tiene esta restricción — sí incluye a todos los
+finales filtrados con producción ese mes, tengan o no coste real.
+
+**La tabla no cambia nada de esto** — cada fila sigue siendo un único
+artículo: su Teórico es siempre el valor fijo de F30026 (nunca una media), y
+su Real (si el rango es de varios meses) ya estaba ponderado por SUS PROPIOS
+meses desde antes (§3.4) — no por el peso de otros artículos. Son dos
+cálculos que conviven sin tocarse: tabla = coste por artículo, gráfico =
+coste medio de la cartera filtrada por mes.
+
+### 3.6 KPI — renovados junto con el coste real, mismo alcance que los gráficos
+
+Los 4 KPI originales (Artículos finales / Coste A1 medio / Sin coste A1 /
+Artículos en los árboles, `Statistics` en `app/coste-a1/page.tsx`) describían
+la foto ESTÁTICA del catálogo (BOM) — tenían sentido antes de que existiera el
+coste real, pero dejaron de ser lo más útil de un vistazo una vez ese pasó a
+ser el foco del panel. Pedido explícito ("qué KPI pondrías más útiles"):
+sustituidos por otros 4, con el MISMO alcance que los gráficos de §3.5
+(`filtros.filtered` — los artículos que pasan búsqueda/familia en cada
+momento, no el dataset sin filtrar) para que KPI, gráficos y tabla cuenten
+siempre la misma historia. Una ronda posterior ("el de artículos con coste
+real y el de artículos finales no los veo muy útiles para la directora
+financiera") sustituyó el de coste real por un KPI en euros y eliminó
+directamente el de artículos finales, dejando los 3 actuales (`columns={3}`
+en `<Statistics>`, antes `columns={4}`):
+
+1. **Desviación media (real vs. teórico)** — el dato que faltaba: media
+   ponderada por producción, MISMA regla de "misma población" que
+   `serieCosteMensual()` (§3.5) pero sobre el rango completo en vez de mes a
+   mes — usa directamente `costeReal`/`costeA1`/`produccion` ya agregados de
+   cada artículo (§3.4), sin repetir el desglose mensual. Solo entran los
+   artículos con coste real Y `producción > 0` en el rango. `—` si ninguno
+   cumple las dos condiciones.
+2. **Impacto de la desviación** (€) — `sumaRealPonderado - sumaTeoricoPonderado`
+   sobre la MISMA población que el KPI 1 (coste real Y `producción > 0` en el
+   rango) — traduce el % de desviación a dinero real (sobrecoste si es
+   positivo, ahorro si es negativo). Sustituye a "Artículos con coste real"
+   (`X / Y`, contador de cobertura de dato): pedido explícito de la directora
+   financiera ("no los veo muy útiles para la directora financiera") —
+   un contador de catálogo no dice cuánto dinero está en juego, el impacto en
+   € sí.
+3. **Producción total** — suma de producción de los artículos filtrados en el
+   rango — da escala al resto (una desviación del 20% sobre 40M unidades no
+   es lo mismo que sobre 40).
+
+**Artículos finales** (`X de Y en total`, filtrados/sin filtrar) se eliminó
+por completo en la misma ronda — mismo motivo que "Artículos con coste real":
+un contador de catálogo no aporta valor financiero. `visibles.length` y
+`data.meta.totalFinales` se siguen usando en otros cálculos del componente
+(la cabecera de filtros, por ejemplo), pero ya no como KPI propio.
+
+**Color según el signo** — pedido explícito ("¿puedes poner los KPI con
+color? Rojo o verde según el dato"): el valor de **Desviación media** e
+**Impacto de la desviación** cambia de color según su signo, con los MISMOS
+tokens que ya usa `DesviacionBadge`/`Descuadre` (`coste-a1-shared.tsx`) —
+positivo = sobrecoste, rojo (`var(--color-destructive)`); negativo = ahorro,
+verde (`var(--color-success)`). Exactamente 0 o sin dato (`—`) se queda en el
+color neutro de siempre. Implementado como un nuevo prop opcional `tone?:
+"destructive" | "success"` en `Statistics` (`components/shadcn-space/blocks/
+statistics-04/statistics.tsx`) que colorea el `<p>` del valor — no se tocó el
+componente para el resto de paneles que también usan `<Statistics>` (p.ej.
+`/compras`), que simplemente no pasan `tone` y se quedan en el color neutro
+de antes. **Producción total** no lleva `tone` — no es un signo de
+desviación, no tiene sentido colorearlo.
+
+Verificado con datos reales (`agent-browser`, enero-mayo 2026): "+42,2 %" de
+desviación media, coherente con los ejemplos de §3.4/§3.5 comprobados a mano.
+
 ---
 
 ## 4. UI
@@ -184,9 +377,12 @@ la tabla cupieran sin scroll horizontal, pero eso rompía la coherencia de ancho
 el resto de la app; se volvió a `max-w-7xl` y en su lugar la tabla soporta scroll
 horizontal (ver §4.1). Los filtros (buscador, familia, obsoletos) ya no viven dentro
 de la tabla — pedido explícito ("quiero que los filtros estén arriba de los KPI") —
-sino en la misma barra que Recalcular/Exportar, **antes** de las tarjetas KPI, igual
-que `/compras` (`MonthRangePicker`/`Filtrar`/`Tabs` de unidad, todo antes de
-`Statistics`). El estado de los filtros vive en un hook compartido,
+sino en la misma barra que Exportar, **antes** de las tarjetas KPI, igual que
+`/compras` (`MonthRangePicker`/`Filtrar`/`Tabs` de unidad, todo antes de
+`Statistics`). No hay un botón "Recalcular" aparte — existió en versiones
+anteriores del panel, pero hacía exactamente lo mismo que "Filtrar" (los dos
+llamaban a `fetchData()` sin argumentos); pedido explícito, se quitó por
+redundante. El estado de los filtros vive en un hook compartido,
 `useCosteA1Filters(data)` (`coste-a1-table.tsx`), porque lo consumen dos sitios
 distintos: la barra de arriba (`CosteA1FilterBar`) y la tabla, más abajo — sin el
 hook, cada uno tendría su propia copia del estado y se desincronizarían.
@@ -201,9 +397,28 @@ estilos distintos uno al lado del otro.
 
 Selección: un clic en una fila **raíz** (artículo final) de la tabla la selecciona
 como artículo activo del panel de desglose (`selectedCodigo` en `page.tsx`, por
-defecto el primero al cargar o tras un Recalcular). El mismo clic también
+defecto el primero al cargar o tras pulsar Filtrar). El mismo clic también
 pliega/despliega sus `subRows` en la tabla — no hay un botón dedicado ni una acción
 separada.
+
+**Bug real corregido — el primero por defecto podía ser un obsoleto que la
+tabla ni mostraba.** Reportado directamente: "la primera vez que cargas en el
+componente del desglose sale uno obsoleto, que no está ni en la tabla". Causa:
+el `useEffect` que elige el artículo por defecto usaba `json.finales[0]`
+DENTRO de `fetchData` — el orden CRUDO que devuelve la API (ordenado solo por
+`costeA1` descendente), sin pasar por ninguno de los filtros que sí aplica la
+tabla (búsqueda, familia, ni la regla de §4.1.1 — un obsoleto solo se ve si
+tuvo producción en el rango). Si el artículo con el `costeA1` más alto era un
+obsoleto sin producción en el rango por defecto (mes en curso), salía
+seleccionado en el panel de desglose sin estar en ninguna fila de la tabla.
+Arreglo: la selección por defecto vive en su propio `useEffect` (`[data,
+filtros.treeData]`, en vez de dentro de `fetchData`) y elige de
+`filtros.treeData` — la misma lista, ya podada/filtrada/ordenada, que
+realmente pinta la tabla — en vez de `data.finales` sin tocar. De paso,
+corrige también el caso interactivo: si el artículo seleccionado deja de
+cumplir un filtro nuevo (búsqueda, familia) sin pasar por un `Filtrar`, el
+panel cambia a mostrar el primero que SÍ siga visible, en vez de quedarse
+enseñando algo que la tabla ya no lista.
 
 ### 4.1 Informe (tabla principal) — solo 11/12
 
@@ -229,9 +444,38 @@ Tabla jerárquica con `subRows` de **profundidad variable** (no fija como los 3
 niveles de compras o los 2 de MRP) — la API ya devuelve el árbol completo anidado,
 `coste-a1-table.tsx` solo traduce la forma (podada) a `TreeRow`. Fila completa
 clicable para desplegar (mismo patrón que `hierarchical-table.tsx` y
-`mrp-materials-table.tsx`), cabecera "Coste Teórico" ordenable siguiendo el patrón
-real de ShadcnSpace (`datatable-03`: `onClick`/`cursor-pointer` en la propia
-`<TableHead>`, sin `<button>` envolviendo el contenido).
+`mrp-materials-table.tsx`), con las 5 cabeceras ordenables (Artículo, Coste
+Teórico, Producción, Coste Real, Desviación — pedido explícito: al principio
+solo Coste Teórico lo era) siguiendo el patrón real de ShadcnSpace
+(`datatable-03`: `onClick`/`cursor-pointer` en la propia `<TableHead>`, sin
+`<button>` envolviendo el contenido).
+
+**Orden por columna — `SORT_POR_COLUMNA` (`coste-a1-table.tsx`)**: mapa
+`id de columna TanStack -> criterio de SortBy` (`concepto` → `"nombre"`, el
+resto comparte literalmente el id) — un único sitio que decide a la vez qué
+cabeceras son clicables y qué le pasan a `toggleSort()`. Dirección por
+defecto al cambiar de columna: ascendente solo para "Artículo" (alfabético),
+descendente para las 4 numéricas (mostrar primero lo más caro/producido/
+desviado tiene más sentido que empezar por lo más pequeño o por `0`).
+
+**`null`/`undefined` ("—" en la tabla) siempre al final, sea cual sea la
+dirección** (`compararConNulos()`) — Producción y Desviación pueden faltar
+(artículo sin producción en el rango, o sin coste real con el que calcular la
+desviación); dejarlos participar en la comparación normal los mezclaría con
+valores reales de forma inconsistente según asc/desc pulsado. Solo se ordena
+el nivel RAÍZ (ver nota ya existente sobre `getSortedRowModel` de TanStack,
+más abajo) — el criterio se aplica igual sea cual sea la columna.
+
+**Coste Real es la excepción — pedido explícito: "que el vacío se tome como 0
+para que salga de los primeros si ordenan de menor a mayor".** A diferencia
+de Producción/Desviación (siempre al final), un "—" en Coste Real se compara
+como si fuera `0` (`(a.costeReal ?? 0) - (b.costeReal ?? 0)`, sin pasar por
+`compararConNulos()`) — con costes siempre ≥ 0, eso lo deja entre los
+primeros al ordenar ascendente (junto a los artículos que de verdad cuestan
+`0`) y entre los últimos al ordenar descendente, en vez de fijo al final pase
+lo que pase. Verificado con datos reales (`agent-browser`, enero-mayo 2026):
+ascendente, el primer artículo con Coste Real `—` (`TOR CC HC2,6 CORE SB TP
+500g`) aparece antes que uno con coste real `0,426 €`.
 
 Columnas: **Artículo** (código+descripción, badge de tipo, badge "Obsoleto" si
 aplica) · **Coste Teórico** (el coste A1 de siempre) · **Producción** · **Coste
@@ -240,17 +484,12 @@ versiones anteriores de este documento ya no existen — la familia se puede fil
 desde el desplegable de la barra de herramientas, y el desglose se abre por
 selección de fila (§4.0), no por botón.
 
-**Producción ya es un dato real** (ver §3.3) — `DespieceNode.produccion`, solo en
-la raíz. **Coste Real y Desviación siguen siendo ficticios** — pedido explícito
-original del usuario ("rellena con datos ficticios porque no lo sé todavía"):
-Coste Real se muestra igual al Coste Teórico y Desviación en `0,0 %`, sin
-ninguna variación aleatoria que pudiera parecer un análisis real. Un aviso en
-texto gris bajo la barra de herramientas lo deja explícito (actualizado al
-quitar Producción de la lista de campos ficticios). Cuando exista una fuente
-real para estos dos campos, sustituir el cálculo inline de `coste-a1-table.tsx`
-(no hay ningún campo nuevo en `DespieceNode` para ellos, a diferencia de
-`produccion` — se computan en el render a partir de `costeA1`) y del mismo modo
-en `coste-a1-desglose-panel.tsx` (§4.2.1).
+**Producción, Coste Real y Desviación son datos reales** — Producción, ver
+§3.3; Coste Real (media ponderada de `F4105` por producción mensual) y
+Desviación (frente al Coste Teórico), ver §3.4. Los tres empezaron como
+placeholders ficticios en versiones anteriores de este panel — el aviso de
+texto gris bajo la barra de herramientas que lo advertía se quitó al dejar de
+serlo.
 
 **Con scroll interno (`ScrollArea`)**: al contrario que el resto de tablas de la app
 (compras, MRP, que dejan crecer la página entera), esta tabla va envuelta en el
@@ -273,6 +512,57 @@ tener producción en el rango) la tabla se quedaba un poco más ancha que el
 contenedor, cortando la columna Desviación por el borde derecho. Mismo ajuste
 (menos margen interno, no menos columnas) que ya se hizo en el panel de
 desglose por el mismo motivo — ver §4.2.1bis.
+
+**Columna Artículo — bug real corregido: descripción larga + "Obsoleto" no
+cabían.** Reportado explícito: "si la descripción es larga y es obsoleto, no
+encajan los datos bien, no caben". Causa: ni el texto de la descripción ni
+sus contenedores llevaban `truncate`/`min-w-0` — con `table-layout: auto`
+(por defecto, sin `<colgroup>` ni anchos fijos en esta tabla), la columna
+Artículo se dimensiona en TODAS las filas al ancho de su contenido más
+largo; una descripción larga sin tope, más la badge "Obsoleto" al lado (que
+nunca envuelve de línea, solo `gap-2` en fila), estiraban esa columna mucho
+más de lo razonable — no solo para esa fila, para la tabla entera. Arreglo:
+`min-w-0` en toda la cadena de contenedores flex de la celda (imprescindible
+— sin él, un hijo flex nunca se encoge por debajo del ancho de su contenido,
+así que `truncate` no tiene efecto ninguno) + `max-w-[13rem] truncate` en el
+propio texto de la descripción (con `title` para ver el texto completo al
+pasar el ratón) + `shrink-0` en la badge y en el icono de aviso para que no
+pierdan tamaño. Verificado con datos reales (`agent-browser`,
+`TORT CEB CARAME 500g TP ALDI`, obsoleto, enero-mayo 2026): la descripción
+se corta con "…", la badge y el icono quedan pegados justo después, y las 4
+columnas numéricas siguen cabiendo sin desbordar.
+
+**Cabeceras acortadas ("Teórico"/"Real"/"Desv."), bug real corregido en
+ventanas estrechas.** Reportado tras el arreglo anterior: "ahora se ve bien
+encajado pero abajo se ve como la barra de desplazamiento". Con el texto
+truncado ya no era la descripción la que desbordaba — era el propio TEXTO de
+las cabeceras ("Coste Teórico", "Coste Real"), más ancho que casi cualquier
+valor real de esas columnas. Comprobado con `agent-browser` variando el
+ancho de ventana (`set viewport`): a partir de ~1024px (el breakpoint `lg`
+de Tailwind, donde `app/coste-a1/page.tsx` pasa la tabla de ancho completo a
+solo 2/3 del grid) la tabla dejaba de caber por 65px — se veía la barra de
+scroll horizontal (`[data-slot="scroll-area-scrollbar"][data-orientation=
+"horizontal"]`) incluso con una sola fila de datos, un rectángulo gris vacío
+sin motivo aparente para quien no supiera que dos columnas apenas no cabían.
+Arreglo: "Coste Teórico" → "Teórico", "Coste Real" → "Real", "Desviación" →
+"Desv." — los mismos nombres cortos que ya usa el panel de desglose
+("Teórico X € · Real Y € · Desv. Z %"), más consistente entre los dos
+componentes, no solo más corto. Verificado con `agent-browser`: a 1024px de
+ancho, `diferencia` (scrollWidth − clientWidth del viewport de la tabla)
+pasa de 65px a 0, sin barra de scroll horizontal.
+
+**Columna Desviación — píldora con fondo en TODAS las filas.** Pedido
+explícito, primera ronda: "quiero que en el desglose de componentes salga el
+porcentaje con fondo, como en la foto, y en la tabla también, pero solo en
+los padre/raíz" — implementado así (píldora solo si `row.original.esRaiz`,
+texto suelto en color para las subfilas). **Revertido en la ronda
+siguiente, pedido explícito: "en la tabla de coste por artículos, ponle al
+final a todos el fondo en la desviación"** — la celda de la columna
+`desviacion` ya no distingue `esRaiz`, todas las filas (artículo final Y
+componentes al expandir el árbol) usan `DesviacionBadge` (`coste-a1-shared.tsx`
+— misma píldora que `Descuadre`, `rounded-full px-2 py-0.5`, `bg-color/10
+text-color`, rojo si `pct > 0`, verde si no). Ver también §4.2.1 para el
+mismo componente en `FilaHoja` del panel de desglose.
 
 **Diseño de la cabecera fija, calcado de `scroll-area-01`**: pedido explícito tras
 ver la primera versión ("que sea igual de diseño la tabla que has hecho ahora" —
@@ -355,13 +645,48 @@ donde nunca convive con un `ScrollArea` propio).
 descolocando el orden por cantidad descendente que ya viene calculado desde la API
 (mismo cuidado que el orden manual de `mrp-materials-table.tsx` con los meses).
 
+**Bug real corregido — un 500 de la API dejaba la página rota, no un error
+legible.** Visto en directo con un corte real de conexión a Oracle (`NJS-500:
+connection to Oracle Database was closed or broken`, `ECONNRESET`): la
+página no comprobaba `res.ok` antes de leer `json.finales.length` en
+`fetchData()` (`app/coste-a1/page.tsx`) — con una respuesta 500
+(`{ error: '...' }`, sin `finales`), eso lanzaba `Cannot read properties of
+undefined (reading 'length')` sin capturar, dejando la página en blanco.
+Arreglo: `if (!res.ok) throw new Error(...)` antes de tocar `json` — cae en
+el mismo `catch` que ya mostraba el toast de error, en vez de romper el
+render.
+
 **Vigencia del BOM/coste, sin selector de fecha**: la lista de materiales y el
 coste A1 siguen siendo una foto del estado vigente **hoy** — a diferencia de
 compras/MRP, no dependen de ningún rango. El rango de fechas que sí existe
 (`MonthRangePicker`, ver §4.1.1 y §3.3) es solo para la producción real y para
 decidir qué obsoletos se ven — no recalcula el árbol ni el coste. El único
 control para recargar TODO (árbol, costes, producción) es el botón
-"Recalcular".
+"Filtrar" (ver §4.0 — no hay un botón "Recalcular" aparte, se quitó por
+redundante).
+
+**Icono de carga del botón "Filtrar" — intento de arreglo del bamboleo,
+PROBADO Y REVERTIDO por regresión real.** Reportado: "gira pero se mueve de
+arriba abajo un poco". El icono (`Loader2` de lucide-react, `animate-spin`
+de Tailwind) es tan pequeño (14px) que Chromium en Windows con escalado de
+pantalla no siempre le asigna su propia capa de composición — sin ella, cada
+frame de la rotación se repinta en la capa normal, y el redondeo a píxel
+entero de esa transformación se percibía como un ligero bamboleo vertical.
+Primer intento: `transform-gpu` (fuerza aceleración por GPU, promociona el
+icono a su propia capa — el arreglo que la propia documentación de Tailwind
+recomienda para animaciones "choppy"), aplicado también al icono de carga
+de los toasts (`components/nova/ui/sonner.tsx`). **Regresión real,
+reportada de inmediato: "la ruleta de carga no gira ni en el botón de
+filtrar ni en el mensaje emergente"** — `transform-gpu` y `animate-spin`
+escriben la misma propiedad `transform` por vías distintas (Tailwind v4
+compone `transform-gpu` a partir de variables `--tw-rotate-*`, mientras que
+el keyframe de `animate-spin` escribe `transform: rotate(...)` literal), y
+en la práctica una pisaba a la otra dejando el icono completamente QUIETO,
+no solo con menos bamboleo. Revertido — ambos iconos vuelven a `animate-spin`
+sin `transform-gpu`. Un bamboleo mínimo es un mal menor frente a un icono
+que no gira en absoluto; verificado con `agent-browser` (matriz de
+`transform` del icono cambiando en cada muestra durante la carga, confirma
+que gira de verdad) que el giro volvió tras revertir.
 
 #### 4.1.1 Obsoletos — visibles solo si tuvieron producción en el rango elegido
 
@@ -477,6 +802,44 @@ al vivir en `coste-a1-shared.tsx`, compartida entre `DetalleNodo` y (para el
 artículo final en conjunto, no un nodo del árbol) la cabecera del propio informe.
 (`estadoSubarbol` sigue usando `CircleAlert` suelto para el icono de aviso del
 informe — ver §4.2.4 — sin pasar por `Descuadre`.)
+
+**El % de desviación de cada `FilaHoja` también es ahora una píldora
+(`DesviacionBadge`, `coste-a1-shared.tsx`)** — pedido explícito, "quiero que
+en el desglose de componentes salga el porcentaje con fondo, como en la
+foto". Mismo tratamiento visual que `Descuadre` (`rounded-full px-2 py-0.5`,
+fondo del color al 10% de opacidad) en vez del texto suelto en color de
+antes — más consistente entre las dos píldoras que conviven en la misma
+tarjeta de detalle. Se aplica a TODAS las filas de `FilaHoja` sin
+excepción — el desglose no distingue artículo final de componente, cada
+fila que se ve aquí ya es "un componente de lo que esté elegido en el
+selector", no hay una raíz que destacar aparte (a diferencia de la tabla,
+§4.1, que en su momento SÍ distinguió raíz/componente para esto — luego
+también revertido a "todos").
+
+**Ronda siguiente: código visible en TODAS partes del desglose + desviación
+también en el nodo seleccionado y en la cabecera del panel.** Pedido
+explícito: "en el desglose tiene que aparecer el número de artículo de
+todos" — antes `FilaHoja` y `DetalleNodo` solo llevaban el código en el
+`title` (tooltip al pasar el ratón), nunca visible en el texto. Arreglo:
+`FilaHoja` añade `<span className="font-mono">{node.codigo}</span>` delante
+de "Teórico X € · Real Y €"; `DetalleNodo` lo mismo delante de "Tipo X · Y".
+
+Pedido explícito, mismo turno: "cuando seleccionas un componente que sale
+como 'padre'... ahí quiero que salga también la desviación y con fondo" y
+"arriba en la descripción que sale la desviación también, que salga con el
+fondo rojo igual". Dos sitios que hasta entonces NO mostraban desviación en
+absoluto:
+
+- `DetalleNodo` (la tarjeta del nodo elegido en el selector, sea la raíz o
+  cualquier "padre" con lista de materiales propia) — solo mostraba
+  Teórico/Real; gana un tercer dato, "Desv. [`DesviacionBadge`]", con el
+  mismo `desviacionPct(node)` que ya se usa en todos lados.
+- El resumen del `CardHeader` del panel (arriba del todo, siempre el de la
+  raíz) — ya mostraba "Desv. Z %" pero como texto suelto en color, no
+  píldora; pasa a `DesviacionBadge` igual que el resto. Se saca del `<p>`
+  que trunca (Teórico/Real) a un `<div>` hermano `shrink-0`, para que la
+  píldora nunca quede recortada si el nombre del artículo empuja el
+  contenido.
 
 El `CardHeader` del panel ya NO repite el estado del artículo final (antes vivía
 ahí, junto a la descripción) — esa información ahora la da directamente la
@@ -690,6 +1053,59 @@ para ser único SIEMPRE aunque el código se repita; `value` usa `key`, `label`
 sigue siendo solo `node.codigo` (los duplicados en pantalla son correctos —
 es genuinamente el mismo artículo usado dos veces).
 
+**Bug real corregido, mucho más tarde — las flechas también estrechaban el
+detalle de abajo, no solo la fila de píldoras.** Reportado con una captura:
+"el componente del desglose tiene mucho margen interior... es por el
+selector, mira cómo están las flechas". Causa: las dos flechas eran hermanas
+de flex de TODO el bloque `<AnimatedTabs>` (`<div className="flex items-start
+gap-1">{flecha}<div className="flex-1"><AnimatedTabs .../></div>{flecha}</div>`)
+— pero `AnimatedTabs` renderiza junto, sin forma de separarlos, tanto la fila
+de píldoras COMO el contenido de la pestaña activa (`DetalleNodo`, con toda
+la lista de materiales). Al ser las flechas hermanas de ese bloque entero, no
+solo de la fila de arriba, el hueco que reservaban (`w-7` × 2 + `gap-1`, unos
+64px) se lo quitaban también al detalle — que quedaba más estrecho que el
+resto del panel sin motivo real, ya que las flechas solo hacen falta para
+desplazar la fila de códigos, no para nada de lo que hay debajo.
+
+Arreglo: las flechas pasan de flex-siblings a `position: absolute` (`top-0`,
+`left-0`/`right-0`) sobre un contenedor `relative` que ya no las necesita
+como hijos de verdad — `selectorRef` (el `div` que engloba `AnimatedTabs`)
+pasa a ocupar TODO el ancho disponible, detalle incluido. Como las flechas
+ya no ceden espacio de flex, hace falta reservárselo de otra forma para que
+no tapen la primera/última píldora: `pr-9 pl-9` añadido al `listClassName`
+de la propia `TabsList` (vía `selectorClassName`) — el hueco para las
+flechas queda confinado a la fila de píldoras, sin filtrar al contenido de
+debajo. El resto del mecanismo (`altoSelector` medido, `invisible` en vez de
+desmontar, `scrollLeft` forzado a 0 al montar) no cambia — ver puntos 3-6 más
+arriba, siguen aplicando igual sobre el mismo `[data-slot="tabs-list"]`,
+ahora solo que sin arrastrar el ancho del detalle con ellos.
+
+**Ronda siguiente — flechas JUNTAS a la derecha, selector a ancho siempre
+constante.** Pedido explícito con captura ("las flechas están las dos a un
+lado, no sé si es mejor así, o como lo tenemos ahora" → sí, mejor así) más
+uno nuevo detectado de paso: "quiero que el selector tenga siempre el mismo
+tamaño tenga uno o más artículos". Causa del segundo: `tabs-08` trae
+`sm:w-fit` en su `TabsList` — sin overflow (pocos códigos) la lista se encoge
+al contenido, así que la caja del selector medía distinto según cuántos
+códigos hubiera (estrecha con 2, ancho completo con 7 que sí necesitan
+scroll). Arreglo conjunto: `pl-9 pr-9` (un lado cada flecha) pasa a `pr-16`
+(las dos JUNTAS, solo a la derecha — `<div className="absolute right-0 top-0
+z-10 flex gap-1">` envolviendo los dos `<button>`, en vez de uno a cada
+extremo del `relative`); `selectorClassName` gana `sm:w-full` (mismo grupo de
+conflicto de Tailwind que `sm:w-fit`, con `cn()` gana el que se pasa después
+— `sm:w-fit` del componente instalado pierde) para forzar SIEMPRE el ancho
+completo del panel, haya overflow o no. Verificado con `agent-browser`:
+"CEBOLLITAS CONFITADAS 40UD" (2 códigos, sin flechas visibles) y "SURTIDO
+TORTILLAS" (7 códigos, flechas visibles) miden el selector exactamente igual
+de ancho.
+
+**Actualización posterior**: "Teórico X € · Real Y € · Desv. Z %" de la
+cabecera del panel (y de `DetalleNodo`/`FilaHoja` para cada nodo del
+selector) dejó de ser el maquillaje ficticio descrito en la "Cuarta vuelta"
+— Real y Desv. son ahora el coste real ponderado de `F4105` y su desviación
+frente al Teórico, ver §3.4. El layout, colores y criterio de `Descuadre` no
+cambiaron.
+
 #### 4.2.2 Historial — pila de tarjetas con "peek" apilado (abandonado, no por bug)
 
 La versión anterior (pila de tarjetas recursiva, todas al mismo ancho, con un
@@ -787,6 +1203,97 @@ El coste (`IECSL`/10000) puede tener hasta 4 decimales con significado real.
 Redondear a 2 (como el resto de importes en € de la app) perdía precisión de verdad
 (ej. `0,6454 €` se veía como `0,65 €`) — aquí `euros()` usa
 `maximumFractionDigits: 4` en vez de 2.
+
+### 4.4 Gráficos mensuales — bloques ShadcnSpace `chart-03`/`chart-04`, editados en el sitio
+
+Pedido explícito con capturas y código de referencia: el gráfico de área con
+gradiente ("Chart 03 - Area Chart Gradient - Yearly Sales Comparison") y el de
+barras ("Chart 04 - Bar Chart - Weekly Sales") del catálogo de ShadcnSpace,
+instalados con el comando oficial (`bunx --bun shadcn@latest add
+@shadcn-space/chart-03`/`chart-04` — estilo `base-nova` del proyecto, sin
+prefijo `/radix/`, comprobado en `components.json`) y editados DIRECTAMENTE en
+el archivo instalado (`components/shadcn-space/blocks/chart-0{3,4}/chart.tsx`)
+en vez de crear un wrapper aparte en `components/nova/` — mismo patrón que
+`chart-15`/`charts-15.tsx` en `/compras` (ver `components/nova/README.md`).
+
+- **Mismo reparto 2/3-1/3** que la fila de tabla+desglose de abajo (`app/coste-a1/page.tsx`):
+  el gráfico de área (`Coste real vs. teórico`) a la izquierda en `lg:col-span-2`,
+  el de barras (`Producción`) a la derecha en `lg:col-span-1`.
+- **Sin las tarjetas KPI del bloque original** ("Sales this year/last year" en
+  chart-03, "$96,850 -5% Last 7 days" + desplegable "Weekly/Monthly/Yearly" en
+  chart-04) — mismo criterio que ya se aplicó a `chart-15`: no hay un periodo
+  anterior con el que comparar de forma automática, y un segundo selector de
+  rango sería redundante con el `MonthRangePicker` del propio panel. En su
+  lugar, leyenda de puntos en la cabecera (mismo patrón que `Charts15`).
+  Tampoco se resalta ninguna barra en concreto (el original de `chart-04`
+  marcaba un día fijo por índice) — aquí no hay un mes "de referencia" obvio.
+- **Barras: cápsula completa, no rectángulo redondeado, y centradas de
+  verdad — bug real corregido**. Primera versión: `radius={[8,8,8,8]}` (poco
+  redondeado) y el `<div className="-me-3 rtl:...">` del bloque original
+  envolviendo el `<ResponsiveContainer>` directamente, sin `CardContent`. Ese
+  margen negativo compensaba el `p-6` que el DEMO del catálogo aplica al
+  `<Card>` entero desde fuera (`className="max-w-sm ... p-6 ..."` en su propio
+  `page.tsx`) — como aquí el `<Card>` no lleva ese padding exterior, el mismo
+  hack solo desequilibraba las barras hacia la derecha (visto en captura,
+  pedido explícito: "más centrado"). Arreglo: `radius={[40,40,40,40]}` en una
+  barra de 32px (`barSize={32}`) — con el radio mayor que la mitad del ancho,
+  redondea las 4 esquinas hasta formar una cápsula completa, igual que la
+  captura de referencia — y `<CardContent>` (mismo padding horizontal que ya
+  usa el resto del panel) en vez del `div` con margen negativo.
+- **Eje X**: `formatMesCorto()` (`coste-a1-shared.tsx`) — `'YYYY-MM'` a "ene
+  26" (año a 2 dígitos, para que quepan hasta 12 puntos sin apretar).
+- **Eje Y del gráfico de área — bug real corregido**: el `margin.left: -20`
+  del bloque original (pensado para ticks cortos tipo "8k", 2-3 caracteres) se
+  heredó sin más al principio — con un tick real como "23,00 €" (7-8
+  caracteres) el texto se salía del todo y se veía cortado por el borde de la
+  tarjeta (comprobado con `agent-browser`). Corregido con `margin.left: 0` +
+  `width={48}` en el `<YAxis>`. De paso, un segundo bug al mismo tiempo:
+  formatear el tick sin decimales (`Math.round`) hacía que dos ticks
+  distintos redondearan al mismo entero en el rango real típico (1-2 €) y se
+  veían duplicados ("2€" dos veces seguidas) — con 1 decimal
+  (`toLocaleString('es-ES', { maximumFractionDigits: 1 })`) cada tick es
+  distinguible.
+- **Rejilla (`CartesianGrid`) — bug real corregido, tema oscuro**: el bloque
+  original usa `stroke="var(--color-border)"` — token que en este proyecto
+  solo existe en `app/globals.css` (el sistema de diseño VIEJO,
+  `--color-border: var(--border)`), **fuera** de `[data-nova-theme]`. En modo
+  oscuro de Nova no seguía al `--border` real de `app/nova-theme.css` (casi
+  blanco a propósito, `oklch(1 0 0 / 10%)`), así que la rejilla se veía con un
+  gris claro FIJO encima del fondo oscuro de la tarjeta — "las líneas de
+  puntos se notan mucho... se ve mucho el blanco", pedido explícito.
+  Corregido a `stroke="var(--border)"` (mismo token que ya usa `chart-15` en
+  compras, sí sensible al tema) + `strokeWidth` por defecto (1, no 2) +
+  `strokeOpacity={0.5}` — mismo criterio que `chart-15` — para que la rejilla
+  quede de fondo en los dos temas, sin competir visualmente con las líneas de
+  coste. Verificado con `agent-browser` en claro y oscuro.
+- **Tooltip**: tabla → `ChartTooltipContent` de Nova (`components/nova/ui/chart.tsx`)
+  con `formatter` propio (usa `euros()`, hasta 4 decimales reales — igual que
+  el resto del panel). Producción → tooltip a medida (`CustomTooltip` dentro de
+  `chart-04/chart.tsx`, calcado del original) con `toLocaleString('es-ES')`.
+- **Verificado con datos reales** (`agent-browser`, enero-mayo 2026, filtro
+  "Todas las familias" y luego "Tortilla"): el tooltip de un punto del área
+  coincide con los valores calculados a mano en §3.5, y los dos gráficos
+  reaccionan al cambiar el filtro de familia de la tabla (confirmando que
+  usan `filtros.filtered`, no el dataset sin filtrar).
+- **Las dos tarjetas, exactamente igual de altas — bug real corregido.**
+  Pedido explícito: "quiero que el gráfico de producciones y el gráfico de
+  desviación de coste sean igual de altos". Las dos ya compartían el mismo
+  alto de CHART (253px), pero medían distinto en total (349px vs. 353px,
+  comprobado con `agent-browser`) porque sus `CardHeader` usaban mecanismos
+  de layout distintos: `chart-04` se apoya en el `grid` por defecto de
+  `CardHeader` (`components/nova/ui/card.tsx`, `CardTitle` + `<p>` como hijos
+  directos); `chart-03` envolvía título+subtítulo en un `<div>` propio y
+  ponía la leyenda al lado con `flex justify-between` (override completo del
+  `grid` del componente) para tener la leyenda de puntos ancladas arriba a la
+  derecha — un mecanismo de layout diferente para el mismo tipo de contenido
+  cambia cómo el navegador calcula la altura, aunque el texto sea del mismo
+  tamaño. Arreglo: `chart-03` pasa a usar `CardAction` (el slot que ya trae
+  `card.tsx` para "acción arriba a la derecha", activa
+  `has-data-[slot=card-action]:grid-cols-[1fr_auto]` en el propio
+  `CardHeader`) para la leyenda, con `CardTitle`/`<p>` como hijos directos —
+  mismo `grid` que `chart-04`, ya sin necesidad de override. Verificado con
+  `agent-browser`: las dos tarjetas miden 353px de alto, cabecera 52px cada
+  una, exactas.
 
 ---
 

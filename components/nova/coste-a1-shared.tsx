@@ -17,6 +17,43 @@ export function euros(v: number): string {
   return `${v.toLocaleString("es-ES", { minimumFractionDigits: 2, maximumFractionDigits: 4 })} €`;
 }
 
+// Desviación del coste real (F4105, ponderado) frente al coste teórico
+// declarado (A1) en %. Positivo = el real sale más caro que el estándar.
+// `null` si falta cualquiera de los dos datos, o si el teórico es 0 (división
+// por cero sin sentido económico). Recibe solo los dos campos que hacen
+// falta (no el DespieceNode completo) para poder reutilizarse también desde
+// TreeRow (coste-a1-table.tsx), que no lleva todos los campos del nodo.
+export function desviacionPct(n: { costeA1: number | null; costeReal: number | null }): number | null {
+  if (n.costeA1 == null || n.costeReal == null || n.costeA1 === 0) return null;
+  return ((n.costeReal - n.costeA1) / n.costeA1) * 100;
+}
+
+// Píldora de color para la desviación — calcada de `Descuadre` (mismos
+// tokens `bg-color/10 text-color`, mismo `rounded-full px-2 py-0.5`) en vez
+// de texto suelto en color — pedido explícito: "quiero que en el desglose de
+// componentes salga el porcentaje con fondo, como en la foto". Positivo (el
+// real sale más caro que el teórico) = rojo, igual criterio de color que ya
+// usaba el texto suelto.
+export function DesviacionBadge({ pct, tono = "text" }: { pct: number; tono?: "text" | "xs" }) {
+  const base = "rounded-full px-2 py-0.5 font-semibold tabular-nums";
+  const cls = tono === "xs" ? "text-[11px]" : "text-xs";
+  const positivo = pct > 0;
+  return (
+    <span
+      className={cn(
+        base,
+        cls,
+        positivo
+          ? "bg-[color:var(--color-destructive)]/10 text-[color:var(--color-destructive)]"
+          : "bg-[color:var(--color-success)]/10 text-[color:var(--color-success)]"
+      )}
+    >
+      {positivo ? "+" : ""}
+      {pct.toLocaleString("es-ES", { minimumFractionDigits: 1, maximumFractionDigits: 1 })} %
+    </span>
+  );
+}
+
 // El informe (tabla principal) y el desglose solo deben enseñar niveles "11"/"12" —
 // nada de envases/etiquetas/materia prima (10, 13, 14...). Poda recursiva por TIPO,
 // no por profundidad: una cadena 12 → 11 → 11 sigue viéndose entera, pero en cuanto
@@ -88,4 +125,81 @@ export function Descuadre({ estado, tono = "text" }: { estado: EstadoDescuadre; 
       NO OK
     </span>
   );
+}
+
+// --- Gráfico "Coste real vs. teórico por mes" (coste-a1-monthly-charts.tsx) ---
+//
+// Agrega VARIOS finales a la vez (a diferencia de `costeReal`/`desviacionPct`,
+// que son por artículo) — mismo criterio de ponderación por producción que ya
+// usa la API para un solo artículo (ver app/api/coste-a1/route.ts, §3.4 de
+// docs/coste-a1.md), extendido para combinar varios artículos en un único
+// punto por mes: cada final pesa según CUÁNTO se produjo de él ese mes.
+//
+// Confirmado con el usuario: el Teórico del gráfico también se pondera por
+// producción (aunque el coste A1 de cada artículo, individualmente, nunca
+// cambia) — si no, la distancia entre las dos líneas mezclaría dos efectos
+// distintos (desviación de coste real + cambio de mix de producción) en vez
+// de aislar solo el primero. Y las dos series usan la MISMA población de
+// artículos con peso en cada mes: un final sin coste real ese mes (sin
+// `COLEDG` configurado, o sin fila en F4105) tampoco cuenta en el Teórico de
+// ese mes, aunque sí tenga coste A1 — para que Real y Teórico sean
+// comparables punto a punto, no medias sobre conjuntos distintos.
+//
+// La tabla (por artículo) NO usa nada de esto — su Teórico sigue siendo
+// siempre el valor fijo de F30026, sin ponderar ni agregar con nada.
+
+const MES_LABEL_CORTO = ["ene", "feb", "mar", "abr", "may", "jun", "jul", "ago", "sep", "oct", "nov", "dic"];
+
+// 'YYYY-MM' -> "ene 26" (año a 2 dígitos: el eje X necesita quedar compacto
+// con hasta 12 puntos).
+export function formatMesCorto(mes: string): string {
+  const [anio, m] = mes.split("-").map(Number);
+  return `${MES_LABEL_CORTO[m - 1]} ${String(anio).slice(2)}`;
+}
+
+export interface CosteMensualPunto { mes: string; teorico: number | null; real: number | null }
+
+export function serieCosteMensual(finales: DespieceNode[], mesesRango: string[]): CosteMensualPunto[] {
+  // Un Map por final (mes -> producción / mes -> coste real) para no repetir
+  // `.find()` dentro del bucle de meses — con hasta ~250 finales × 12 meses no
+  // sería un problema de rendimiento real, pero así queda igual de claro y sin
+  // el coste extra.
+  const porFinal = finales.map((f) => ({
+    costeA1: f.costeA1,
+    produccionPorMes: new Map((f.produccionPorMes ?? []).map((p) => [p.mes, p.produccion])),
+    costeRealPorMes: new Map((f.costeRealPorMes ?? []).map((p) => [p.mes, p.costeReal])),
+  }));
+  return mesesRango.map((mes) => {
+    let sumaTeorico = 0;
+    let sumaReal = 0;
+    let sumaPesos = 0;
+    for (const f of porFinal) {
+      const peso = f.produccionPorMes.get(mes) ?? 0;
+      if (peso <= 0) continue;
+      const costeReal = f.costeRealPorMes.get(mes) ?? null;
+      // Misma población en las dos series: sin coste real ese mes, este final
+      // tampoco pesa en el Teórico de ese mes (aunque tenga costeA1).
+      if (costeReal == null || f.costeA1 == null) continue;
+      sumaPesos += peso;
+      sumaTeorico += f.costeA1 * peso;
+      sumaReal += costeReal * peso;
+    }
+    return {
+      mes,
+      teorico: sumaPesos > 0 ? sumaTeorico / sumaPesos : null,
+      real: sumaPesos > 0 ? sumaReal / sumaPesos : null,
+    };
+  });
+}
+
+export interface ProduccionMensualPunto { mes: string; produccion: number }
+
+// Suma directa (sin ponderar — es la magnitud en sí, no un coste medio) de la
+// producción de TODOS los finales pasados, mes a mes.
+export function serieProduccionMensual(finales: DespieceNode[], mesesRango: string[]): ProduccionMensualPunto[] {
+  const porFinal = finales.map((f) => new Map((f.produccionPorMes ?? []).map((p) => [p.mes, p.produccion])));
+  return mesesRango.map((mes) => ({
+    mes,
+    produccion: porFinal.reduce((s, m) => s + (m.get(mes) ?? 0), 0),
+  }));
 }

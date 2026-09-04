@@ -7,7 +7,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { Download, Loader2, RefreshCw } from "lucide-react";
+import { Download } from "lucide-react";
 import * as XLSX from "xlsx";
 import Header from "@/components/shadcn-space/blocks/topbar-02/header";
 import { type ThemeMode } from "@/components/nova/mode-toggle";
@@ -15,6 +15,9 @@ import { NovaPortalProvider } from "@/components/nova/portal-container";
 import Statistics from "@/components/shadcn-space/blocks/statistics-04/statistics";
 import CosteA1Table, { CosteA1FilterBar, useCosteA1Filters, type DespieceNode } from "@/components/nova/coste-a1-table";
 import CosteA1DesglosePanel from "@/components/nova/coste-a1-desglose-panel";
+import CosteMensualChart from "@/components/shadcn-space/blocks/chart-03/chart";
+import ProduccionMensualChart from "@/components/shadcn-space/blocks/chart-04/chart";
+import { formatMesCorto, serieCosteMensual, serieProduccionMensual } from "@/components/nova/coste-a1-shared";
 import { Button } from "@/components/nova/ui/button";
 import { Toaster } from "@/components/nova/ui/sonner";
 
@@ -22,7 +25,7 @@ interface SessionUser { id: number; username: string; role: string; name: string
 
 interface CosteA1Response {
   finales: DespieceNode[];
-  meta: { totalFinales: number; articulosDistintos: number };
+  meta: { totalFinales: number; articulosDistintos: number; mesesSinConfigurar: string[]; mesesRango: string[] };
 }
 
 // Recorre el árbol para aplanarlo a filas (exportación Excel) y para las medias de
@@ -71,9 +74,9 @@ export default function CosteA1Page() {
   const [selectedCodigo, setSelectedCodigo] = useState<string | null>(null);
 
   // Estado de filtros de la tabla (buscador, familia, rango de meses) — se
-  // muestra arriba de los KPI (junto a Recalcular/Exportar, igual que /compras)
-  // pero lo consume la tabla, más abajo; de ahí el hook compartido en vez de
-  // tenerlo dentro de la tabla. Declarado ANTES de `fetchData` — necesita leer
+  // muestra arriba de los KPI (junto a Exportar, igual que /compras) pero lo
+  // consume la tabla, más abajo; de ahí el hook compartido en vez de tenerlo
+  // dentro de la tabla. Declarado ANTES de `fetchData` — necesita leer
   // `filtros.monthRange` para pedir la producción del rango elegido.
   const filtros = useCosteA1Filters(data?.finales ?? []);
 
@@ -90,13 +93,13 @@ export default function CosteA1Page() {
         router.push("/login");
         return;
       }
+      // Bug real visto en directo: un corte de conexión con Oracle (NJS-500,
+      // ECONNRESET) hace que la API devuelva 500 con `{ error: '...' }`, sin
+      // `finales` — sin este chequeo, `json.finales.length` de más abajo
+      // petaba la página entera en vez de mostrar el error.
+      if (!res.ok) throw new Error(`API devolvió ${res.status}`);
       const json: CosteA1Response = await res.json();
       setData(json);
-      // Selecciona el primer artículo final por defecto (o lo mantiene si sigue
-      // presente tras un Recalcular).
-      setSelectedCodigo((actual) =>
-        actual && json.finales.some((n) => n.codigo === actual) ? actual : json.finales[0]?.codigo ?? null
-      );
       toast.success(`${json.finales.length} artículos finales calculados`, { id });
     } catch (err) {
       console.error("Error cargando coste A1:", err);
@@ -140,16 +143,101 @@ export default function CosteA1Page() {
     [data, selectedCodigo]
   );
 
+  // Selecciona por defecto el primer artículo VISIBLE en la tabla — bug real
+  // corregido: antes se elegía `json.finales[0]` dentro de `fetchData` (orden
+  // crudo de la API, sin pasar por búsqueda/familia ni por la regla de
+  // "obsoleto solo se ve si tuvo producción en el rango"), así que en la
+  // primera carga podía aparecer seleccionado en el panel de desglose un
+  // artículo obsoleto que la tabla ni siquiera mostraba. `filtros.treeData` ya
+  // está podado/filtrado/ordenado igual que lo que renderiza la tabla — se
+  // mantiene la selección actual si sigue siendo visible ahí; si no (primera
+  // carga, o se acaba de filtrar fuera con la búsqueda/familia), cae al
+  // primero de esa misma lista.
+  useEffect(() => {
+    if (!data) return;
+    setSelectedCodigo((actual) =>
+      actual && filtros.treeData.some((n) => n.codigo === actual) ? actual : filtros.treeData[0]?.codigo ?? null
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [data, filtros.treeData]);
+
   const portalContainerRef = useRef<HTMLDivElement>(null);
 
-  const conCoste = data ? data.finales.filter((n) => n.costeA1 != null) : [];
-  const costeMedio = conCoste.length > 0 ? conCoste.reduce((s, n) => s + (n.costeA1 ?? 0), 0) / conCoste.length : null;
+  // Gráficos "Coste real vs. teórico" y "Producción" (arriba de la tabla) —
+  // agregan VARIOS finales a la vez, a diferencia de la tabla (un artículo por
+  // fila): mismos artículos que la tabla tiene filtrados en cada momento
+  // (búsqueda/familia, `filtros.filtered`), confirmado con el usuario. Ver
+  // serieCosteMensual()/serieProduccionMensual() (coste-a1-shared.tsx) para el
+  // porqué de la ponderación.
+  const serieCoste = useMemo(
+    () =>
+      serieCosteMensual(filtros.filtered, data?.meta.mesesRango ?? []).map((p) => ({
+        mes: formatMesCorto(p.mes),
+        teorico: p.teorico,
+        real: p.real,
+      })),
+    [filtros.filtered, data?.meta.mesesRango]
+  );
+  const serieProduccion = useMemo(
+    () =>
+      serieProduccionMensual(filtros.filtered, data?.meta.mesesRango ?? []).map((p) => ({
+        mes: formatMesCorto(p.mes),
+        produccion: p.produccion,
+      })),
+    [filtros.filtered, data?.meta.mesesRango]
+  );
+
+  // KPI — pedido explícito de renovarlos: los 4 originales (Artículos
+  // finales/Coste A1 medio/Sin coste A1/Artículos en los árboles) describían
+  // la foto ESTÁTICA del catálogo (BOM), de antes de que existiera el coste
+  // real; con la comparación real vs. teórico como foco actual del panel,
+  // esos datos ya no eran lo más útil de un vistazo. Mismo alcance que los
+  // gráficos de arriba (`filtros.filtered`, no el dataset sin filtrar) — para
+  // que KPI, gráficos y tabla cuenten siempre la misma historia.
+  const visibles = filtros.filtered;
+  // Coincide con la misma regla de "misma población" del gráfico
+  // (serieCosteMensual, coste-a1-shared.tsx): solo entran en la desviación
+  // ponderada los artículos con coste real Y producción > 0 en el rango — un
+  // artículo con coste real pero sin producción no debe pesar en la media.
+  const conDesviacionPonderable = visibles.filter((n) => n.costeReal != null && n.costeA1 != null && (n.produccion ?? 0) > 0);
+  const sumaPesos = conDesviacionPonderable.reduce((s, n) => s + (n.produccion ?? 0), 0);
+  const sumaTeoricoPonderado = conDesviacionPonderable.reduce((s, n) => s + (n.costeA1 ?? 0) * (n.produccion ?? 0), 0);
+  const sumaRealPonderado = conDesviacionPonderable.reduce((s, n) => s + (n.costeReal ?? 0) * (n.produccion ?? 0), 0);
+  const desviacionMedia = sumaPesos > 0 && sumaTeoricoPonderado > 0 ? ((sumaRealPonderado - sumaTeoricoPonderado) / sumaTeoricoPonderado) * 100 : null;
+  // Impacto económico de la desviación en euros — sustituye a "Artículos con
+  // coste real" (contador de catálogo, poco útil para una directora
+  // financiera). Mismo criterio de población que desviacionMedia: solo
+  // artículos con coste real Y producción > 0 pesan aquí.
+  const impactoEuros = sumaPesos > 0 ? sumaRealPonderado - sumaTeoricoPonderado : null;
+  const produccionTotal = visibles.reduce((s, n) => s + (n.produccion ?? 0), 0);
+
   const stats = data
     ? [
-        { title: "Artículos finales", value: data.meta.totalFinales.toLocaleString("es-ES"), subValue: "Se venden tal cual, vigente hoy" },
-        { title: "Coste A1 medio", value: costeMedio != null ? `${costeMedio.toLocaleString("es-ES", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €` : "—", subValue: "Media de los que tienen coste" },
-        { title: "Sin coste A1", value: String(data.meta.totalFinales - conCoste.length), subValue: "F30026 sin fila (07/A1)" },
-        { title: "Artículos en los árboles", value: data.meta.articulosDistintos.toLocaleString("es-ES"), subValue: "Distintos, en todos los despieces" },
+        {
+          title: "Desviación media (real vs. teórico)",
+          value: desviacionMedia != null
+            ? `${desviacionMedia > 0 ? "+" : ""}${desviacionMedia.toLocaleString("es-ES", { minimumFractionDigits: 1, maximumFractionDigits: 1 })} %`
+            : "—",
+          subValue: "Ponderada por producción, artículos filtrados",
+          // Mismo criterio de color que DesviacionBadge (coste-a1-shared.tsx):
+          // positivo = sobrecoste (destructive), negativo = ahorro (success).
+          // Exactamente 0 o sin dato se queda en el color neutro.
+          tone: desviacionMedia != null && desviacionMedia !== 0 ? (desviacionMedia > 0 ? "destructive" as const : "success" as const) : undefined,
+        },
+        {
+          title: "Impacto de la desviación",
+          value:
+            impactoEuros != null
+              ? `${impactoEuros > 0 ? "+" : ""}${impactoEuros.toLocaleString("es-ES", { minimumFractionDigits: 0, maximumFractionDigits: 0 })} €`
+              : "—",
+          subValue: impactoEuros != null ? (impactoEuros > 0 ? "Sobrecoste frente al teórico" : "Ahorro frente al teórico") : "Sin datos ponderables",
+          tone: impactoEuros != null && impactoEuros !== 0 ? (impactoEuros > 0 ? "destructive" as const : "success" as const) : undefined,
+        },
+        {
+          title: "Producción total",
+          value: produccionTotal.toLocaleString("es-ES", { maximumFractionDigits: 0 }),
+          subValue: "Unidades, rango y artículos filtrados",
+        },
       ]
     : [];
 
@@ -161,11 +249,7 @@ export default function CosteA1Page() {
           {/* Mismo ancho que el resto de paneles (max-w-7xl, igual que /compras) */}
           <main className="mx-auto max-w-7xl space-y-4 p-4 md:p-6">
             <div className="flex flex-wrap items-center gap-2">
-              <Button size="sm" variant="outline" className="gap-1.5" onClick={() => fetchData()} disabled={loading}>
-                {loading ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
-                Recalcular
-              </Button>
-              <CosteA1FilterBar filtros={filtros} onFiltrarFechas={() => fetchData()} />
+              <CosteA1FilterBar filtros={filtros} onFiltrarFechas={() => fetchData()} loading={loading} />
               <Button size="sm" className="ml-auto gap-1.5" onClick={exportToExcel} disabled={!data || data.finales.length === 0}>
                 <Download size={14} />
                 Exportar
@@ -176,7 +260,18 @@ export default function CosteA1Page() {
               <p className="text-muted-foreground">Cargando…</p>
             ) : (
               <>
-                <Statistics data={stats} columns={4} />
+                <Statistics data={stats} columns={3} />
+                {/* Coste real vs. teórico (área) + Producción (barras), mismo
+                    reparto 2/3-1/3 que la fila de tabla+desglose de abajo —
+                    pedido explícito, "dos componentes arriba". */}
+                <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
+                  <div className="lg:col-span-2">
+                    <CosteMensualChart data={serieCoste} />
+                  </div>
+                  <div className="lg:col-span-1">
+                    <ProduccionMensualChart data={serieProduccion} />
+                  </div>
+                </div>
                 {/* Vuelta a 2/3-1/3: el ancho exterior de tabla/panel no debía
                     tocarse ("el componente completo fuera igual de grande, ni
                     más ni menos") — probar 3/5-2/5 dejaba la tabla sin verse

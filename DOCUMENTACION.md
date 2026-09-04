@@ -284,6 +284,13 @@ CREATE TABLE jde_status_descriptions (
   updated_at TEXT DEFAULT (datetime('now'))
 );
 
+-- Mapeo mes -> código COLEDG de F4105 (coste real mensual, JDE), editable desde /admin (ver docs/coste-a1.md §3.4)
+CREATE TABLE coste_a1_coledg_mensual (
+  mes TEXT PRIMARY KEY,
+  coledg TEXT NOT NULL,
+  updated_at TEXT DEFAULT (datetime('now'))
+);
+
 -- Registro de aceptación del pop-up de /consulta-stock-pda (ver docs/consulta-stock-pda.md §8.2)
 CREATE TABLE stock_scan_confirmations (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -433,6 +440,14 @@ Edición de las descripciones de los códigos `F47011.SYEDSP` que se muestran en
 - Persistencia en SQLite (tabla `jde_status_descriptions`). El seed inicial es idempotente (`INSERT OR IGNORE`), por lo que las ediciones manuales **no se sobreescriben** en futuros despliegues.
 - Cuando el admin guarda un cambio, el panel `/comparativa-seres` lo verá la próxima vez que se cargue (hace `fetch('/api/jde-statuses')` al montar).
 
+#### Pestaña Coste real (coste-a1)
+Mapeo mes → código `COLEDG` de `F4105` (coste real mensual, JDE) usado por `/coste-a1` para ponderar el coste real por producción — ver `docs/coste-a1.md` §3.4.
+
+- JDE genera un código `COLEDG` nuevo cada mes (ej. `'6M'` = enero 2026) sin fórmula deducible — hay que consultar `F4105` y añadirlo aquí cada vez que aparezca un mes nuevo.
+- Formulario **Añadir mes** (selector `<input type="month">` + código) y tabla de meses ya configurados, cada uno editable (input + botón **Guardar**) y borrable.
+- Persistencia en SQLite (tabla `coste_a1_coledg_mensual`, `mes` 'YYYY-MM' como clave primaria). Sin seed inicial — vacía hasta que el admin la rellene.
+- Un mes del rango de `/coste-a1` sin código configurado aquí se ignora en el cálculo (no bloquea el resto) y se reporta en `meta.mesesSinConfigurar` de la respuesta de la API.
+
 ### APIs de administración
 
 | Método | Ruta | Descripción |
@@ -450,6 +465,10 @@ Edición de las descripciones de los códigos `F47011.SYEDSP` que se muestran en
 | PUT | `/api/admin/jde-statuses/:code` | Actualiza la descripción de un código existente. No permite crear ni borrar |
 | GET | `/api/jde-statuses` | Lista pública (con sesión) consumida por `/comparativa-seres` |
 | GET | `/api/admin/logs` | Logs de consultas con paginación, filtros y estadísticas (ver sección 7) |
+| GET | `/api/admin/coste-a1-coledg` | Lista el mapeo mes→código COLEDG (con `updated_at`) |
+| POST | `/api/admin/coste-a1-coledg` | Crea un mes nuevo (`mes` 'YYYY-MM' + `coledg`). 409 si el mes ya existe |
+| PUT | `/api/admin/coste-a1-coledg/:mes` | Actualiza el código de un mes existente |
+| DELETE | `/api/admin/coste-a1-coledg/:mes` | Elimina el mapeo de un mes |
 
 ---
 

@@ -13,9 +13,10 @@
 //
 // Filtros (buscador, familia, obsoletos) y tabla van en componentes separados —
 // `useCosteA1Filters` + `CosteA1FilterBar` + `CosteA1Table` — porque la página los
-// coloca en sitios distintos: los filtros arriba (junto a Recalcular/Exportar,
-// antes de los KPIs, igual que /compras) y la tabla más abajo, junto al panel de
-// desglose.
+// coloca en sitios distintos: los filtros arriba (junto a Exportar, antes de los
+// KPIs, igual que /compras) y la tabla más abajo, junto al panel de desglose. Sin
+// botón "Recalcular" aparte — hacía exactamente lo mismo que "Filtrar" (pedido
+// explícito: "el botón recalcular ya no vale, porque ya está el de filtrar").
 import { useMemo, useState } from "react";
 import {
   useReactTable,
@@ -24,7 +25,7 @@ import {
   getCoreRowModel,
   getExpandedRowModel,
 } from "@tanstack/react-table";
-import { ArrowDown, ArrowUp, CircleAlert, ChevronDown, ChevronRight, SearchX } from "lucide-react";
+import { ArrowDown, ArrowUp, CircleAlert, ChevronDown, ChevronRight, Filter, Loader2, SearchX } from "lucide-react";
 import { Input } from "@/components/nova/ui/input";
 import { Badge } from "@/components/nova/ui/badge";
 import { Button } from "@/components/nova/ui/button";
@@ -34,7 +35,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/nova/ui/c
 import { TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/nova/ui/table";
 import { cn } from "@/lib/utils";
 import MonthRangePicker, { type MonthRange } from "./month-range-picker";
-import { estadoSubarbol, euros, podar1112, type DespieceNode, type EstadoDescuadre } from "./coste-a1-shared";
+import { DesviacionBadge, desviacionPct, estadoSubarbol, euros, podar1112, type DespieceNode, type EstadoDescuadre } from "./coste-a1-shared";
 
 export type { DespieceNode };
 
@@ -46,6 +47,7 @@ interface TreeRow {
   familia: string;
   familiaDescripcion: string;
   costeA1: number | null;
+  costeReal: number | null;
   esRaiz: boolean;
   obsoleto: boolean;
   // Solo tiene valor real en la fila raíz — igual que en DespieceNode, producción
@@ -66,6 +68,7 @@ function toTreeRow(n: DespieceNode, id: string, esRaiz: boolean, estado?: Estado
     familia: n.familia,
     familiaDescripcion: n.familiaDescripcion,
     costeA1: n.costeA1,
+    costeReal: n.costeReal,
     esRaiz,
     obsoleto: n.obsoleto,
     produccion: n.produccion,
@@ -74,7 +77,19 @@ function toTreeRow(n: DespieceNode, id: string, esRaiz: boolean, estado?: Estado
   };
 }
 
-type SortBy = "coste" | "nombre";
+type SortBy = "nombre" | "coste" | "produccion" | "costeReal" | "desviacion";
+
+// Columna de la tabla (id de TanStack) -> criterio de orden que le corresponde
+// — "concepto" (Artículo) ordena por "nombre", el resto comparte literalmente
+// el id. Un solo mapa para no repetirlo entre el header sortable y el
+// `onClick` que dispara `toggleSort()`.
+const SORT_POR_COLUMNA: Record<string, SortBy> = {
+  concepto: "nombre",
+  coste: "coste",
+  produccion: "produccion",
+  costeReal: "costeReal",
+  desviacion: "desviacion",
+};
 
 // --- Filtros: estado + derivados, compartido entre CosteA1FilterBar y CosteA1Table ---
 
@@ -122,23 +137,50 @@ export function useCosteA1Filters(data: DespieceNode[]) {
     });
   }, [data, search, familia]);
 
+  // `null`/`undefined` ("—" en la tabla) siempre al final, sea cual sea la
+  // dirección — que un "sin dato" salte de arriba a abajo solo por pulsar la
+  // cabecera dos veces sería confuso, y no aporta nada ordenar por "quién no
+  // tiene coste real" en vez de por el valor en sí.
+  function compararConNulos(av: number | null | undefined, bv: number | null | undefined, dir: "asc" | "desc"): number {
+    const aNulo = av == null;
+    const bNulo = bv == null;
+    if (aNulo && bNulo) return 0;
+    if (aNulo) return 1;
+    if (bNulo) return -1;
+    const cmp = av - bv;
+    return dir === "asc" ? cmp : -cmp;
+  }
+
   // Orden manual del nivel RAÍZ únicamente — getSortedRowModel de TanStack también
   // reordenaría los hijos de cada árbol por el mismo criterio, descolocando el orden
   // por cantidad descendente que ya viene calculado desde la API.
   const sorted = useMemo(() => {
     const arr = [...filtered];
     arr.sort((a, b) => {
-      const cmp = sortBy === "coste"
-        ? (a.costeA1 ?? -1) - (b.costeA1 ?? -1)
-        : (a.descripcion || a.codigo).localeCompare(b.descripcion || b.codigo);
-      return sortDir === "asc" ? cmp : -cmp;
+      if (sortBy === "nombre") {
+        const cmp = (a.descripcion || a.codigo).localeCompare(b.descripcion || b.codigo);
+        return sortDir === "asc" ? cmp : -cmp;
+      }
+      if (sortBy === "produccion") return compararConNulos(a.produccion, b.produccion, sortDir);
+      // Coste Real: "—" cuenta como 0, no "al final sea cual sea la dirección"
+      // como el resto de columnas — pedido explícito: "que el vacío se tome
+      // como 0 para que salga de los primeros si ordenan de menor a mayor".
+      // Con costes siempre ≥ 0, un artículo sin coste real queda entre los
+      // primeros al ordenar ascendente (junto a los que de verdad cuestan 0)
+      // y entre los últimos al ordenar descendente — como si sí tuviera dato.
+      if (sortBy === "costeReal") {
+        const cmp = (a.costeReal ?? 0) - (b.costeReal ?? 0);
+        return sortDir === "asc" ? cmp : -cmp;
+      }
+      if (sortBy === "desviacion") return compararConNulos(desviacionPct(a), desviacionPct(b), sortDir);
+      return compararConNulos(a.costeA1, b.costeA1, sortDir); // "coste"
     });
     return arr;
   }, [filtered, sortBy, sortDir]);
 
   const toggleSort = (col: SortBy) => {
     if (sortBy === col) setSortDir((d) => (d === "asc" ? "desc" : "asc"));
-    else { setSortBy(col); setSortDir(col === "coste" ? "desc" : "asc"); }
+    else { setSortBy(col); setSortDir(col === "nombre" ? "asc" : "desc"); }
   };
 
   // Informe: podado a solo 11/12 — ver podar1112() en coste-a1-shared. El desglose
@@ -161,13 +203,16 @@ export function useCosteA1Filters(data: DespieceNode[]) {
 
 export type CosteA1Filters = ReturnType<typeof useCosteA1Filters>;
 
-// --- Barra de filtros: arriba de los KPI, junto a Recalcular/Exportar (mismo orden
-// que /compras — todos los controles antes de las tarjetas KPI) ---
+// --- Barra de filtros: arriba de los KPI, junto a Exportar (mismo orden que
+// /compras — todos los controles antes de las tarjetas KPI) ---
 
 // `onFiltrarFechas`: dispara la consulta a la API con el `monthRange` actual —
 // vive en la página (app/coste-a1/page.tsx), no aquí, porque cambia lo que se
 // PIDE al servidor, no un filtro puramente local como búsqueda/familia.
-export function CosteA1FilterBar({ filtros, onFiltrarFechas }: { filtros: CosteA1Filters; onFiltrarFechas: () => void }) {
+// `loading`: mismo dato que ya tenía la página para el botón "Recalcular" (ya
+// eliminado) — el botón "Filtrar" es ahora el único disparador de la consulta,
+// así que necesita su propio estado de carga.
+export function CosteA1FilterBar({ filtros, onFiltrarFechas, loading }: { filtros: CosteA1Filters; onFiltrarFechas: () => void; loading: boolean }) {
   const { search, setSearch, familia, setFamilia, familias, monthRange, setMonthRange, filtered, totalCount } = filtros;
   return (
     <>
@@ -183,7 +228,14 @@ export function CosteA1FilterBar({ filtros, onFiltrarFechas }: { filtros: CosteA
             {(v: string) => (v === "__todas__" ? "Todas las familias" : familias.find(([code]) => code === v)?.[1] || v)}
           </SelectValue>
         </SelectTrigger>
-        <SelectContent>
+        {/* alignItemWithTrigger=false: el comportamiento por defecto (estilo
+            <select> nativo) alinea el ítem SELECCIONADO con el trigger en vez
+            de anclar el desplegable debajo — con una familia hacia el final
+            de la lista (alfabética, 10 opciones) el desplegable se abría
+            hacia ARRIBA, tapando la barra de navegación, y se veía
+            desalineado. Con esto se comporta como un desplegable normal:
+            siempre debajo del trigger, alineado a su izquierda. */}
+        <SelectContent align="start" alignItemWithTrigger={false}>
           <SelectItem value="__todas__">Todas las familias</SelectItem>
           {familias.map(([code, desc]) => (
             <SelectItem key={code} value={code}>{desc}</SelectItem>
@@ -191,7 +243,22 @@ export function CosteA1FilterBar({ filtros, onFiltrarFechas }: { filtros: CosteA
         </SelectContent>
       </Select>
       <MonthRangePicker value={monthRange} onChange={setMonthRange} />
-      <Button variant="outline" size="sm" className="h-8" onClick={onFiltrarFechas}>
+      {/* Mismo diseño que el botón "Filtrar" de /compras (app/compras/page.tsx):
+          variante por defecto (no "outline"), icono Filter/spinner según `loading`. */}
+      <Button size="sm" className="gap-1.5" onClick={onFiltrarFechas} disabled={loading}>
+        {/* `transform-gpu` PROBADO y REVERTIDO — pensado para el pequeño
+            bamboleo vertical del icono al girar, pero en la práctica
+            interfería con el propio `transform: rotate(...)` de
+            `animate-spin` (las dos clases fijan la misma propiedad
+            `transform` por vías distintas — Tailwind v4 compone
+            `transform-gpu` a partir de variables `--tw-rotate-*`, mientras
+            que el keyframe de `animate-spin` escribe `transform` literal, y
+            una pisaba a la otra) y dejaba el icono completamente QUIETO en
+            vez de solo bambolear menos — "la ruleta de carga no gira ni en
+            el botón de filtrar ni en el mensaje emergente", reportado de
+            inmediato. Un icono que gira con un bamboleo mínimo es un mal
+            menor frente a uno que no gira en absoluto. */}
+        {loading ? <Loader2 size={14} className="animate-spin" /> : <Filter size={14} />}
         Filtrar
       </Button>
       <span className="text-sm text-muted-foreground">{filtered.length} de {totalCount} artículos finales</span>
@@ -215,18 +282,34 @@ function buildColumns(sortBy: SortBy, sortDir: "asc" | "desc") {
   return [
     columnHelper.display({
       id: "concepto",
-      header: () => <span>Artículo</span>,
+      header: () => <SortableHeaderLabel label="Artículo" active={sortBy === "nombre"} dir={sortDir} />,
       cell: ({ row }) => {
         const r = row.original;
+        // Bug real corregido: sin tope de ancho ni `truncate`, una descripción
+        // larga + la badge "Obsoleto" (que nunca envolvía de línea, solo
+        // `gap-2` en fila) estiraban la columna Artículo a su ancho natural —
+        // con `table-layout: auto` (por defecto), ESA columna pasaba a medir
+        // lo mismo en TODAS las filas, no solo en la del artículo largo,
+        // desbordando la tabla mucho más de lo necesario. `min-w-0` en toda la
+        // cadena de contenedores flex (imprescindible: sin él, un hijo flex
+        // nunca se encoge por debajo de su ancho de contenido, así que
+        // `truncate` no tiene efecto) + `max-w-[13rem] truncate` en el propio
+        // texto tapan la columna a un ancho razonable — la badge lleva
+        // `shrink-0` para no perder su tamaño si el texto se recorta.
         const contenido = (
-          <span className="flex flex-col">
-            <span className="flex items-center gap-2">
-              <span className={cn("font-medium text-foreground", r.esRaiz && "font-semibold")}>{r.concepto}</span>
+          <span className="flex min-w-0 flex-col">
+            <span className="flex min-w-0 items-center gap-2">
+              <span
+                className={cn("min-w-0 max-w-[13rem] truncate font-medium text-foreground", r.esRaiz && "font-semibold")}
+                title={r.concepto}
+              >
+                {r.concepto}
+              </span>
               {/* Sin badge de tipo (Producto terminado/semiterminado) aquí — pedido
                   explícito, hacía falta el hueco para que la Desviación quepa sin
                   scroll horizontal. El tipo se sigue viendo en el panel de la
                   derecha (Desglose/Comparación), donde sí hay sitio. */}
-              {r.obsoleto && <Badge variant="destructive" className="font-normal">Obsoleto</Badge>}
+              {r.obsoleto && <Badge variant="destructive" className="shrink-0 font-normal">Obsoleto</Badge>}
               {r.esRaiz && r.estado === "problema" && (
                 <CircleAlert
                   size={14}
@@ -239,14 +322,14 @@ function buildColumns(sortBy: SortBy, sortDir: "asc" | "desc") {
           </span>
         );
         return (
-          <div className="flex items-center gap-2" style={{ paddingLeft: row.depth * 22 }}>
+          <div className="flex min-w-0 items-center gap-2" style={{ paddingLeft: row.depth * 22 }}>
             {r.subRows && r.subRows.length > 0 ? (
-              <span className="flex items-center gap-2" aria-expanded={row.getIsExpanded()}>
+              <span className="flex min-w-0 items-center gap-2" aria-expanded={row.getIsExpanded()}>
                 {row.getIsExpanded() ? <ChevronDown size={14} className="shrink-0 text-muted-foreground" /> : <ChevronRight size={14} className="shrink-0 text-muted-foreground" />}
                 {contenido}
               </span>
             ) : (
-              <span className="pl-[22px]">{contenido}</span>
+              <span className="min-w-0 pl-[22px]">{contenido}</span>
             )}
           </div>
         );
@@ -254,7 +337,15 @@ function buildColumns(sortBy: SortBy, sortDir: "asc" | "desc") {
     }),
     columnHelper.display({
       id: "coste",
-      header: () => <SortableHeaderLabel label="Coste Teórico" active={sortBy === "coste"} dir={sortDir} align="right" />,
+      // "Teórico", no "Coste Teórico" — bug real corregido: a anchos de
+      // ventana estrechos (~1024px, el breakpoint `lg` donde la tabla pasa a
+      // ocupar solo 2/3 del ancho) el propio TEXTO de las cabeceras era más
+      // ancho que los valores que muestran, y las 5 columnas dejaban de
+      // caber — se veía la barra de scroll horizontal incluso con una sola
+      // fila de datos. Mismos nombres cortos que ya usa el panel de
+      // desglose ("Teórico X € · Real Y € · Desv. Z %") — más consistente,
+      // no solo más corto.
+      header: () => <SortableHeaderLabel label="Teórico" active={sortBy === "coste"} dir={sortDir} align="right" />,
       cell: ({ row }) => (
         <span className={cn("block text-right tabular-nums", row.original.esRaiz ? "font-semibold text-foreground" : "text-muted-foreground")}>
           {row.original.costeA1 != null ? euros(row.original.costeA1) : "—"}
@@ -262,36 +353,49 @@ function buildColumns(sortBy: SortBy, sortDir: "asc" | "desc") {
       ),
     }),
     // Producción real (F4111, ILDCT='IC') del artículo final en el rango de fechas
-    // del filtro — pedido explícito, ya no es un placeholder. Solo tiene valor en
-    // la fila raíz (`produccion` viene `undefined` en los componentes, ver
-    // DespieceNode); Coste Real y Desviación SIGUEN siendo ficticios (pedido
-    // aparte, sin fuente de datos real todavía — ver subtítulo de la cabecera).
+    // del filtro. Solo tiene valor en la fila raíz (`produccion` viene
+    // `undefined` en los componentes, ver DespieceNode).
     columnHelper.display({
       id: "produccion",
-      header: () => <span className="block text-right">Producción</span>,
+      header: () => <SortableHeaderLabel label="Producción" active={sortBy === "produccion"} dir={sortDir} align="right" />,
       cell: ({ row }) => (
         <span className={cn("block text-right tabular-nums", row.original.esRaiz ? "text-foreground" : "text-muted-foreground")}>
           {row.original.produccion != null ? row.original.produccion.toLocaleString("es-ES", { maximumFractionDigits: 2 }) : "—"}
         </span>
       ),
     }),
+    // Coste real: media ponderada por producción mensual de F4105.COUNCS en el
+    // rango de fechas (ver app/api/coste-a1/route.ts, apartado "Coste real").
+    // "—" cuando ningún mes del rango tiene código COLEDG configurado en
+    // /admin, o F4105 no tiene coste para ese código en esos meses.
     columnHelper.display({
       id: "costeReal",
-      header: () => <span className="block text-right">Coste Real</span>,
+      header: () => <SortableHeaderLabel label="Real" active={sortBy === "costeReal"} dir={sortDir} align="right" />,
       cell: ({ row }) => (
-        <span className="block text-right tabular-nums text-muted-foreground">
-          {row.original.costeA1 != null ? euros(row.original.costeA1) : "—"}
+        <span className={cn("block text-right tabular-nums", row.original.esRaiz ? "font-semibold text-foreground" : "text-muted-foreground")}>
+          {row.original.costeReal != null ? euros(row.original.costeReal) : "—"}
         </span>
       ),
     }),
+    // Desviación: coste real vs. coste teórico (A1) — positivo = el real sale
+    // más caro que el estándar declarado.
     columnHelper.display({
       id: "desviacion",
-      header: () => <span className="block text-right">Desviación</span>,
-      cell: ({ row }) => (
-        <span className="block text-right tabular-nums text-muted-foreground">
-          {row.original.costeA1 != null ? "0,0 %" : "—"}
-        </span>
-      ),
+      header: () => <SortableHeaderLabel label="Desv." active={sortBy === "desviacion"} dir={sortDir} align="right" />,
+      cell: ({ row }) => {
+        const pct = desviacionPct(row.original);
+        if (pct == null) {
+          return <span className="block text-right tabular-nums text-muted-foreground">—</span>;
+        }
+        // Píldora con fondo en TODAS las filas — pedido explícito ("ponle al
+        // final a todos el fondo en la desviación"), revierte la ronda
+        // anterior que la dejaba solo en la fila raíz.
+        return (
+          <div className="flex justify-end">
+            <DesviacionBadge pct={pct} tono="xs" />
+          </div>
+        );
+      },
     }),
   ];
 }
@@ -330,7 +434,7 @@ export default function CosteA1Table({
       <CardHeader className="px-6 pt-6">
         <CardTitle className="text-lg font-medium text-foreground">Coste por artículo final</CardTitle>
         <p className="text-sm font-normal text-muted-foreground">
-          Pulsa una fila raíz para ver su desglose. Coste Real y Desviación son ficticios.
+          Pulsa una fila raíz para ver su desglose.
         </p>
       </CardHeader>
       <CardContent className="overflow-hidden rounded-b-xl border-t border-border p-0">
@@ -350,12 +454,12 @@ export default function CosteA1Table({
               {table.getHeaderGroups().map((hg) => (
                 <TableRow key={hg.id} className="sticky top-0 z-10 border-border/60 backdrop-blur-sm">
                   {hg.headers.map((h) => {
-                    const sortable = h.column.id === "coste";
+                    const sortKey = SORT_POR_COLUMNA[h.column.id];
                     return (
                       <TableHead
                         key={h.id}
-                        className={cn("h-9 bg-muted/40 px-3 text-muted-foreground", sortable && "cursor-pointer select-none")}
-                        onClick={sortable ? () => toggleSort(h.column.id as SortBy) : undefined}
+                        className={cn("h-9 bg-muted/40 px-3 text-muted-foreground", sortKey && "cursor-pointer select-none")}
+                        onClick={sortKey ? () => toggleSort(sortKey) : undefined}
                       >
                         {h.isPlaceholder ? null : flexRender(h.column.columnDef.header, h.getContext())}
                       </TableHead>

@@ -25,6 +25,10 @@ const Toaster = ({ ...props }: ToasterProps) => {
           <OctagonXIcon className="size-4" />
         ),
         loading: (
+          // `transform-gpu` probado y revertido — interfería con el propio
+          // `animate-spin` (las dos escriben `transform` por vías
+          // distintas) y dejaba el icono quieto en vez de solo bambolear
+          // menos. Ver comentario completo en coste-a1-table.tsx.
           <Loader2Icon className="size-4 animate-spin" />
         ),
       }}

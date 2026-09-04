@@ -56,7 +56,28 @@
 //   comentario más abajo), pero F4801/F4111/F41002 trabajan con el código
 //   CORTO (`WAITM`/`IMITM`) — el cruce sale de `F4101.IMITM`, añadido a la
 //   consulta de metadatos (paso G) solo para los finales, no para todo el
-//   árbol.
+//   árbol. La producción se agrega TAMBIÉN por mes (no solo el total del
+//   rango) — hace falta para ponderar el coste real (ver punto siguiente).
+// - Coste real por artículo y componente, en el mismo rango de fechas
+//   (`costeReal` en TODOS los nodos del árbol, no solo finales): F4105.COUNCS,
+//   COMCU=10999, un código COLEDG distinto por mes ('6M'=enero 2026,
+//   '6N'=febrero...) sin fórmula fiable para deducirlo — igual problema que
+//   COLEDG_VIGENTE en api/compras/route.ts pero mensual en vez de anual, así
+//   que el mapeo mes->COLEDG vive en SQLite (tabla `coste_a1_coledg_mensual`,
+//   editable desde /admin) en vez de hardcodeado. Un mes del rango sin código
+//   configurado en esa tabla simplemente se ignora (no cuenta en el cálculo).
+//   Con un solo mes en el rango, el coste real es directamente el valor de
+//   F4105 de ese mes. Con varios meses, es la media PONDERADA por la
+//   producción real de cada mes — pero no la del propio nodo (una materia
+//   prima no tiene órdenes de fabricación propias): pondera con la producción
+//   mensual del artículo FINAL (raíz) al que pertenece ese despiece — todo el
+//   árbol de un mismo final comparte los mismos pesos mensuales, confirmado
+//   con el usuario. Si la producción total pesa 0 en todos los meses con
+//   coste disponible (caso raro: no debería pasar, solo se listan finales con
+//   producción en el rango), se cae a media simple entre esos meses en vez de
+//   dejar el dato vacío. Un mes sin coste en F4105 para ese código concreto
+//   se excluye del cálculo (ni cuenta en el numerador ni en el denominador),
+//   no se trata como 0.
 import { NextRequest, NextResponse } from 'next/server';
 import { getDbConnection } from '@/lib/db';
 import { getDayOfYear } from '@/lib/utils';
@@ -83,6 +104,31 @@ function fechaAJdeProduccion(fecha: Date): number {
   return (fecha.getFullYear() - 2000) * 1000 + getDayOfYear(fecha);
 }
 
+// Inversa aproximada de fechaAJdeProduccion(): de un valor "yyddd" (sin el
+// prefijo 100000+, mismo formato que MOD(TO55TAREA,100000)/MOD(ILTRDJ,100000))
+// a su mes calendario 'YYYY-MM'. new Date(year, 0, ddd) normaliza solo el
+// desbordamiento de días (ddd=32 -> 1 de febrero), igual que getDayOfYear().
+function fechaJdeAMes(v: number): string {
+  const yy = Math.floor(v / 1000);
+  const ddd = v % 1000;
+  const fecha = new Date(2000 + yy, 0, ddd);
+  return `${fecha.getFullYear()}-${String(fecha.getMonth() + 1).padStart(2, '0')}`;
+}
+
+// Lista de meses calendario 'YYYY-MM' entre dos fechas, ambos extremos
+// incluidos (el rango del filtro solo deja elegir meses completos, ver
+// MonthRangePicker).
+function mesesEntreFechas(inicio: Date, fin: Date): string[] {
+  const meses: string[] = [];
+  const cursor = new Date(inicio.getFullYear(), inicio.getMonth(), 1);
+  const finCursor = new Date(fin.getFullYear(), fin.getMonth(), 1);
+  while (cursor <= finCursor) {
+    meses.push(`${cursor.getFullYear()}-${String(cursor.getMonth() + 1).padStart(2, '0')}`);
+    cursor.setMonth(cursor.getMonth() + 1);
+  }
+  return meses;
+}
+
 interface BomRow { K: string; L: string; QTY: number; UM: string }
 interface BomLine { componente: string; qty: number; um: string }
 // CORTO (F4101.IMITM) solo hace falta para cruzar con producción (F4801/F4111/
@@ -103,6 +149,12 @@ export interface DespieceNode {
   // cambia el catálogo).
   obsoleto: boolean; // F4101.IMSTKT = 'O' — mismo campo que ya usa /caducados
   costeA1: number | null;
+  // Coste real ponderado (F4105.COUNCS) en el rango de fechas pedido — en
+  // TODOS los nodos del árbol (a diferencia de `produccion`, que solo tiene
+  // valor en la raíz). `null` cuando ningún mes del rango tiene código COLEDG
+  // configurado, o ninguno tiene coste en F4105 para este código. Ver
+  // comentario de cabecera del archivo.
+  costeReal: number | null;
   cantidad: number; // cantidad de este artículo por unidad de su padre directo (1 en la raíz)
   um: string;
   // Producción real (F4111, ILDCT='IC') en el rango de fechas pedido — SOLO
@@ -110,6 +162,16 @@ export interface DespieceNode {
   // árbol (no se pide desglose de producción por componente). Ver comentario de
   // cabecera del archivo.
   produccion?: number;
+  // Desglose mes a mes de producción y coste real — SOLO en la raíz, igual que
+  // `produccion`. Es la materia prima del gráfico "Coste real vs. teórico por
+  // mes" (`components/nova/coste-a1-monthly-chart.tsx`): ese gráfico agrega
+  // VARIOS finales a la vez, así que necesita el detalle por mes de cada uno
+  // por separado, no el agregado ya ponderado que da `costeReal`.
+  // `costeRealPorMes[i].costeReal` es el valor RAW de F4105 para ese mes (sin
+  // ponderar por nada) — la ponderación entre artículos la hace el frontend al
+  // construir la serie del gráfico.
+  produccionPorMes?: { mes: string; produccion: number }[];
+  costeRealPorMes?: { mes: string; costeReal: number | null }[];
   children: DespieceNode[];
 }
 
@@ -130,6 +192,23 @@ export async function GET(req: NextRequest) {
   const endDateStr = searchParams.get('endDate') || finMesActual;
   const startJdeProd = fechaAJdeProduccion(new Date(startDateStr));
   const endJdeProd = fechaAJdeProduccion(new Date(endDateStr));
+
+  // Meses calendario del rango (para el coste real) y su código COLEDG
+  // configurado en /admin — un mes sin código configurado se ignora, no
+  // bloquea el resto del cálculo.
+  const mesesRango = mesesEntreFechas(new Date(startDateStr), new Date(endDateStr));
+  const coledgPorMes = new Map<string, string>();
+  try {
+    const db = getDb();
+    const placeholdersDb = mesesRango.map(() => '?').join(', ');
+    const filas = db
+      .prepare(`SELECT mes, coledg FROM coste_a1_coledg_mensual WHERE mes IN (${placeholdersDb})`)
+      .all(...mesesRango) as { mes: string; coledg: string }[];
+    filas.forEach((f) => coledgPorMes.set(f.mes, f.coledg));
+  } catch (e) {
+    console.error('Error leyendo coste_a1_coledg_mensual:', e);
+  }
+  const mesesSinConfigurar = mesesRango.filter((m) => !coledgPorMes.has(m));
 
   let conn;
   try {
@@ -177,7 +256,7 @@ export async function GET(req: NextRequest) {
       .sort();
 
     if (finales.length === 0) {
-      return NextResponse.json({ finales: [], meta: { totalFinales: 0, articulosDistintos: 0 } });
+      return NextResponse.json({ finales: [], meta: { totalFinales: 0, articulosDistintos: 0, mesesSinConfigurar, mesesRango } });
     }
 
     // E) Construir el árbol de cada final (con corte de ciclos — un BOM real no
@@ -226,6 +305,10 @@ export async function GET(req: NextRequest) {
     // (F41002) porque un mismo artículo puede tener producción registrada en más
     // de una UM — ver comentario de cabecera.
     const produccionMap = new Map<string, number>(); // código LARGO -> cantidad en UM primaria
+    // código LARGO -> mes 'YYYY-MM' -> cantidad en UM primaria. Solo se rellena
+    // para el peso del coste real (ver comentario de cabecera) — produccionMap
+    // (el total del rango) sigue siendo la fuente de la columna "Producción".
+    const produccionMensualMap = new Map<string, Map<string, number>>();
     const finalesCortos = Array.from(
       new Set(finales.map((f) => metaMap.get(f)?.CORTO).filter((c): c is string => !!c))
     );
@@ -236,6 +319,7 @@ export async function GET(req: NextRequest) {
 
       const prodResult = await conn.execute(
         `SELECT TRIM(A.WAAITM) AS WAAITM, TRIM(A.WAITM) AS WAITM, C.ILTRUM,
+           MOD(B.TO55TAREA, 100000) AS FECHA_JDE,
            SUM(CASE WHEN C.ILDCT = 'IC' THEN C.ILTRQT ELSE 0 END) AS QTY
          FROM (
            SELECT TODOCO, MAX(TO55TAREA) as TO55TAREA
@@ -251,7 +335,7 @@ export async function GET(req: NextRequest) {
          GROUP BY A.WADOCO, B.TO55TAREA, A.WAAITM, A.WAITM, C.ILTRUM`,
         { startJdeProd, endJdeProd, ...finalesBinds }
       );
-      const prodRows = prodResult.rows as { WAAITM: string; WAITM: string; ILTRUM: string | null; QTY: number }[];
+      const prodRows = prodResult.rows as { WAAITM: string; WAITM: string; ILTRUM: string | null; FECHA_JDE: number; QTY: number }[];
 
       if (prodRows.length > 0) {
         // Unidad primaria (F4101.IMUOM1) y conversiones (F41002), por código CORTO
@@ -321,6 +405,11 @@ export async function GET(req: NextRequest) {
             if (factor !== null) cantidadFinal = cantidadCruda * factor;
           }
           produccionMap.set(largo, (produccionMap.get(largo) ?? 0) + cantidadFinal);
+
+          const mes = fechaJdeAMes(row.FECHA_JDE);
+          if (!produccionMensualMap.has(largo)) produccionMensualMap.set(largo, new Map());
+          const porMes = produccionMensualMap.get(largo)!;
+          porMes.set(mes, (porMes.get(mes) ?? 0) + cantidadFinal);
         }
       }
     }
@@ -334,6 +423,66 @@ export async function GET(req: NextRequest) {
       binds
     );
     const costMap = new Map((costResult.rows as CostRow[]).map((r) => [r.LARGO, r.COSTE_RAW / 10000]));
+
+    // H.1) Coste real (F4105.COUNCS), para TODOS los códigos del árbol (no solo
+    // finales) — un código COLEDG por cada mes del rango con mapeo configurado
+    // en `coste_a1_coledg_mensual` (ver más arriba). COMCU es NCHAR en Oracle:
+    // se bindea como STRING (nunca number) — bindearlo como número dispara una
+    // conversión implícita CHAR->NUMBER de la columna que revienta con
+    // ORA-01722 en cuanto alguna fila de la tabla no es puramente numérica
+    // (comprobado en real: `COMCU = :planta` con planta number falla; con
+    // planta string funciona).
+    const codigosColedg = Array.from(new Set(Array.from(coledgPorMes.values())));
+    const costeRealPorArticulo = new Map<string, Map<string, number>>(); // LARGO -> COLEDG -> coste
+    if (codigosColedg.length > 0) {
+      const coledgPlaceholders = codigosColedg.map((_, i) => `:cd${i}`).join(', ');
+      const coledgBinds: Record<string, string> = {};
+      codigosColedg.forEach((v, i) => { coledgBinds[`cd${i}`] = v; });
+      const costeRealResult = await conn.execute(
+        `SELECT TRIM(COLITM) AS LARGO, TRIM(COLEDG) AS COLEDG, COUNCS AS COSTE_RAW
+         FROM F4105
+         WHERE TRIM(COMCU) = :planta AND TRIM(COLEDG) IN (${coledgPlaceholders}) AND TRIM(COLITM) IN (${placeholders})`,
+        { planta: String(PLANTA), ...coledgBinds, ...binds }
+      );
+      (costeRealResult.rows as { LARGO: string; COLEDG: string; COSTE_RAW: number }[]).forEach((r) => {
+        if (!costeRealPorArticulo.has(r.LARGO)) costeRealPorArticulo.set(r.LARGO, new Map());
+        costeRealPorArticulo.get(r.LARGO)!.set(r.COLEDG, r.COSTE_RAW / 10000);
+      });
+    }
+
+    // Coste real ponderado de un código concreto, dados los pesos mensuales del
+    // FINAL al que pertenece (mismo peso para todo su árbol). Un mes sin coste
+    // en F4105 para este código se excluye (no cuenta ni en el numerador ni en
+    // el denominador). Si el peso total es 0 pero hay algún coste disponible,
+    // cae a media simple entre esos meses en vez de devolver null — ver
+    // comentario de cabecera del archivo.
+    function costeRealNodo(codigo: string, pesos: { mes: string; peso: number }[]): number | null {
+      const costesPorMes = costeRealPorArticulo.get(codigo);
+      if (!costesPorMes) return null;
+      let sumaPonderada = 0;
+      let sumaPesos = 0;
+      let sumaSimple = 0;
+      let n = 0;
+      for (const { mes, peso } of pesos) {
+        const coledg = coledgPorMes.get(mes);
+        if (!coledg) continue;
+        const coste = costesPorMes.get(coledg);
+        if (coste == null) continue;
+        sumaPonderada += coste * peso;
+        sumaPesos += peso;
+        sumaSimple += coste;
+        n += 1;
+      }
+      if (n === 0) return null;
+      return sumaPesos > 0 ? sumaPonderada / sumaPesos : sumaSimple / n;
+    }
+
+    // Asigna `costeReal` a todo el subárbol de un final, con los pesos
+    // mensuales (producción) de ESE final — no del propio nodo, ver cabecera.
+    function asignarCosteReal(n: DespieceNode, pesos: { mes: string; peso: number }[]): void {
+      n.costeReal = costeRealNodo(n.codigo, pesos);
+      n.children.forEach((c) => asignarCosteReal(c, pesos));
+    }
 
     // I) Catálogo de familia (UDC 41/S2) y de categoría/tipo (UDC 41/S1) — mismo
     // patrón que /api/compras y /api/mrp. Ambos vienen en MAYÚSCULAS del catálogo
@@ -365,6 +514,7 @@ export async function GET(req: NextRequest) {
         tipoCod: meta?.TIPO_COD || '',
         obsoleto: meta?.STKT === 'O',
         costeA1: costMap.get(n.codigo) ?? null,
+        costeReal: null, // se rellena después con asignarCosteReal() — depende de los pesos del final
         cantidad: Math.round(n.cantidad * 1000) / 1000,
         um: n.um,
         children: n.children
@@ -378,7 +528,19 @@ export async function GET(req: NextRequest) {
     // DespieceNode. `enriquecer()` ya deja `produccion` como `undefined` en todo
     // el árbol (no está en el objeto que devuelve); aquí se rellena SOLO para los
     // finales, con lo que haya en produccionMap (0 si no tuvo producción real).
-    finalesOut.forEach((f) => { f.produccion = produccionMap.get(f.codigo) ?? 0; });
+    // `costeReal` sí se rellena en TODO el árbol de cada final, con los pesos
+    // mensuales (producción) de ESE final — ver asignarCosteReal() más arriba.
+    finalesOut.forEach((f) => {
+      f.produccion = produccionMap.get(f.codigo) ?? 0;
+      const pesos = mesesRango.map((mes) => ({ mes, peso: produccionMensualMap.get(f.codigo)?.get(mes) ?? 0 }));
+      asignarCosteReal(f, pesos);
+      f.produccionPorMes = pesos.map(({ mes, peso }) => ({ mes, produccion: peso }));
+      f.costeRealPorMes = mesesRango.map((mes) => {
+        const coledg = coledgPorMes.get(mes);
+        const coste = coledg ? costeRealPorArticulo.get(f.codigo)?.get(coledg) ?? null : null;
+        return { mes, costeReal: coste };
+      });
+    });
 
     // Registrar consulta en logs (nunca bloquea la respuesta) — mismo patrón que
     // /api/compras y /api/mrp.
@@ -394,7 +556,17 @@ export async function GET(req: NextRequest) {
 
     return NextResponse.json({
       finales: finalesOut,
-      meta: { totalFinales: finalesOut.length, articulosDistintos: codigos.length },
+      meta: {
+        totalFinales: finalesOut.length,
+        articulosDistintos: codigos.length,
+        // Meses del rango sin código COLEDG configurado en /admin — el coste
+        // real de esos meses no entra en el cálculo. Vacío = rango totalmente
+        // cubierto.
+        mesesSinConfigurar,
+        // Meses calendario 'YYYY-MM' del rango pedido, en orden — el frontend
+        // los usa como eje X del gráfico mensual en vez de recalcularlos.
+        mesesRango,
+      },
     });
   } catch (error) {
     console.error('Error en /api/coste-a1:', error);

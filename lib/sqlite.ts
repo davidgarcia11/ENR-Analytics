@@ -93,6 +93,17 @@ export function getDb(): Database.Database {
       mensajes TEXT NOT NULL,
       created_at TEXT DEFAULT (datetime('now'))
     );
+
+    -- Mapeo mes -> código COLEDG de F4105 (coste real mensual, JDE). No hay fórmula
+    -- fiable para deducir el código de cada mes (mismo problema que COLEDG_VIGENTE
+    -- en api/compras/route.ts, pero mensual en vez de anual) — admin lo va añadiendo
+    -- a mano cada mes desde /admin. Usado por /api/coste-a1 para el coste real
+    -- ponderado por producción. Ver docs/coste-a1.md.
+    CREATE TABLE IF NOT EXISTS coste_a1_coledg_mensual (
+      mes TEXT PRIMARY KEY,
+      coledg TEXT NOT NULL,
+      updated_at TEXT DEFAULT (datetime('now'))
+    );
   `);
 
   // Migración: añadir columna must_change_password si no existe (para BDs creadas antes de esta versión)
@@ -134,6 +145,11 @@ export function getDb(): Database.Database {
     'INSERT OR IGNORE INTO screens (key, label, path, is_public) VALUES (?, ?, ?, 1)'
   );
   for (const p of PANELS) seedScreen.run(p.key, p.label, p.href);
+  // Sincroniza el label si un panel se renombra en PANELS (INSERT OR IGNORE de
+  // arriba no toca filas ya existentes) — label no es editable desde /admin, así
+  // que PANELS sigue siendo la única fuente de verdad también tras el seed inicial.
+  const syncScreenLabel = _db.prepare('UPDATE screens SET label = ? WHERE key = ? AND label != ?');
+  for (const p of PANELS) syncScreenLabel.run(p.label, p.key, p.label);
   // 'admin' no es un panel real (no vive en PANELS) y es privado por defecto.
   _db.exec(`
     INSERT OR IGNORE INTO screens (key, label, path, is_public) VALUES ('admin', 'Administración', '/admin', 0);
