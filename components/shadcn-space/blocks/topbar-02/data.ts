@@ -9,8 +9,8 @@ export interface ScreenConfig {
 // Reparto de los paneles reales de lib/panels.ts (fuente única, ver CLAUDE.md) entre
 // "dashboards" (vistas analíticas de solo lectura) y "apps" (herramientas operativas
 // donde el usuario actúa) — misma distinción que docs/compras-v1-historico.md §9.
-const DASHBOARD_KEYS = ["produccion", "caducados", "comparativa", "compras", "mrp", "costes"] as const;
-const APP_KEYS = ["pedidos", "consulta_stock_pda", "muestras"] as const;
+const DASHBOARD_KEYS = ["produccion", "pedidos", "caducados", "comparativa", "compras", "mrp", "costes"] as const;
+const APP_KEYS = ["consulta_stock_pda", "muestras"] as const;
 
 // Misma regla que components/Navbar.tsx (canAccessPanel) — una sola definición de
 // "quién puede ver este panel en el nav", compartida por los dos sistemas de diseño.
