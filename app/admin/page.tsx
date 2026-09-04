@@ -46,11 +46,17 @@ interface Screen {
   config: ScreenConfig
 }
 
-type Tab = 'usuarios' | 'roles' | 'pantallas' | 'estados-jde' | 'muestras'
+type Tab = 'usuarios' | 'roles' | 'pantallas' | 'estados-jde' | 'coste-a1-coledg' | 'muestras'
 
 interface JdeStatus {
   code: string
   description: string
+  updated_at?: string
+}
+
+interface ColedgMensual {
+  mes: string
+  coledg: string
   updated_at?: string
 }
 
@@ -120,6 +126,17 @@ export default function AdminPage() {
   const [jdeStatusSuccess, setJdeStatusSuccess] = useState("")
   const [jdeStatusError, setJdeStatusError] = useState("")
 
+  // ─── Coste real mensual (mapeo mes -> ledger IELEDG de F30026, usado por /costes) ──
+  const [coledgMensual, setColedgMensual] = useState<ColedgMensual[]>([])
+  const [loadingColedgMensual, setLoadingColedgMensual] = useState(false)
+  const [newMesColedg, setNewMesColedg] = useState("")
+  const [newColedgCodigo, setNewColedgCodigo] = useState("")
+  const [creatingColedg, setCreatingColedg] = useState(false)
+  const [coledgDrafts, setColedgDrafts] = useState<Record<string, string>>({})
+  const [savingColedg, setSavingColedg] = useState<string | null>(null)
+  const [coledgError, setColedgError] = useState("")
+  const [coledgSuccess, setColedgSuccess] = useState("")
+
   // ─── Muestras (sincronización manual) ─────────────────────────────────────────
   const [muestrasSync, setMuestrasSync] = useState<MuestrasSyncState | null>(null)
   const [syncingMuestras, setSyncingMuestras] = useState(false)
@@ -137,6 +154,7 @@ export default function AdminPage() {
       loadRoles()
       loadScreens()
       loadJdeStatuses()
+      loadColedgMensual()
       loadMuestrasSync()
     } catch {
       router.push("/login")
@@ -230,6 +248,77 @@ export default function AdminPage() {
     } finally {
       setSavingJdeStatus(null)
     }
+  }
+
+  const loadColedgMensual = async () => {
+    setLoadingColedgMensual(true)
+    try {
+      const res = await fetch("/api/admin/coste-a1-coledg")
+      if (res.ok) {
+        const data: ColedgMensual[] = await res.json()
+        setColedgMensual(data)
+        const drafts: Record<string, string> = {}
+        data.forEach(c => { drafts[c.mes] = c.coledg })
+        setColedgDrafts(drafts)
+      }
+    } finally { setLoadingColedgMensual(false) }
+  }
+
+  const createColedgMensual = async (e: React.FormEvent) => {
+    e.preventDefault()
+    setColedgError(""); setColedgSuccess(""); setCreatingColedg(true)
+    try {
+      const res = await fetch("/api/admin/coste-a1-coledg", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ mes: newMesColedg, coledg: newColedgCodigo }),
+      })
+      const data = await res.json()
+      if (!res.ok) { setColedgError(data.error); return }
+      setColedgSuccess(`Mes "${newMesColedg}" añadido con código "${newColedgCodigo.toUpperCase()}"`)
+      setNewMesColedg(""); setNewColedgCodigo("")
+      loadColedgMensual()
+    } catch { setColedgError("Error de conexión") } finally { setCreatingColedg(false) }
+  }
+
+  const saveColedgMensual = async (mes: string) => {
+    const coledg = (coledgDrafts[mes] ?? '').trim()
+    if (!coledg) {
+      setColedgError(`El código de ${mes} no puede estar vacío`)
+      return
+    }
+    setColedgError(""); setColedgSuccess(""); setSavingColedg(mes)
+    try {
+      const res = await fetch(`/api/admin/coste-a1-coledg/${encodeURIComponent(mes)}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ coledg }),
+      })
+      const data = await res.json()
+      if (!res.ok) { setColedgError(data.error || 'Error al guardar'); return }
+      setColedgSuccess(`Código de "${mes}" guardado`)
+      loadColedgMensual()
+    } catch {
+      setColedgError('Error de conexión')
+    } finally {
+      setSavingColedg(null)
+    }
+  }
+
+  const deleteColedgMensual = (mes: string) => {
+    setConfirmState({
+      title: "Eliminar mapeo de mes",
+      description: `Se eliminará el código IELEDG configurado para "${mes}". El coste real de /costes dejará de tener dato para ese mes hasta que se vuelva a configurar.`,
+      onConfirm: async () => {
+        try {
+          const res = await fetch(`/api/admin/coste-a1-coledg/${encodeURIComponent(mes)}`, { method: "DELETE" })
+          const data = await res.json()
+          if (!res.ok) { toast(data.error || "Error al eliminar", "error"); return }
+          loadColedgMensual()
+          toast(`Mes "${mes}" eliminado`, "success")
+        } catch { toast("Error al eliminar", "error") }
+      },
+    })
   }
 
   // ─── Acciones de usuarios ────────────────────────────────────────────────────
@@ -426,6 +515,7 @@ export default function AdminPage() {
             { value: 'roles', label: 'Roles' },
             { value: 'pantallas', label: 'Pantallas' },
             { value: 'estados-jde', label: 'Estados JDE' },
+            { value: 'coste-a1-coledg', label: 'Coste real (Costes)' },
             { value: 'muestras', label: 'Muestras' },
           ]}
         />
@@ -823,6 +913,117 @@ export default function AdminPage() {
                           </TableCell>
                         </TableRow>
                       ))}
+                    </TableBody>
+                  </Table>
+                )}
+              </CardContent>
+            </Card>
+          </div>
+        )}
+
+        {/* ── Pestaña Coste real (Costes) ────────────────────────────────────
+            Mapeo mes -> código de ledger IELEDG de F30026 (coste real mensual,
+            JDE) — MISMA tabla que el coste teórico A1, mismo IECOST='A1', solo
+            cambia el ledger ('07' fijo para el teórico, uno por mes aquí). JDE
+            genera un código nuevo cada mes sin patrón previsible (mismo caso
+            que COLEDG_VIGENTE en /compras, aquí mensual) — se añade a mano
+            aquí cada vez que aparezca un mes nuevo. Usado por /api/costes
+            para el "Coste Real" ponderado por producción. Corregido — antes
+            decía "COLEDG de F4105": esa tabla da el coste total del ledger
+            (Material + Mano de obra + Amortización...), no solo el
+            componente A1/Material que hace comparable la desviación. */}
+        {activeTab === 'coste-a1-coledg' && (
+          <div className="space-y-4">
+            <Card accent>
+              <CardHeader>
+                <CardTitle className="text-sm font-bold text-secondary-foreground flex items-center gap-2">
+                  <Tag className="h-4 w-4 text-primary" aria-hidden="true" />
+                  Añadir mes
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <p className="text-xs text-muted-foreground mb-4">
+                  Cada mes JDE genera un código de ledger <strong>IELEDG</strong> nuevo en F30026 con el coste real de ese mes (ej. &quot;6M&quot; = enero 2026). No hay fórmula fija — hay que consultar F30026 (mismo <strong>IECOST=&apos;A1&apos;</strong> que el coste teórico, solo cambia el ledger) y añadir aquí el código que le corresponda a cada mes nuevo para que <strong>Costes</strong> pueda calcular el coste real.
+                </p>
+                <form onSubmit={createColedgMensual} className="flex flex-wrap items-end gap-4">
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-semibold text-secondary-foreground">Mes</label>
+                    <Input type="month" value={newMesColedg} onChange={e => setNewMesColedg(e.target.value)} required className="w-[160px]" />
+                  </div>
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-semibold text-secondary-foreground">
+                      Código IELEDG <span className="font-normal text-muted-foreground">(F30026)</span>
+                    </label>
+                    <Input value={newColedgCodigo} onChange={e => setNewColedgCodigo(e.target.value)} placeholder="6M" required className="w-[120px] uppercase" />
+                  </div>
+                  <Button type="submit" disabled={creatingColedg} className="font-semibold">
+                    {creatingColedg ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Tag className="mr-2 h-4 w-4" />}
+                    Añadir
+                  </Button>
+                </form>
+                {coledgError && <p className="text-sm text-red-600 font-medium mt-3">{coledgError}</p>}
+                {coledgSuccess && <p className="text-sm text-green-600 font-medium mt-3">{coledgSuccess}</p>}
+              </CardContent>
+            </Card>
+
+            <Card accent>
+              <CardHeader>
+                <CardTitle className="text-sm font-bold text-secondary-foreground">Meses configurados</CardTitle>
+              </CardHeader>
+              <CardContent>
+                {loadingColedgMensual ? (
+                  <Spinner label="Cargando..." className="py-8" />
+                ) : (
+                  <Table>
+                    <TableHeader>
+                      <TableRow className="hover:bg-transparent">
+                        <TableHead className="font-bold text-secondary-foreground w-32">Mes</TableHead>
+                        <TableHead className="font-bold text-secondary-foreground">Código IELEDG</TableHead>
+                        <TableHead className="font-bold text-secondary-foreground w-40 text-right">Acciones</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {coledgMensual.map(c => (
+                        <TableRow key={c.mes} className="hover:bg-muted/50 border-border">
+                          <TableCell>
+                            <span className="font-mono font-bold text-foreground bg-muted px-2 py-1 rounded">{c.mes}</span>
+                          </TableCell>
+                          <TableCell>
+                            <Input
+                              value={coledgDrafts[c.mes] ?? ''}
+                              onChange={e => setColedgDrafts(d => ({ ...d, [c.mes]: e.target.value.toUpperCase() }))}
+                              className="h-9 text-sm w-28"
+                            />
+                          </TableCell>
+                          <TableCell className="text-right">
+                            <div className="flex items-center justify-end gap-2">
+                              <Button
+                                size="sm"
+                                onClick={() => saveColedgMensual(c.mes)}
+                                disabled={savingColedg === c.mes || (coledgDrafts[c.mes] ?? '').trim() === c.coledg}
+                                className="font-semibold"
+                              >
+                                {savingColedg === c.mes ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Guardar'}
+                              </Button>
+                              <Button
+                                variant="ghost" size="sm"
+                                onClick={() => deleteColedgMensual(c.mes)}
+                                className="text-red-500 hover:text-red-700 hover:bg-red-50"
+                                title="Eliminar mes"
+                              >
+                                <Trash2 className="h-4 w-4" />
+                              </Button>
+                            </div>
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                      {coledgMensual.length === 0 && (
+                        <TableRow className="hover:bg-transparent">
+                          <TableCell colSpan={3} className="text-center text-sm text-muted-foreground py-8">
+                            Ningún mes configurado todavía.
+                          </TableCell>
+                        </TableRow>
+                      )}
                     </TableBody>
                   </Table>
                 )}

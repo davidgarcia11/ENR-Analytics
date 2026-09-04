@@ -94,6 +94,17 @@ export function getDb(): Database.Database {
       created_at TEXT DEFAULT (datetime('now'))
     );
 
+    -- Mapeo mes -> código de ledger IELEDG de F30026 (coste real mensual, JDE). No hay
+    -- fórmula fiable para deducir el código de cada mes (mismo problema que COLEDG_VIGENTE
+    -- en api/compras/route.ts, pero mensual en vez de anual) — admin lo va añadiendo
+    -- a mano cada mes desde /admin. Usado por /api/costes para el coste real
+    -- ponderado por producción. Ver docs/costes.md.
+    CREATE TABLE IF NOT EXISTS coste_a1_coledg_mensual (
+      mes TEXT PRIMARY KEY,
+      coledg TEXT NOT NULL,
+      updated_at TEXT DEFAULT (datetime('now'))
+    );
+
     -- Estado editable de /muestras (pendiente/enviado/completado) + observación libre por
     -- lote. No viene de JDE: es una capa propia sobre el listado de producción real
     -- (F4111/F4101/F4108), igual que jde_status_descriptions es una capa propia sobre datos
@@ -191,6 +202,17 @@ export function getDb(): Database.Database {
     _db.exec("ALTER TABLE presets ADD COLUMN screen TEXT NOT NULL DEFAULT 'produccion'");
   }
 
+  // Migración: el panel "Costes" cambió de key/URL — 'coste_a1' → 'costes' (y
+  // /coste-a1 → /costes). El seed de más abajo busca la fila por `key` e
+  // inserta una nueva con INSERT OR IGNORE si no la encuentra: sin este UPDATE
+  // antes, nacería una fila nueva PÚBLICA por defecto y la vieja (con los
+  // permisos ya concedidos, referenciados por screen_id en screen_permissions)
+  // quedaría huérfana — un panel restringido se abriría a todo el mundo sin
+  // que nadie lo pidiera. Actualizar en sitio conserva el id y por tanto los
+  // permisos ya concedidos. Idempotente: tras la primera vez ya no hay ninguna
+  // fila con key='coste_a1', así que no vuelve a tocar nada.
+  _db.exec("UPDATE screens SET key = 'costes', path = '/costes' WHERE key = 'coste_a1'");
+
   // Seed roles base (idempotente)
   _db.exec(`
     INSERT OR IGNORE INTO roles (name, label) VALUES ('admin', 'Administrador');
@@ -203,6 +225,11 @@ export function getDb(): Database.Database {
     'INSERT OR IGNORE INTO screens (key, label, path, is_public) VALUES (?, ?, ?, 1)'
   );
   for (const p of PANELS) seedScreen.run(p.key, p.label, p.href);
+  // Sincroniza el label si un panel se renombra en PANELS (INSERT OR IGNORE de
+  // arriba no toca filas ya existentes) — label no es editable desde /admin, así
+  // que PANELS sigue siendo la única fuente de verdad también tras el seed inicial.
+  const syncScreenLabel = _db.prepare('UPDATE screens SET label = ? WHERE key = ? AND label != ?');
+  for (const p of PANELS) syncScreenLabel.run(p.label, p.key, p.label);
   // 'admin' no es un panel real (no vive en PANELS) y es privado por defecto.
   _db.exec(`
     INSERT OR IGNORE INTO screens (key, label, path, is_public) VALUES ('admin', 'Administración', '/admin', 0);

@@ -18,8 +18,8 @@ const geistMono = Geist_Mono({
 
 // Metadatos de la aplicación (Lo que sale en la pestaña del navegador y Google)
 export const metadata: Metadata = {
-  title: "Dashboard Producción",
-  description: "Dashboard de control de producción",
+  title: "ENR Analytics",
+  description: "Paneles de analítica de Elaborados Naturales",
 };
 
 // RootLayout es el componente PADRE de toda la aplicación.

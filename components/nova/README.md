@@ -200,6 +200,58 @@ de intentar un script inline propio.
   con lo que el primitivo realmente emite no da error, simplemente **no hace nada**, y
   gana el estilo por defecto del primitivo por debajo (bug real: la píldora activa del
   nav quedaba casi ilegible al abrir el desplegable, ver `docs/compras.md` §8 punto 10).
+- **Bloques animados con `motion/react` pueden traer `bun run build` roto por tipos, no
+  por lógica**: detectado en `tabs-08` (instalado, borrado al no usarse, y vuelto a
+  instalar dos veces más para `/costes` según fue cambiando el diseño de ese panel —
+  la versión actual sí lo usa de verdad, ver `docs/costes.md` §4.2) y en
+  `animated-list-03` (instalado dos veces solo para consultar su código como
+  referencia y borrado las dos, nunca llegó a usarse tal cual — mismo sitio de la
+  documentación). Ambos usan objetos sin anotar el tipo de `motion/react` que les
+  corresponde — TypeScript infiere `type: "spring"`/`ease: "easeIn"` como `string`
+  genérico en vez del literal que la librería espera, y `tsc` falla (`Type 'string' is
+  not assignable to type 'AnimationGeneratorType'`). No es un bug introducido en este
+  proyecto ni una excusa para reescribir el componente a mano — es un fix mínimo y
+  legítimo sobre el archivo instalado, cada vez que se reinstale: anotar
+  explícitamente `Variants` (en los objetos de variantes) y, si hace falta,
+  `Transition` (en constantes de transición compartidas reutilizadas como valor por
+  defecto de un parámetro — ese fue el caso de `animated-list-03`, un poco distinto al
+  de `tabs-08`), ambos importados como `import type { ... } from "motion/react"`. Si
+  otro bloque `motion/react` de ShadcnSpace falla igual al instalarlo, es el mismo
+  tipo de arreglo — y si el bloque acaba sin usarse, se puede borrar sin más (no hace
+  falta dejar el fix "por si acaso"; si se vuelve a necesitar más adelante, es el
+  mismo arreglo de una línea al reinstalarlo).
+- **`ScrollArea` + `<Table>` compartido + cabecera `sticky` no se llevan bien
+  anidados**: `components/nova/ui/table.tsx` envuelve siempre su `<table>` en un
+  `<div overflow-x-auto>` propio; anidar ESE div dentro del `Viewport` de
+  `ScrollArea` activa la regla de interdependencia de `overflow` de CSS y lo
+  convierte en su propio contenedor con scroll — una cabecera `sticky` dentro se
+  "pega" a ese div (que nunca se mueve él mismo) en vez del `Viewport` real que el
+  usuario desplaza, y visualmente deja de funcionar. Detectado y corregido en
+  `/costes` (ver `docs/costes.md` §4.1): si otra tabla necesita `ScrollArea` +
+  cabecera fija, usar un `<table>` suelto (mismas clases que `ui/table.tsx`) en vez
+  del componente `Table`, dentro del `ScrollArea`. De paso, `ui/scroll-area.tsx`
+  ganó una prop `orientation?: "vertical" | "horizontal" | "both"` (por defecto
+  `"vertical"`, igual que antes) para pedir scrollbar horizontal cuando haga falta.
+
+- **`components/nova/portal-container.tsx`** (`NovaPortalProvider`/`useNovaPortalContainer`)
+  corrige un bug real: los primitivos de Base UI que usan `*Primitive.Portal` escapan
+  por defecto a `document.body` — fuera de `[data-nova-theme]`, heredan los tokens del
+  sistema viejo (visto primero como un botón "Aplicar" en rojo corporativo dentro de un
+  `Sheet`, en vez del negro casi-negro de Nova). Cada página Nova envuelve su contenido en
+  `<NovaPortalProvider container={portalContainerRef}>` (`portalContainerRef` apunta al
+  div raíz `[data-nova-theme]`), y cada primitivo con Portal debe pasarle
+  `container={useNovaPortalContainer()}`. Parcheados: `popover.tsx`, `select.tsx`,
+  `navigation-menu.tsx`, `dialog.tsx`, `sheet.tsx` (el `Combobox`, si se instala,
+  necesitará el mismo tratamiento). **Al instalar cualquier primitivo nuevo con
+  `*Primitive.Portal` — Tooltip, Menu, HoverCard..., hay que aplicar el mismo patrón antes
+  de darlo por terminado**, no solo cuando el bug se vea a simple vista (el `Sheet` estuvo
+  meses sin el parche porque nadie lo había usado de verdad todavía en una rama mergeada).
+- **`Dialog` instalado** (`bunx --bun shadcn@latest add dialog`, panel de coste A1): trae
+  animación de apertura/cierre (fade+zoom) ya incluida en el primitivo — no hace falta
+  añadirla a mano. El `sm:max-w-sm` por defecto es para diálogos de confirmación pequeños;
+  para un modal grande centrado (ej. un panel de detalle/verificación), sobreescribe el
+  ancho vía `className` en `<DialogContent>` (`w-[90vw] max-w-3xl` o similar) en vez de
+  tocar el primitivo compartido.
 
 ## Cómo construir el siguiente panel Nova
 
