@@ -23,6 +23,8 @@ type Statistics = {
   subValue: string;
   badgeColor?: string;
   badgeValue?: string;
+  /** Clase Tailwind para colorear el valor grande (p.ej. el color de un estado). */
+  valueClassName?: string;
   chartType?: ChartType;
   // Color del valor según el signo del dato (ej. desviación/impacto de coste
   // real vs. teórico) — mismos tokens que `DesviacionBadge`/`Descuadre`
@@ -246,7 +248,8 @@ export default function Statistic({ data = defaultStatisticsData, columns = 4 }:
                           ? "text-[color:var(--color-destructive)]"
                           : item.tone === "success"
                             ? "text-[color:var(--color-success)]"
-                            : "text-card-foreground"
+                            : "text-card-foreground",
+                        item.valueClassName
                       )}
                     >
                       {item.value}

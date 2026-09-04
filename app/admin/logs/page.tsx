@@ -69,6 +69,14 @@ const SOURCE_LABELS: Record<string, string> = {
   'compras': 'Compras',
   'mrp': 'Explosión de compras',
   'coste_a1': 'Costes',
+  'muestras': 'Muestras',
+  'muestras-sync': 'Muestras (sincronización)',
+}
+
+const SYNC_TRIGGER_LABELS: Record<string, string> = {
+  'scheduled': 'automática (30 min)',
+  'config-change': 'cambio de lista de artículos',
+  'manual': 'botón manual en /admin',
 }
 
 // Umbral en ms para marcar consultas lentas
@@ -115,6 +123,12 @@ function summarizeFilters(filtersJson: string): string {
     const f = JSON.parse(filtersJson)
 
     if (f.action === 'login') return 'Inicio de sesión'
+
+    if (f.trigger) {
+      const trigger = SYNC_TRIGGER_LABELS[f.trigger] || f.trigger
+      const base = `Disparada por: ${trigger} · ${f.articulosConfigurados ?? 0} artículo${f.articulosConfigurados === 1 ? '' : 's'} configurado${f.articulosConfigurados === 1 ? '' : 's'}`
+      return f.error ? `${base} · Error: ${f.error}` : base
+    }
 
     const parts: string[] = []
 

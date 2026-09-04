@@ -9,7 +9,7 @@ export async function GET() {
   }
 
   const db = getDb();
-  const dbUser = db.prepare('SELECT must_change_password, name, surname, default_plant FROM users WHERE id = ?').get(user.id) as any;
+  const dbUser = db.prepare('SELECT must_change_password, name, surname, default_plant, can_configure_muestras FROM users WHERE id = ?').get(user.id) as any;
 
   return NextResponse.json({
     id: user.id,
@@ -19,5 +19,6 @@ export async function GET() {
     surname: dbUser?.surname || '',
     mustChangePassword: !!(dbUser?.must_change_password),
     defaultPlant: dbUser?.default_plant || '',
+    canConfigureMuestras: !!(dbUser?.can_configure_muestras),
   });
 }
