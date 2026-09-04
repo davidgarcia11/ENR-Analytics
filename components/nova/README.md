@@ -202,8 +202,8 @@ de intentar un script inline propio.
   nav quedaba casi ilegible al abrir el desplegable, ver `docs/compras.md` §8 punto 10).
 - **Bloques animados con `motion/react` pueden traer `bun run build` roto por tipos, no
   por lógica**: detectado en `tabs-08` (instalado, borrado al no usarse, y vuelto a
-  instalar dos veces más para `/coste-a1` según fue cambiando el diseño de ese panel —
-  la versión actual sí lo usa de verdad, ver `docs/coste-a1.md` §4.2) y en
+  instalar dos veces más para `/costes` según fue cambiando el diseño de ese panel —
+  la versión actual sí lo usa de verdad, ver `docs/costes.md` §4.2) y en
   `animated-list-03` (instalado dos veces solo para consultar su código como
   referencia y borrado las dos, nunca llegó a usarse tal cual — mismo sitio de la
   documentación). Ambos usan objetos sin anotar el tipo de `motion/react` que les
@@ -227,7 +227,7 @@ de intentar un script inline propio.
   convierte en su propio contenedor con scroll — una cabecera `sticky` dentro se
   "pega" a ese div (que nunca se mueve él mismo) en vez del `Viewport` real que el
   usuario desplaza, y visualmente deja de funcionar. Detectado y corregido en
-  `/coste-a1` (ver `docs/coste-a1.md` §4.1): si otra tabla necesita `ScrollArea` +
+  `/costes` (ver `docs/costes.md` §4.1): si otra tabla necesita `ScrollArea` +
   cabecera fija, usar un `<table>` suelto (mismas clases que `ui/table.tsx`) en vez
   del componente `Table`, dentro del `ScrollArea`. De paso, `ui/scroll-area.tsx`
   ganó una prop `orientation?: "vertical" | "horizontal" | "both"` (por defecto

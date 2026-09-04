@@ -23,7 +23,7 @@ export const PANELS = [
     { key: 'consulta_stock_pda', label: 'Consulta Stock PDA', href: '/consulta-stock-pda', Icon: ScanBarcode, description: 'Consulta de stock FEFO por escaneo de palet' },
     { key: 'compras', label: 'Compras', href: '/compras', Icon: ShoppingCart, description: 'Previsión de ventas vs. venta real, por artículo y mes' },
     { key: 'mrp', label: 'Explosión de compras', href: '/mrp', Icon: Boxes, description: 'Previsión × lista de materiales → qué comprar de cada material' },
-    { key: 'coste_a1', label: 'Costes', href: '/coste-a1', Icon: Layers, description: 'Coste de producto terminado y despiece recursivo de materiales' },
+    { key: 'costes', label: 'Costes', href: '/costes', Icon: Layers, description: 'Coste de producto terminado y despiece recursivo de materiales' },
 ] as const
 
 export type PanelKey = typeof PANELS[number]['key']

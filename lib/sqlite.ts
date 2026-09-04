@@ -97,8 +97,8 @@ export function getDb(): Database.Database {
     -- Mapeo mes -> código COLEDG de F4105 (coste real mensual, JDE). No hay fórmula
     -- fiable para deducir el código de cada mes (mismo problema que COLEDG_VIGENTE
     -- en api/compras/route.ts, pero mensual en vez de anual) — admin lo va añadiendo
-    -- a mano cada mes desde /admin. Usado por /api/coste-a1 para el coste real
-    -- ponderado por producción. Ver docs/coste-a1.md.
+    -- a mano cada mes desde /admin. Usado por /api/costes para el coste real
+    -- ponderado por producción. Ver docs/costes.md.
     CREATE TABLE IF NOT EXISTS coste_a1_coledg_mensual (
       mes TEXT PRIMARY KEY,
       coledg TEXT NOT NULL,
@@ -132,6 +132,17 @@ export function getDb(): Database.Database {
   if (!presetColumns.some(c => c.name === 'screen')) {
     _db.exec("ALTER TABLE presets ADD COLUMN screen TEXT NOT NULL DEFAULT 'produccion'");
   }
+
+  // Migración: el panel "Costes" cambió de key/URL — 'coste_a1' → 'costes' (y
+  // /coste-a1 → /costes). El seed de más abajo busca la fila por `key` e
+  // inserta una nueva con INSERT OR IGNORE si no la encuentra: sin este UPDATE
+  // antes, nacería una fila nueva PÚBLICA por defecto y la vieja (con los
+  // permisos ya concedidos, referenciados por screen_id en screen_permissions)
+  // quedaría huérfana — un panel restringido se abriría a todo el mundo sin
+  // que nadie lo pidiera. Actualizar en sitio conserva el id y por tanto los
+  // permisos ya concedidos. Idempotente: tras la primera vez ya no hay ninguna
+  // fila con key='coste_a1', así que no vuelve a tocar nada.
+  _db.exec("UPDATE screens SET key = 'costes', path = '/costes' WHERE key = 'coste_a1'");
 
   // Seed roles base (idempotente)
   _db.exec(`

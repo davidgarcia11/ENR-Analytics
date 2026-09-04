@@ -118,7 +118,7 @@ export default function AdminPage() {
   const [jdeStatusSuccess, setJdeStatusSuccess] = useState("")
   const [jdeStatusError, setJdeStatusError] = useState("")
 
-  // ─── Coste real mensual (mapeo mes -> COLEDG de F4105, usado por /coste-a1) ──
+  // ─── Coste real mensual (mapeo mes -> ledger IELEDG de F30026, usado por /costes) ──
   const [coledgMensual, setColedgMensual] = useState<ColedgMensual[]>([])
   const [loadingColedgMensual, setLoadingColedgMensual] = useState(false)
   const [newMesColedg, setNewMesColedg] = useState("")
@@ -270,7 +270,7 @@ export default function AdminPage() {
   const deleteColedgMensual = (mes: string) => {
     setConfirmState({
       title: "Eliminar mapeo de mes",
-      description: `Se eliminará el código COLEDG configurado para "${mes}". El coste real de /coste-a1 dejará de tener dato para ese mes hasta que se vuelva a configurar.`,
+      description: `Se eliminará el código IELEDG configurado para "${mes}". El coste real de /costes dejará de tener dato para ese mes hasta que se vuelva a configurar.`,
       onConfirm: async () => {
         try {
           const res = await fetch(`/api/admin/coste-a1-coledg/${encodeURIComponent(mes)}`, { method: "DELETE" })
@@ -462,7 +462,7 @@ export default function AdminPage() {
             { value: 'roles', label: 'Roles' },
             { value: 'pantallas', label: 'Pantallas' },
             { value: 'estados-jde', label: 'Estados JDE' },
-            { value: 'coste-a1-coledg', label: 'Coste real (coste-a1)' },
+            { value: 'coste-a1-coledg', label: 'Coste real (Costes)' },
           ]}
         />
 
@@ -856,12 +856,17 @@ export default function AdminPage() {
           </div>
         )}
 
-        {/* ── Pestaña Coste real (coste-a1) ────────────────────────────────────
-            Mapeo mes -> código COLEDG de F4105 (coste real mensual, JDE). JDE
+        {/* ── Pestaña Coste real (Costes) ────────────────────────────────────
+            Mapeo mes -> código de ledger IELEDG de F30026 (coste real mensual,
+            JDE) — MISMA tabla que el coste teórico A1, mismo IECOST='A1', solo
+            cambia el ledger ('07' fijo para el teórico, uno por mes aquí). JDE
             genera un código nuevo cada mes sin patrón previsible (mismo caso
             que COLEDG_VIGENTE en /compras, aquí mensual) — se añade a mano
-            aquí cada vez que aparezca un mes nuevo. Usado por /api/coste-a1
-            para el "Coste Real" ponderado por producción. */}
+            aquí cada vez que aparezca un mes nuevo. Usado por /api/costes
+            para el "Coste Real" ponderado por producción. Corregido — antes
+            decía "COLEDG de F4105": esa tabla da el coste total del ledger
+            (Material + Mano de obra + Amortización...), no solo el
+            componente A1/Material que hace comparable la desviación. */}
         {activeTab === 'coste-a1-coledg' && (
           <div className="space-y-4">
             <Card accent>
@@ -873,7 +878,7 @@ export default function AdminPage() {
               </CardHeader>
               <CardContent>
                 <p className="text-xs text-muted-foreground mb-4">
-                  Cada mes JDE genera un código <strong>COLEDG</strong> nuevo en F4105 con el coste real de ese mes (ej. &quot;6M&quot; = enero 2026). No hay fórmula fija — hay que consultar F4105 y añadir aquí el código que le corresponda a cada mes nuevo para que <strong>Coste A1</strong> pueda calcular el coste real.
+                  Cada mes JDE genera un código de ledger <strong>IELEDG</strong> nuevo en F30026 con el coste real de ese mes (ej. &quot;6M&quot; = enero 2026). No hay fórmula fija — hay que consultar F30026 (mismo <strong>IECOST=&apos;A1&apos;</strong> que el coste teórico, solo cambia el ledger) y añadir aquí el código que le corresponda a cada mes nuevo para que <strong>Costes</strong> pueda calcular el coste real.
                 </p>
                 <form onSubmit={createColedgMensual} className="flex flex-wrap items-end gap-4">
                   <div className="space-y-1.5">
@@ -882,7 +887,7 @@ export default function AdminPage() {
                   </div>
                   <div className="space-y-1.5">
                     <label className="text-xs font-semibold text-secondary-foreground">
-                      Código COLEDG <span className="font-normal text-muted-foreground">(F4105)</span>
+                      Código IELEDG <span className="font-normal text-muted-foreground">(F30026)</span>
                     </label>
                     <Input value={newColedgCodigo} onChange={e => setNewColedgCodigo(e.target.value)} placeholder="6M" required className="w-[120px] uppercase" />
                   </div>
@@ -908,7 +913,7 @@ export default function AdminPage() {
                     <TableHeader>
                       <TableRow className="hover:bg-transparent">
                         <TableHead className="font-bold text-secondary-foreground w-32">Mes</TableHead>
-                        <TableHead className="font-bold text-secondary-foreground">Código COLEDG</TableHead>
+                        <TableHead className="font-bold text-secondary-foreground">Código IELEDG</TableHead>
                         <TableHead className="font-bold text-secondary-foreground w-40 text-right">Acciones</TableHead>
                       </TableRow>
                     </TableHeader>

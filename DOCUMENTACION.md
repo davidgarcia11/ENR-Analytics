@@ -284,7 +284,7 @@ CREATE TABLE jde_status_descriptions (
   updated_at TEXT DEFAULT (datetime('now'))
 );
 
--- Mapeo mes -> código COLEDG de F4105 (coste real mensual, JDE), editable desde /admin (ver docs/coste-a1.md §3.4)
+-- Mapeo mes -> código COLEDG de F4105 (coste real mensual, JDE), editable desde /admin (ver docs/costes.md §3.4)
 CREATE TABLE coste_a1_coledg_mensual (
   mes TEXT PRIMARY KEY,
   coledg TEXT NOT NULL,
@@ -440,13 +440,13 @@ Edición de las descripciones de los códigos `F47011.SYEDSP` que se muestran en
 - Persistencia en SQLite (tabla `jde_status_descriptions`). El seed inicial es idempotente (`INSERT OR IGNORE`), por lo que las ediciones manuales **no se sobreescriben** en futuros despliegues.
 - Cuando el admin guarda un cambio, el panel `/comparativa-seres` lo verá la próxima vez que se cargue (hace `fetch('/api/jde-statuses')` al montar).
 
-#### Pestaña Coste real (coste-a1)
-Mapeo mes → código `COLEDG` de `F4105` (coste real mensual, JDE) usado por `/coste-a1` para ponderar el coste real por producción — ver `docs/coste-a1.md` §3.4.
+#### Pestaña Coste real (Costes)
+Mapeo mes → código `COLEDG` de `F4105` (coste real mensual, JDE) usado por `/costes` para ponderar el coste real por producción — ver `docs/costes.md` §3.4.
 
 - JDE genera un código `COLEDG` nuevo cada mes (ej. `'6M'` = enero 2026) sin fórmula deducible — hay que consultar `F4105` y añadirlo aquí cada vez que aparezca un mes nuevo.
 - Formulario **Añadir mes** (selector `<input type="month">` + código) y tabla de meses ya configurados, cada uno editable (input + botón **Guardar**) y borrable.
 - Persistencia en SQLite (tabla `coste_a1_coledg_mensual`, `mes` 'YYYY-MM' como clave primaria). Sin seed inicial — vacía hasta que el admin la rellene.
-- Un mes del rango de `/coste-a1` sin código configurado aquí se ignora en el cálculo (no bloquea el resto) y se reporta en `meta.mesesSinConfigurar` de la respuesta de la API.
+- Un mes del rango de `/costes` sin código configurado aquí se ignora en el cálculo (no bloquea el resto) y se reporta en `meta.mesesSinConfigurar` de la respuesta de la API.
 
 ### APIs de administración
 
@@ -866,7 +866,7 @@ Cada panel tiene su documentación específica en la carpeta `docs/`:
 | Comparativa SERES vs JDE | `/comparativa-seres` | [docs/seres-jde-comparativa.md](docs/seres-jde-comparativa.md) |
 | Consulta de stock por escaneo (FEFO, Reflex) | `/consulta-stock-pda` | [docs/consulta-stock-pda.md](docs/consulta-stock-pda.md) |
 | Compras (previsión de ventas vs. venta real, rediseño sobre sistema Nova) | `/compras` | [docs/compras.md](docs/compras.md) |
-| Coste A1 y despiece recursivo de materiales (sistema Nova) | `/coste-a1` | [docs/coste-a1.md](docs/coste-a1.md) |
+| Coste A1 y despiece recursivo de materiales (sistema Nova) | `/costes` | [docs/costes.md](docs/costes.md) |
 
 ### API externa — `GET /api/jde-orders`
 

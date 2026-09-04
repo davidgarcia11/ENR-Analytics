@@ -34,7 +34,7 @@
 //   prefijo NO es fiable del todo: casi todos los "99" (8 de 9) tienen SRP1='12'
 //   (PRODUCTO TERMINADO), no una categoría "Comercializado" que ni existe en el
 //   catálogo real — y hay excepciones sueltas en otros prefijos (13/14 con SRP1
-//   distinto al prefijo). Ver docs/coste-a1.md §3.1.
+//   distinto al prefijo). Ver docs/costes.md §3.1.
 // - Obsoletos: F4101.IMSTKT = 'O' (mismo campo que ya usa /caducados). La API
 //   siempre devuelve TODOS los finales con el flag `obsoleto` — el filtrado
 //   (un obsoleto solo se ve en la tabla si tuvo producción en el rango de
@@ -59,25 +59,35 @@
 //   árbol. La producción se agrega TAMBIÉN por mes (no solo el total del
 //   rango) — hace falta para ponderar el coste real (ver punto siguiente).
 // - Coste real por artículo y componente, en el mismo rango de fechas
-//   (`costeReal` en TODOS los nodos del árbol, no solo finales): F4105.COUNCS,
-//   COMCU=10999, un código COLEDG distinto por mes ('6M'=enero 2026,
-//   '6N'=febrero...) sin fórmula fiable para deducirlo — igual problema que
-//   COLEDG_VIGENTE en api/compras/route.ts pero mensual en vez de anual, así
-//   que el mapeo mes->COLEDG vive en SQLite (tabla `coste_a1_coledg_mensual`,
-//   editable desde /admin) en vez de hardcodeado. Un mes del rango sin código
-//   configurado en esa tabla simplemente se ignora (no cuenta en el cálculo).
-//   Con un solo mes en el rango, el coste real es directamente el valor de
-//   F4105 de ese mes. Con varios meses, es la media PONDERADA por la
-//   producción real de cada mes — pero no la del propio nodo (una materia
-//   prima no tiene órdenes de fabricación propias): pondera con la producción
-//   mensual del artículo FINAL (raíz) al que pertenece ese despiece — todo el
-//   árbol de un mismo final comparte los mismos pesos mensuales, confirmado
-//   con el usuario. Si la producción total pesa 0 en todos los meses con
-//   coste disponible (caso raro: no debería pasar, solo se listan finales con
-//   producción en el rango), se cae a media simple entre esos meses en vez de
-//   dejar el dato vacío. Un mes sin coste en F4105 para ese código concreto
-//   se excluye del cálculo (ni cuenta en el numerador ni en el denominador),
-//   no se trata como 0.
+//   (`costeReal` en TODOS los nodos del árbol, no solo finales): MISMA tabla
+//   que el coste teórico, F30026, con el MISMO método de coste IECOST='A1'
+//   (Material) — para que sea comparable con el teórico hace falta el mismo
+//   componente de coste, no el coste unitario total del ledger (que suma
+//   Material + Mano de obra + Gastos + Amortización, etc. — ver corrección
+//   más abajo, en H.1). Lo único que cambia es el ledger: IELEDG='07' (Coste
+//   Estándar) para el teórico, un código IELEDG distinto por mes ('6M'=enero
+//   2026, '6N'=febrero...) para el real, sin fórmula fiable para deducirlo —
+//   igual problema que COLEDG_VIGENTE en api/compras/route.ts pero mensual en
+//   vez de anual, así que el mapeo mes->ledger vive en SQLite (tabla
+//   `coste_a1_coledg_mensual`, editable desde /admin) en vez de hardcodeado.
+//   Un mes del rango sin código configurado en esa tabla simplemente se
+//   ignora (no cuenta en el cálculo). Con un solo mes en el rango, el coste
+//   real es directamente el valor de F30026 de ese mes/ledger. Con varios
+//   meses, es la media PONDERADA por la producción real de cada mes — pero no
+//   la del propio nodo (una materia prima no tiene órdenes de fabricación
+//   propias): pondera con la producción mensual del artículo FINAL (raíz) al
+//   que pertenece ese despiece — todo el árbol de un mismo final comparte los
+//   mismos pesos mensuales, confirmado con el usuario. Si la producción total
+//   pesa 0 en todos los meses con coste disponible (caso raro: no debería
+//   pasar, solo se listan finales con producción en el rango), se cae a media
+//   simple entre esos meses en vez de dejar el dato vacío. Un mes sin coste
+//   en F30026 para ese código/ledger concreto se excluye del cálculo (ni
+//   cuenta en el numerador ni en el denominador), no se trata como 0.
+//   CORREGIDO (pedido explícito): al principio esta consulta leía F4105.COUNCS
+//   en vez de F30026.IECSL — F4105 da el coste unitario TOTAL del ledger, así
+//   que la "desviación real vs. teórico" mezclaba dos cosas distintas (coste
+//   total vs. solo Material) en vez de medir una desviación real de coste de
+//   material. Ver H.1 más abajo para el detalle de la consulta corregida.
 import { NextRequest, NextResponse } from 'next/server';
 import { getDbConnection } from '@/lib/db';
 import { getDayOfYear } from '@/lib/utils';
@@ -149,10 +159,11 @@ export interface DespieceNode {
   // cambia el catálogo).
   obsoleto: boolean; // F4101.IMSTKT = 'O' — mismo campo que ya usa /caducados
   costeA1: number | null;
-  // Coste real ponderado (F4105.COUNCS) en el rango de fechas pedido — en
-  // TODOS los nodos del árbol (a diferencia de `produccion`, que solo tiene
-  // valor en la raíz). `null` cuando ningún mes del rango tiene código COLEDG
-  // configurado, o ninguno tiene coste en F4105 para este código. Ver
+  // Coste real ponderado (F30026.IECSL, IECOST='A1', mismo componente que el
+  // teórico pero con el ledger mensual en vez de '07') en el rango de fechas
+  // pedido — en TODOS los nodos del árbol (a diferencia de `produccion`, que
+  // solo tiene valor en la raíz). `null` cuando ningún mes del rango tiene
+  // ledger configurado, o ninguno tiene coste en F30026 para este código. Ver
   // comentario de cabecera del archivo.
   costeReal: number | null;
   cantidad: number; // cantidad de este artículo por unidad de su padre directo (1 en la raíz)
@@ -167,7 +178,7 @@ export interface DespieceNode {
   // mes" (`components/nova/coste-a1-monthly-chart.tsx`): ese gráfico agrega
   // VARIOS finales a la vez, así que necesita el detalle por mes de cada uno
   // por separado, no el agregado ya ponderado que da `costeReal`.
-  // `costeRealPorMes[i].costeReal` es el valor RAW de F4105 para ese mes (sin
+  // `costeRealPorMes[i].costeReal` es el valor RAW de F30026 para ese mes (sin
   // ponderar por nada) — la ponderación entre artículos la hace el frontend al
   // construir la serie del gráfico.
   produccionPorMes?: { mes: string; produccion: number }[];
@@ -176,7 +187,7 @@ export interface DespieceNode {
 }
 
 export async function GET(req: NextRequest) {
-  const denied = await requireScreenAccess('coste_a1');
+  const denied = await requireScreenAccess('costes');
   if (denied) return denied;
   const startTime = Date.now();
   const { searchParams } = new URL(req.url);
@@ -424,25 +435,31 @@ export async function GET(req: NextRequest) {
     );
     const costMap = new Map((costResult.rows as CostRow[]).map((r) => [r.LARGO, r.COSTE_RAW / 10000]));
 
-    // H.1) Coste real (F4105.COUNCS), para TODOS los códigos del árbol (no solo
-    // finales) — un código COLEDG por cada mes del rango con mapeo configurado
-    // en `coste_a1_coledg_mensual` (ver más arriba). COMCU es NCHAR en Oracle:
-    // se bindea como STRING (nunca number) — bindearlo como número dispara una
-    // conversión implícita CHAR->NUMBER de la columna que revienta con
-    // ORA-01722 en cuanto alguna fila de la tabla no es puramente numérica
-    // (comprobado en real: `COMCU = :planta` con planta number falla; con
-    // planta string funciona).
+    // H.1) Coste real, para TODOS los códigos del árbol (no solo finales) — MISMA
+    // tabla que el coste teórico (F30026) y MISMO método de coste (IECOST='A1',
+    // Material) para que las dos cifras sean comparables: solo cambia el ledger
+    // (IELEDG), '07' (Coste Estándar) para el teórico, un código distinto por mes
+    // ('6M'=enero 2026, '6N'=febrero...) para el real, con mapeo configurado en
+    // `coste_a1_coledg_mensual` (ver más arriba).
+    //
+    // Corregido — ANTES esta consulta leía F4105.COUNCS (Coste Unitario), que es
+    // el coste total del ledger (Material + Mano de obra + Gastos + Amortización,
+    // etc.), no solo el componente Material. Comparar ese total contra el A1
+    // (solo Material) mezclaba dos cosas distintas y no era una desviación real
+    // de coste, sino en gran parte la diferencia entre "todo" y "una parte".
+    // Pedido explícito del usuario, que conoce el modelo de costes de JDE: leer
+    // el MISMO componente A1 pero del ledger mensual en vez del '07' estándar.
     const codigosColedg = Array.from(new Set(Array.from(coledgPorMes.values())));
-    const costeRealPorArticulo = new Map<string, Map<string, number>>(); // LARGO -> COLEDG -> coste
+    const costeRealPorArticulo = new Map<string, Map<string, number>>(); // LARGO -> IELEDG -> coste
     if (codigosColedg.length > 0) {
       const coledgPlaceholders = codigosColedg.map((_, i) => `:cd${i}`).join(', ');
       const coledgBinds: Record<string, string> = {};
       codigosColedg.forEach((v, i) => { coledgBinds[`cd${i}`] = v; });
       const costeRealResult = await conn.execute(
-        `SELECT TRIM(COLITM) AS LARGO, TRIM(COLEDG) AS COLEDG, COUNCS AS COSTE_RAW
-         FROM F4105
-         WHERE TRIM(COMCU) = :planta AND TRIM(COLEDG) IN (${coledgPlaceholders}) AND TRIM(COLITM) IN (${placeholders})`,
-        { planta: String(PLANTA), ...coledgBinds, ...binds }
+        `SELECT TRIM(IELITM) AS LARGO, TRIM(IELEDG) AS COLEDG, IECSL AS COSTE_RAW
+         FROM F30026
+         WHERE TRIM(IECOST) = 'A1' AND IEMMCU = ${PLANTA} AND TRIM(IELEDG) IN (${coledgPlaceholders}) AND TRIM(IELITM) IN (${placeholders})`,
+        { ...coledgBinds, ...binds }
       );
       (costeRealResult.rows as { LARGO: string; COLEDG: string; COSTE_RAW: number }[]).forEach((r) => {
         if (!costeRealPorArticulo.has(r.LARGO)) costeRealPorArticulo.set(r.LARGO, new Map());
@@ -452,7 +469,7 @@ export async function GET(req: NextRequest) {
 
     // Coste real ponderado de un código concreto, dados los pesos mensuales del
     // FINAL al que pertenece (mismo peso para todo su árbol). Un mes sin coste
-    // en F4105 para este código se excluye (no cuenta ni en el numerador ni en
+    // en F30026 para este código se excluye (no cuenta ni en el numerador ni en
     // el denominador). Si el peso total es 0 pero hay algún coste disponible,
     // cae a media simple entre esos meses en vez de devolver null — ver
     // comentario de cabecera del archivo.
@@ -569,7 +586,7 @@ export async function GET(req: NextRequest) {
       },
     });
   } catch (error) {
-    console.error('Error en /api/coste-a1:', error);
+    console.error('Error en /api/costes:', error);
     return NextResponse.json({ error: 'Error al calcular el coste y despiece' }, { status: 500 });
   } finally {
     if (conn) {

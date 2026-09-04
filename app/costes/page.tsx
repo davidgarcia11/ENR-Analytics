@@ -1,5 +1,5 @@
 // Coste A1 y despiece recursivo de materiales — para cada artículo "final" (el que
-// realmente se vende, ver /api/coste-a1), su coste A1 (F30026) y el árbol completo
+// realmente se vende, ver /api/costes), su coste A1 (F30026) y el árbol completo
 // de su lista de materiales (F3002, planta 10999), nivel a nivel. Foto del estado
 // VIGENTE HOY, no histórica por mes (a diferencia de MRP). Ver ClickUp #869eq7vnp.
 "use client";
@@ -54,7 +54,7 @@ export default function CosteA1Page() {
 
   // Mismo patrón que el resto de paneles (ver app/compras/page.tsx) — solo para
   // mostrar quién ha entrado y poder cerrar sesión desde la cabecera. El control de
-  // acceso real ya lo hace requireScreenAccess('coste_a1') en api/coste-a1/route.ts.
+  // acceso real ya lo hace requireScreenAccess('costes') en api/costes/route.ts.
   useEffect(() => {
     fetch("/api/auth/me")
       .then((r) => (r.ok ? r.json() : null))
@@ -88,7 +88,7 @@ export default function CosteA1Page() {
         startDate: filtros.monthRange.startDate,
         endDate: filtros.monthRange.endDate,
       });
-      const res = await fetch(`/api/coste-a1?${params}`);
+      const res = await fetch(`/api/costes?${params}`);
       if (res.status === 401 || res.status === 403) {
         router.push("/login");
         return;

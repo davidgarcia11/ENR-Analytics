@@ -5,7 +5,7 @@
 // desglose era un modal propio de ese archivo; al pasar el desglose a un panel
 // aparte (columna derecha) se extraen aquí para no duplicarlos.
 import { cn } from "@/lib/utils";
-import type { DespieceNode } from "@/app/api/coste-a1/route";
+import type { DespieceNode } from "@/app/api/costes/route";
 
 export type { DespieceNode };
 

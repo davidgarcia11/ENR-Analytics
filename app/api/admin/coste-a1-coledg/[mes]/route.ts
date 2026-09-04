@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getDb } from '@/lib/sqlite';
 
-// PUT /api/admin/coste-a1-coledg/:mes — edita el código COLEDG de un mes existente.
+// PUT /api/admin/coste-a1-coledg/:mes — edita el código de ledger IELEDG de un mes existente.
 // DELETE /api/admin/coste-a1-coledg/:mes — borra el mapeo de un mes (p. ej. si se
 // configuró con el código equivocado).
 export async function PUT(
@@ -22,7 +22,7 @@ export async function PUT(
 
   const coledg = (body.coledg ?? '').trim().toUpperCase();
   if (!coledg) {
-    return NextResponse.json({ error: 'El código COLEDG no puede estar vacío' }, { status: 400 });
+    return NextResponse.json({ error: 'El código IELEDG no puede estar vacío' }, { status: 400 });
   }
 
   try {

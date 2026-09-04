@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getDb } from '@/lib/sqlite';
 
-// GET /api/admin/coste-a1-coledg — lista mes -> código COLEDG (F4105).
+// GET /api/admin/coste-a1-coledg — lista mes -> código de ledger IELEDG (F30026).
 // POST /api/admin/coste-a1-coledg — añade un mes nuevo (no permite duplicar uno
 // existente, para eso está el PUT en [mes]/route.ts).
 export async function GET() {
@@ -31,7 +31,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Mes inválido (formato YYYY-MM)' }, { status: 400 });
   }
   if (!coledg) {
-    return NextResponse.json({ error: 'El código COLEDG no puede estar vacío' }, { status: 400 });
+    return NextResponse.json({ error: 'El código IELEDG no puede estar vacío' }, { status: 400 });
   }
 
   try {
