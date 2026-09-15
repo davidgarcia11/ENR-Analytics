@@ -22,6 +22,7 @@ import { PresetPanel, PresetQuickSelect, usePresets } from "@/components/PresetP
 import * as XLSX from 'xlsx'
 import { useRouter } from "next/navigation"
 import React from "react"
+import { plantJdeCode } from "@/lib/plants"
 
 // Coincidencia con comodín: * funciona como % en SQL (ej: *123, 123*, *123*)
 // Sin comodín → búsqueda de subcadena (comportamiento por defecto)
@@ -32,7 +33,7 @@ function matchesWildcard(value: string, pattern: string): boolean {
   return new RegExp('^' + escaped.replace(/\*/g, '.*') + '$', 'i').test(value)
 }
 
-interface SessionUser { id: number; username: string; role: string; name: string; surname: string }
+interface SessionUser { id: number; username: string; role: string; name: string; surname: string; defaultPlant: string }
 
 interface LotDetail {
   lineNumber: number
@@ -190,10 +191,18 @@ export default function PreparacionPedidos() {
   const deferredOrders = useDeferredValue(filteredOrders)
 
   // --- INIT ---
+  // Espera a conocer la sesión antes de la primera consulta, para que ya venga
+  // filtrada por la planta por defecto del usuario (si tiene una) y no se vea
+  // primero "todas las plantas" y luego solo la suya.
   useEffect(() => {
-    checkSession()
-    fetchPlants()
-    fetchData()
+    (async () => {
+      const user = await checkSession()
+      const code = plantJdeCode(user?.defaultPlant)
+      const initialPlants = code ? [code] : []
+      setSelectedPlants(initialPlants)
+      fetchPlants()
+      fetchData(initialPlants)
+    })()
     fetch('/api/categories?field=srp2').then(r => r.ok ? r.json() : []).then(setAllFamilias).catch(() => {})
   }, [])
 
@@ -206,13 +215,13 @@ export default function PreparacionPedidos() {
     } catch { }
   }
 
-  const checkSession = async () => {
+  const checkSession = async (): Promise<SessionUser | null> => {
     try {
       const res = await fetch('/api/auth/me')
       let user = null
       if (res.ok) {
         user = await res.json()
-        if (user.mustChangePassword) { router.push('/cambiar-contrasena'); return }
+        if (user.mustChangePassword) { router.push('/cambiar-contrasena'); return null }
         setSessionUser(user)
       }
       const screensRes = await fetch('/api/screen-permissions')
@@ -221,11 +230,12 @@ export default function PreparacionPedidos() {
         const mine = screens['pedidos']
         if (mine && !mine.is_public) {
           if (!user || (user.role !== 'admin' && !mine.allowed_roles.includes(user.role))) {
-            router.push('/login'); return
+            router.push('/login'); return null
           }
         }
       }
-    } catch { }
+      return user
+    } catch { return null }
   }
 
   const logout = async () => {
@@ -233,7 +243,9 @@ export default function PreparacionPedidos() {
     setSessionUser(null)
   }
 
-  const fetchData = async () => {
+  // plantsOverride se usa solo en la carga inicial, cuando aún no ha dado tiempo
+  // a que el estado selectedPlants recién fijado se refleje en este cierre (closure).
+  const fetchData = async (plantsOverride?: string[]) => {
     // Aplicar filtros cliente al lanzar la búsqueda
     setAppliedArticles(selectedArticles)
     setAppliedDestinos(selectedDestinos)
@@ -244,7 +256,8 @@ export default function PreparacionPedidos() {
     setLoading(true)
     try {
       const params = new URLSearchParams()
-      selectedPlants.forEach(v => params.append('plant', v))
+      const plantsToUse = plantsOverride ?? selectedPlants
+      plantsToUse.forEach(v => params.append('plant', v))
       if (filters.startDate)        params.append('startDate',        filters.startDate)
       if (filters.endDate)          params.append('endDate',          filters.endDate)
       if (filters.deliveryStartDate) params.append('deliveryStartDate', filters.deliveryStartDate)
@@ -418,7 +431,8 @@ export default function PreparacionPedidos() {
             onClose={() => setShowPresets(false)}
             getFilters={getPresetFilters}
             applyFilters={applyPresetFilters}
-            hint="Se guardarán las plantas, fechas, estado, artículo, destino y búsquedas seleccionados."
+            dateFields={['startDate', 'endDate', 'deliveryStartDate', 'deliveryEndDate']}
+            hint="Se guardarán las plantas, estado, artículo, destino y búsquedas seleccionados."
           />
         )}
 

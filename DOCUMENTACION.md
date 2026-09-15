@@ -34,7 +34,7 @@ Esta aplicación es un **panel de control (dashboard) de producción** para la e
 | **xlsx** | 0.18 | Generar archivos Excel (.xlsx) |
 | **recharts** | — | Gráficos de líneas para estadísticas de logs |
 | **lucide-react** | 0.563 | Iconos SVG (Search, Factory, Download...) |
-| **@radix-ui/react-popover** | — | Popover posicionado con Portal (usado por `DatePicker` y `MermaCellPopover`) |
+| **@radix-ui/react-popover** | — | Popover posicionado con Portal (usado por `MermaCellPopover`; la versión anterior de `app/compras/page.tsx` también lo usaba — el `/compras` actual, sobre Nova, usa `components/nova/ui/popover.tsx` en su lugar) |
 | **Bun** | — | Gestor de paquetes y runtime (alternativa a npm/node) |
 
 ---
@@ -70,6 +70,7 @@ dashboard/
 │   ├── sqlite.ts                 ← Conexión a SQLite (usuarios, presets, migraciones, roles, pantallas)
 │   ├── auth.ts                   ← JWT, bcrypt, SessionUser, cookieOptions
 │   ├── permissions.ts            ← Control de acceso por pantalla (getAllScreensConfig, requireScreenAccess)
+│   ├── panels.ts                 ← Fuente única de los paneles reales (clave, label, href, icono, descripción)
 │   ├── utils.ts                  ← Funciones auxiliares (fechas, cantidades, clases CSS)
 │   ├── reflex.ts                 ← Conexión a SQL Server (Reflex), análoga a db.ts para Oracle
 │   └── gs1.ts                    ← Parser de códigos de barras GS1-128 (EAN/lote/cantidad/SSCC/fechas)
@@ -221,6 +222,7 @@ CREATE TABLE users (
   must_change_password INTEGER DEFAULT 0,   -- 1 = forzar cambio en próximo login
   name TEXT NOT NULL DEFAULT '',             -- Nombre del usuario
   surname TEXT NOT NULL DEFAULT '',          -- Apellido del usuario
+  default_plant TEXT NOT NULL DEFAULT '',    -- id de lib/plants.ts, '' = sin planta por defecto (todas)
   created_at TEXT DEFAULT (datetime('now'))
 );
 
@@ -281,6 +283,25 @@ CREATE TABLE jde_status_descriptions (
   description TEXT NOT NULL,
   updated_at TEXT DEFAULT (datetime('now'))
 );
+
+-- Mapeo mes -> código de ledger IELEDG de F30026 (coste real mensual, JDE), editable desde /admin (ver docs/costes.md §3.4)
+CREATE TABLE coste_a1_coledg_mensual (
+  mes TEXT PRIMARY KEY,
+  coledg TEXT NOT NULL,
+  updated_at TEXT DEFAULT (datetime('now'))
+);
+
+-- Registro de aceptación del pop-up de /consulta-stock-pda (ver docs/consulta-stock-pda.md §8.2)
+CREATE TABLE stock_scan_confirmations (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  username TEXT NOT NULL DEFAULT 'Invitado',
+  sscc TEXT NOT NULL,
+  articulo TEXT,
+  estado TEXT NOT NULL,
+  mensajes TEXT NOT NULL,        -- JSON array de los mensajes exactos mostrados
+  created_at TEXT DEFAULT (datetime('now'))
+);
 ```
 
 **Seeds iniciales:**
@@ -292,7 +313,7 @@ CREATE TABLE jde_status_descriptions (
 Todos los seeds usan `INSERT OR IGNORE` para no romper DBs existentes.
 
 **Migraciones automáticas:** Al arrancar, comprueba si faltan columnas y las añade con `ALTER TABLE`. Columnas gestionadas:
-- `must_change_password`, `name`, `surname` → tabla `users`
+- `must_change_password`, `name`, `surname`, `default_plant` → tabla `users`
 - `source` → tabla `query_logs`
 - `screen` → tabla `presets` (con `DEFAULT 'produccion'` para no romper presets anteriores)
 
@@ -316,8 +337,44 @@ interface SessionUser {
   role: string;
   name: string;
   surname: string;
+  defaultPlant: string;
 }
 ```
+
+### `lib/plants.ts` — Plantas, sub-plantas y planta por defecto del usuario
+
+Fuente única de las 4 plantas físicas de la empresa (Aguilar, Corella, Funes, Tudefrigo). Cada
+sistema tiene su propio código para la misma planta física — JDE (`F0006.MCMCU`) y Reflex
+(`HLEMPLP.EMCDPO`) — así que `lib/plants.ts` define un `id` canónico por planta (el que se guarda
+en `users.default_plant`) y expone `plantJdeCode(id)` / `plantReflexCode(id)` / `plantLabel(id)`
+para traducirlo al código que necesita cada panel. `id` vacío = el usuario no tiene planta por
+defecto (se comporta como "Todas", igual que antes de tener esta función).
+
+Los códigos JDE se confirmaron consultando `F0006` (`WHERE MCSTYL = 'BP'`), no son una suposición:
+
+| Planta | `id` canónico | Código JDE | Código Reflex |
+|---|---|---|---|
+| Aguilar | `aguilar` | `10100` | `001` |
+| Corella | `corella` | `10200` | `002` |
+| Funes | `funes` | `10300` | `004` |
+| Tudefrigo | `tudefrigo` | `10003` | `006` |
+
+**Uso en los paneles con filtro de planta** (`/produccion`, `/preparacion-pedidos`, `/caducados`,
+`/consulta-stock-pda`): al cargar, cada panel espera a conocer la sesión (`/api/auth/me`) antes de
+disparar su primera consulta, resuelve `defaultPlant` al código de su propio sistema, y lo usa como
+filtro inicial — así la primera pantalla ya sale filtrada, sin parpadeo de "todas las plantas" y
+luego solo la suya. `/produccion` solo tiene como opción Aguilar/Corella/Funes (Tudefrigo es
+almacén, no se produce ahí): si la planta por defecto de un usuario es Tudefrigo, ese panel en
+concreto cae a "Todas", los demás paneles sí la aplican. `/compras` y `/comparativa-seres` no
+tienen filtro de planta, no usan este módulo.
+
+**Sub-plantas de Funes** (`FUNES_SUBPLANTS`, `funesSubplantLabel()`, `plantHasSubplants()`): Funes
+es la única planta con dos naves físicas, y el stock del mismo artículo se reparte entre ellas. Se
+identifican con `HLEMPLP.EMCMGN` en Reflex (`004` = Funes 1, `005` = Funes 2) y las usa
+`/consulta-stock-pda` para no recomendar un palet que está en la nave de al lado — ver
+`docs/consulta-stock-pda.md` §7.5 para el detalle (incluido el aviso de que `EMCMGN` **no** es único
+entre depósitos, así que siempre se filtra junto con `EMCDPO`). No mapean 1:1 con las sub-líneas de
+`/produccion`, que salen de JDE y son tres (Funes 1 / Funes 2 / Funes Past.).
 
 ### Flujo de autenticación
 
@@ -357,9 +414,9 @@ Solo usuarios con `role === 'admin'`. Si no eres admin, te redirige a `/producci
 El panel tiene cuatro pestañas: **Usuarios**, **Roles**, **Pantallas** y **Estados JDE**.
 
 #### Pestaña Usuarios
-1. **Crear usuario:** Formulario con campos Nombre, Apellido, Usuario (login), Contraseña, Rol (dropdown dinámico desde BD), checkbox "Forzar cambio de contraseña"
-2. **Listar usuarios:** Tabla con ID, Nombre completo, Usuario, Rol (badge), Fecha creación
-3. **Editar usuario:** Botón lápiz azul → fila editable (nombre, apellido, usuario, rol). Valida unicidad del username (409 inline)
+1. **Crear usuario:** Formulario con campos Nombre, Apellido, Usuario (login), Contraseña, Rol (dropdown dinámico desde BD), Planta por defecto (dropdown desde `lib/plants.ts` — "Todas" + las 4 plantas), checkbox "Forzar cambio de contraseña"
+2. **Listar usuarios:** Tabla con ID, Nombre completo, Usuario, Rol (badge), Planta, Fecha creación
+3. **Editar usuario:** Botón lápiz azul → fila editable (nombre, apellido, usuario, rol, planta por defecto). Valida unicidad del username (409 inline)
 4. **Resetear contraseña:** Botón llave ámbar → input inline → nueva contraseña + fuerza cambio en próximo login
 5. **Eliminar usuario:** Con confirmación. No permite auto-eliminación.
 
@@ -383,13 +440,21 @@ Edición de las descripciones de los códigos `F47011.SYEDSP` que se muestran en
 - Persistencia en SQLite (tabla `jde_status_descriptions`). El seed inicial es idempotente (`INSERT OR IGNORE`), por lo que las ediciones manuales **no se sobreescriben** en futuros despliegues.
 - Cuando el admin guarda un cambio, el panel `/comparativa-seres` lo verá la próxima vez que se cargue (hace `fetch('/api/jde-statuses')` al montar).
 
+#### Pestaña Coste real (Costes)
+Mapeo mes → código de ledger `IELEDG` de `F30026` (mismo `IECOST='A1'` que el coste teórico, coste real mensual JDE) usado por `/costes` para ponderar el coste real por producción — ver `docs/costes.md` §3.4.
+
+- JDE genera un código `IELEDG` nuevo cada mes (ej. `'6M'` = enero 2026) sin fórmula deducible — hay que consultar `F30026` y añadirlo aquí cada vez que aparezca un mes nuevo.
+- Formulario **Añadir mes** (selector `<input type="month">` + código) y tabla de meses ya configurados, cada uno editable (input + botón **Guardar**) y borrable.
+- Persistencia en SQLite (tabla `coste_a1_coledg_mensual`, `mes` 'YYYY-MM' como clave primaria). Sin seed inicial — vacía hasta que el admin la rellene.
+- Un mes del rango de `/costes` sin código configurado aquí se ignora en el cálculo (no bloquea el resto) y se reporta en `meta.mesesSinConfigurar` de la respuesta de la API.
+
 ### APIs de administración
 
 | Método | Ruta | Descripción |
 |---|---|---|
 | GET | `/api/admin/users` | Lista todos los usuarios |
 | POST | `/api/admin/users` | Crea usuario. Rol validado contra tabla `roles`. 409 si username duplicado |
-| PUT | `/api/admin/users/:id` | Edita datos (nombre, apellido, username, rol). 409 si username duplicado |
+| PUT | `/api/admin/users/:id` | Edita datos (nombre, apellido, username, rol, planta por defecto). 409 si username duplicado |
 | PATCH | `/api/admin/users/:id` | Resetea contraseña (fuerza cambio en próximo login) |
 | DELETE | `/api/admin/users/:id` | Elimina usuario (no permite auto-eliminación) |
 | GET | `/api/admin/roles` | Lista todos los roles |
@@ -400,6 +465,10 @@ Edición de las descripciones de los códigos `F47011.SYEDSP` que se muestran en
 | PUT | `/api/admin/jde-statuses/:code` | Actualiza la descripción de un código existente. No permite crear ni borrar |
 | GET | `/api/jde-statuses` | Lista pública (con sesión) consumida por `/comparativa-seres` |
 | GET | `/api/admin/logs` | Logs de consultas con paginación, filtros y estadísticas (ver sección 7) |
+| GET | `/api/admin/coste-a1-coledg` | Lista el mapeo mes→código de ledger IELEDG (F30026, con `updated_at`) |
+| POST | `/api/admin/coste-a1-coledg` | Crea un mes nuevo (`mes` 'YYYY-MM' + `coledg`). 409 si el mes ya existe |
+| PUT | `/api/admin/coste-a1-coledg/:mes` | Actualiza el código de un mes existente |
+| DELETE | `/api/admin/coste-a1-coledg/:mes` | Elimina el mapeo de un mes |
 
 ---
 
@@ -703,6 +772,18 @@ Solo accesible para admins. Se accede desde:
 - `summarizeFilters()` convierte el JSON de filtros en un resumen legible (ej: "Aguilar · 01/03 - 02/03 · 3 filtros"). También maneja filtros específicos de caducados (type, location).
 - Las estadísticas, gráfico y ranking excluyen entradas de login (solo consultas reales)
 
+### Pestaña "Confirmaciones PDA" (`/admin/logs`)
+
+Segunda pestaña de la misma página (`<Tabs>`, junto a "Consultas"), con su propio estado y su
+propia API — no reutiliza `query_logs`. Lista el registro de aceptación del pop-up obligatorio de
+`/consulta-stock-pda` (ver `docs/consulta-stock-pda.md` §8.2): quién aceptó qué aviso, con qué SSCC
+y cuándo — trazabilidad si un producto se mete erróneamente en línea.
+
+- **Archivo:** mismo `app/admin/logs/page.tsx`, tabla `stock_scan_confirmations`.
+- **API:** `GET /api/admin/scan-confirmations` (`app/api/admin/scan-confirmations/route.ts`) — paginada, filtros por usuario, resultado (correcto/aviso/no_encontrado/sin_fecha/otra_subplanta), SSCC (parcial) y rango de fechas. Solo admin.
+- **Tabla:** Fecha/Hora, Usuario, SSCC completo, Artículo, Resultado aceptado (badge de color + los mensajes exactos que vio el operario).
+- No comparte filtros, paginación ni contador de página con la pestaña "Consultas" — son datasets independientes.
+
 ### Persistencia
 
 Los logs se almacenan en `data/app.db` (SQLite), igual que usuarios y presets. No se pierden al hacer `git pull`, `bun install` o `bun run build`.
@@ -784,6 +865,10 @@ Cada panel tiene su documentación específica en la carpeta `docs/`:
 | Palets caducados/obsoletos/bloqueados | `/caducados` | [docs/palets-caducados.md](docs/palets-caducados.md) |
 | Comparativa SERES vs JDE | `/comparativa-seres` | [docs/seres-jde-comparativa.md](docs/seres-jde-comparativa.md) |
 | Consulta de stock por escaneo (FEFO, Reflex) | `/consulta-stock-pda` | [docs/consulta-stock-pda.md](docs/consulta-stock-pda.md) |
+| Compras (previsión de ventas vs. venta real, rediseño sobre sistema Nova) | `/compras` | [docs/compras.md](docs/compras.md) |
+| Explosión de compras (MRP) | `/mrp` | [docs/mrp.md](docs/mrp.md) |
+| Coste A1 y despiece recursivo de materiales (sistema Nova) | `/costes` | [docs/costes.md](docs/costes.md) |
+| Control de muestras (pendiente/enviado/completado) | `/muestras` | [docs/muestras.md](docs/muestras.md) |
 | Loteadora | `/loteadora` | [docs/loteadora.md](docs/loteadora.md) |
 
 ### API externa — `GET /api/jde-orders`
@@ -842,10 +927,10 @@ Tarjeta de métrica (borde superior rojo corporativo vía `Card accent`, icono, 
 
 ### `PresetPanel.tsx` — `PresetPanel`, `PresetQuickSelect`, `usePresets`
 
-Sistema de presets compartido por todos los paneles con presets (`caducados`, `preparacion-pedidos`, `comparativa-seres`; `produccion` mantiene su propia variante integrada en `FilterPanel`). Antes estaba duplicado (con pequeñas divergencias que eran bugs latentes) en cada página.
+Sistema de presets compartido por los paneles con presets (`caducados`, `preparacion-pedidos`, `comparativa-seres`; `produccion` mantiene su propia variante integrada en `FilterPanel`). Antes estaba duplicado (con pequeñas divergencias que eran bugs latentes) en cada página. **`/compras` (sobre Nova) no tiene filtros ni presets conectados todavía** — la versión anterior sí los tenía; ver `docs/compras.md` §10 y la nota sobre "Presets" en el dropdown de perfil de `components/nova/README.md`.
 
 - **`usePresets(screen)`** — hook que hace el `fetch('/api/presets?screen=...')` y expone `{ presets, reload }`. Se llama **una vez por página** y su resultado se reparte a los otros dos componentes, para que ambos vean siempre la misma lista sin fetches duplicados ni desincronización tras guardar/borrar.
-- **`PresetPanel`** — panel "Mis Presets de Filtros" (guardar/editar/listar/borrar). Props: `screen`, `presets`, `onReload` (del hook), `open`, `onClose`, `getFilters()` (serializa el estado de filtros actual), `applyFilters(filters)` (restaura cada filtro con sus defaults), `hint?`. Gestiona guardar/editar (`toast` de éxito/error) y borrado con `ConfirmDialog` de confirmación (antes era un borrado inmediato sin confirmar); llama a `onReload()` tras cada cambio.
+- **`PresetPanel`** — panel "Mis Presets de Filtros" (guardar/editar/listar/borrar). Props: `screen`, `presets`, `onReload` (del hook), `open`, `onClose`, `getFilters()` (serializa el estado de filtros actual), `applyFilters(filters)` (restaura cada filtro con sus defaults), `hint?`, `dateFields?` (nombres de campos de fecha; si se pasan, añade el checkbox "Incluir fechas" — ver `docs/design-system.md` §5). Gestiona guardar/editar (`toast` de éxito/error) y borrado con `ConfirmDialog` de confirmación (antes era un borrado inmediato sin confirmar); llama a `onReload()` tras cada cambio.
 - **`PresetQuickSelect`** — desplegable de carga inmediata en la barra de acciones (junto a Filtrar/Excel/Limpiar), para cargar un preset sin abrir el panel completo. Props: `presets`, `onSelect(preset)`. No renderiza nada si no hay presets guardados.
 
 Cada panel debe montar los tres juntos — ver el checklist de [`docs/design-system.md`](docs/design-system.md#5-componentes-de-panel-components) para el patrón completo.
@@ -858,21 +943,21 @@ Barra de navegación compartida por todos los paneles. Reemplaza el top bar dupl
 
 | Prop | Tipo | Descripción |
 |---|---|---|
-| `currentPanel` | `'produccion' \| 'pedidos' \| 'caducados' \| 'comparativa'` (opcional) | Panel activo (se marca con punto rojo en el dropdown). Se omite en páginas que usan `Navbar`/`AppShell` pero no son uno de los 4 paneles reales (ej. `/admin/logs`) — así no marcan ninguno como activo |
+| `currentPanel` | `PanelKey` (de `lib/panels.ts`, opcional) | Panel activo (se marca con punto rojo en el dropdown). Se omite en páginas que usan `Navbar`/`AppShell` pero no son uno de los paneles reales (ej. `/admin/logs`) — así no marcan ninguno como activo |
 | `user` | `SessionUser \| null` | Usuario de sesión. Si es null, muestra botón "Iniciar sesión" |
 | `onLogout` | `() => void` | Callback para cerrar sesión |
-| `onPresetsClick` | `() => void` (opcional) | Si se pasa, aparece el botón "Presets". Lo wirean los 4 paneles (`/produccion`, `/preparacion-pedidos`, `/caducados`, `/comparativa-seres`) sólo con sesión activa |
+| `onPresetsClick` | `() => void` (opcional) | Si se pasa, aparece el botón "Presets". Lo wirean los paneles con presets (`/produccion`, `/preparacion-pedidos`, `/caducados`, `/comparativa-seres`) sólo con sesión activa. `/compras` (Nova) no usa `Navbar`/`AppShell` y no tiene presets conectados todavía — ver `docs/compras.md` §10 |
 
 **Comportamiento:**
 - Logo a la izquierda
 - Botón **"Paneles ▾"** con dropdown filtrado según permisos: solo muestra los paneles a los que el usuario actual tiene acceso. Si no hay ninguno accesible, el botón se oculta.
-- Botón "Presets" visible en los 4 paneles cuando hay sesión. Al pulsarlo, cada panel incrementa una señal interna (`presetsSignal`) que abre su propio panel/modal de presets. Los presets están aislados por `screen` (`produccion`, `pedidos`, `caducados`, `comparativa`)
+- Botón "Presets" visible en los paneles con presets cuando hay sesión. Al pulsarlo, cada panel incrementa una señal interna (`presetsSignal`) que abre su propio panel/modal de presets. Los presets están aislados por `screen` (`produccion`, `pedidos`, `caducados`, `comparativa`, `compras`)
 - Con sesión: nombre del usuario, botones Admin y Logs (solo si `role === 'admin'`), botón Salir
 - Sin sesión: enlace "Iniciar sesión"
 
 La Navbar obtiene la configuración de pantallas de `GET /api/screen-permissions` en un `useEffect` al montarse. Usa la misma función `canAccessPanel()` que las páginas para decidir qué mostrar.
 
-**Añadir un nuevo panel al dropdown:** añadir una entrada al array `PANELS` en `components/Navbar.tsx` y usar la nueva clave en `currentPanel`.
+**Añadir un nuevo panel al dropdown:** añadir una entrada a `PANELS` en `lib/panels.ts` — **no** en `Navbar.tsx` directamente. Es la fuente única que también usan la portada (`app/page.tsx`), el login (`app/login/page.tsx`) y `SCREEN_KEYS` de `app/admin/page.tsx`; ver `docs/design-system.md` §5.1 para el porqué (dos bugs reales salieron de tener esta lista copiada en cada sitio).
 
 ### `FilterPanel.tsx`
 
@@ -903,7 +988,7 @@ Wrapper fino sobre `<input type="date">` nativo del navegador. Devuelve y recibe
 
 ### `components/ui/popover.tsx`
 
-Componente `Popover` / `PopoverTrigger` / `PopoverContent` estilo shadcn/ui basado en `@radix-ui/react-popover`. `PopoverContent` renderiza en Portal para garantizar z-index correcto sobre cualquier elemento. Lo usan `DatePicker` y `MermaCellPopover`.
+Componente `Popover` / `PopoverTrigger` / `PopoverContent` estilo shadcn/ui basado en `@radix-ui/react-popover`. `PopoverContent` renderiza en Portal para garantizar z-index correcto sobre cualquier elemento. Lo usa `MermaCellPopover` (y lo usaba la tarjeta KPI de Kg de la versión anterior de `/compras`, ver `docs/compras-v1-historico.md` §13.1 — el `/compras` actual usa el `Popover` propio del sistema Nova, `components/nova/ui/popover.tsx`, no este).
 
 ### `ArticleMultiSelect.tsx`
 

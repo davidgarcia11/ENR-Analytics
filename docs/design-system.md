@@ -5,6 +5,8 @@
 
 Este documento es la referencia obligatoria antes de escribir JSX/CSS en cualquier panel. Si algo de lo que necesitas no está aquí, es más probable que falte un componente por crear que una excepción por hacer.
 
+> **Excepción — sistema Nova:** `/compras` usa un segundo sistema de diseño (ShadcnSpace, aislado vía `[data-nova-theme]`), que **no** sigue las reglas de este documento. Si vas a tocar ese panel (o a construir el siguiente sobre Nova), lee [`components/nova/README.md`](../components/nova/README.md) y [`docs/compras.md`](compras.md) §6 en su lugar. El resto de paneles sigue usando exactamente lo de aquí.
+
 ---
 
 ## 1. Regla de oro
@@ -61,7 +63,7 @@ Estilo shadcn simplificado. Todos aceptan `className` para extender, nunca para 
 | Componente | Uso | Notas |
 |---|---|---|
 | `Button` | Cualquier acción clicable | Variantes: `default` (rojo corporativo), `destructive`, `outline`, `secondary`, `ghost`, `link`. Tamaños: `default`, `sm`, `lg`, `icon`. El botón "principal" de una página (Filtrar, Guardar, Crear) es siempre `variant="default"` — no le pongas `style={{backgroundColor:'#D30B15'}}`, ya lo es. |
-| `Card` | Contenedor con borde y sombra | Prop **`accent`** (`<Card accent>`) añade el borde superior rojo de 3px + `overflow-hidden`. Es el reemplazo directo de `style={{borderTop:'3px solid #D30B15'}}`. Úsalo en toda tarjeta de panel/filtros/KPI. |
+| `Card` | Contenedor con borde y sombra | Prop **`accent`** (`<Card accent>`) añade el borde superior rojo de 3px + `overflow-hidden`. Es el reemplazo directo de `style={{borderTop:'3px solid #D30B15'}}`. Úsalo en toda tarjeta de panel/filtros/KPI. **Si la Card contiene un `ArticleMultiSelect`/`SingleSelect`** (menú `absolute`), añade `className="overflow-visible"` — si no, el `overflow-hidden` de `accent` recorta el desplegable al abrirlo. Ya pasó en compras, caducados, producción y comparativa SERES; ver `overflow-visible` en cualquiera de esos filtros como ejemplo. |
 | `Input` | Campo de texto | Ya trae borde, foco y disabled tokenizados. |
 | `Table` / `TableHeader` / `TableBody` / `TableRow` / `TableHead` / `TableCell` | Tablas de datos | `TableRow` ya tiene hover; si la fila no debe reaccionar al hover (fila de estado, spinner, empty state), añade `className="hover:bg-transparent"`. |
 | `Popover` / `PopoverTrigger` / `PopoverContent` | Desplegables posicionados | Basado en Radix, con Portal. |
@@ -140,6 +142,7 @@ const applyPresetFilters = (f: Record<string, unknown>) => {
   getFilters={() => ({ /* objeto con TUS filtros actuales */ })}
   applyFilters={applyPresetFilters}
   hint="Se guardarán X, Y y Z."       // opcional, texto de ayuda bajo el botón Guardar
+  dateFields={['startDate', 'endDate']}  // opcional, ver más abajo — omite si tu panel no tiene fechas
 />
 
 // 2) Desplegable de carga rápida — junto a los botones Filtrar/Excel/Limpiar
@@ -155,15 +158,58 @@ La página aporta:
 
 El hook `usePresets(screen)` es quien de verdad hace el fetch a `/api/presets?screen=...` — se llama **una vez** en la página y se reparte a ambos componentes. Esto es importante: si cada componente hiciera su propio fetch, el desplegable rápido y el panel podrían mostrar listas desincronizadas después de guardar/borrar un preset. `PresetPanel` llama a `onReload()` (el `reload` del hook) tras guardar/editar/borrar, así que el desplegable rápido se actualiza solo.
 
+**`dateFields` — "Incluir fechas" opcional al guardar (igual que producción/`FilterPanel`)**: si tu panel filtra por rango de fechas, pásale la lista de claves de fecha que devuelve tu `getFilters()` (ej. `['startDate', 'endDate']`, o con fecha de entrega `['startDate','endDate','deliveryStartDate','deliveryEndDate']` como en pedidos). Con esto:
+- Aparece un checkbox **"Incluir fechas"** junto al nombre, desmarcado por defecto — si no lo marcas, esas claves se borran del objeto antes de guardarlo, así el preset sirve para cualquier día.
+- Los presets guardados con fecha muestran un icono de calendario junto al nombre.
+- Al editar un preset que ya tenía fechas, el checkbox aparece premarcado solo.
+
+Si tu panel no tiene filtro de fechas (ej. caducados) o usa un filtro relativo que no caduca igual (ej. "últimos N días" en comparativa SERES), simplemente **omite** `dateFields` — el componente se comporta exactamente igual que antes, sin checkbox.
+
 Todo lo demás (guardar, editar, listar, `ConfirmDialog` al borrar, toasts de éxito/error) lo gestiona `PresetPanel`. La página sigue necesitando su propio estado `showPresets` (booleano) y `presetsSignal` (para que el botón "Presets" del Navbar lo abra) — eso no cambia.
+
+### `lib/panels.ts` — fuente única de paneles (§5.1)
+
+**Nunca vuelvas a declarar una lista de paneles a mano.** Hasta que existía este archivo, la
+misma lista (clave, label, href, icono) estaba copiada en 5 sitios — `Navbar.tsx`, la portada
+(`app/page.tsx`), el login (`app/login/page.tsx`), `SCREEN_KEYS` de `app/admin/page.tsx` y el seed
+de la tabla `screens` en `lib/sqlite.ts` — y añadir un panel nuevo significaba acordarse de
+actualizar los 5 a mano. Dos bugs reales salieron de esto: un panel aparecía en unos sitios sí y en
+otros no (logs, permisos, portada), y en el peor caso un usuario con acceso real a un panel **no
+podía ni iniciar sesión** porque `login/page.tsx` no lo reconocía en su copia de la lista. El seed
+de SQLite tenía el mismo problema latente (detectado en revisión antes de causar un incidente): un
+panel sin fila en `screens` queda público por defecto y ni siquiera aparece en "Pantallas" de
+`/admin` para poder restringirlo.
+
+```ts
+// lib/panels.ts
+export const PANELS = [
+  { key: 'mi_panel', label: 'Mi Panel', href: '/mi-panel', Icon: MiIcono, description: '...' },
+  ...
+] as const
+
+export type PanelKey = typeof PANELS[number]['key']
+```
+
+`Navbar.tsx`, `app/page.tsx` y `app/login/page.tsx` importan `PANELS` directamente; `SCREEN_KEYS`
+de `app/admin/page.tsx` se deriva con `PANELS.map(({ key, label }) => ({ key, label }))`; el seed
+de `lib/sqlite.ts` itera `PANELS` con un `INSERT OR IGNORE` preparado (públicas por defecto, igual
+que antes). Añadir un panel nuevo es **una sola línea en un solo archivo** — los 5 consumidores se
+actualizan solos.
 
 ### `Navbar` (`components/Navbar.tsx`)
 
-No se toca su API al añadir un panel nuevo salvo un paso: añadir la entrada al array `PANELS` (clave, label, href, icono) — ver `DOCUMENTACION.md` sección 10.
+No se toca su API al añadir un panel nuevo — importa `PANELS` de `lib/panels.ts` (ver §5.1). Solo
+gestiona el dropdown, la sesión y el filtrado por permisos (`canAccessPanel`).
 
 ### `FilterPanel` (`components/FilterPanel.tsx`)
 
 Es específico del dashboard de producción (categorías JDE). Para un panel nuevo con filtros propios, **no lo reutilices tal cual** — construye tu propio bloque de filtros dentro de un `<Card accent>` siguiendo el patrón visual: `p-4 space-y-4`, secciones separadas por `<div className="border-t border-border" />`, labels `text-xs font-semibold text-secondary-foreground`, título de sección `text-xs font-semibold text-muted-foreground uppercase tracking-wider`.
+
+### `ArticleMultiSelect` / `SingleSelect` (`components/ArticleMultiSelect.tsx`, `components/SingleSelect.tsx`)
+
+Desplegables con el mismo look (botón + panel `absolute` blanco redondeado con buscador y hover). `ArticleMultiSelect` es multi-selección (categorías, artículos, plantas...); `SingleSelect` es de una sola opción con una opción "Todas" implícita (planta, sub-planta...). **Nunca un `<select>` nativo** para un filtro de panel — se ve distinto al resto (estilo del navegador) y rompe la consistencia visual. `PresetQuickSelect` ("Cargar preset") sigue el mismo patrón visual aunque no reutiliza estos componentes (es una acción de un solo disparo, no un filtro con valor persistente).
+
+Van siempre dentro de una `<Card accent>` — recuerda el `overflow-visible` de la fila `Card` de la tabla del punto 4, si no el menú se recorta al abrirse.
 
 ---
 
@@ -186,8 +232,8 @@ Estas cuatro reglas sustituyeron comportamientos concretos que existían en el c
 Sigue este orden; cada paso da por hecho que el anterior está hecho.
 
 1. **Página** (`app/mi-panel/page.tsx`, `"use client"`): monta `<AppShell navbar={{...}} title="..." description="...">` como contenedor raíz. No repitas `<main>`/`max-w-*`/`<Navbar>` sueltos.
-2. **Navbar**: añade tu panel al array `PANELS` en `components/Navbar.tsx` (clave, label, href, icono de lucide-react). Si el panel debe poder restringirse por rol, añade su `key` a `SCREEN_KEYS` en `app/admin/page.tsx` para que aparezca en la pestaña "Pantallas".
-3. **Filtros**: bloque propio en un `<Card accent>` siguiendo el patrón del punto 5 (FilterPanel). Usa `Input`, `DatePicker`, `ArticleMultiSelect`/`SingleSelect` según el tipo de filtro.
+2. **Registrar el panel**: añade una entrada a `PANELS` en `lib/panels.ts` (clave, label, href, icono de lucide-react, descripción) — **y solo ahí** (ver §5.1). `Navbar.tsx`, la portada (`app/page.tsx`), el login (`app/login/page.tsx`) y `SCREEN_KEYS` de `app/admin/page.tsx` lo importan automáticamente, no hay que tocarlos.
+3. **Filtros**: bloque propio en un `<Card accent>` siguiendo el patrón del punto 5 (FilterPanel). Usa `Input`, `DatePicker`, `ArticleMultiSelect`/`SingleSelect` según el tipo de filtro (nunca un `<select>` nativo — ver punto 5). Si usas `ArticleMultiSelect`/`SingleSelect`, añade `overflow-visible` a la `Card accent` (ver punto 4) o el desplegable se recorta.
 4. **Presets** (si el panel los necesita): estado `showPresets`/`presetsSignal` + `const { presets, reload } = usePresets('mi_panel')` + `<PresetPanel .../>` **y** `<PresetQuickSelect .../>` en la barra de acciones — ver punto 5. Recuerda pasar `onPresetsClick` al `navbar` del `AppShell`.
 5. **KPIs** (si aplica): `<KpiCard>` en un grid `sm:grid-cols-2 md:grid-cols-N`.
 6. **Tabla**: `Table`/`TableHeader`/`TableBody`/`TableRow`/`TableHead`/`TableCell` dentro de `<Card accent>`. Estados de `loading` → `Spinner`, sin resultados → `EmptyState`, ambos en una `TableRow className="hover:bg-transparent"` con `colSpan` al nº de columnas.

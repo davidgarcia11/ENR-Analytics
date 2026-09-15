@@ -14,6 +14,8 @@ import { useToast } from "@/components/ui/toast"
 import { Loader2, Trash2, UserPlus, ArrowLeft, KeyRound, Pencil, FileText, ShieldCheck, Tag, Printer, FileCode, Link2 } from "lucide-react"
 import Image from "next/image"
 import { SingleSelect } from "@/components/SingleSelect"
+import { PANELS } from "@/lib/panels"
+import { PLANTS, plantLabel } from "@/lib/plants"
 
 interface User {
   id: number
@@ -21,6 +23,8 @@ interface User {
   role: string
   name: string
   surname: string
+  defaultPlant: string
+  canConfigureMuestras: boolean
   created_at: string
 }
 
@@ -43,7 +47,7 @@ interface Screen {
   config: ScreenConfig
 }
 
-type Tab = 'usuarios' | 'roles' | 'pantallas' | 'estados-jde' | 'loteadoras' | 'plantillas' | 'articulos-plantilla'
+type Tab = 'usuarios' | 'roles' | 'pantallas' | 'estados-jde' | 'loteadoras' | 'plantillas' | 'articulos-plantilla' | 'coste-a1-coledg' | 'muestras'
 
 interface JdeStatus {
   code: string
@@ -91,12 +95,21 @@ interface ArticuloLoteadora {
   descripcion: string
 }
 
-const SCREEN_KEYS: { key: string; label: string }[] = [
-  { key: 'produccion',  label: 'Producción' },
-  { key: 'pedidos',     label: 'Pedidos' },
-  { key: 'caducados',   label: 'Caducados' },
-  { key: 'comparativa', label: 'Comparativa SERES' },
-]
+interface ColedgMensual {
+  mes: string
+  coledg: string
+  updated_at?: string
+}
+
+interface MuestrasSyncState {
+  lastSyncedAt: string | null
+  candidatosSincronizados: number
+  error: string | null
+  articulosConfigurados: number
+}
+
+// Derivado de la fuente única de paneles — nunca declarar esta lista a mano aquí.
+const SCREEN_KEYS = PANELS.map(({ key, label }) => ({ key, label }))
 
 export default function AdminPage() {
   const router = useRouter()
@@ -115,6 +128,7 @@ export default function AdminPage() {
   const [newRole, setNewRole] = useState("user")
   const [newName, setNewName] = useState("")
   const [newSurname, setNewSurname] = useState("")
+  const [newDefaultPlant, setNewDefaultPlant] = useState("")
   const [forceChange, setForceChange] = useState(true)
   const [creating, setCreating] = useState(false)
   const [userError, setUserError] = useState("")
@@ -126,6 +140,7 @@ export default function AdminPage() {
   const [editSurname, setEditSurname] = useState("")
   const [editUsername, setEditUsername] = useState("")
   const [editRole, setEditRole] = useState("user")
+  const [editDefaultPlant, setEditDefaultPlant] = useState("")
   const [editError, setEditError] = useState("")
 
   // ─── Roles ───────────────────────────────────────────────────────────────────
@@ -192,6 +207,21 @@ export default function AdminPage() {
   const [asociacionSuccess, setAsociacionSuccess] = useState("")
   const [creandoAsociacion, setCreandoAsociacion] = useState(false)
 
+  // ─── Coste real mensual (mapeo mes -> ledger IELEDG de F30026, usado por /costes) ──
+  const [coledgMensual, setColedgMensual] = useState<ColedgMensual[]>([])
+  const [loadingColedgMensual, setLoadingColedgMensual] = useState(false)
+  const [newMesColedg, setNewMesColedg] = useState("")
+  const [newColedgCodigo, setNewColedgCodigo] = useState("")
+  const [creatingColedg, setCreatingColedg] = useState(false)
+  const [coledgDrafts, setColedgDrafts] = useState<Record<string, string>>({})
+  const [savingColedg, setSavingColedg] = useState<string | null>(null)
+  const [coledgError, setColedgError] = useState("")
+  const [coledgSuccess, setColedgSuccess] = useState("")
+
+  // ─── Muestras (sincronización manual) ─────────────────────────────────────────
+  const [muestrasSync, setMuestrasSync] = useState<MuestrasSyncState | null>(null)
+  const [syncingMuestras, setSyncingMuestras] = useState(false)
+
   useEffect(() => { checkAuth() }, [])
 
   // Estado en vivo de las loteadoras: solo se comprueba mientras la pestaña
@@ -218,6 +248,8 @@ export default function AdminPage() {
       loadMensajes()
       loadAsociaciones()
       loadArticulosLoteadora()
+      loadColedgMensual()
+      loadMuestrasSync()
     } catch {
       router.push("/login")
     }
@@ -239,6 +271,31 @@ export default function AdminPage() {
       const res = await fetch("/api/admin/roles")
       if (res.ok) setRoles(await res.json())
     } finally { setLoadingRoles(false) }
+  }
+
+  const loadMuestrasSync = async () => {
+    try {
+      const res = await fetch("/api/admin/muestras-sync")
+      if (res.ok) setMuestrasSync(await res.json())
+    } catch { /* silencioso */ }
+  }
+
+  // La sincronización real se dispara sola (al cambiar la lista de artículos y cada
+  // 30 min de fondo, ver lib/muestras.ts) — este botón es solo un "hazlo ya", y como
+  // ya no va por tramos, la petición termina cuando termina de verdad (sin polling).
+  const syncMuestrasNow = async () => {
+    setSyncingMuestras(true)
+    try {
+      const res = await fetch("/api/admin/muestras-sync", { method: "POST" })
+      const data = await res.json()
+      if (!res.ok) { toast(data.error || "Error al sincronizar", "error"); return }
+      toast(`Sincronizado — ${data.rows} lotes traídos`, "success")
+      loadMuestrasSync()
+    } catch {
+      toast("Error al sincronizar", "error")
+    } finally {
+      setSyncingMuestras(false)
+    }
   }
 
   const loadScreens = async () => {
@@ -500,6 +557,77 @@ export default function AdminPage() {
     })
   }
 
+  const loadColedgMensual = async () => {
+    setLoadingColedgMensual(true)
+    try {
+      const res = await fetch("/api/admin/coste-a1-coledg")
+      if (res.ok) {
+        const data: ColedgMensual[] = await res.json()
+        setColedgMensual(data)
+        const drafts: Record<string, string> = {}
+        data.forEach(c => { drafts[c.mes] = c.coledg })
+        setColedgDrafts(drafts)
+      }
+    } finally { setLoadingColedgMensual(false) }
+  }
+
+  const createColedgMensual = async (e: React.FormEvent) => {
+    e.preventDefault()
+    setColedgError(""); setColedgSuccess(""); setCreatingColedg(true)
+    try {
+      const res = await fetch("/api/admin/coste-a1-coledg", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ mes: newMesColedg, coledg: newColedgCodigo }),
+      })
+      const data = await res.json()
+      if (!res.ok) { setColedgError(data.error); return }
+      setColedgSuccess(`Mes "${newMesColedg}" añadido con código "${newColedgCodigo.toUpperCase()}"`)
+      setNewMesColedg(""); setNewColedgCodigo("")
+      loadColedgMensual()
+    } catch { setColedgError("Error de conexión") } finally { setCreatingColedg(false) }
+  }
+
+  const saveColedgMensual = async (mes: string) => {
+    const coledg = (coledgDrafts[mes] ?? '').trim()
+    if (!coledg) {
+      setColedgError(`El código de ${mes} no puede estar vacío`)
+      return
+    }
+    setColedgError(""); setColedgSuccess(""); setSavingColedg(mes)
+    try {
+      const res = await fetch(`/api/admin/coste-a1-coledg/${encodeURIComponent(mes)}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ coledg }),
+      })
+      const data = await res.json()
+      if (!res.ok) { setColedgError(data.error || 'Error al guardar'); return }
+      setColedgSuccess(`Código de "${mes}" guardado`)
+      loadColedgMensual()
+    } catch {
+      setColedgError('Error de conexión')
+    } finally {
+      setSavingColedg(null)
+    }
+  }
+
+  const deleteColedgMensual = (mes: string) => {
+    setConfirmState({
+      title: "Eliminar mapeo de mes",
+      description: `Se eliminará el código IELEDG configurado para "${mes}". El coste real de /costes dejará de tener dato para ese mes hasta que se vuelva a configurar.`,
+      onConfirm: async () => {
+        try {
+          const res = await fetch(`/api/admin/coste-a1-coledg/${encodeURIComponent(mes)}`, { method: "DELETE" })
+          const data = await res.json()
+          if (!res.ok) { toast(data.error || "Error al eliminar", "error"); return }
+          loadColedgMensual()
+          toast(`Mes "${mes}" eliminado`, "success")
+        } catch { toast("Error al eliminar", "error") }
+      },
+    })
+  }
+
   // ─── Acciones de usuarios ────────────────────────────────────────────────────
 
   const createUser = async (e: React.FormEvent) => {
@@ -509,12 +637,12 @@ export default function AdminPage() {
       const res = await fetch("/api/admin/users", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ username: newUsername, password: newPassword, role: newRole, mustChangePassword: forceChange, name: newName, surname: newSurname }),
+        body: JSON.stringify({ username: newUsername, password: newPassword, role: newRole, mustChangePassword: forceChange, name: newName, surname: newSurname, defaultPlant: newDefaultPlant }),
       })
       const data = await res.json()
       if (!res.ok) { setUserError(data.error); return }
       setUserSuccess(`Usuario "${newUsername}" creado`)
-      setNewUsername(""); setNewPassword(""); setNewRole("user"); setNewName(""); setNewSurname(""); setForceChange(true)
+      setNewUsername(""); setNewPassword(""); setNewRole("user"); setNewName(""); setNewSurname(""); setNewDefaultPlant(""); setForceChange(true)
       loadUsers()
     } catch { setUserError("Error de conexión") } finally { setCreating(false) }
   }
@@ -551,9 +679,25 @@ export default function AdminPage() {
     } catch { toast("Error al resetear", "error") }
   }
 
+  // Permiso suelto (no un rol): quién puede editar la lista de artículos de /muestras
+  // además de admin. Se alterna con un solo clic, sin entrar en modo edición del resto
+  // de datos del usuario — ver docs/muestras.md.
+  const toggleMuestrasConfig = async (u: User) => {
+    try {
+      const res = await fetch(`/api/admin/users/${u.id}/muestras-config`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ enabled: !u.canConfigureMuestras }),
+      })
+      if (!res.ok) { toast("Error al actualizar el permiso", "error"); return }
+      setUsers(prev => prev.map(x => x.id === u.id ? { ...x, canConfigureMuestras: !u.canConfigureMuestras } : x))
+    } catch { toast("Error al actualizar el permiso", "error") }
+  }
+
   const startEdit = (u: User) => {
     setEditUserId(u.id); setEditName(u.name || ""); setEditSurname(u.surname || "")
-    setEditUsername(u.username); setEditRole(u.role); setEditError(""); setResetUserId(null)
+    setEditUsername(u.username); setEditRole(u.role); setEditDefaultPlant(u.defaultPlant || "")
+    setEditError(""); setResetUserId(null)
   }
 
   const saveEdit = async () => {
@@ -563,7 +707,7 @@ export default function AdminPage() {
       const res = await fetch(`/api/admin/users/${editUserId}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ username: editUsername, name: editName, surname: editSurname, role: editRole }),
+        body: JSON.stringify({ username: editUsername, name: editName, surname: editSurname, role: editRole, defaultPlant: editDefaultPlant }),
       })
       const data = await res.json()
       if (!res.ok) { setEditError(data.error); return }
@@ -681,6 +825,8 @@ export default function AdminPage() {
             { value: 'loteadoras', label: 'Loteadoras' },
             { value: 'plantillas', label: 'Plantillas' },
             { value: 'articulos-plantilla', label: 'Artículos → Plantilla' },
+            { value: 'coste-a1-coledg', label: 'Coste real (Costes)' },
+            { value: 'muestras', label: 'Muestras' },
           ]}
         />
 
@@ -720,6 +866,13 @@ export default function AdminPage() {
                         {roles.map(r => <option key={r.name} value={r.name}>{r.label}</option>)}
                       </select>
                     </div>
+                    <div className="space-y-1.5">
+                      <label className="text-xs font-semibold text-secondary-foreground">Planta por defecto</label>
+                      <select value={newDefaultPlant} onChange={e => setNewDefaultPlant(e.target.value)} className="flex h-9 w-[150px] rounded-md border border-input bg-card px-3 py-1 text-sm shadow-sm">
+                        <option value="">Todas</option>
+                        {PLANTS.map(p => <option key={p.id} value={p.id}>{p.label}</option>)}
+                      </select>
+                    </div>
                     <Button type="submit" disabled={creating} className="font-semibold">
                       {creating ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <UserPlus className="mr-2 h-4 w-4" />}
                       Crear
@@ -751,8 +904,10 @@ export default function AdminPage() {
                         <TableHead className="font-bold text-secondary-foreground">Nombre</TableHead>
                         <TableHead className="font-bold text-secondary-foreground">Usuario</TableHead>
                         <TableHead className="font-bold text-secondary-foreground">Rol</TableHead>
+                        <TableHead className="font-bold text-secondary-foreground">Planta</TableHead>
                         <TableHead className="font-bold text-secondary-foreground">Creado</TableHead>
                         <TableHead className="font-bold text-secondary-foreground text-right">Acciones</TableHead>
+                        <TableHead className="font-bold text-secondary-foreground text-center" title="Puede editar la lista de artículos visibles en /muestras, además de admin">Responsable Muestras</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
@@ -774,7 +929,13 @@ export default function AdminPage() {
                                 {roles.map(r => <option key={r.name} value={r.name}>{r.label}</option>)}
                               </select>
                             </TableCell>
-                            <TableCell colSpan={2}>
+                            <TableCell>
+                              <select value={editDefaultPlant} onChange={e => setEditDefaultPlant(e.target.value)} className="h-8 rounded-md border border-input bg-card px-2 text-sm">
+                                <option value="">Todas</option>
+                                {PLANTS.map(p => <option key={p.id} value={p.id}>{p.label}</option>)}
+                              </select>
+                            </TableCell>
+                            <TableCell colSpan={3}>
                               <div className="flex items-center gap-2">
                                 <Button size="sm" onClick={saveEdit} className="text-xs font-semibold h-8">Guardar</Button>
                                 <Button size="sm" variant="ghost" onClick={() => setEditUserId(null)} className="text-muted-foreground h-8 text-xs">Cancelar</Button>
@@ -792,6 +953,7 @@ export default function AdminPage() {
                                 {roles.find(r => r.name === u.role)?.label ?? u.role}
                               </Badge>
                             </TableCell>
+                            <TableCell className="text-muted-foreground text-sm">{plantLabel(u.defaultPlant) || 'Todas'}</TableCell>
                             <TableCell className="text-muted-foreground text-sm">{new Date(u.created_at).toLocaleDateString('es-ES')}</TableCell>
                             <TableCell className="text-right space-x-1">
                               <Button variant="ghost" size="sm" onClick={() => startEdit(u)} className="text-blue-500 hover:text-blue-700 hover:bg-blue-50" title="Editar usuario">
@@ -804,12 +966,22 @@ export default function AdminPage() {
                                 <Trash2 className="h-4 w-4" />
                               </Button>
                             </TableCell>
+                            <TableCell className="text-center">
+                              <input
+                                type="checkbox"
+                                checked={u.role === 'admin' ? true : u.canConfigureMuestras}
+                                disabled={u.role === 'admin'}
+                                onChange={() => toggleMuestrasConfig(u)}
+                                className="h-4 w-4 rounded border-input accent-primary disabled:opacity-50"
+                                title={u.role === 'admin' ? 'admin siempre puede configurar /muestras' : 'Puede editar la lista de artículos de /muestras'}
+                              />
+                            </TableCell>
                           </TableRow>
                         )
                       ))}
                       {resetUserId && (
                         <TableRow className="bg-amber-50 border-amber-200">
-                          <TableCell colSpan={6}>
+                          <TableCell colSpan={8}>
                             <div className="flex items-center gap-3">
                               <span className="text-sm font-medium text-amber-700">Nueva contraseña para &quot;{users.find(u => u.id === resetUserId)?.username}&quot;:</span>
                               <Input type="password" value={resetPassword} onChange={e => setResetPassword(e.target.value)} placeholder="Nueva contraseña" className="h-8 w-[200px] text-sm" autoFocus onKeyDown={e => e.key === 'Enter' && resetUserPassword(resetUserId)} />
@@ -1361,6 +1533,168 @@ export default function AdminPage() {
               </CardContent>
             </Card>
           </>
+        )}
+
+        {/* ── Pestaña Coste real (Costes) ────────────────────────────────────
+            Mapeo mes -> código de ledger IELEDG de F30026 (coste real mensual,
+            JDE) — MISMA tabla que el coste teórico A1, mismo IECOST='A1', solo
+            cambia el ledger ('07' fijo para el teórico, uno por mes aquí). JDE
+            genera un código nuevo cada mes sin patrón previsible (mismo caso
+            que COLEDG_VIGENTE en /compras, aquí mensual) — se añade a mano
+            aquí cada vez que aparezca un mes nuevo. Usado por /api/costes
+            para el "Coste Real" ponderado por producción. Corregido — antes
+            decía "COLEDG de F4105": esa tabla da el coste total del ledger
+            (Material + Mano de obra + Amortización...), no solo el
+            componente A1/Material que hace comparable la desviación. */}
+        {activeTab === 'coste-a1-coledg' && (
+          <div className="space-y-4">
+            <Card accent>
+              <CardHeader>
+                <CardTitle className="text-sm font-bold text-secondary-foreground flex items-center gap-2">
+                  <Tag className="h-4 w-4 text-primary" aria-hidden="true" />
+                  Añadir mes
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <p className="text-xs text-muted-foreground mb-4">
+                  Cada mes JDE genera un código de ledger <strong>IELEDG</strong> nuevo en F30026 con el coste real de ese mes (ej. &quot;6M&quot; = enero 2026). No hay fórmula fija — hay que consultar F30026 (mismo <strong>IECOST=&apos;A1&apos;</strong> que el coste teórico, solo cambia el ledger) y añadir aquí el código que le corresponda a cada mes nuevo para que <strong>Costes</strong> pueda calcular el coste real.
+                </p>
+                <form onSubmit={createColedgMensual} className="flex flex-wrap items-end gap-4">
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-semibold text-secondary-foreground">Mes</label>
+                    <Input type="month" value={newMesColedg} onChange={e => setNewMesColedg(e.target.value)} required className="w-[160px]" />
+                  </div>
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-semibold text-secondary-foreground">
+                      Código IELEDG <span className="font-normal text-muted-foreground">(F30026)</span>
+                    </label>
+                    <Input value={newColedgCodigo} onChange={e => setNewColedgCodigo(e.target.value)} placeholder="6M" required className="w-[120px] uppercase" />
+                  </div>
+                  <Button type="submit" disabled={creatingColedg} className="font-semibold">
+                    {creatingColedg ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Tag className="mr-2 h-4 w-4" />}
+                    Añadir
+                  </Button>
+                </form>
+                {coledgError && <p className="text-sm text-red-600 font-medium mt-3">{coledgError}</p>}
+                {coledgSuccess && <p className="text-sm text-green-600 font-medium mt-3">{coledgSuccess}</p>}
+              </CardContent>
+            </Card>
+
+            <Card accent>
+              <CardHeader>
+                <CardTitle className="text-sm font-bold text-secondary-foreground">Meses configurados</CardTitle>
+              </CardHeader>
+              <CardContent>
+                {loadingColedgMensual ? (
+                  <Spinner label="Cargando..." className="py-8" />
+                ) : (
+                  <Table>
+                    <TableHeader>
+                      <TableRow className="hover:bg-transparent">
+                        <TableHead className="font-bold text-secondary-foreground w-32">Mes</TableHead>
+                        <TableHead className="font-bold text-secondary-foreground">Código IELEDG</TableHead>
+                        <TableHead className="font-bold text-secondary-foreground w-40 text-right">Acciones</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {coledgMensual.map(c => (
+                        <TableRow key={c.mes} className="hover:bg-muted/50 border-border">
+                          <TableCell>
+                            <span className="font-mono font-bold text-foreground bg-muted px-2 py-1 rounded">{c.mes}</span>
+                          </TableCell>
+                          <TableCell>
+                            <Input
+                              value={coledgDrafts[c.mes] ?? ''}
+                              onChange={e => setColedgDrafts(d => ({ ...d, [c.mes]: e.target.value.toUpperCase() }))}
+                              className="h-9 text-sm w-28"
+                            />
+                          </TableCell>
+                          <TableCell className="text-right">
+                            <div className="flex items-center justify-end gap-2">
+                              <Button
+                                size="sm"
+                                onClick={() => saveColedgMensual(c.mes)}
+                                disabled={savingColedg === c.mes || (coledgDrafts[c.mes] ?? '').trim() === c.coledg}
+                                className="font-semibold"
+                              >
+                                {savingColedg === c.mes ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Guardar'}
+                              </Button>
+                              <Button
+                                variant="ghost" size="sm"
+                                onClick={() => deleteColedgMensual(c.mes)}
+                                className="text-red-500 hover:text-red-700 hover:bg-red-50"
+                                title="Eliminar mes"
+                              >
+                                <Trash2 className="h-4 w-4" />
+                              </Button>
+                            </div>
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                      {coledgMensual.length === 0 && (
+                        <TableRow className="hover:bg-transparent">
+                          <TableCell colSpan={3} className="text-center text-sm text-muted-foreground py-8">
+                            Ningún mes configurado todavía.
+                          </TableCell>
+                        </TableRow>
+                      )}
+                    </TableBody>
+                  </Table>
+                )}
+              </CardContent>
+            </Card>
+          </div>
+        )}
+
+        {/* ── Pestaña Muestras (sincronización de la caché de /muestras) ────────
+            El panel /muestras nunca consulta Oracle en directo — lee de sample_candidates
+            (SQLite), que se sincroniza sola al cambiar la lista de artículos visibles y
+            cada 30 min de fondo. Este botón solo fuerza esa misma sincronización ya
+            mismo. Ver docs/muestras.md. */}
+        {activeTab === 'muestras' && (
+          <div className="space-y-4">
+            <Card accent>
+              <CardHeader>
+                <CardTitle className="text-sm font-bold text-secondary-foreground flex items-center gap-2">
+                  <FileText className="h-4 w-4 text-primary" aria-hidden="true" />
+                  Sincronización de Muestras
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <p className="text-xs text-muted-foreground">
+                  El panel <strong>/muestras</strong> se sincroniza solo: al cambiar la lista de &quot;Artículos visibles&quot;
+                  y cada 30 minutos de fondo. Este botón solo sirve para forzarlo ahora mismo.
+                </p>
+
+                {!muestrasSync ? (
+                  <Spinner label="Cargando estado..." className="py-4" />
+                ) : muestrasSync.articulosConfigurados === 0 ? (
+                  <div className="flex items-center gap-3">
+                    <Badge variant="outline">Sin artículos configurados</Badge>
+                    <span className="text-sm text-muted-foreground">
+                      Añade al menos uno en &quot;Artículos visibles&quot; (dentro de /muestras) para que haya algo que sincronizar.
+                    </span>
+                  </div>
+                ) : (
+                  <div className="flex flex-wrap items-center gap-3">
+                    <Badge variant={muestrasSync.error ? 'destructive' : muestrasSync.lastSyncedAt ? 'success' : 'outline'}>
+                      {muestrasSync.error ? 'Error' : muestrasSync.lastSyncedAt ? 'Al día' : 'Sin sincronizar todavía'}
+                    </Badge>
+                    <span className="text-sm text-muted-foreground">
+                      {muestrasSync.articulosConfigurados} artículo{muestrasSync.articulosConfigurados === 1 ? '' : 's'} configurado{muestrasSync.articulosConfigurados === 1 ? '' : 's'}
+                      {muestrasSync.lastSyncedAt && ` · última sincronización: ${new Date(muestrasSync.lastSyncedAt).toLocaleString('es-ES')} · ${muestrasSync.candidatosSincronizados.toLocaleString('es-ES')} lotes`}
+                    </span>
+                    {muestrasSync.error && <span className="text-sm text-red-600">{muestrasSync.error}</span>}
+
+                    <Button size="sm" onClick={syncMuestrasNow} disabled={syncingMuestras} className="font-semibold ml-auto">
+                      {syncingMuestras ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+                      Sincronizar ahora
+                    </Button>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          </div>
         )}
 
       </div>

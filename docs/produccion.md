@@ -451,9 +451,18 @@ Esto ocurre **una sola vez** al cargar la página, no en cada búsqueda.
 
 ### Plantas hardcodeadas — ¿por qué?
 
-Las plantas (`Aguilar`, `Corella`, `Funes`) están hardcodeadas en el `<select>`. **No** se cargan dinámicamente desde Oracle como en otros paneles.
+Las plantas (`Aguilar`, `Corella`, `Funes`) están hardcodeadas en el `SingleSelect` de planta (`components/SingleSelect.tsx`, no un `<select>` nativo — ver `docs/design-system.md` §4). **No** se cargan dinámicamente desde Oracle como en otros paneles.
 
 El motivo: la lógica de sub-plantas de Funes depende del primer dígito de `TO55TAREA`, que es un campo custom de la empresa. No hay forma de determinar eso dinámicamente desde F0006.
+
+### Planta por defecto del usuario
+
+Si el usuario logueado tiene una planta por defecto asignada en `/admin` (ver `lib/plants.ts` y
+`DOCUMENTACION.md` §4), `page.tsx` espera a conocer la sesión antes de la primera consulta y la usa
+como filtro inicial — tanto en la consulta de datos como en el `SingleSelect` de planta de
+`FilterPanel` (prop `initialPlant`, aplicado una sola vez vía `handlePlantChange`). Tudefrigo no es
+una opción en este panel (no se produce ahí): si esa es la planta por defecto del usuario, este
+panel en concreto cae a "Todas", aunque el resto de paneles sí la respeten.
 
 ### Señal para presets desde el header
 
@@ -808,9 +817,9 @@ Las plantas están **hardcodeadas** porque la lógica de sub-plantas depende del
 
 Ejemplo: "Tudela" con código `10400`.
 
-**Cambio 1 — `components/FilterPanel.tsx`** (dropdown de planta):
+**Cambio 1 — `components/FilterPanel.tsx`** (array `options` del `SingleSelect` de planta):
 ```tsx
-<option value="10400">Tudela</option>
+{ id: '10400', description: 'Tudela' }
 ```
 
 **Cambio 2 — `lib/utils.ts`** (`parseJdeDate`):
@@ -832,16 +841,14 @@ Ejemplo: "Funes 3" con subcode `6`.
 case '6': subBlockName = "Funes 3"; break;
 ```
 
-**Cambio 2 — `components/FilterPanel.tsx`** (el `<select>` condicional de sub-planta):
+**Cambio 2 — `components/FilterPanel.tsx`** (array `options` condicional del `SingleSelect` de sub-planta):
 ```tsx
-{filters.plant === '10300' && (
-    <>
-      <option value="3">Funes 1</option>
-      <option value="4">Funes 2</option>
-      <option value="5">Funes Past.</option>
-      <option value="6">Funes 3</option>  {/* NUEVO */}
-    </>
-)}
+options={filters.plant === '10300' ? [
+  { id: '3', description: 'Funes 1' },
+  { id: '4', description: 'Funes 2' },
+  { id: '5', description: 'Funes Past.' },
+  { id: '6', description: 'Funes 3' }, // NUEVO
+] : []}
 ```
 
 **Cambio 3 — `app/api/production/route.ts`** (si "Funes 3" reutiliza un subcode histórico):

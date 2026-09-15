@@ -1,0 +1,148 @@
+/*
+ * Tema Nova (ShadcnSpace) — sistema de diseño AISLADO, en construcción.
+ * No lo usa ningún panel existente.
+ *
+ * Mecanismo de aislamiento: NOMBRES ESTÁNDAR (--primary, --background,
+ * --muted-foreground, --border, --radius-lg...), los mismos que trae el código de
+ * cualquier block de shadcn/ShadcnSpace sin tocarlo. Lo que aísla NO es el nombre de
+ * la variable, sino el SELECTOR: los valores Nova solo existen dentro de
+ * [data-nova-theme]. Fuera de ese atributo, esas variables siguen siendo las que
+ * define app/globals.css (rojo corporativo) porque este archivo no las toca en :root.
+ *
+ * Requisito para que esto funcione: app/globals.css NO puede definir --color-primary
+ * etc. como literal directo (`--color-primary: #d30b15`), porque entonces Tailwind
+ * genera `.bg-primary{background-color:#d30b15}` sin ninguna variable en tiempo de
+ * ejecución que sobrescribir. Por eso globals.css ahora usa una indirección de dos
+ * niveles: --color-primary: var(--primary), con --primary definido en :root. Verificado
+ * con build (ver components/nova/README.md).
+ *
+ * Los --radius-sm/md/lg/xl/2xl/3xl NO hace falta registrarlos aquí: Tailwind ya los
+ * expone como variables reales en :root por defecto (comprobado con build). Solo se
+ * sobrescriben dentro de [data-nova-theme].
+ */
+@import "tailwindcss";
+@import "tw-animate-css";
+@import "shadcn/tailwind.css";
+
+/* Redefine la variante `dark:` de Tailwind (por defecto solo mira
+ * prefers-color-scheme) para que dependa de [data-nova-theme="dark"] en su lugar —
+ * así los `dark:` que ya traen los primitivos instalados (button, select...) seguido
+ * la selección explícita Claro/Oscuro/Sistema del panel, no el SO directamente.
+ * Seguro para el sistema viejo: no usa ninguna clase `dark:` en ningún sitio
+ * (comprobado con grep antes de tocar esto). */
+@custom-variant dark (&:is([data-nova-theme="dark"] *));
+
+/* Sin esto, un `border`/`border-b` sin color explícito cae en currentColor (texto,
+ * casi negro) en vez de en --border — es la línea negra que aparecía en el header de
+ * topbar-02. app/globals.css ya tiene el equivalente para el sistema viejo
+ * (`@layer base { * { @apply border-border } }`); el scope Nova necesita el suyo. */
+@layer base {
+  [data-nova-theme] *,
+  [data-nova-theme]::before,
+  [data-nova-theme]::after {
+    border-color: var(--border);
+  }
+}
+
+/* Claves que NO existen en app/globals.css (chart-*, sidebar-*): son de registro
+ * nuevo, aditivo, sin conflicto posible con el sistema actual. */
+@theme inline {
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
+}
+
+/* Base color: Zinc. Modo claro — activo en cualquier elemento con data-nova-theme
+ * (incluido data-nova-theme="dark", que luego se pisa con el bloque de abajo). */
+[data-nova-theme] {
+  --background: oklch(1 0 0);
+  --foreground: oklch(0.141 0.005 285.823);
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.141 0.005 285.823);
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.141 0.005 285.823);
+
+  /* Primario ShadcnSpace por defecto (zinc-900, neutro).
+     Para aplicar el rojo corporativo (#d30b15), ver components/nova/README.md. */
+  --primary: oklch(0.21 0.006 285.885);
+  --primary-foreground: oklch(0.985 0 0);
+
+  --secondary: oklch(0.967 0.001 286.375);
+  --secondary-foreground: oklch(0.21 0.006 285.885);
+  --muted: oklch(0.967 0.001 286.375);
+  --muted-foreground: oklch(0.552 0.016 285.938);
+  --accent: oklch(0.967 0.001 286.375);
+  --accent-foreground: oklch(0.21 0.006 285.885);
+  --destructive: oklch(0.577 0.245 27.325);
+  --destructive-foreground: oklch(0.985 0 0);
+  --border: oklch(0.92 0.004 286.32);
+  --input: oklch(0.92 0.004 286.32);
+  --ring: oklch(0.705 0.015 286.067);
+
+  --chart-1: oklch(0.871 0.006 286.286);
+  --chart-2: oklch(0.552 0.016 285.938);
+  --chart-3: oklch(0.442 0.017 285.786);
+  --chart-4: oklch(0.37 0.013 285.805);
+  --chart-5: oklch(0.274 0.006 286.033);
+
+  --sidebar: oklch(0.985 0 0);
+  --sidebar-foreground: oklch(0.141 0.005 285.823);
+  --sidebar-primary: oklch(0.21 0.006 285.885);
+  --sidebar-primary-foreground: oklch(0.985 0 0);
+  --sidebar-accent: oklch(0.967 0.001 286.375);
+  --sidebar-accent-foreground: oklch(0.21 0.006 285.885);
+  --sidebar-border: oklch(0.92 0.004 286.32);
+  --sidebar-ring: oklch(0.705 0.015 286.067);
+
+  /* Radio de fábrica del preset Nova (0.625rem), sobre las variables --radius-*
+     que Tailwind ya expone por defecto (no hace falta declararlas en @theme). */
+  --radius-sm: 0.375rem;
+  --radius-md: 0.5rem;
+  --radius-lg: 0.625rem;
+  --radius-xl: 0.875rem;
+  --radius-2xl: 1.125rem;
+  --radius-3xl: 1.375rem;
+}
+
+/* Modo oscuro: definido por paridad con el preset Nova, pero NO se activa en
+   ningún sitio (este proyecto no tiene dark mode, ver DECISIONS.md). Solo se
+   aplicaría si algo pusiera data-nova-theme="dark" explícitamente. */
+[data-nova-theme="dark"] {
+  --background: oklch(0.141 0.005 285.823);
+  --foreground: oklch(0.985 0 0);
+  --card: oklch(0.21 0.006 285.885);
+  --card-foreground: oklch(0.985 0 0);
+  --popover: oklch(0.21 0.006 285.885);
+  --popover-foreground: oklch(0.985 0 0);
+  --primary: oklch(0.92 0.004 286.32);
+  --primary-foreground: oklch(0.21 0.006 285.885);
+  --secondary: oklch(0.274 0.006 286.033);
+  --secondary-foreground: oklch(0.985 0 0);
+  --muted: oklch(0.274 0.006 286.033);
+  --muted-foreground: oklch(0.705 0.015 286.067);
+  --accent: oklch(0.274 0.006 286.033);
+  --accent-foreground: oklch(0.985 0 0);
+  --destructive: oklch(0.704 0.191 22.216);
+  --destructive-foreground: oklch(0.985 0 0);
+  --border: oklch(1 0 0 / 10%);
+  --input: oklch(1 0 0 / 15%);
+  --ring: oklch(0.552 0.016 285.938);
+  --sidebar: oklch(0.21 0.006 285.885);
+  --sidebar-foreground: oklch(0.985 0 0);
+  --sidebar-primary: oklch(0.488 0.243 264.376);
+  --sidebar-primary-foreground: oklch(0.985 0 0);
+  --sidebar-accent: oklch(0.274 0.006 286.033);
+  --sidebar-accent-foreground: oklch(0.985 0 0);
+  --sidebar-border: oklch(1 0 0 / 10%);
+  --sidebar-ring: oklch(0.552 0.016 285.938);
+}

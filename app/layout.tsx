@@ -1,6 +1,7 @@
 import type { Metadata } from "next"; // Tipo de dato para definir metadatos (título, descripción) para SEO
 import { Geist, Geist_Mono } from "next/font/google"; // Fuentes de Google optimizadas por Next.js
 import "./globals.css"; // Importamos los estilos globales (Tailwind, resets, etc.)
+import "./nova-theme.css"; // Tema Nova (ShadcnSpace) aislado bajo [data-nova-theme] — no afecta a los paneles existentes
 import { ToastProvider } from "@/components/ui/toast"; // Sistema de notificaciones global
 
 // Configuración de la fuente Sans Serif (Geist)
@@ -17,8 +18,8 @@ const geistMono = Geist_Mono({
 
 // Metadatos de la aplicación (Lo que sale en la pestaña del navegador y Google)
 export const metadata: Metadata = {
-  title: "Dashboard Producción",
-  description: "Dashboard de control de producción",
+  title: "ENR Analytics",
+  description: "Paneles de analítica de Elaborados Naturales",
 };
 
 // RootLayout es el componente PADRE de toda la aplicación.

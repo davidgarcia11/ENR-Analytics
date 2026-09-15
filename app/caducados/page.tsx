@@ -16,8 +16,9 @@ import { PresetPanel, PresetQuickSelect, usePresets } from "@/components/PresetP
 import { ArticleMultiSelect } from "@/components/ArticleMultiSelect"
 import * as XLSX from 'xlsx'
 import { useRouter } from "next/navigation"
+import { plantJdeCode } from "@/lib/plants"
 
-interface SessionUser { id: number; username: string; role: string; name: string; surname: string }
+interface SessionUser { id: number; username: string; role: string; name: string; surname: string; defaultPlant: string }
 interface Plant { id: string; description: string }
 interface LotState { code: string; description: string }
 interface PaletRow {
@@ -106,6 +107,11 @@ const CaducadosTable = memo(function CaducadosTable({ data, loading }: { data: P
   )
 })
 
+// Prefiltro por defecto del filtro Categoría al acceder al panel
+const DEFAULT_SRP1 = ['10', '11', '12', '13', '14']
+// Prefiltro por defecto del filtro Ubicacion al acceder al panel (GENERICA)
+const DEFAULT_LOCATIONS = ['__blank__']
+
 export default function CaducadosPage() {
   const router = useRouter()
 
@@ -118,10 +124,10 @@ export default function CaducadosPage() {
   const [availableLotStates, setAvailableLotStates] = useState<LotState[]>([])
   const [availableSrp1, setAvailableSrp1] = useState<{ id: string; description: string }[]>([])
   const [availableSrp2, setAvailableSrp2] = useState<{ id: string; description: string }[]>([])
-  const [selectedSrp1, setSelectedSrp1] = useState<string[]>([])
+  const [selectedSrp1, setSelectedSrp1] = useState<string[]>(DEFAULT_SRP1)
   const [selectedSrp2, setSelectedSrp2] = useState<string[]>([])
   const [selectedPlants, setSelectedPlants] = useState<string[]>([])
-  const [selectedLocations, setSelectedLocations] = useState<string[]>(['__blank__'])
+  const [selectedLocations, setSelectedLocations] = useState<string[]>(DEFAULT_LOCATIONS)
   const [selectedType, setSelectedType] = useState<'todos' | 'caducados' | 'obsoletos' | 'bloqueados'>('todos')
   const [selectedLotStates, setSelectedLotStates] = useState<string[]>([])
   const [paletSearch, setPaletSearch] = useState('')
@@ -173,12 +179,20 @@ export default function CaducadosPage() {
 
   const deferredData = useDeferredValue(filteredData)
 
+  // Espera a conocer la sesión antes de la primera consulta, para que ya venga
+  // filtrada por la planta por defecto del usuario (si tiene una) y no se vea
+  // primero "todas las plantas" y luego solo la suya.
   useEffect(() => {
-    checkSession()
+    (async () => {
+      const user = await checkSession()
+      const code = plantJdeCode(user?.defaultPlant)
+      const initialPlants = code ? [code] : []
+      setSelectedPlants(initialPlants)
+      fetchPlants()
+      fetchData(initialPlants)
+    })()
     fetchLotStates()
     fetchCategories()
-    fetchPlants()
-    fetchData()
   }, [])
 
   const fetchPlants = async () => {
@@ -209,13 +223,13 @@ export default function CaducadosPage() {
     } catch { }
   }
 
-  const checkSession = async () => {
+  const checkSession = async (): Promise<SessionUser | null> => {
     try {
       const res = await fetch('/api/auth/me')
       let user = null
       if (res.ok) {
         user = await res.json()
-        if (user.mustChangePassword) { router.push('/cambiar-contrasena'); return }
+        if (user.mustChangePassword) { router.push('/cambiar-contrasena'); return null }
         setSessionUser(user)
       }
       const screensRes = await fetch('/api/screen-permissions')
@@ -225,11 +239,12 @@ export default function CaducadosPage() {
         if (mine && !mine.is_public) {
           if (!user || (user.role !== 'admin' && !mine.allowed_roles.includes(user.role))) {
             router.push('/login')
-            return
+            return null
           }
         }
       }
-    } catch { }
+      return user
+    } catch { return null }
   }
 
   const logout = async () => {
@@ -237,13 +252,16 @@ export default function CaducadosPage() {
     setSessionUser(null)
   }
 
-  const fetchData = async () => {
+  // plantsOverride se usa solo en la carga inicial, cuando aún no ha dado tiempo
+  // a que el estado selectedPlants recién fijado se refleje en este cierre (closure).
+  const fetchData = async (plantsOverride?: string[]) => {
     // Aplicar el filtro de artículo al pulsar "Filtrar" (igual que producción)
     setAppliedArticles(selectedArticles)
     setLoading(true)
     try {
       const params = new URLSearchParams()
-      selectedPlants.forEach(v => params.append('plant', v))
+      const plantsToUse = plantsOverride ?? selectedPlants
+      plantsToUse.forEach(v => params.append('plant', v))
       selectedLocations.forEach(v => params.append('location', v))
       params.append('type', selectedType)
       selectedLotStates.forEach(v => params.append('lotStates', v))
@@ -270,10 +288,10 @@ export default function CaducadosPage() {
 
   const clearFilters = () => {
     setSelectedPlants([])
-    setSelectedLocations([])
+    setSelectedLocations(DEFAULT_LOCATIONS)
     setSelectedType('todos')
     setSelectedLotStates([])
-    setSelectedSrp1([])
+    setSelectedSrp1(DEFAULT_SRP1)
     setSelectedSrp2([])
     setPaletSearch('')
     setLoteSearch('')
@@ -308,7 +326,7 @@ export default function CaducadosPage() {
     setSelectedSrp2((f.selectedSrp2 as string[]) || [])
     setSelectedPlants((f.selectedPlants as string[]) || [])
     const locs = f.selectedLocations as string[] | undefined
-    setSelectedLocations(locs && locs.length > 0 ? locs : ['__blank__'])
+    setSelectedLocations(locs && locs.length > 0 ? locs : DEFAULT_LOCATIONS)
     setPaletSearch((f.paletSearch as string) || '')
     setLoteSearch((f.loteSearch as string) || '')
     setSelectedArticles((f.selectedArticles as string[]) || [])
@@ -372,7 +390,9 @@ export default function CaducadosPage() {
       )}
 
       {/* --- FILTROS --- */}
-      <Card accent className="space-y-4 p-4">
+      {/* overflow-visible: Card accent trae overflow-hidden (para la barra superior redondeada),
+          pero eso recortaba el desplegable absolute de ArticleMultiSelect. */}
+      <Card accent className="overflow-visible space-y-4 p-4">
         <div>
           <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2">Filtros</p>
           <div className="flex flex-wrap items-end gap-3">
@@ -509,7 +529,7 @@ export default function CaducadosPage() {
 
         {/* Acciones */}
         <div className="flex flex-wrap items-end gap-3 justify-end">
-          <Button id="cad-filtrar" onClick={fetchData} disabled={loading} className="font-semibold">
+          <Button id="cad-filtrar" onClick={() => fetchData()} disabled={loading} className="font-semibold">
             {loading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" aria-hidden="true" /> : <Search className="mr-2 h-4 w-4" aria-hidden="true" />}
             Filtrar
           </Button>
