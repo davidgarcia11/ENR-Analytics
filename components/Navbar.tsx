@@ -10,7 +10,7 @@ interface SessionUser { id: number; username: string; role: string; name: string
 interface ScreenConfig { is_public: boolean; allowed_roles: string[] }
 
 interface NavbarProps {
-  // Opcional: páginas que no son uno de los 4 paneles (ej. /admin/logs) no marcan ninguno como activo
+  // Opcional: páginas que no son uno de los paneles listados en PANELS (ej. /admin/logs) no marcan ninguno como activo
   currentPanel?: PanelKey
   user: SessionUser | null
   onLogout: () => void

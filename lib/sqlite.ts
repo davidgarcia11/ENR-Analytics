@@ -80,6 +80,44 @@ export function getDb(): Database.Database {
       updated_at TEXT DEFAULT (datetime('now'))
     );
 
+    -- Impresoras loteadoras (TIJ, protocolo TCP) gestionadas desde /admin.
+    -- Los Field Module (lote/cocida/caducidad) ya no se configuran aquí por
+    -- máquina: viven por mensaje (loteadora_mensajes), porque cada plantilla
+    -- puede tener los campos en IDs distintos. Ver docs/loteadora.md.
+    CREATE TABLE IF NOT EXISTS loteadoras (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL UNIQUE,
+      ip TEXT NOT NULL,
+      port INTEGER NOT NULL,
+      slave_address INTEGER NOT NULL DEFAULT 0,
+      enabled INTEGER NOT NULL DEFAULT 1,
+      linea TEXT NOT NULL DEFAULT '',
+      created_at TEXT DEFAULT (datetime('now'))
+    );
+
+    -- Plantillas/mensajes configurados en las loteadoras (nombre global, debe
+    -- coincidir exacto con el mensaje creado en la máquina) y los IDs de los
+    -- tres Field Module que trae: lote, fecha de cocida y caducidad.
+    CREATE TABLE IF NOT EXISTS loteadora_mensajes (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL UNIQUE,
+      lot_field_id INTEGER NOT NULL,
+      cocida_field_id INTEGER NOT NULL,
+      expiry_field_id INTEGER NOT NULL,
+      hora_field_id INTEGER NOT NULL,
+      turno_field_id INTEGER NOT NULL,
+      linea_field_id INTEGER NOT NULL,
+      created_at TEXT DEFAULT (datetime('now'))
+    );
+
+    -- Asociación artículo (F4101.IMLITM) -> plantilla. Global: el mismo
+    -- artículo usa siempre el mismo mensaje, sea cual sea la loteadora.
+    CREATE TABLE IF NOT EXISTS loteadora_articulo_mensajes (
+      articulo_id TEXT PRIMARY KEY,
+      mensaje_id INTEGER NOT NULL REFERENCES loteadora_mensajes(id) ON DELETE CASCADE,
+      created_at TEXT DEFAULT (datetime('now'))
+    );
+
     -- Registro de aceptación del pop-up de /consulta-stock-pda: qué mensaje se le mostró al
     -- operario al escanear un SSCC y quién/cuándo lo aceptó. Trazabilidad para el caso de que
     -- un producto se meta erróneamente en línea: saber a quién le salió el aviso y cuál era.
@@ -202,6 +240,48 @@ export function getDb(): Database.Database {
     _db.exec("ALTER TABLE presets ADD COLUMN screen TEXT NOT NULL DEFAULT 'produccion'");
   }
 
+  // Migración: quitar columna message_name de loteadoras si existe (BDs creadas
+  // antes de que la plantilla pasara a elegirse en vivo desde /loteadora)
+  const loteadoraColumns = _db.prepare("PRAGMA table_info(loteadoras)").all() as { name: string }[];
+  if (loteadoraColumns.some(c => c.name === 'message_name')) {
+    _db.exec("ALTER TABLE loteadoras DROP COLUMN message_name");
+  }
+
+  // Migración: quitar lot_field_id/expiry_field_id de loteadoras si existen
+  // (BDs creadas antes de que los IDs de campo pasaran a vivir por mensaje,
+  // ver loteadora_mensajes)
+  if (loteadoraColumns.some(c => c.name === 'lot_field_id')) {
+    _db.exec("ALTER TABLE loteadoras DROP COLUMN lot_field_id");
+  }
+  if (loteadoraColumns.some(c => c.name === 'expiry_field_id')) {
+    _db.exec("ALTER TABLE loteadoras DROP COLUMN expiry_field_id");
+  }
+
+  // Migración: añadir columna linea a loteadoras si no existe (BDs creadas
+  // antes de que la línea de fabricación se asignara por loteadora).
+  if (!loteadoraColumns.some(c => c.name === 'linea')) {
+    _db.exec("ALTER TABLE loteadoras ADD COLUMN linea TEXT NOT NULL DEFAULT ''");
+  }
+
+  // Migración: añadir columna hora_field_id a loteadora_mensajes si no existe
+  // (BDs creadas antes de que la plantilla incluyera la hora de envío).
+  const mensajeColumns = _db.prepare("PRAGMA table_info(loteadora_mensajes)").all() as { name: string }[];
+  if (!mensajeColumns.some(c => c.name === 'hora_field_id')) {
+    _db.exec("ALTER TABLE loteadora_mensajes ADD COLUMN hora_field_id INTEGER NOT NULL DEFAULT 0");
+  }
+
+  // Migración: añadir columna turno_field_id a loteadora_mensajes si no existe
+  // (BDs creadas antes de que la plantilla incluyera el turno).
+  if (!mensajeColumns.some(c => c.name === 'turno_field_id')) {
+    _db.exec("ALTER TABLE loteadora_mensajes ADD COLUMN turno_field_id INTEGER NOT NULL DEFAULT 0");
+  }
+
+  // Migración: añadir columna linea_field_id a loteadora_mensajes si no existe
+  // (BDs creadas antes de que la plantilla incluyera la línea de fabricación).
+  if (!mensajeColumns.some(c => c.name === 'linea_field_id')) {
+    _db.exec("ALTER TABLE loteadora_mensajes ADD COLUMN linea_field_id INTEGER NOT NULL DEFAULT 0");
+  }
+
   // Migración: el panel "Costes" cambió de key/URL — 'coste_a1' → 'costes' (y
   // /coste-a1 → /costes). El seed de más abajo busca la fila por `key` e
   // inserta una nueva con INSERT OR IGNORE si no la encuentra: sin este UPDATE
@@ -221,10 +301,13 @@ export function getDb(): Database.Database {
 
   // Seed pantallas (idempotente) — derivado de PANELS (lib/panels.ts), la fuente única
   // de paneles. Públicas por defecto; restringible luego desde /admin sin tocar código.
+  // `privado: true` en PANELS (hoy solo /loteadora) nace con is_public = 0. Solo
+  // aplica al alta: si ya existe la fila, INSERT OR IGNORE no la toca, así que lo
+  // que haya configurado admin desde /admin → Pantallas manda siempre.
   const seedScreen = _db.prepare(
-    'INSERT OR IGNORE INTO screens (key, label, path, is_public) VALUES (?, ?, ?, 1)'
+    'INSERT OR IGNORE INTO screens (key, label, path, is_public) VALUES (?, ?, ?, ?)'
   );
-  for (const p of PANELS) seedScreen.run(p.key, p.label, p.href);
+  for (const p of PANELS) seedScreen.run(p.key, p.label, p.href, 'privado' in p && p.privado ? 0 : 1);
   // Sincroniza el label si un panel se renombra en PANELS (INSERT OR IGNORE de
   // arriba no toca filas ya existentes) — label no es editable desde /admin, así
   // que PANELS sigue siendo la única fuente de verdad también tras el seed inicial.

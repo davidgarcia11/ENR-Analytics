@@ -70,8 +70,10 @@ export function SingleSelect({
                     {value === 'all' ? (
                         <span className="text-slate-500 font-normal">Filtrar por {label}...</span>
                     ) : (
-                        <span className="bg-slate-100 text-slate-800 text-xs px-2 py-0.5 rounded-md border border-slate-200 font-medium truncate max-w-[130px]">
-                            {selectedOption?.description ?? value}
+                        <span className="bg-slate-100 text-slate-800 text-xs px-2 py-0.5 rounded-md border border-slate-200 font-medium truncate max-w-[220px]">
+                            {selectedOption
+                                ? (showId ? `${selectedOption.id} - ${selectedOption.description}` : selectedOption.description)
+                                : value}
                         </span>
                     )}
                 </div>

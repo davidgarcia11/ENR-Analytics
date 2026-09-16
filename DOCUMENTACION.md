@@ -866,9 +866,10 @@ Cada panel tiene su documentación específica en la carpeta `docs/`:
 | Comparativa SERES vs JDE | `/comparativa-seres` | [docs/seres-jde-comparativa.md](docs/seres-jde-comparativa.md) |
 | Consulta de stock por escaneo (FEFO, Reflex) | `/consulta-stock-pda` | [docs/consulta-stock-pda.md](docs/consulta-stock-pda.md) |
 | Compras (previsión de ventas vs. venta real, rediseño sobre sistema Nova) | `/compras` | [docs/compras.md](docs/compras.md) |
-| Explosión de compras (MRP) | `/mrp` | *(sin doc propio todavía — ver comentarios en `app/api/mrp/route.ts`)* |
+| Explosión de compras (MRP) | `/mrp` | [docs/mrp.md](docs/mrp.md) |
 | Coste A1 y despiece recursivo de materiales (sistema Nova) | `/costes` | [docs/costes.md](docs/costes.md) |
 | Control de muestras (pendiente/enviado/completado) | `/muestras` | [docs/muestras.md](docs/muestras.md) |
+| Loteadora | `/loteadora` | [docs/loteadora.md](docs/loteadora.md) |
 
 ### API externa — `GET /api/jde-orders`
 

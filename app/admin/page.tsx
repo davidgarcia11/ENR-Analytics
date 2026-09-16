@@ -11,8 +11,9 @@ import { Badge } from "@/components/ui/badge"
 import { Spinner } from "@/components/ui/spinner"
 import { ConfirmDialog } from "@/components/ui/dialog"
 import { useToast } from "@/components/ui/toast"
-import { Loader2, Trash2, UserPlus, ArrowLeft, KeyRound, Pencil, FileText, ShieldCheck, Tag } from "lucide-react"
+import { Loader2, Trash2, UserPlus, ArrowLeft, KeyRound, Pencil, FileText, ShieldCheck, Tag, Printer, FileCode, Link2 } from "lucide-react"
 import Image from "next/image"
+import { SingleSelect } from "@/components/SingleSelect"
 import { PANELS } from "@/lib/panels"
 import { PLANTS, plantLabel } from "@/lib/plants"
 
@@ -46,12 +47,56 @@ interface Screen {
   config: ScreenConfig
 }
 
-type Tab = 'usuarios' | 'roles' | 'pantallas' | 'estados-jde' | 'coste-a1-coledg' | 'muestras'
+type Tab = 'usuarios' | 'roles' | 'pantallas' | 'estados-jde' | 'loteadoras' | 'plantillas' | 'articulos-plantilla' | 'coste-a1-coledg' | 'muestras'
 
 interface JdeStatus {
   code: string
   description: string
   updated_at?: string
+}
+
+interface Loteadora {
+  id: number
+  name: string
+  ip: string
+  port: number
+  slave_address: number
+  enabled: number
+  linea: string
+  created_at: string
+}
+
+type EstadoLoteadoraValor = 'activa' | 'en_error' | 'standby' | 'apagada'
+
+const ESTADO_LOTEADORA_INFO: Record<EstadoLoteadoraValor, { label: string; variant: 'success' | 'destructive' | 'warning' | 'default' }> = {
+  activa: { label: 'Activa', variant: 'success' },
+  en_error: { label: 'En error', variant: 'destructive' },
+  standby: { label: 'Sin imprimir', variant: 'warning' },
+  apagada: { label: 'Sin conexión', variant: 'default' },
+}
+
+interface LoteadoraMensaje {
+  id: number
+  name: string
+  lot_field_id: number
+  cocida_field_id: number
+  expiry_field_id: number
+  hora_field_id: number
+  turno_field_id: number
+  linea_field_id: number
+  created_at: string
+}
+
+interface ArticuloMensajeAsociacion {
+  articulo_id: string
+  mensaje_id: number
+  mensaje_name: string
+  created_at: string
+}
+
+interface ArticuloLoteadora {
+  id: string
+  descripcion: string
 }
 
 interface ColedgMensual {
@@ -126,6 +171,50 @@ export default function AdminPage() {
   const [jdeStatusSuccess, setJdeStatusSuccess] = useState("")
   const [jdeStatusError, setJdeStatusError] = useState("")
 
+  // ─── Loteadoras ────────────────────────────────────────────────────────────
+  const [loteadoras, setLoteadoras] = useState<Loteadora[]>([])
+  const [loadingLoteadoras, setLoadingLoteadoras] = useState(false)
+  const [newLoteadoraName, setNewLoteadoraName] = useState("")
+  const [newLoteadoraIp, setNewLoteadoraIp] = useState("")
+  const [newLoteadoraPort, setNewLoteadoraPort] = useState("8010")
+  const [newLoteadoraSlave, setNewLoteadoraSlave] = useState("0")
+  const [newLoteadoraLinea, setNewLoteadoraLinea] = useState("")
+  const [loteadoraError, setLoteadoraError] = useState("")
+  const [loteadoraSuccess, setLoteadoraSuccess] = useState("")
+  const [creatingLoteadora, setCreatingLoteadora] = useState(false)
+  const [editLoteadoraId, setEditLoteadoraId] = useState<number | null>(null)
+  const [editLoteadora, setEditLoteadora] = useState({ name: "", ip: "", port: "", slaveAddress: "", enabled: true, linea: "" })
+  const [editLoteadoraError, setEditLoteadoraError] = useState("")
+  const [loteadoraLiveStatus, setLoteadoraLiveStatus] = useState<Record<number, EstadoLoteadoraValor>>({})
+
+  // ─── Plantillas (loteadora_mensajes) ──────────────────────────────────────────
+  const [mensajes, setMensajes] = useState<LoteadoraMensaje[]>([])
+  const [loadingMensajes, setLoadingMensajes] = useState(false)
+  const [newMensajeName, setNewMensajeName] = useState("")
+  const [newMensajeLotField, setNewMensajeLotField] = useState("1")
+  const [newMensajeCocidaField, setNewMensajeCocidaField] = useState("2")
+  const [newMensajeExpiryField, setNewMensajeExpiryField] = useState("3")
+  const [newMensajeHoraField, setNewMensajeHoraField] = useState("4")
+  const [newMensajeTurnoField, setNewMensajeTurnoField] = useState("5")
+  const [newMensajeLineaField, setNewMensajeLineaField] = useState("6")
+  const [mensajeError, setMensajeError] = useState("")
+  const [mensajeSuccess, setMensajeSuccess] = useState("")
+  const [creatingMensaje, setCreatingMensaje] = useState(false)
+  const [editMensajeId, setEditMensajeId] = useState<number | null>(null)
+  const [editMensaje, setEditMensaje] = useState({ name: "", lotFieldId: "", cocidaFieldId: "", expiryFieldId: "", horaFieldId: "", turnoFieldId: "", lineaFieldId: "" })
+  const [editMensajeError, setEditMensajeError] = useState("")
+
+  // ─── Artículos → Plantilla (loteadora_articulo_mensajes) ──────────────────────
+  const [articulosLoteadora, setArticulosLoteadora] = useState<ArticuloLoteadora[]>([])
+  const [loadingArticulosLoteadora, setLoadingArticulosLoteadora] = useState(false)
+  const [asociaciones, setAsociaciones] = useState<ArticuloMensajeAsociacion[]>([])
+  const [loadingAsociaciones, setLoadingAsociaciones] = useState(false)
+  const [nuevaAsociacionArticulo, setNuevaAsociacionArticulo] = useState("")
+  const [nuevaAsociacionMensaje, setNuevaAsociacionMensaje] = useState("")
+  const [asociacionError, setAsociacionError] = useState("")
+  const [asociacionSuccess, setAsociacionSuccess] = useState("")
+  const [creandoAsociacion, setCreandoAsociacion] = useState(false)
+
   // ─── Coste real mensual (mapeo mes -> ledger IELEDG de F30026, usado por /costes) ──
   const [coledgMensual, setColedgMensual] = useState<ColedgMensual[]>([])
   const [loadingColedgMensual, setLoadingColedgMensual] = useState(false)
@@ -143,6 +232,15 @@ export default function AdminPage() {
 
   useEffect(() => { checkAuth() }, [])
 
+  // Estado en vivo de las loteadoras: solo se comprueba mientras la pestaña
+  // está activa (cada comprobación abre una conexión TCP breve a cada máquina).
+  useEffect(() => {
+    if (activeTab !== 'loteadoras') return
+    loadLoteadoraLiveStatus()
+    const interval = setInterval(loadLoteadoraLiveStatus, 60000)
+    return () => clearInterval(interval)
+  }, [activeTab])
+
   const checkAuth = async () => {
     try {
       const res = await fetch("/api/auth/me")
@@ -154,6 +252,10 @@ export default function AdminPage() {
       loadRoles()
       loadScreens()
       loadJdeStatuses()
+      loadLoteadoras()
+      loadMensajes()
+      loadAsociaciones()
+      loadArticulosLoteadora()
       loadColedgMensual()
       loadMuestrasSync()
     } catch {
@@ -248,6 +350,219 @@ export default function AdminPage() {
     } finally {
       setSavingJdeStatus(null)
     }
+  }
+
+  const loadLoteadoras = async () => {
+    setLoadingLoteadoras(true)
+    try {
+      const res = await fetch("/api/admin/loteadoras")
+      if (res.ok) setLoteadoras(await res.json())
+    } finally { setLoadingLoteadoras(false) }
+  }
+
+  const loadLoteadoraLiveStatus = async () => {
+    try {
+      const res = await fetch("/api/admin/loteadoras/estado")
+      if (!res.ok) return
+      const data: { id: number; state: EstadoLoteadoraValor }[] = await res.json()
+      setLoteadoraLiveStatus(Object.fromEntries(data.map(d => [d.id, d.state])))
+    } catch { /* se reintenta en el siguiente ciclo de 60s */ }
+  }
+
+  // ─── Acciones de loteadoras ───────────────────────────────────────────────────
+
+  const createLoteadora = async (e: React.FormEvent) => {
+    e.preventDefault()
+    setLoteadoraError(""); setLoteadoraSuccess(""); setCreatingLoteadora(true)
+    try {
+      const res = await fetch("/api/admin/loteadoras", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: newLoteadoraName, ip: newLoteadoraIp, port: Number(newLoteadoraPort),
+          slaveAddress: Number(newLoteadoraSlave), linea: newLoteadoraLinea,
+        }),
+      })
+      const data = await res.json()
+      if (!res.ok) { setLoteadoraError(data.error); return }
+      setLoteadoraSuccess(`Loteadora "${newLoteadoraName}" creada`)
+      setNewLoteadoraName(""); setNewLoteadoraIp(""); setNewLoteadoraPort("8010")
+      setNewLoteadoraSlave("0"); setNewLoteadoraLinea("")
+      loadLoteadoras()
+    } catch { setLoteadoraError("Error de conexión") } finally { setCreatingLoteadora(false) }
+  }
+
+  const startEditLoteadora = (l: Loteadora) => {
+    setEditLoteadoraId(l.id)
+    setEditLoteadora({
+      name: l.name, ip: l.ip, port: String(l.port), slaveAddress: String(l.slave_address),
+      enabled: !!l.enabled, linea: l.linea,
+    })
+    setEditLoteadoraError("")
+  }
+
+  const saveEditLoteadora = async () => {
+    if (!editLoteadoraId) return
+    setEditLoteadoraError("")
+    try {
+      const res = await fetch(`/api/admin/loteadoras/${editLoteadoraId}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: editLoteadora.name, ip: editLoteadora.ip, port: Number(editLoteadora.port),
+          slaveAddress: Number(editLoteadora.slaveAddress),
+          enabled: editLoteadora.enabled, linea: editLoteadora.linea,
+        }),
+      })
+      const data = await res.json()
+      if (!res.ok) { setEditLoteadoraError(data.error || "Error al guardar"); return }
+      setEditLoteadoraId(null)
+      loadLoteadoras()
+      toast(`Loteadora "${editLoteadora.name}" actualizada`, "success")
+    } catch { setEditLoteadoraError("Error de conexión") }
+  }
+
+  // ─── Carga de plantillas y asociaciones ──────────────────────────────────────
+
+  const loadMensajes = async () => {
+    setLoadingMensajes(true)
+    try {
+      const res = await fetch("/api/admin/loteadora-mensajes")
+      if (res.ok) setMensajes(await res.json())
+    } finally { setLoadingMensajes(false) }
+  }
+
+  const loadAsociaciones = async () => {
+    setLoadingAsociaciones(true)
+    try {
+      const res = await fetch("/api/admin/loteadora-articulos")
+      if (res.ok) setAsociaciones(await res.json())
+    } finally { setLoadingAsociaciones(false) }
+  }
+
+  const loadArticulosLoteadora = async () => {
+    setLoadingArticulosLoteadora(true)
+    try {
+      const res = await fetch("/api/loteadora/articulos")
+      if (res.ok) setArticulosLoteadora(await res.json())
+    } finally { setLoadingArticulosLoteadora(false) }
+  }
+
+  // ─── Acciones de plantillas ───────────────────────────────────────────────────
+
+  const createMensaje = async (e: React.FormEvent) => {
+    e.preventDefault()
+    setMensajeError(""); setMensajeSuccess(""); setCreatingMensaje(true)
+    try {
+      const res = await fetch("/api/admin/loteadora-mensajes", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: newMensajeName,
+          lotFieldId: Number(newMensajeLotField), cocidaFieldId: Number(newMensajeCocidaField), expiryFieldId: Number(newMensajeExpiryField), horaFieldId: Number(newMensajeHoraField), turnoFieldId: Number(newMensajeTurnoField), lineaFieldId: Number(newMensajeLineaField),
+        }),
+      })
+      const data = await res.json()
+      if (!res.ok) { setMensajeError(data.error); return }
+      setMensajeSuccess(`Plantilla "${newMensajeName}" creada`)
+      setNewMensajeName(""); setNewMensajeLotField("1"); setNewMensajeCocidaField("2"); setNewMensajeExpiryField("3"); setNewMensajeHoraField("4"); setNewMensajeTurnoField("5"); setNewMensajeLineaField("6")
+      loadMensajes()
+    } catch { setMensajeError("Error de conexión") } finally { setCreatingMensaje(false) }
+  }
+
+  const startEditMensaje = (m: LoteadoraMensaje) => {
+    setEditMensajeId(m.id)
+    setEditMensaje({
+      name: m.name, lotFieldId: String(m.lot_field_id), cocidaFieldId: String(m.cocida_field_id), expiryFieldId: String(m.expiry_field_id), horaFieldId: String(m.hora_field_id), turnoFieldId: String(m.turno_field_id), lineaFieldId: String(m.linea_field_id),
+    })
+    setEditMensajeError("")
+  }
+
+  const saveEditMensaje = async () => {
+    if (!editMensajeId) return
+    setEditMensajeError("")
+    try {
+      const res = await fetch(`/api/admin/loteadora-mensajes/${editMensajeId}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: editMensaje.name,
+          lotFieldId: Number(editMensaje.lotFieldId), cocidaFieldId: Number(editMensaje.cocidaFieldId), expiryFieldId: Number(editMensaje.expiryFieldId), horaFieldId: Number(editMensaje.horaFieldId), turnoFieldId: Number(editMensaje.turnoFieldId), lineaFieldId: Number(editMensaje.lineaFieldId),
+        }),
+      })
+      const data = await res.json()
+      if (!res.ok) { setEditMensajeError(data.error || "Error al guardar"); return }
+      setEditMensajeId(null)
+      loadMensajes()
+      toast(`Plantilla "${editMensaje.name}" actualizada`, "success")
+    } catch { setEditMensajeError("Error de conexión") }
+  }
+
+  const deleteMensaje = (id: number, name: string) => {
+    setConfirmState({
+      title: "Eliminar plantilla",
+      description: `Se eliminará la plantilla "${name}" y las asociaciones de artículos que la usen. Esta acción no se puede deshacer.`,
+      onConfirm: async () => {
+        try {
+          const res = await fetch(`/api/admin/loteadora-mensajes/${id}`, { method: "DELETE" })
+          const data = await res.json()
+          if (!res.ok) { toast(data.error || "Error al eliminar", "error"); return }
+          loadMensajes(); loadAsociaciones()
+          toast(`Plantilla "${name}" eliminada`, "success")
+        } catch { toast("Error al eliminar", "error") }
+      },
+    })
+  }
+
+  // ─── Acciones de asociaciones artículo → plantilla ────────────────────────────
+
+  const createAsociacion = async (e: React.FormEvent) => {
+    e.preventDefault()
+    setAsociacionError(""); setAsociacionSuccess(""); setCreandoAsociacion(true)
+    try {
+      const res = await fetch("/api/admin/loteadora-articulos", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ articuloId: nuevaAsociacionArticulo, mensajeId: Number(nuevaAsociacionMensaje) }),
+      })
+      const data = await res.json()
+      if (!res.ok) { setAsociacionError(data.error); return }
+      setAsociacionSuccess(`Artículo "${nuevaAsociacionArticulo}" asociado`)
+      setNuevaAsociacionArticulo(""); setNuevaAsociacionMensaje("")
+      loadAsociaciones()
+    } catch { setAsociacionError("Error de conexión") } finally { setCreandoAsociacion(false) }
+  }
+
+  const deleteAsociacion = (articuloId: string) => {
+    setConfirmState({
+      title: "Quitar asociación",
+      description: `Se quitará la plantilla asociada al artículo "${articuloId}".`,
+      onConfirm: async () => {
+        try {
+          const res = await fetch(`/api/admin/loteadora-articulos/${articuloId}`, { method: "DELETE" })
+          const data = await res.json()
+          if (!res.ok) { toast(data.error || "Error al eliminar", "error"); return }
+          loadAsociaciones()
+          toast(`Asociación de "${articuloId}" eliminada`, "success")
+        } catch { toast("Error al eliminar", "error") }
+      },
+    })
+  }
+
+  const deleteLoteadora = (id: number, name: string) => {
+    setConfirmState({
+      title: "Eliminar loteadora",
+      description: `Se eliminará la loteadora "${name}". Esta acción no se puede deshacer.`,
+      onConfirm: async () => {
+        try {
+          const res = await fetch(`/api/admin/loteadoras/${id}`, { method: "DELETE" })
+          const data = await res.json()
+          if (!res.ok) { toast(data.error || "Error al eliminar", "error"); return }
+          loadLoteadoras()
+          toast(`Loteadora "${name}" eliminada`, "success")
+        } catch { toast("Error al eliminar", "error") }
+      },
+    })
   }
 
   const loadColedgMensual = async () => {
@@ -515,6 +830,9 @@ export default function AdminPage() {
             { value: 'roles', label: 'Roles' },
             { value: 'pantallas', label: 'Pantallas' },
             { value: 'estados-jde', label: 'Estados JDE' },
+            { value: 'loteadoras', label: 'Loteadoras' },
+            { value: 'plantillas', label: 'Plantillas' },
+            { value: 'articulos-plantilla', label: 'Artículos → Plantilla' },
             { value: 'coste-a1-coledg', label: 'Coste real (Costes)' },
             { value: 'muestras', label: 'Muestras' },
           ]}
@@ -919,6 +1237,341 @@ export default function AdminPage() {
               </CardContent>
             </Card>
           </div>
+        )}
+
+        {/* ── Pestaña Loteadoras ───────────────────────────────────────────────── */}
+        {activeTab === 'loteadoras' && (
+          <>
+            <Card accent>
+              <CardHeader>
+                <CardTitle className="text-sm font-bold text-secondary-foreground flex items-center gap-2">
+                  <Printer className="h-4 w-4 text-primary" aria-hidden="true" />
+                  Añadir Loteadora
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <form onSubmit={createLoteadora} className="flex flex-wrap items-end gap-4">
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-semibold text-secondary-foreground">Nombre</label>
+                    <Input value={newLoteadoraName} onChange={e => setNewLoteadoraName(e.target.value)} placeholder="Loteadora línea 1" required className="w-[180px]" />
+                  </div>
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-semibold text-secondary-foreground">IP</label>
+                    <Input value={newLoteadoraIp} onChange={e => setNewLoteadoraIp(e.target.value)} placeholder="192.168.1.10" required className="w-[140px]" />
+                  </div>
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-semibold text-secondary-foreground">Puerto</label>
+                    <Input type="number" value={newLoteadoraPort} onChange={e => setNewLoteadoraPort(e.target.value)} required className="w-[90px]" />
+                  </div>
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-semibold text-secondary-foreground">Slave Address</label>
+                    <Input type="number" value={newLoteadoraSlave} onChange={e => setNewLoteadoraSlave(e.target.value)} className="w-[90px]" />
+                  </div>
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-semibold text-secondary-foreground">Línea de fabricación</label>
+                    <Input value={newLoteadoraLinea} onChange={e => setNewLoteadoraLinea(e.target.value)} placeholder="Línea 1" required className="w-[140px]" />
+                  </div>
+                  <Button type="submit" disabled={creatingLoteadora} className="font-semibold">
+                    {creatingLoteadora ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Printer className="mr-2 h-4 w-4" />}
+                    Añadir
+                  </Button>
+                </form>
+                {loteadoraError && <p className="text-sm text-red-600 font-medium mt-3">{loteadoraError}</p>}
+                {loteadoraSuccess && <p className="text-sm text-green-600 font-medium mt-3">{loteadoraSuccess}</p>}
+              </CardContent>
+            </Card>
+
+            <Card accent>
+              <CardHeader>
+                <CardTitle className="text-sm font-bold text-secondary-foreground">Loteadoras Registradas</CardTitle>
+              </CardHeader>
+              <CardContent>
+                {loadingLoteadoras ? (
+                  <Spinner label="Cargando..." className="py-8" />
+                ) : (
+                  <Table>
+                    <TableHeader>
+                      <TableRow className="hover:bg-transparent">
+                        <TableHead className="font-bold text-secondary-foreground">Nombre</TableHead>
+                        <TableHead className="font-bold text-secondary-foreground">IP:Puerto</TableHead>
+                        <TableHead className="font-bold text-secondary-foreground">Línea</TableHead>
+                        <TableHead className="font-bold text-secondary-foreground">Estado</TableHead>
+                        <TableHead className="font-bold text-secondary-foreground text-right">Acciones</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {loteadoras.map(l => (
+                        editLoteadoraId === l.id ? (
+                          <TableRow key={l.id} className="bg-blue-50 border-blue-200">
+                            <TableCell colSpan={5}>
+                              <div className="flex flex-wrap items-end gap-3">
+                                <Input value={editLoteadora.name} onChange={e => setEditLoteadora(s => ({ ...s, name: e.target.value }))} placeholder="Nombre" className="h-8 w-[140px] text-sm" autoFocus />
+                                <Input value={editLoteadora.ip} onChange={e => setEditLoteadora(s => ({ ...s, ip: e.target.value }))} placeholder="IP" className="h-8 w-[120px] text-sm" />
+                                <Input type="number" value={editLoteadora.port} onChange={e => setEditLoteadora(s => ({ ...s, port: e.target.value }))} placeholder="Puerto" className="h-8 w-[80px] text-sm" />
+                                <Input type="number" value={editLoteadora.slaveAddress} onChange={e => setEditLoteadora(s => ({ ...s, slaveAddress: e.target.value }))} placeholder="Slave" className="h-8 w-[70px] text-sm" />
+                                <Input value={editLoteadora.linea} onChange={e => setEditLoteadora(s => ({ ...s, linea: e.target.value }))} placeholder="Línea" className="h-8 w-[100px] text-sm" />
+                                <label className="flex items-center gap-1.5 text-xs font-medium text-secondary-foreground">
+                                  <input type="checkbox" checked={editLoteadora.enabled} onChange={e => setEditLoteadora(s => ({ ...s, enabled: e.target.checked }))} />
+                                  Habilitada
+                                </label>
+                                <Button size="sm" onClick={saveEditLoteadora} className="text-xs font-semibold h-8">Guardar</Button>
+                                <Button size="sm" variant="ghost" onClick={() => setEditLoteadoraId(null)} className="text-muted-foreground h-8 text-xs">Cancelar</Button>
+                                {editLoteadoraError && <span className="text-xs text-red-600 font-medium">{editLoteadoraError}</span>}
+                              </div>
+                            </TableCell>
+                          </TableRow>
+                        ) : (
+                          <TableRow key={l.id} className="hover:bg-muted/50 border-border">
+                            <TableCell className="font-medium">{l.name}</TableCell>
+                            <TableCell className="text-muted-foreground text-sm">{l.ip}:{l.port}</TableCell>
+                            <TableCell className="text-muted-foreground text-sm">{l.linea || '—'}</TableCell>
+                            <TableCell>
+                              <div className="flex flex-wrap gap-1.5">
+                                <Badge variant={l.enabled ? 'success' : 'default'}>{l.enabled ? 'Habilitada' : 'Deshabilitada'}</Badge>
+                                {loteadoraLiveStatus[l.id] ? (
+                                  <Badge variant={ESTADO_LOTEADORA_INFO[loteadoraLiveStatus[l.id]].variant}>
+                                    {ESTADO_LOTEADORA_INFO[loteadoraLiveStatus[l.id]].label}
+                                  </Badge>
+                                ) : (
+                                  <Badge variant="outline">Comprobando…</Badge>
+                                )}
+                              </div>
+                            </TableCell>
+                            <TableCell className="text-right">
+                              <Button variant="ghost" size="sm" onClick={() => startEditLoteadora(l)} className="text-blue-500 hover:text-blue-700 hover:bg-blue-50" title="Editar loteadora">
+                                <Pencil className="h-4 w-4" />
+                              </Button>
+                              <Button variant="ghost" size="sm" onClick={() => deleteLoteadora(l.id, l.name)} className="text-red-500 hover:text-red-700 hover:bg-red-50" title="Eliminar loteadora">
+                                <Trash2 className="h-4 w-4" />
+                              </Button>
+                            </TableCell>
+                          </TableRow>
+                        )
+                      ))}
+                    </TableBody>
+                  </Table>
+                )}
+              </CardContent>
+            </Card>
+          </>
+        )}
+
+        {/* ── Pestaña Plantillas (loteadora_mensajes) ─────────────────────────── */}
+        {activeTab === 'plantillas' && (
+          <>
+            <Card accent>
+              <CardHeader>
+                <CardTitle className="text-sm font-bold text-secondary-foreground flex items-center gap-2">
+                  <FileCode className="h-4 w-4 text-primary" aria-hidden="true" />
+                  Añadir Plantilla
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <form onSubmit={createMensaje} className="flex flex-wrap items-end gap-4">
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-semibold text-secondary-foreground">
+                      Nombre <span className="font-normal text-muted-foreground">(igual que en la máquina)</span>
+                    </label>
+                    <Input value={newMensajeName} onChange={e => setNewMensajeName(e.target.value)} placeholder="pruebaDavid.msg" required className="w-[180px]" />
+                  </div>
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-semibold text-secondary-foreground">ID campo lote</label>
+                    <Input type="number" value={newMensajeLotField} onChange={e => setNewMensajeLotField(e.target.value)} className="w-[110px]" />
+                  </div>
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-semibold text-secondary-foreground">ID campo cocida</label>
+                    <Input type="number" value={newMensajeCocidaField} onChange={e => setNewMensajeCocidaField(e.target.value)} className="w-[110px]" />
+                  </div>
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-semibold text-secondary-foreground">ID campo caducidad</label>
+                    <Input type="number" value={newMensajeExpiryField} onChange={e => setNewMensajeExpiryField(e.target.value)} className="w-[110px]" />
+                  </div>
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-semibold text-secondary-foreground">ID campo hora</label>
+                    <Input type="number" value={newMensajeHoraField} onChange={e => setNewMensajeHoraField(e.target.value)} className="w-[110px]" />
+                  </div>
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-semibold text-secondary-foreground">ID campo turno</label>
+                    <Input type="number" value={newMensajeTurnoField} onChange={e => setNewMensajeTurnoField(e.target.value)} className="w-[110px]" />
+                  </div>
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-semibold text-secondary-foreground">ID campo línea</label>
+                    <Input type="number" value={newMensajeLineaField} onChange={e => setNewMensajeLineaField(e.target.value)} className="w-[110px]" />
+                  </div>
+                  <Button type="submit" disabled={creatingMensaje} className="font-semibold">
+                    {creatingMensaje ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <FileCode className="mr-2 h-4 w-4" />}
+                    Añadir
+                  </Button>
+                </form>
+                {mensajeError && <p className="text-sm text-red-600 font-medium mt-3">{mensajeError}</p>}
+                {mensajeSuccess && <p className="text-sm text-green-600 font-medium mt-3">{mensajeSuccess}</p>}
+              </CardContent>
+            </Card>
+
+            <Card accent>
+              <CardHeader>
+                <CardTitle className="text-sm font-bold text-secondary-foreground">Plantillas Registradas</CardTitle>
+              </CardHeader>
+              <CardContent>
+                {loadingMensajes ? (
+                  <Spinner label="Cargando..." className="py-8" />
+                ) : (
+                  <Table>
+                    <TableHeader>
+                      <TableRow className="hover:bg-transparent">
+                        <TableHead className="font-bold text-secondary-foreground">Nombre</TableHead>
+                        <TableHead className="font-bold text-secondary-foreground">ID lote</TableHead>
+                        <TableHead className="font-bold text-secondary-foreground">ID cocida</TableHead>
+                        <TableHead className="font-bold text-secondary-foreground">ID caducidad</TableHead>
+                        <TableHead className="font-bold text-secondary-foreground">ID hora</TableHead>
+                        <TableHead className="font-bold text-secondary-foreground">ID turno</TableHead>
+                        <TableHead className="font-bold text-secondary-foreground">ID línea</TableHead>
+                        <TableHead className="font-bold text-secondary-foreground text-right">Acciones</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {mensajes.map(m => (
+                        editMensajeId === m.id ? (
+                          <TableRow key={m.id} className="bg-blue-50 border-blue-200">
+                            <TableCell colSpan={8}>
+                              <div className="flex flex-wrap items-end gap-3">
+                                <Input value={editMensaje.name} onChange={e => setEditMensaje(s => ({ ...s, name: e.target.value }))} placeholder="Nombre" className="h-8 w-[160px] text-sm" autoFocus />
+                                <Input type="number" value={editMensaje.lotFieldId} onChange={e => setEditMensaje(s => ({ ...s, lotFieldId: e.target.value }))} placeholder="ID lote" className="h-8 w-[90px] text-sm" />
+                                <Input type="number" value={editMensaje.cocidaFieldId} onChange={e => setEditMensaje(s => ({ ...s, cocidaFieldId: e.target.value }))} placeholder="ID cocida" className="h-8 w-[90px] text-sm" />
+                                <Input type="number" value={editMensaje.expiryFieldId} onChange={e => setEditMensaje(s => ({ ...s, expiryFieldId: e.target.value }))} placeholder="ID cad." className="h-8 w-[90px] text-sm" />
+                                <Input type="number" value={editMensaje.horaFieldId} onChange={e => setEditMensaje(s => ({ ...s, horaFieldId: e.target.value }))} placeholder="ID hora" className="h-8 w-[90px] text-sm" />
+                                <Input type="number" value={editMensaje.turnoFieldId} onChange={e => setEditMensaje(s => ({ ...s, turnoFieldId: e.target.value }))} placeholder="ID turno" className="h-8 w-[90px] text-sm" />
+                                <Input type="number" value={editMensaje.lineaFieldId} onChange={e => setEditMensaje(s => ({ ...s, lineaFieldId: e.target.value }))} placeholder="ID línea" className="h-8 w-[90px] text-sm" />
+                                <Button size="sm" onClick={saveEditMensaje} className="text-xs font-semibold h-8">Guardar</Button>
+                                <Button size="sm" variant="ghost" onClick={() => setEditMensajeId(null)} className="text-muted-foreground h-8 text-xs">Cancelar</Button>
+                                {editMensajeError && <span className="text-xs text-red-600 font-medium">{editMensajeError}</span>}
+                              </div>
+                            </TableCell>
+                          </TableRow>
+                        ) : (
+                          <TableRow key={m.id} className="hover:bg-muted/50 border-border">
+                            <TableCell className="font-medium">
+                              <code className="text-xs bg-muted px-1.5 py-0.5 rounded">{m.name}</code>
+                            </TableCell>
+                            <TableCell className="text-muted-foreground text-sm">{m.lot_field_id}</TableCell>
+                            <TableCell className="text-muted-foreground text-sm">{m.cocida_field_id}</TableCell>
+                            <TableCell className="text-muted-foreground text-sm">{m.expiry_field_id}</TableCell>
+                            <TableCell className="text-muted-foreground text-sm">{m.hora_field_id}</TableCell>
+                            <TableCell className="text-muted-foreground text-sm">{m.turno_field_id}</TableCell>
+                            <TableCell className="text-muted-foreground text-sm">{m.linea_field_id}</TableCell>
+                            <TableCell className="text-right">
+                              <Button variant="ghost" size="sm" onClick={() => startEditMensaje(m)} className="text-blue-500 hover:text-blue-700 hover:bg-blue-50" title="Editar plantilla">
+                                <Pencil className="h-4 w-4" />
+                              </Button>
+                              <Button variant="ghost" size="sm" onClick={() => deleteMensaje(m.id, m.name)} className="text-red-500 hover:text-red-700 hover:bg-red-50" title="Eliminar plantilla">
+                                <Trash2 className="h-4 w-4" />
+                              </Button>
+                            </TableCell>
+                          </TableRow>
+                        )
+                      ))}
+                    </TableBody>
+                  </Table>
+                )}
+              </CardContent>
+            </Card>
+          </>
+        )}
+
+        {/* ── Pestaña Artículos → Plantilla (loteadora_articulo_mensajes) ─────── */}
+        {activeTab === 'articulos-plantilla' && (
+          <>
+            {/* overflow-visible: sin esto, accent (overflow-hidden en Card) recorta el
+                desplegable del SingleSelect, que se posiciona con position:absolute
+                dentro de esta misma tarjeta (ver components/SingleSelect.tsx) */}
+            <Card accent className="overflow-visible">
+              <CardHeader>
+                <CardTitle className="text-sm font-bold text-secondary-foreground flex items-center gap-2">
+                  <Link2 className="h-4 w-4 text-primary" aria-hidden="true" />
+                  Asociar Artículo a Plantilla
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <form onSubmit={createAsociacion} className="flex flex-wrap items-end gap-4">
+                  <div className="space-y-1.5 w-[280px]">
+                    <label className="text-xs font-semibold text-secondary-foreground">
+                      Artículo
+                      {loadingArticulosLoteadora && <Loader2 className="inline h-3 w-3 animate-spin ml-1.5 text-muted-foreground" />}
+                    </label>
+                    <SingleSelect
+                      label="artículo"
+                      showId
+                      allLabel="Buscar por código o descripción…"
+                      value={nuevaAsociacionArticulo || 'all'}
+                      onChange={id => setNuevaAsociacionArticulo(id === 'all' ? '' : id)}
+                      options={articulosLoteadora.map(a => ({ id: a.id, description: a.descripcion }))}
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-semibold text-secondary-foreground">Plantilla</label>
+                    <select
+                      value={nuevaAsociacionMensaje}
+                      onChange={e => setNuevaAsociacionMensaje(e.target.value)}
+                      required
+                      className="flex h-9 w-[180px] rounded-md border border-input bg-card px-3 py-1 text-sm shadow-sm"
+                    >
+                      <option value="" disabled>Seleccionar…</option>
+                      {mensajes.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
+                    </select>
+                  </div>
+                  <Button type="submit" disabled={creandoAsociacion || !nuevaAsociacionArticulo} className="font-semibold">
+                    {creandoAsociacion ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Link2 className="mr-2 h-4 w-4" />}
+                    Asociar
+                  </Button>
+                </form>
+                {asociacionError && <p className="text-sm text-red-600 font-medium mt-3">{asociacionError}</p>}
+                {asociacionSuccess && <p className="text-sm text-green-600 font-medium mt-3">{asociacionSuccess}</p>}
+                <p className="text-xs text-muted-foreground mt-3">
+                  Si el artículo ya tiene una plantilla asociada, volver a asociarlo sustituye la anterior.
+                </p>
+              </CardContent>
+            </Card>
+
+            <Card accent>
+              <CardHeader>
+                <CardTitle className="text-sm font-bold text-secondary-foreground">Asociaciones Registradas</CardTitle>
+              </CardHeader>
+              <CardContent>
+                {loadingAsociaciones ? (
+                  <Spinner label="Cargando..." className="py-8" />
+                ) : (
+                  <Table>
+                    <TableHeader>
+                      <TableRow className="hover:bg-transparent">
+                        <TableHead className="font-bold text-secondary-foreground">Artículo</TableHead>
+                        <TableHead className="font-bold text-secondary-foreground">Descripción</TableHead>
+                        <TableHead className="font-bold text-secondary-foreground">Plantilla</TableHead>
+                        <TableHead className="font-bold text-secondary-foreground text-right">Acciones</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {asociaciones.map(a => (
+                        <TableRow key={a.articulo_id} className="hover:bg-muted/50 border-border">
+                          <TableCell className="font-medium">
+                            <code className="text-xs bg-muted px-1.5 py-0.5 rounded">{a.articulo_id}</code>
+                          </TableCell>
+                          <TableCell className="text-muted-foreground text-sm">
+                            {articulosLoteadora.find(art => art.id === a.articulo_id)?.descripcion ?? '—'}
+                          </TableCell>
+                          <TableCell className="text-sm">{a.mensaje_name}</TableCell>
+                          <TableCell className="text-right">
+                            <Button variant="ghost" size="sm" onClick={() => deleteAsociacion(a.articulo_id)} className="text-red-500 hover:text-red-700 hover:bg-red-50" title="Quitar asociación">
+                              <Trash2 className="h-4 w-4" />
+                            </Button>
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                )}
+              </CardContent>
+            </Card>
+          </>
         )}
 
         {/* ── Pestaña Coste real (Costes) ────────────────────────────────────
