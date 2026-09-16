@@ -13,7 +13,7 @@
 // explícita: que se "parezcan" en colores/tamaños/componentes compartidos aunque el
 // contenido de cada tabla sea distinto.
 import { useEffect, useMemo, useState } from "react";
-import { SearchX, Loader2, CircleIcon } from "lucide-react";
+import { SearchX, Loader2, CircleIcon, ArrowUp, ArrowDown, ArrowUpDown } from "lucide-react";
 import { Input } from "@/components/nova/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/nova/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/nova/ui/table";
@@ -61,8 +61,18 @@ export const ESTADO_TEXT_COLOR: Record<Estado, string> = {
 
 const PAGE_SIZE = 50;
 
+// Columnas ordenables por clic en cabecera — petición explícita, solo estas 3
+// (no Descripción/Estado/Observación).
+const COLUMNAS_ORDENABLES = ["articulo", "marca", "lote"] as const;
+type ColumnaOrdenable = typeof COLUMNAS_ORDENABLES[number];
+
 function claveDe(m: { articulo: string; lote: string }) {
   return `${m.articulo}::${m.lote}`;
+}
+
+function IconoOrden({ columna, orden }: { columna: ColumnaOrdenable; orden: { columna: ColumnaOrdenable; dir: "asc" | "desc" } | null }) {
+  if (orden?.columna !== columna) return <ArrowUpDown size={12} className="text-muted-foreground/50" />;
+  return orden.dir === "asc" ? <ArrowUp size={12} /> : <ArrowDown size={12} />;
 }
 
 export default function MuestrasTable({
@@ -77,6 +87,8 @@ export default function MuestrasTable({
   const [busqueda, setBusqueda] = useState("");
   // Por defecto solo Pendientes — petición explícita, el usuario cambia el filtro si quiere ver el resto.
   const [filtroEstado, setFiltroEstado] = useState<Estado | "todos">("pendiente");
+  // null = orden natural (el que llega de la API). Clic en cabecera: asc → desc → sin orden.
+  const [orden, setOrden] = useState<{ columna: ColumnaOrdenable; dir: "asc" | "desc" } | null>(null);
   const [pagina, setPagina] = useState(1);
   const [seleccion, setSeleccion] = useState<Set<string>>(new Set());
   const [bulkEstado, setBulkEstado] = useState<Estado>("enviado");
@@ -84,7 +96,7 @@ export default function MuestrasTable({
 
   const filtradas = useMemo(() => {
     const q = busqueda.trim().toLowerCase();
-    return data.filter((m) => {
+    const resultado = data.filter((m) => {
       if (filtroEstado !== "todos" && m.estado !== filtroEstado) return false;
       if (!q) return true;
       return (
@@ -94,10 +106,24 @@ export default function MuestrasTable({
         m.marca.toLowerCase().includes(q)
       );
     });
-  }, [data, busqueda, filtroEstado]);
+    if (orden) {
+      const { columna, dir } = orden;
+      resultado.sort((a, b) => a[columna].localeCompare(b[columna], "es", { numeric: true }) * (dir === "asc" ? 1 : -1));
+    }
+    return resultado;
+  }, [data, busqueda, filtroEstado, orden]);
+
+  // Clic en cabecera: sin orden → asc → desc → sin orden (misma columna), o asc directo al cambiar de columna.
+  const toggleOrden = (columna: ColumnaOrdenable) => {
+    setOrden((prev) => {
+      if (!prev || prev.columna !== columna) return { columna, dir: "asc" };
+      if (prev.dir === "asc") return { columna, dir: "desc" };
+      return null;
+    });
+  };
 
   const totalPaginas = Math.max(1, Math.ceil(filtradas.length / PAGE_SIZE));
-  useEffect(() => { setPagina(1); }, [busqueda, filtroEstado]);
+  useEffect(() => { setPagina(1); }, [busqueda, filtroEstado, orden]);
   useEffect(() => { if (pagina > totalPaginas) setPagina(totalPaginas); }, [pagina, totalPaginas]);
 
   const paginadas = useMemo(
@@ -238,10 +264,22 @@ export default function MuestrasTable({
                         onCheckedChange={toggleCabecera}
                       />
                     </TableHead>
-                    <TableHead className="h-9 bg-muted/40 px-4 text-muted-foreground">Artículo</TableHead>
+                    <TableHead className="h-9 bg-muted/40 px-4 text-muted-foreground">
+                      <button type="button" onClick={() => toggleOrden("articulo")} className="flex items-center gap-1 hover:text-foreground">
+                        Artículo <IconoOrden columna="articulo" orden={orden} />
+                      </button>
+                    </TableHead>
                     <TableHead className="h-9 bg-muted/40 px-4 text-muted-foreground">Descripción</TableHead>
-                    <TableHead className="h-9 bg-muted/40 px-4 text-muted-foreground">Marca</TableHead>
-                    <TableHead className="h-9 bg-muted/40 px-4 text-muted-foreground">Lote</TableHead>
+                    <TableHead className="h-9 bg-muted/40 px-4 text-muted-foreground">
+                      <button type="button" onClick={() => toggleOrden("marca")} className="flex items-center gap-1 hover:text-foreground">
+                        Marca <IconoOrden columna="marca" orden={orden} />
+                      </button>
+                    </TableHead>
+                    <TableHead className="h-9 bg-muted/40 px-4 text-muted-foreground">
+                      <button type="button" onClick={() => toggleOrden("lote")} className="flex items-center gap-1 hover:text-foreground">
+                        Lote <IconoOrden columna="lote" orden={orden} />
+                      </button>
+                    </TableHead>
                     <TableHead className="h-9 bg-muted/40 px-4 text-muted-foreground">Estado</TableHead>
                     <TableHead className="h-9 w-64 bg-muted/40 px-4 text-muted-foreground">Observación</TableHead>
                   </TableRow>

@@ -35,6 +35,8 @@ app/                          # Rutas Next.js (App Router)
   consulta-stock-pda/         # Panel consulta de stock por escaneo (FEFO, Reflex/SQL Server)
   compras/                    # Panel comparativa previsión de ventas vs. venta real (director de compras) — sistema Nova
   costes/                     # Panel de coste A1 y despiece recursivo de materiales — sistema Nova
+  mrp/                        # Panel explosión de compras (previsión × lista de materiales) — sistema Nova
+  muestras/                   # App control de muestras pendientes/enviadas/completadas — sistema Nova
   admin/page.tsx              # Panel de administración de usuarios
   admin/logs/page.tsx         # Logs de consultas (solo admin)
   login/page.tsx              # Login
@@ -54,6 +56,8 @@ app/                          # Rutas Next.js (App Router)
     costes/                   # GET coste A1 (F30026) + despiece recursivo (F3002) + coste real ponderado (F30026, ledger mensual) — jerárquico (Nova)
     auth/                     # login, logout, me, change-password
     admin/                    # users CRUD, logs, coste-a1-coledg (mapeo mes->ledger IELEDG para el coste real de /costes)
+    mrp/                       # GET explosión recursiva de materiales a comprar a partir de previsión (F3460) + BOM (F3002) (Nova)
+    muestras/                  # CRUD control de muestras pendientes/enviadas/completadas (Nova)
     presets/                  # CRUD presets de filtros
 lib/
   db.ts                       # Conexión Oracle (getDbConnection)
@@ -88,6 +92,8 @@ docs/                         # Documentación específica por panel
   compras.md                  # Panel comparativa previsión de ventas vs. venta real (sistema Nova) — también referencia de patrones Nova reutilizables
   compras-v1-historico.md     # Documentación de la versión anterior de /compras (código ya sustituido, conocimiento JDE aún vigente)
   costes.md                   # Panel de coste A1 y despiece recursivo de materiales (sistema Nova)
+  mrp.md                      # Panel de explosión de compras / MRP (sistema Nova)
+  muestras.md                 # App de control de muestras pendientes/enviadas/completadas (sistema Nova)
 ```
 
 ## Convenciones de código
@@ -218,6 +224,8 @@ Solo cuando se pida explícitamente usar Nova (no es el sistema por defecto toda
   - Cambios en el panel de consulta de stock por escaneo → `docs/consulta-stock-pda.md`
   - Cambios en el panel de compras o en el sistema Nova (`/compras`, `api/compras`, `components/nova/`, `components/shadcn-space/`) → `docs/compras.md` y `components/nova/README.md`
   - Cambios en el panel de costes (`/costes`, `api/costes`, `api/admin/coste-a1-coledg`) → `docs/costes.md`
+  - Cambios en el panel de MRP (`/mrp`, `api/mrp`) → `docs/mrp.md`
+  - Cambios en el panel de muestras (`/muestras`, `api/muestras`) → `docs/muestras.md`
   - Nuevo panel → crear `docs/nombre-panel.md` y añadir referencia en `DOCUMENTACION.md` sección 9
 - Sugerir commit con mensaje siguiendo el estilo del proyecto (conventional + español)
 - Actualizar la tarea de ClickUp correspondiente (estado, comentario) según en qué paso del flujo Git se esté — ver `MANUAL_IA_ALIMENTAR_CLICKUP.md`
