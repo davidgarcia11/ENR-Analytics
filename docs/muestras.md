@@ -281,6 +281,12 @@ artículos configurada, tarda segundos).
   - Búsqueda y filtro de estado son **locales** (sobre los datos ya cargados). **Filtro
     de estado por defecto: "Pendiente"** (petición explícita) — el usuario cambia a
     Enviado/Completado/Todos si quiere.
+  - **Ordenación** (local, sobre `filtradas`, antes de paginar): clic en cabecera de
+    Artículo/Marca/Lote (únicas columnas ordenables) alterna sin orden → ascendente →
+    descendente, con icono `ArrowUp`/`ArrowDown`/`ArrowUpDown` (lucide-react) junto al
+    texto. Un solo criterio de orden a la vez (clic en otra columna sustituye al
+    anterior). `localeCompare(..., "es", { numeric: true })` para que el Lote (numérico
+    como texto) ordene por valor y no lexicográficamente.
   - Estado se edita con un `Select` por fila y observación con un `Input` por fila que
     guarda al perder el foco (`onBlur`). El texto del estado siempre sale con mayúscula
     inicial (`ESTADO_LABEL`, no el valor crudo `pendiente`/`enviado`/`completado`) —
