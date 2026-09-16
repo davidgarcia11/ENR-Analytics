@@ -91,6 +91,7 @@ export function getDb(): Database.Database {
       port INTEGER NOT NULL,
       slave_address INTEGER NOT NULL DEFAULT 0,
       enabled INTEGER NOT NULL DEFAULT 1,
+      linea TEXT NOT NULL DEFAULT '',
       created_at TEXT DEFAULT (datetime('now'))
     );
 
@@ -103,6 +104,9 @@ export function getDb(): Database.Database {
       lot_field_id INTEGER NOT NULL,
       cocida_field_id INTEGER NOT NULL,
       expiry_field_id INTEGER NOT NULL,
+      hora_field_id INTEGER NOT NULL,
+      turno_field_id INTEGER NOT NULL,
+      linea_field_id INTEGER NOT NULL,
       created_at TEXT DEFAULT (datetime('now'))
     );
 
@@ -253,6 +257,31 @@ export function getDb(): Database.Database {
     _db.exec("ALTER TABLE loteadoras DROP COLUMN expiry_field_id");
   }
 
+  // Migración: añadir columna linea a loteadoras si no existe (BDs creadas
+  // antes de que la línea de fabricación se asignara por loteadora).
+  if (!loteadoraColumns.some(c => c.name === 'linea')) {
+    _db.exec("ALTER TABLE loteadoras ADD COLUMN linea TEXT NOT NULL DEFAULT ''");
+  }
+
+  // Migración: añadir columna hora_field_id a loteadora_mensajes si no existe
+  // (BDs creadas antes de que la plantilla incluyera la hora de envío).
+  const mensajeColumns = _db.prepare("PRAGMA table_info(loteadora_mensajes)").all() as { name: string }[];
+  if (!mensajeColumns.some(c => c.name === 'hora_field_id')) {
+    _db.exec("ALTER TABLE loteadora_mensajes ADD COLUMN hora_field_id INTEGER NOT NULL DEFAULT 0");
+  }
+
+  // Migración: añadir columna turno_field_id a loteadora_mensajes si no existe
+  // (BDs creadas antes de que la plantilla incluyera el turno).
+  if (!mensajeColumns.some(c => c.name === 'turno_field_id')) {
+    _db.exec("ALTER TABLE loteadora_mensajes ADD COLUMN turno_field_id INTEGER NOT NULL DEFAULT 0");
+  }
+
+  // Migración: añadir columna linea_field_id a loteadora_mensajes si no existe
+  // (BDs creadas antes de que la plantilla incluyera la línea de fabricación).
+  if (!mensajeColumns.some(c => c.name === 'linea_field_id')) {
+    _db.exec("ALTER TABLE loteadora_mensajes ADD COLUMN linea_field_id INTEGER NOT NULL DEFAULT 0");
+  }
+
   // Migración: el panel "Costes" cambió de key/URL — 'coste_a1' → 'costes' (y
   // /coste-a1 → /costes). El seed de más abajo busca la fila por `key` e
   // inserta una nueva con INSERT OR IGNORE si no la encuentra: sin este UPDATE
@@ -272,10 +301,13 @@ export function getDb(): Database.Database {
 
   // Seed pantallas (idempotente) — derivado de PANELS (lib/panels.ts), la fuente única
   // de paneles. Públicas por defecto; restringible luego desde /admin sin tocar código.
+  // `privado: true` en PANELS (hoy solo /loteadora) nace con is_public = 0. Solo
+  // aplica al alta: si ya existe la fila, INSERT OR IGNORE no la toca, así que lo
+  // que haya configurado admin desde /admin → Pantallas manda siempre.
   const seedScreen = _db.prepare(
-    'INSERT OR IGNORE INTO screens (key, label, path, is_public) VALUES (?, ?, ?, 1)'
+    'INSERT OR IGNORE INTO screens (key, label, path, is_public) VALUES (?, ?, ?, ?)'
   );
-  for (const p of PANELS) seedScreen.run(p.key, p.label, p.href);
+  for (const p of PANELS) seedScreen.run(p.key, p.label, p.href, 'privado' in p && p.privado ? 0 : 1);
   // Sincroniza el label si un panel se renombra en PANELS (INSERT OR IGNORE de
   // arriba no toca filas ya existentes) — label no es editable desde /admin, así
   // que PANELS sigue siendo la única fuente de verdad también tras el seed inicial.

@@ -8,6 +8,9 @@ export function parseMensajeInput(body: any) {
   const lotFieldId = Number(body.lotFieldId);
   const cocidaFieldId = Number(body.cocidaFieldId);
   const expiryFieldId = Number(body.expiryFieldId);
+  const horaFieldId = Number(body.horaFieldId);
+  const turnoFieldId = Number(body.turnoFieldId);
+  const lineaFieldId = Number(body.lineaFieldId);
 
   if (!name) return { error: 'El nombre es obligatorio' };
 
@@ -15,17 +18,20 @@ export function parseMensajeInput(body: any) {
     ['ID de campo del lote', lotFieldId],
     ['ID de campo de la cocida', cocidaFieldId],
     ['ID de campo de la caducidad', expiryFieldId],
+    ['ID de campo de la hora', horaFieldId],
+    ['ID de campo del turno', turnoFieldId],
+    ['ID de campo de la línea', lineaFieldId],
   ] as const) {
     if (!Number.isInteger(value) || value < 0 || value > 255) {
       return { error: `${label} debe ser un entero entre 0 y 255` };
     }
   }
 
-  if (lotFieldId === cocidaFieldId || lotFieldId === expiryFieldId || cocidaFieldId === expiryFieldId) {
-    return { error: 'Los IDs de campo de lote, cocida y caducidad deben ser distintos entre sí' };
+  if (new Set([lotFieldId, cocidaFieldId, expiryFieldId, horaFieldId, turnoFieldId, lineaFieldId]).size !== 6) {
+    return { error: 'Los IDs de campo de lote, cocida, caducidad, hora, turno y línea deben ser distintos entre sí' };
   }
 
-  return { value: { name, lotFieldId, cocidaFieldId, expiryFieldId } };
+  return { value: { name, lotFieldId, cocidaFieldId, expiryFieldId, horaFieldId, turnoFieldId, lineaFieldId } };
 }
 
 export async function GET() {
@@ -36,7 +42,7 @@ export async function GET() {
 
   const db = getDb();
   const mensajes = db.prepare(
-    'SELECT id, name, lot_field_id, cocida_field_id, expiry_field_id, created_at FROM loteadora_mensajes ORDER BY name'
+    'SELECT id, name, lot_field_id, cocida_field_id, expiry_field_id, hora_field_id, turno_field_id, linea_field_id, created_at FROM loteadora_mensajes ORDER BY name'
   ).all();
   return NextResponse.json(mensajes);
 }
@@ -52,15 +58,15 @@ export async function POST(req: NextRequest) {
   if ('error' in parsed) {
     return NextResponse.json({ error: parsed.error }, { status: 400 });
   }
-  const { name, lotFieldId, cocidaFieldId, expiryFieldId } = parsed.value;
+  const { name, lotFieldId, cocidaFieldId, expiryFieldId, horaFieldId, turnoFieldId, lineaFieldId } = parsed.value;
 
   const db = getDb();
   try {
     const result = db.prepare(
-      `INSERT INTO loteadora_mensajes (name, lot_field_id, cocida_field_id, expiry_field_id)
-       VALUES (?, ?, ?, ?)`
-    ).run(name, lotFieldId, cocidaFieldId, expiryFieldId);
-    const created = db.prepare('SELECT id, name, lot_field_id, cocida_field_id, expiry_field_id, created_at FROM loteadora_mensajes WHERE id = ?').get(result.lastInsertRowid);
+      `INSERT INTO loteadora_mensajes (name, lot_field_id, cocida_field_id, expiry_field_id, hora_field_id, turno_field_id, linea_field_id)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`
+    ).run(name, lotFieldId, cocidaFieldId, expiryFieldId, horaFieldId, turnoFieldId, lineaFieldId);
+    const created = db.prepare('SELECT id, name, lot_field_id, cocida_field_id, expiry_field_id, hora_field_id, turno_field_id, linea_field_id, created_at FROM loteadora_mensajes WHERE id = ?').get(result.lastInsertRowid);
     return NextResponse.json(created, { status: 201 });
   } catch (err: any) {
     if (err.message?.includes('UNIQUE')) {

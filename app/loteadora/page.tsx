@@ -26,6 +26,7 @@ import { type ThemeMode } from "@/components/nova/mode-toggle";
 import { NovaPortalProvider } from "@/components/nova/portal-container";
 import DatePicker from "@/components/nova/date-picker";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/nova/ui/card";
+import { Alert, AlertDescription } from "@/components/nova/ui/alert";
 import { Button } from "@/components/nova/ui/button";
 import { Badge } from "@/components/nova/ui/badge";
 import { Input } from "@/components/nova/ui/input";
@@ -34,11 +35,25 @@ import { Combobox, ComboboxContent, ComboboxEmpty, ComboboxInput, ComboboxItem, 
 import { Toaster } from "@/components/nova/ui/sonner";
 
 interface SessionUser { id: number; username: string; role: string; name: string; surname: string }
-interface PlantillaArticulo { messageName: string; lotFieldId: number; cocidaFieldId: number; expiryFieldId: number }
+interface PlantillaArticulo { messageName: string; lotFieldId: number; cocidaFieldId: number; expiryFieldId: number; horaFieldId: number; turnoFieldId: number; lineaFieldId: number }
 interface Articulo { id: string; descripcion: string; diasCaducidad: number; plantilla: PlantillaArticulo | null }
-interface Loteadora { id: number; name: string }
+interface Loteadora { id: number; name: string; linea: string }
 type EstadoLoteadoraValor = "activa" | "en_error" | "standby" | "apagada";
 interface EstadoLoteadora { id: number; name: string; state: EstadoLoteadoraValor }
+
+// Formulario de UN trabajo de impresión (artículo/fechas/turno/plantilla elegida).
+// Se guarda uno por loteadora (ver `formStates` en el componente) para que cambiar
+// de loteadora no mezcle ni pierda lo que había en cada una.
+interface LoteadoraFormState {
+  selectedArticuloId: string | null;
+  fechaFab: string;
+  fechaCocida: string;
+  diasCad: string;
+  diasDesdeJde: number | null;
+  modoManual: boolean;
+  turno: string;
+  selectedMensaje: string;
+}
 
 // Colores fijos (enum cerrado de 4 estados) — mismo formato "bg-x/10 text-x" que el
 // resto de indicadores de estado en Nova (ver components/nova/mrp-materials-table.tsx).
@@ -67,6 +82,9 @@ function addDays(date: Date, days: number): Date {
 function formatDateES(date: Date): string {
   return date.toLocaleDateString("es-ES", { day: "2-digit", month: "2-digit", year: "numeric" });
 }
+function toHHmm(date: Date): string {
+  return `${String(date.getHours()).padStart(2, "0")}${String(date.getMinutes()).padStart(2, "0")}`;
+}
 function todayISO(): string {
   const d = new Date();
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
@@ -76,6 +94,18 @@ function parseFecha(val: string): Date | null {
   const [y, m, d] = val.split("-").map(Number);
   if (!y || !m || !d) return null;
   return new Date(y, m - 1, d);
+}
+function defaultFormState(): LoteadoraFormState {
+  return {
+    selectedArticuloId: null,
+    fechaFab: todayISO(),
+    fechaCocida: todayISO(),
+    diasCad: "",
+    diasDesdeJde: null,
+    modoManual: false,
+    turno: "",
+    selectedMensaje: "",
+  };
 }
 
 export default function LoteadoraPage() {
@@ -96,15 +126,12 @@ export default function LoteadoraPage() {
 
   // Selección de artículo (búsqueda directa, sin marca)
   const [articulos, setArticulos] = useState<Articulo[]>([]);
-  const [selectedArticulo, setSelectedArticulo] = useState<Articulo | null>(null);
   const [loadingArticulos, setLoadingArticulos] = useState(false);
 
-  // Formulario
-  const [fechaFab, setFechaFab] = useState(todayISO());
-  const [fechaCocida, setFechaCocida] = useState(todayISO());
-  const [diasCad, setDiasCad] = useState("");
-  const [diasDesdeJde, setDiasDesdeJde] = useState<number | null>(null);
-  const [modoManual, setModoManual] = useState(false);
+  // Formulario — uno POR LOTEADORA (clave = selectedLoteadora, "" = todavía sin
+  // elegir ninguna), para que cambiar de loteadora no mezcle ni pierda lo que
+  // había en cada una. Ver "Sesión por loteadora" en docs/loteadora.md §14.
+  const [formStates, setFormStates] = useState<Record<string, LoteadoraFormState>>({});
 
   // Estado JDE
   const [jdeOnline, setJdeOnline] = useState(true);
@@ -116,11 +143,38 @@ export default function LoteadoraPage() {
   const [loadingEstado, setLoadingEstado] = useState(false);
   const [limpiandoBuffer, setLimpiandoBuffer] = useState(false);
 
-  // Plantilla (mensaje) a cargar en la loteadora seleccionada
+  // Plantilla (mensaje) a cargar en la loteadora seleccionada — la lista de
+  // nombres disponibles en la máquina (mensajes) es dato en vivo, se refresca
+  // siempre; cuál está elegida (selectedMensaje) vive en formStates.
   const [mensajes, setMensajes] = useState<string[]>([]);
-  const [selectedMensaje, setSelectedMensaje] = useState("");
   const [loadingMensajes, setLoadingMensajes] = useState(false);
   const [cargandoMensaje, setCargandoMensaje] = useState(false);
+
+  // Formulario activo: el de la loteadora seleccionada ahora mismo (o el
+  // "borrador" sin loteadora todavía, clave "").
+  const currentForm = formStates[selectedLoteadora] ?? defaultFormState();
+  const { fechaFab, fechaCocida, diasCad, diasDesdeJde, modoManual, turno, selectedMensaje } = currentForm;
+  const selectedArticulo = articulos.find((a) => a.id === currentForm.selectedArticuloId) ?? null;
+  const updateForm = (patch: Partial<LoteadoraFormState>) => {
+    setFormStates((prev) => ({
+      ...prev,
+      [selectedLoteadora]: { ...(prev[selectedLoteadora] ?? defaultFormState()), ...patch },
+    }));
+  };
+  const setFechaFab = (v: string) => updateForm({ fechaFab: v });
+  const setFechaCocida = (v: string) => updateForm({ fechaCocida: v });
+  const setDiasCad = (v: string) => updateForm({ diasCad: v });
+  const setModoManual = (v: boolean) => updateForm({ modoManual: v });
+  const setTurno = (v: string) => updateForm({ turno: v });
+  const setSelectedMensaje = (v: string) => updateForm({ selectedMensaje: v });
+
+  // Hora de envío (HHmm): reloj en vivo, no editable — se manda tal cual esté
+  // en el instante exacto de pulsar "Enviar".
+  const [ahora, setAhora] = useState(() => new Date());
+  useEffect(() => {
+    const interval = setInterval(() => setAhora(new Date()), 1000);
+    return () => clearInterval(interval);
+  }, []);
 
   // Envío
   const [sending, setSending] = useState(false);
@@ -149,7 +203,6 @@ export default function LoteadoraPage() {
   useEffect(() => {
     if (!selectedLoteadora) {
       setMensajes([]);
-      setSelectedMensaje("");
       return;
     }
     // Se refresca el estado en vivo justo aquí (no solo cada 60s) para que el
@@ -160,23 +213,40 @@ export default function LoteadoraPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedLoteadora]);
 
-  // Autocarga de plantilla: si el artículo elegido tiene una plantilla
-  // asociada (configurada en /admin), se carga sola en la loteadora sin
-  // pedir confirmación — sustituye a la selección manual para ese caso.
+  // Autocarga de plantilla: si el artículo elegido (para ESTA loteadora, ver
+  // formStates) tiene una plantilla asociada, se carga sola sin pedir
+  // confirmación. Dependencias por valor (id/messageName), no por el objeto
+  // `selectedArticulo` entero — ese objeto cambia de referencia cada vez que
+  // se refresca `articulos` (cada 60s) aunque el contenido sea el mismo, y
+  // dispararía una recarga innecesaria en la loteadora cada minuto.
   useEffect(() => {
     if (!selectedLoteadora || !selectedArticulo?.plantilla) return;
     cargarMensaje(selectedArticulo.plantilla.messageName);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedArticulo, selectedLoteadora]);
+  }, [selectedArticulo?.id, selectedArticulo?.plantilla?.messageName, selectedLoteadora]);
+
+  const LOGIN_URL = `/login?next=${encodeURIComponent("/loteadora")}`;
 
   const checkSession = async () => {
     try {
       const res = await fetch("/api/auth/me");
       if (res.ok) setSessionUser(await res.json());
-      else router.push("/login");
+      else router.push(LOGIN_URL);
     } catch {
-      router.push("/login");
+      router.push(LOGIN_URL);
     }
+  };
+
+  // La sesión solo se comprueba al montar, así que si el token caduca con el
+  // panel abierto (tablet de planta que no se cierra en días), el primer aviso
+  // es un 401 de cualquiera de las cuatro rutas que exigen sesión. Sin esto se
+  // mostraba "No autenticado" como si fuera un error de la máquina.
+  // Provisional: lo sustituirá el SessionProvider/apiFetch compartido.
+  const sesionCaducada = (res: Response) => {
+    if (res.status !== 401) return false;
+    toast.error("Tu sesión ha caducado — vuelve a iniciar sesión");
+    router.push(LOGIN_URL);
+    return true;
   };
 
   const logout = async () => {
@@ -229,13 +299,12 @@ export default function LoteadoraPage() {
     setLoadingMensajes(true);
     try {
       const res = await fetch(`/api/loteadora/mensajes?loteadoraId=${loteadoraId}`);
+      if (sesionCaducada(res)) return;
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Error al listar las plantillas de la loteadora");
       setMensajes(data.messages);
-      setSelectedMensaje("");
     } catch (err: any) {
       setMensajes([]);
-      setSelectedMensaje("");
       toast.error(err.message || "Error al listar las plantillas de la loteadora");
     } finally {
       setLoadingMensajes(false);
@@ -244,7 +313,7 @@ export default function LoteadoraPage() {
 
   const cargarMensaje = async (messageName: string) => {
     if (!selectedLoteadora || !messageName || cargandoMensaje) return;
-    setSelectedMensaje(messageName);
+    updateForm({ selectedMensaje: messageName });
     setCargandoMensaje(true);
     try {
       const res = await fetch("/api/loteadora/cargar-mensaje", {
@@ -252,6 +321,7 @@ export default function LoteadoraPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ loteadoraId: Number(selectedLoteadora), messageName }),
       });
+      if (sesionCaducada(res)) return;
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Error al cargar la plantilla");
       toast.success("Plantilla cargada correctamente");
@@ -273,6 +343,7 @@ export default function LoteadoraPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ loteadoraId: Number(selectedLoteadora) }),
       });
+      if (sesionCaducada(res)) return;
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Error al limpiar el buffer");
       toast.success("Buffer de campos remotos vaciado");
@@ -285,17 +356,36 @@ export default function LoteadoraPage() {
 
   const handleArticuloChange = (id: string | null) => {
     const art = articulos.find((a) => a.id === id) ?? null;
-    setSelectedArticulo(art);
-    if (!art) return;
-    if (art.diasCaducidad > 0) {
-      setDiasDesdeJde(art.diasCaducidad);
-      setDiasCad(String(art.diasCaducidad));
-      setModoManual(false);
-    } else {
-      setDiasDesdeJde(null);
-      setDiasCad("");
-      setModoManual(true);
+    if (!art) {
+      updateForm({ selectedArticuloId: null });
+      return;
     }
+    updateForm({
+      selectedArticuloId: art.id,
+      ...(art.diasCaducidad > 0
+        ? { diasDesdeJde: art.diasCaducidad, diasCad: String(art.diasCaducidad), modoManual: false }
+        : { diasDesdeJde: null, diasCad: "", modoManual: true }),
+    });
+  };
+
+  // Al elegir una loteadora que aún no tenga su propia sesión: si venías del
+  // "borrador" sin loteadora (flujo normal: rellenar el formulario y luego
+  // elegir a dónde enviarlo), se la queda esa loteadora. Si ya tenías otra
+  // loteadora elegida y cambias a una tercera sin visitar, empieza en blanco
+  // — cada loteadora tiene su propia sesión independiente, no hereda de la
+  // que tuvieras abierta un momento antes.
+  const handleLoteadoraSelect = (id: string) => {
+    setFormStates((prev) => {
+      if (prev[id]) return prev;
+      const seed = selectedLoteadora === "" ? (prev[""] ?? defaultFormState()) : defaultFormState();
+      return { ...prev, [id]: seed };
+    });
+    setSelectedLoteadora(id);
+    // El error de envío es de la loteadora que se acaba de dejar — mostrarlo
+    // sobre la sesión de otra loteadora sería confuso.
+    setSendError(null);
+    setSendErrorDetail(null);
+    setShowSendErrorDetail(false);
   };
 
   const handleEnviar = async () => {
@@ -314,8 +404,11 @@ export default function LoteadoraPage() {
           lote,
           fechaCocida: cocida,
           fechaCaducidad: formatDateES(fechaCaducidad),
+          horaEnvio: toHHmm(new Date()),
+          turno,
         }),
       });
+      if (sesionCaducada(res)) return;
       const data = await res.json();
       if (!res.ok) {
         setSendError(data.error || "Error al enviar a la loteadora");
@@ -341,7 +434,9 @@ export default function LoteadoraPage() {
   const lote = fabDate ? toLote(fabDate) : null;
   const cocida = cocidaDate ? toLote(cocidaDate) : null;
   const fechaCaducidad = cocidaDate && !isNaN(diasNum) && diasNum > 0 ? addDays(cocidaDate, diasNum) : null;
-  const canSend = !!lote && !!cocida && !!fechaCaducidad && !!selectedArticulo?.plantilla && !!selectedLoteadora && !sending;
+  const loteadoraSeleccionada = loteadoras.find((l) => String(l.id) === selectedLoteadora) ?? null;
+  const lineaLoteadora = loteadoraSeleccionada?.linea || null;
+  const canSend = !!lote && !!cocida && !!fechaCaducidad && !!turno && !!lineaLoteadora && !!selectedArticulo?.plantilla && !!selectedLoteadora && !sending;
   const diasReadonly = !modoManual && jdeOnline && diasDesdeJde !== null;
   const canCargarMensaje = !!selectedLoteadora && !!selectedMensaje && !cargandoMensaje;
 
@@ -358,7 +453,7 @@ export default function LoteadoraPage() {
         <div className="overflow-hidden bg-background md:m-2 md:rounded-xl md:shadow-sm md:outline md:outline-border">
           <Header user={sessionUser} onLogout={logout} mode={mode} onModeChange={setMode} />
 
-          <main className="mx-auto max-w-5xl space-y-4 p-4 md:p-6">
+          <main className="mx-auto max-w-7xl space-y-4 p-4 md:p-6">
             <Card>
               <CardHeader className="flex flex-wrap items-center justify-between gap-2 border-b pb-4">
                 <CardTitle>Loteadora</CardTitle>
@@ -396,10 +491,12 @@ export default function LoteadoraPage() {
                   </div>
 
                   {selectedArticulo && !selectedArticulo.plantilla && (
-                    <p className="flex items-center gap-1.5 rounded-md border border-amber-500/20 bg-amber-400/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-400">
-                      <AlertTriangle className="size-3.5 flex-shrink-0" />
-                      Este artículo no tiene una plantilla asociada — configúralo en /admin antes de poder enviar.
-                    </p>
+                    <Alert className="border-amber-500/20 bg-amber-400/10 py-2">
+                      <AlertTriangle className="text-amber-600" />
+                      <AlertDescription className="text-xs text-amber-700 dark:text-amber-400">
+                        Este artículo no tiene una plantilla asociada — configúralo en /admin antes de poder enviar.
+                      </AlertDescription>
+                    </Alert>
                   )}
 
                   {/* Fabricación y cocida lado a lado — la caducidad se calcula desde cocida, no desde fabricación */}
@@ -463,8 +560,22 @@ export default function LoteadoraPage() {
                   </div>
 
                   <div className="grid gap-1.5">
+                    <label className="text-xs font-semibold text-foreground">Turno</label>
+                    <Select value={turno || undefined} onValueChange={(v) => setTurno(v as string)}>
+                      <SelectTrigger className="w-full">
+                        <SelectValue placeholder="Seleccionar turno…" />
+                      </SelectTrigger>
+                      <SelectContent align="start" alignItemWithTrigger={false}>
+                        <SelectItem value="1">1</SelectItem>
+                        <SelectItem value="2">2</SelectItem>
+                        <SelectItem value="3">3</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  <div className="grid gap-1.5">
                     <label className="text-xs font-semibold text-foreground">Loteadora</label>
-                    <Select value={selectedLoteadora || undefined} onValueChange={(v) => setSelectedLoteadora(v as string)}>
+                    <Select value={selectedLoteadora || undefined} onValueChange={(v) => handleLoteadoraSelect(v as string)}>
                       <SelectTrigger className="w-full">
                         <SelectValue placeholder={loteadoras.length === 0 ? "Sin loteadoras configuradas" : "Seleccionar loteadora…"} />
                       </SelectTrigger>
@@ -475,6 +586,15 @@ export default function LoteadoraPage() {
                       </SelectContent>
                     </Select>
                   </div>
+
+                  {selectedLoteadora && !lineaLoteadora && (
+                    <Alert className="border-amber-500/20 bg-amber-400/10 py-2">
+                      <AlertTriangle className="text-amber-600" />
+                      <AlertDescription className="text-xs text-amber-700 dark:text-amber-400">
+                        Esta loteadora no tiene línea de fabricación configurada — configúrala en /admin antes de poder enviar.
+                      </AlertDescription>
+                    </Alert>
+                  )}
 
                   {selectedLoteadora && (
                     <div className="grid gap-1.5">
@@ -525,9 +645,11 @@ export default function LoteadoraPage() {
                 <div className="flex flex-col gap-4 lg:pl-6">
                   <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Vista previa de impresión</p>
 
-                  {/* Aspecto de etiqueta/cupón: el "perforado" queda solo en los separadores internos
-                      (línea discontinua alrededor de toda la tarjeta se lee como "zona vacía/placeholder"
-                      en la mayoría de sistemas de diseño — justo lo contrario de "esto es lo importante") */}
+                  {/* Etiqueta: grid de 2 columnas (en vez de la lista apilada original a
+                      text-4xl) — más compacta que la versión original pero con más
+                      presencia que un grid de 3 columnas, para no dejar un hueco enorme
+                      antes del botón "Enviar" (ver §5/§14 docs/loteadora.md). Contorno
+                      sólido, tanto en la tarjeta como en las casillas interiores. */}
                   <div className="rounded-xl border border-border bg-muted/30 p-6 shadow-sm">
                     <div className="text-center">
                       {selectedArticulo ? (
@@ -539,53 +661,44 @@ export default function LoteadoraPage() {
                         <p className="text-sm text-muted-foreground">Ningún artículo seleccionado</p>
                       )}
                     </div>
-                    <div className="mt-4 divide-y divide-dashed divide-border">
+                    <div className="mt-4 grid grid-cols-2 gap-3">
                       {[
                         { label: "Lote", value: lote },
                         { label: "Cocida", value: cocida },
-                        { label: "F. Caducidad", value: fechaCaducidad ? formatDateES(fechaCaducidad) : null },
+                        { label: "Caducidad", value: fechaCaducidad ? formatDateES(fechaCaducidad) : null },
+                        { label: "Hora", value: toHHmm(ahora) },
+                        { label: "Turno", value: turno || null },
+                        { label: "Línea", value: lineaLoteadora },
                       ].map(({ label, value }) => (
-                        <div key={label} className="flex flex-col items-center gap-0.5 py-3 first:pt-0 last:pb-0">
-                          <span className="text-[11px] font-semibold uppercase tracking-[0.2em] text-muted-foreground">{label}</span>
-                          <span className={`font-mono text-4xl font-bold tracking-widest ${value ? "text-foreground" : "text-muted-foreground/25"}`}>
-                            {value ?? "——"}
+                        <div key={label} className="rounded-lg border border-border bg-background px-3 py-3 text-center">
+                          <span className="block text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">{label}</span>
+                          <span className={`block truncate font-mono text-xl font-bold ${value ? "text-foreground" : "text-muted-foreground/30"}`}>
+                            {value ?? "—"}
                           </span>
                         </div>
                       ))}
                     </div>
                   </div>
 
-                  {fabDate && (
-                    <div className="flex flex-wrap justify-center gap-2">
-                      <Badge variant="secondary">Lote — Año: {String(fabDate.getFullYear()).slice(-2)} · Día juliano: {toJulianDay(fabDate)}</Badge>
-                      {cocidaDate && (
-                        <Badge variant="secondary">Cocida — Año: {String(cocidaDate.getFullYear()).slice(-2)} · Día juliano: {toJulianDay(cocidaDate)}</Badge>
-                      )}
-                      {cocidaDate && fechaCaducidad && (
-                        <Badge variant="secondary">{formatDateES(cocidaDate)} + {diasNum} días</Badge>
-                      )}
-                    </div>
-                  )}
-
                   <div className="flex-1" />
 
                   {sendError && (
-                    <div className="space-y-1 rounded-lg border border-rose-500/20 bg-rose-400/10 px-4 py-3 text-sm font-medium text-rose-600 dark:text-rose-400">
-                      <div className="flex items-center gap-2">
-                        <XCircle className="size-4 flex-shrink-0" />
-                        {sendError}
-                      </div>
-                      {sendErrorDetail && (
-                        <div className="pl-6">
-                          <button type="button" onClick={() => setShowSendErrorDetail((v) => !v)} className="text-xs font-normal underline hover:opacity-80">
-                            {showSendErrorDetail ? "Ocultar detalle" : "Ver más"}
-                          </button>
-                          {showSendErrorDetail && (
-                            <p className="mt-1 font-mono text-xs font-normal">Código de estado de la máquina: {sendErrorDetail}</p>
-                          )}
-                        </div>
-                      )}
-                    </div>
+                    <Alert variant="destructive">
+                      <XCircle />
+                      <AlertDescription>
+                        <span className="font-medium">{sendError}</span>
+                        {sendErrorDetail && (
+                          <div className="mt-1">
+                            <button type="button" onClick={() => setShowSendErrorDetail((v) => !v)} className="text-xs underline hover:opacity-80">
+                              {showSendErrorDetail ? "Ocultar detalle" : "Ver más"}
+                            </button>
+                            {showSendErrorDetail && (
+                              <p className="mt-1 font-mono text-xs">Código de estado de la máquina: {sendErrorDetail}</p>
+                            )}
+                          </div>
+                        )}
+                      </AlertDescription>
+                    </Alert>
                   )}
 
                   <Button onClick={handleEnviar} disabled={!canSend} className="h-11 w-full text-sm font-semibold">

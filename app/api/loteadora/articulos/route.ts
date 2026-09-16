@@ -33,12 +33,13 @@ export async function GET() {
     const db = getDb()
     const asociaciones = db.prepare(
       `SELECT am.articulo_id, m.name AS messageName, m.lot_field_id AS lotFieldId,
-              m.cocida_field_id AS cocidaFieldId, m.expiry_field_id AS expiryFieldId
+              m.cocida_field_id AS cocidaFieldId, m.expiry_field_id AS expiryFieldId, m.hora_field_id AS horaFieldId,
+              m.turno_field_id AS turnoFieldId, m.linea_field_id AS lineaFieldId
        FROM loteadora_articulo_mensajes am
        JOIN loteadora_mensajes m ON m.id = am.mensaje_id`
-    ).all() as { articulo_id: string; messageName: string; lotFieldId: number; cocidaFieldId: number; expiryFieldId: number }[]
+    ).all() as { articulo_id: string; messageName: string; lotFieldId: number; cocidaFieldId: number; expiryFieldId: number; horaFieldId: number; turnoFieldId: number; lineaFieldId: number }[]
     const plantillaPorArticulo = new Map(asociaciones.map(a => [a.articulo_id, {
-      messageName: a.messageName, lotFieldId: a.lotFieldId, cocidaFieldId: a.cocidaFieldId, expiryFieldId: a.expiryFieldId,
+      messageName: a.messageName, lotFieldId: a.lotFieldId, cocidaFieldId: a.cocidaFieldId, expiryFieldId: a.expiryFieldId, horaFieldId: a.horaFieldId, turnoFieldId: a.turnoFieldId, lineaFieldId: a.lineaFieldId,
     }]))
 
     const rowsConPlantilla = rows.map(r => ({ ...r, plantilla: plantillaPorArticulo.get(r.id) ?? null }))

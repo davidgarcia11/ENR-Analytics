@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getDb } from '@/lib/sqlite';
-import { verifySession } from '@/lib/auth';
+import { requireScreenAccess } from '@/lib/permissions';
 import { listMessageNames } from '@/lib/loteadora-printer';
 
 interface LoteadoraRow {
@@ -12,10 +12,8 @@ interface LoteadoraRow {
 // Lista las plantillas guardadas en una loteadora (comando 1F), para el
 // desplegable de /loteadora. Requiere sesión, igual que /enviar.
 export async function GET(req: NextRequest) {
-  const user = await verifySession();
-  if (!user) {
-    return NextResponse.json({ error: 'No autenticado' }, { status: 401 });
-  }
+  const denied = await requireScreenAccess('loteadora');
+  if (denied) return denied;
 
   const loteadoraId = Number(req.nextUrl.searchParams.get('loteadoraId'));
   if (!loteadoraId) {

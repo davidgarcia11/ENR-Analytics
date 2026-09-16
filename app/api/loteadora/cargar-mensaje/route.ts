@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getDb } from '@/lib/sqlite';
-import { verifySession } from '@/lib/auth';
+import { requireScreenAccess } from '@/lib/permissions';
 import { loadPrintMessage } from '@/lib/loteadora-printer';
 
 interface LoteadoraRow {
@@ -15,10 +15,8 @@ interface LoteadoraRow {
 // máquina está explícitamente permitido actualizar el contenido con la
 // impresión iniciada — no hace falta pararla (ver docs/loteadora.md §11).
 export async function POST(req: NextRequest) {
-  const user = await verifySession();
-  if (!user) {
-    return NextResponse.json({ error: 'No autenticado' }, { status: 401 });
-  }
+  const denied = await requireScreenAccess('loteadora');
+  if (denied) return denied;
 
   const { loteadoraId, messageName } = await req.json();
   if (!loteadoraId || !messageName) {

@@ -16,7 +16,7 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
   if ('error' in parsed) {
     return NextResponse.json({ error: parsed.error }, { status: 400 });
   }
-  const { name, lotFieldId, cocidaFieldId, expiryFieldId } = parsed.value;
+  const { name, lotFieldId, cocidaFieldId, expiryFieldId, horaFieldId, turnoFieldId, lineaFieldId } = parsed.value;
 
   const db = getDb();
 
@@ -26,9 +26,9 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
   }
 
   const result = db.prepare(
-    `UPDATE loteadora_mensajes SET name = ?, lot_field_id = ?, cocida_field_id = ?, expiry_field_id = ?
+    `UPDATE loteadora_mensajes SET name = ?, lot_field_id = ?, cocida_field_id = ?, expiry_field_id = ?, hora_field_id = ?, turno_field_id = ?, linea_field_id = ?
      WHERE id = ?`
-  ).run(name, lotFieldId, cocidaFieldId, expiryFieldId, mensajeId);
+  ).run(name, lotFieldId, cocidaFieldId, expiryFieldId, horaFieldId, turnoFieldId, lineaFieldId, mensajeId);
 
   if (result.changes === 0) {
     return NextResponse.json({ error: 'Plantilla no encontrada' }, { status: 404 });

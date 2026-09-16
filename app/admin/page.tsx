@@ -62,6 +62,7 @@ interface Loteadora {
   port: number
   slave_address: number
   enabled: number
+  linea: string
   created_at: string
 }
 
@@ -80,6 +81,9 @@ interface LoteadoraMensaje {
   lot_field_id: number
   cocida_field_id: number
   expiry_field_id: number
+  hora_field_id: number
+  turno_field_id: number
+  linea_field_id: number
   created_at: string
 }
 
@@ -174,11 +178,12 @@ export default function AdminPage() {
   const [newLoteadoraIp, setNewLoteadoraIp] = useState("")
   const [newLoteadoraPort, setNewLoteadoraPort] = useState("8010")
   const [newLoteadoraSlave, setNewLoteadoraSlave] = useState("0")
+  const [newLoteadoraLinea, setNewLoteadoraLinea] = useState("")
   const [loteadoraError, setLoteadoraError] = useState("")
   const [loteadoraSuccess, setLoteadoraSuccess] = useState("")
   const [creatingLoteadora, setCreatingLoteadora] = useState(false)
   const [editLoteadoraId, setEditLoteadoraId] = useState<number | null>(null)
-  const [editLoteadora, setEditLoteadora] = useState({ name: "", ip: "", port: "", slaveAddress: "", enabled: true })
+  const [editLoteadora, setEditLoteadora] = useState({ name: "", ip: "", port: "", slaveAddress: "", enabled: true, linea: "" })
   const [editLoteadoraError, setEditLoteadoraError] = useState("")
   const [loteadoraLiveStatus, setLoteadoraLiveStatus] = useState<Record<number, EstadoLoteadoraValor>>({})
 
@@ -189,11 +194,14 @@ export default function AdminPage() {
   const [newMensajeLotField, setNewMensajeLotField] = useState("1")
   const [newMensajeCocidaField, setNewMensajeCocidaField] = useState("2")
   const [newMensajeExpiryField, setNewMensajeExpiryField] = useState("3")
+  const [newMensajeHoraField, setNewMensajeHoraField] = useState("4")
+  const [newMensajeTurnoField, setNewMensajeTurnoField] = useState("5")
+  const [newMensajeLineaField, setNewMensajeLineaField] = useState("6")
   const [mensajeError, setMensajeError] = useState("")
   const [mensajeSuccess, setMensajeSuccess] = useState("")
   const [creatingMensaje, setCreatingMensaje] = useState(false)
   const [editMensajeId, setEditMensajeId] = useState<number | null>(null)
-  const [editMensaje, setEditMensaje] = useState({ name: "", lotFieldId: "", cocidaFieldId: "", expiryFieldId: "" })
+  const [editMensaje, setEditMensaje] = useState({ name: "", lotFieldId: "", cocidaFieldId: "", expiryFieldId: "", horaFieldId: "", turnoFieldId: "", lineaFieldId: "" })
   const [editMensajeError, setEditMensajeError] = useState("")
 
   // ─── Artículos → Plantilla (loteadora_articulo_mensajes) ──────────────────────
@@ -372,14 +380,14 @@ export default function AdminPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           name: newLoteadoraName, ip: newLoteadoraIp, port: Number(newLoteadoraPort),
-          slaveAddress: Number(newLoteadoraSlave),
+          slaveAddress: Number(newLoteadoraSlave), linea: newLoteadoraLinea,
         }),
       })
       const data = await res.json()
       if (!res.ok) { setLoteadoraError(data.error); return }
       setLoteadoraSuccess(`Loteadora "${newLoteadoraName}" creada`)
       setNewLoteadoraName(""); setNewLoteadoraIp(""); setNewLoteadoraPort("8010")
-      setNewLoteadoraSlave("0")
+      setNewLoteadoraSlave("0"); setNewLoteadoraLinea("")
       loadLoteadoras()
     } catch { setLoteadoraError("Error de conexión") } finally { setCreatingLoteadora(false) }
   }
@@ -388,7 +396,7 @@ export default function AdminPage() {
     setEditLoteadoraId(l.id)
     setEditLoteadora({
       name: l.name, ip: l.ip, port: String(l.port), slaveAddress: String(l.slave_address),
-      enabled: !!l.enabled,
+      enabled: !!l.enabled, linea: l.linea,
     })
     setEditLoteadoraError("")
   }
@@ -403,7 +411,7 @@ export default function AdminPage() {
         body: JSON.stringify({
           name: editLoteadora.name, ip: editLoteadora.ip, port: Number(editLoteadora.port),
           slaveAddress: Number(editLoteadora.slaveAddress),
-          enabled: editLoteadora.enabled,
+          enabled: editLoteadora.enabled, linea: editLoteadora.linea,
         }),
       })
       const data = await res.json()
@@ -451,13 +459,13 @@ export default function AdminPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           name: newMensajeName,
-          lotFieldId: Number(newMensajeLotField), cocidaFieldId: Number(newMensajeCocidaField), expiryFieldId: Number(newMensajeExpiryField),
+          lotFieldId: Number(newMensajeLotField), cocidaFieldId: Number(newMensajeCocidaField), expiryFieldId: Number(newMensajeExpiryField), horaFieldId: Number(newMensajeHoraField), turnoFieldId: Number(newMensajeTurnoField), lineaFieldId: Number(newMensajeLineaField),
         }),
       })
       const data = await res.json()
       if (!res.ok) { setMensajeError(data.error); return }
       setMensajeSuccess(`Plantilla "${newMensajeName}" creada`)
-      setNewMensajeName(""); setNewMensajeLotField("1"); setNewMensajeCocidaField("2"); setNewMensajeExpiryField("3")
+      setNewMensajeName(""); setNewMensajeLotField("1"); setNewMensajeCocidaField("2"); setNewMensajeExpiryField("3"); setNewMensajeHoraField("4"); setNewMensajeTurnoField("5"); setNewMensajeLineaField("6")
       loadMensajes()
     } catch { setMensajeError("Error de conexión") } finally { setCreatingMensaje(false) }
   }
@@ -465,7 +473,7 @@ export default function AdminPage() {
   const startEditMensaje = (m: LoteadoraMensaje) => {
     setEditMensajeId(m.id)
     setEditMensaje({
-      name: m.name, lotFieldId: String(m.lot_field_id), cocidaFieldId: String(m.cocida_field_id), expiryFieldId: String(m.expiry_field_id),
+      name: m.name, lotFieldId: String(m.lot_field_id), cocidaFieldId: String(m.cocida_field_id), expiryFieldId: String(m.expiry_field_id), horaFieldId: String(m.hora_field_id), turnoFieldId: String(m.turno_field_id), lineaFieldId: String(m.linea_field_id),
     })
     setEditMensajeError("")
   }
@@ -479,7 +487,7 @@ export default function AdminPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           name: editMensaje.name,
-          lotFieldId: Number(editMensaje.lotFieldId), cocidaFieldId: Number(editMensaje.cocidaFieldId), expiryFieldId: Number(editMensaje.expiryFieldId),
+          lotFieldId: Number(editMensaje.lotFieldId), cocidaFieldId: Number(editMensaje.cocidaFieldId), expiryFieldId: Number(editMensaje.expiryFieldId), horaFieldId: Number(editMensaje.horaFieldId), turnoFieldId: Number(editMensaje.turnoFieldId), lineaFieldId: Number(editMensaje.lineaFieldId),
         }),
       })
       const data = await res.json()
@@ -1259,6 +1267,10 @@ export default function AdminPage() {
                     <label className="text-xs font-semibold text-secondary-foreground">Slave Address</label>
                     <Input type="number" value={newLoteadoraSlave} onChange={e => setNewLoteadoraSlave(e.target.value)} className="w-[90px]" />
                   </div>
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-semibold text-secondary-foreground">Línea de fabricación</label>
+                    <Input value={newLoteadoraLinea} onChange={e => setNewLoteadoraLinea(e.target.value)} placeholder="Línea 1" required className="w-[140px]" />
+                  </div>
                   <Button type="submit" disabled={creatingLoteadora} className="font-semibold">
                     {creatingLoteadora ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Printer className="mr-2 h-4 w-4" />}
                     Añadir
@@ -1282,6 +1294,7 @@ export default function AdminPage() {
                       <TableRow className="hover:bg-transparent">
                         <TableHead className="font-bold text-secondary-foreground">Nombre</TableHead>
                         <TableHead className="font-bold text-secondary-foreground">IP:Puerto</TableHead>
+                        <TableHead className="font-bold text-secondary-foreground">Línea</TableHead>
                         <TableHead className="font-bold text-secondary-foreground">Estado</TableHead>
                         <TableHead className="font-bold text-secondary-foreground text-right">Acciones</TableHead>
                       </TableRow>
@@ -1290,12 +1303,13 @@ export default function AdminPage() {
                       {loteadoras.map(l => (
                         editLoteadoraId === l.id ? (
                           <TableRow key={l.id} className="bg-blue-50 border-blue-200">
-                            <TableCell colSpan={4}>
+                            <TableCell colSpan={5}>
                               <div className="flex flex-wrap items-end gap-3">
                                 <Input value={editLoteadora.name} onChange={e => setEditLoteadora(s => ({ ...s, name: e.target.value }))} placeholder="Nombre" className="h-8 w-[140px] text-sm" autoFocus />
                                 <Input value={editLoteadora.ip} onChange={e => setEditLoteadora(s => ({ ...s, ip: e.target.value }))} placeholder="IP" className="h-8 w-[120px] text-sm" />
                                 <Input type="number" value={editLoteadora.port} onChange={e => setEditLoteadora(s => ({ ...s, port: e.target.value }))} placeholder="Puerto" className="h-8 w-[80px] text-sm" />
                                 <Input type="number" value={editLoteadora.slaveAddress} onChange={e => setEditLoteadora(s => ({ ...s, slaveAddress: e.target.value }))} placeholder="Slave" className="h-8 w-[70px] text-sm" />
+                                <Input value={editLoteadora.linea} onChange={e => setEditLoteadora(s => ({ ...s, linea: e.target.value }))} placeholder="Línea" className="h-8 w-[100px] text-sm" />
                                 <label className="flex items-center gap-1.5 text-xs font-medium text-secondary-foreground">
                                   <input type="checkbox" checked={editLoteadora.enabled} onChange={e => setEditLoteadora(s => ({ ...s, enabled: e.target.checked }))} />
                                   Habilitada
@@ -1310,6 +1324,7 @@ export default function AdminPage() {
                           <TableRow key={l.id} className="hover:bg-muted/50 border-border">
                             <TableCell className="font-medium">{l.name}</TableCell>
                             <TableCell className="text-muted-foreground text-sm">{l.ip}:{l.port}</TableCell>
+                            <TableCell className="text-muted-foreground text-sm">{l.linea || '—'}</TableCell>
                             <TableCell>
                               <div className="flex flex-wrap gap-1.5">
                                 <Badge variant={l.enabled ? 'success' : 'default'}>{l.enabled ? 'Habilitada' : 'Deshabilitada'}</Badge>
@@ -1371,6 +1386,18 @@ export default function AdminPage() {
                     <label className="text-xs font-semibold text-secondary-foreground">ID campo caducidad</label>
                     <Input type="number" value={newMensajeExpiryField} onChange={e => setNewMensajeExpiryField(e.target.value)} className="w-[110px]" />
                   </div>
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-semibold text-secondary-foreground">ID campo hora</label>
+                    <Input type="number" value={newMensajeHoraField} onChange={e => setNewMensajeHoraField(e.target.value)} className="w-[110px]" />
+                  </div>
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-semibold text-secondary-foreground">ID campo turno</label>
+                    <Input type="number" value={newMensajeTurnoField} onChange={e => setNewMensajeTurnoField(e.target.value)} className="w-[110px]" />
+                  </div>
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-semibold text-secondary-foreground">ID campo línea</label>
+                    <Input type="number" value={newMensajeLineaField} onChange={e => setNewMensajeLineaField(e.target.value)} className="w-[110px]" />
+                  </div>
                   <Button type="submit" disabled={creatingMensaje} className="font-semibold">
                     {creatingMensaje ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <FileCode className="mr-2 h-4 w-4" />}
                     Añadir
@@ -1396,6 +1423,9 @@ export default function AdminPage() {
                         <TableHead className="font-bold text-secondary-foreground">ID lote</TableHead>
                         <TableHead className="font-bold text-secondary-foreground">ID cocida</TableHead>
                         <TableHead className="font-bold text-secondary-foreground">ID caducidad</TableHead>
+                        <TableHead className="font-bold text-secondary-foreground">ID hora</TableHead>
+                        <TableHead className="font-bold text-secondary-foreground">ID turno</TableHead>
+                        <TableHead className="font-bold text-secondary-foreground">ID línea</TableHead>
                         <TableHead className="font-bold text-secondary-foreground text-right">Acciones</TableHead>
                       </TableRow>
                     </TableHeader>
@@ -1403,12 +1433,15 @@ export default function AdminPage() {
                       {mensajes.map(m => (
                         editMensajeId === m.id ? (
                           <TableRow key={m.id} className="bg-blue-50 border-blue-200">
-                            <TableCell colSpan={5}>
+                            <TableCell colSpan={8}>
                               <div className="flex flex-wrap items-end gap-3">
                                 <Input value={editMensaje.name} onChange={e => setEditMensaje(s => ({ ...s, name: e.target.value }))} placeholder="Nombre" className="h-8 w-[160px] text-sm" autoFocus />
                                 <Input type="number" value={editMensaje.lotFieldId} onChange={e => setEditMensaje(s => ({ ...s, lotFieldId: e.target.value }))} placeholder="ID lote" className="h-8 w-[90px] text-sm" />
                                 <Input type="number" value={editMensaje.cocidaFieldId} onChange={e => setEditMensaje(s => ({ ...s, cocidaFieldId: e.target.value }))} placeholder="ID cocida" className="h-8 w-[90px] text-sm" />
                                 <Input type="number" value={editMensaje.expiryFieldId} onChange={e => setEditMensaje(s => ({ ...s, expiryFieldId: e.target.value }))} placeholder="ID cad." className="h-8 w-[90px] text-sm" />
+                                <Input type="number" value={editMensaje.horaFieldId} onChange={e => setEditMensaje(s => ({ ...s, horaFieldId: e.target.value }))} placeholder="ID hora" className="h-8 w-[90px] text-sm" />
+                                <Input type="number" value={editMensaje.turnoFieldId} onChange={e => setEditMensaje(s => ({ ...s, turnoFieldId: e.target.value }))} placeholder="ID turno" className="h-8 w-[90px] text-sm" />
+                                <Input type="number" value={editMensaje.lineaFieldId} onChange={e => setEditMensaje(s => ({ ...s, lineaFieldId: e.target.value }))} placeholder="ID línea" className="h-8 w-[90px] text-sm" />
                                 <Button size="sm" onClick={saveEditMensaje} className="text-xs font-semibold h-8">Guardar</Button>
                                 <Button size="sm" variant="ghost" onClick={() => setEditMensajeId(null)} className="text-muted-foreground h-8 text-xs">Cancelar</Button>
                                 {editMensajeError && <span className="text-xs text-red-600 font-medium">{editMensajeError}</span>}
@@ -1423,6 +1456,9 @@ export default function AdminPage() {
                             <TableCell className="text-muted-foreground text-sm">{m.lot_field_id}</TableCell>
                             <TableCell className="text-muted-foreground text-sm">{m.cocida_field_id}</TableCell>
                             <TableCell className="text-muted-foreground text-sm">{m.expiry_field_id}</TableCell>
+                            <TableCell className="text-muted-foreground text-sm">{m.hora_field_id}</TableCell>
+                            <TableCell className="text-muted-foreground text-sm">{m.turno_field_id}</TableCell>
+                            <TableCell className="text-muted-foreground text-sm">{m.linea_field_id}</TableCell>
                             <TableCell className="text-right">
                               <Button variant="ghost" size="sm" onClick={() => startEditMensaje(m)} className="text-blue-500 hover:text-blue-700 hover:bg-blue-50" title="Editar plantilla">
                                 <Pencil className="h-4 w-4" />
@@ -1445,7 +1481,10 @@ export default function AdminPage() {
         {/* ── Pestaña Artículos → Plantilla (loteadora_articulo_mensajes) ─────── */}
         {activeTab === 'articulos-plantilla' && (
           <>
-            <Card accent>
+            {/* overflow-visible: sin esto, accent (overflow-hidden en Card) recorta el
+                desplegable del SingleSelect, que se posiciona con position:absolute
+                dentro de esta misma tarjeta (ver components/SingleSelect.tsx) */}
+            <Card accent className="overflow-visible">
               <CardHeader>
                 <CardTitle className="text-sm font-bold text-secondary-foreground flex items-center gap-2">
                   <Link2 className="h-4 w-4 text-primary" aria-hidden="true" />

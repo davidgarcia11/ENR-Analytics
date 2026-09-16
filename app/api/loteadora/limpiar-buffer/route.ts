@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getDb } from '@/lib/sqlite';
-import { verifySession } from '@/lib/auth';
+import { requireScreenAccess } from '@/lib/permissions';
 import { clearRemoteFieldBuffer } from '@/lib/loteadora-printer';
 
 interface LoteadoraRow {
@@ -12,10 +12,8 @@ interface LoteadoraRow {
 // Vacía la cola de campos remotos pendientes de una loteadora (comando 21).
 // No imprime nada — solo descarta envíos en cola que no se hayan consumido.
 export async function POST(req: NextRequest) {
-  const user = await verifySession();
-  if (!user) {
-    return NextResponse.json({ error: 'No autenticado' }, { status: 401 });
-  }
+  const denied = await requireScreenAccess('loteadora');
+  if (denied) return denied;
 
   const { loteadoraId } = await req.json();
   if (!loteadoraId) {

@@ -25,7 +25,9 @@ export const PANELS = [
     { key: 'mrp', label: 'Explosión de compras', href: '/mrp', Icon: Boxes, description: 'Previsión × lista de materiales → qué comprar de cada material' },
     { key: 'costes', label: 'Costes', href: '/costes', Icon: Layers, description: 'Coste de producto terminado y despiece recursivo de materiales' },
     { key: 'muestras', label: 'Muestras', href: '/muestras', Icon: FlaskConical, description: 'Control de muestras de producto terminado: pendientes, enviadas y completadas' },
-    { key: 'loteadora', label: 'Loteadora', href: '/loteadora', Icon: Tag, description: 'Impresión de lote y fecha de caducidad en las loteadoras' },
+    // privado por defecto: dispara impresiones físicas reales, no tiene sentido
+    // que sea accesible sin sesión como el resto (ver docs/loteadora.md §16)
+    { key: 'loteadora', label: 'Loteadora', href: '/loteadora', Icon: Tag, description: 'Impresión de lote y fecha de caducidad en las loteadoras', privado: true },
 ] as const
 
 export type PanelKey = typeof PANELS[number]['key']

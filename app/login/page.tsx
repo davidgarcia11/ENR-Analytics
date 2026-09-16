@@ -45,11 +45,25 @@ export default function LoginPage() {
         const screensRes = await fetch('/api/screen-permissions')
         if (screensRes.ok) {
           const screens = await screensRes.json()
-          const first = PANELS.find(p => {
+          const puedeAcceder = (p: typeof PANELS[number]) => {
             const cfg = screens[p.key]
             if (!cfg) return true
             return cfg.is_public || data.role === 'admin' || cfg.allowed_roles.includes(data.role)
-          })
+          }
+
+          // Si llegó aquí redirigido desde un panel (?next=/loteadora), volver a ese
+          // panel en vez de al primero de la lista. Dos guardas imprescindibles: que
+          // sea ruta interna (si no, es un open redirect de manual) y que de verdad
+          // tenga acceso (si no, el panel le rebota al login otra vez, en bucle).
+          // Se lee de window y no con useSearchParams para no tener que envolver la
+          // página en <Suspense>, que es lo que pide Next al prerenderizarla.
+          const next = new URLSearchParams(window.location.search).get('next')
+          const destino = next && next.startsWith('/') && !next.startsWith('//')
+            ? PANELS.find(p => p.href === next && puedeAcceder(p))
+            : undefined
+          if (destino) { router.push(destino.href); return }
+
+          const first = PANELS.find(puedeAcceder)
           if (first) { router.push(first.href); return }
           setError("No tienes acceso a ningún panel. Contacta con el administrador.")
           return
