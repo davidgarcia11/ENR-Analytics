@@ -11,9 +11,11 @@
 
 **Cada artículo tiene una plantilla (mensaje) asociada de forma global** (§13): al elegirlo en `/loteadora`, si tiene plantilla, se carga sola en la loteadora seleccionada, sin botón. Los IDs de campo (lote/cocida/caducidad) ya no son fijos por loteadora — viven en la plantilla, así que máquinas distintas pueden usar Field Module en IDs distintos para el mismo artículo/mensaje. Además de la fecha de fabricación (solo para el lote), hay una **fecha de cocida** independiente, de la que se calcula la caducidad (§5).
 
-Rama: `feature/loteadora`. Creada antes del rediseño UI/UX (PR #53), por lo que **no usa `AppShell`/tokens** como el resto de paneles — usa maquetación y colores hardcodeados heredados del diseño anterior.
+Rama: `feature/loteadora`.
 
-**No sigue todavía el patrón de acceso configurable (`is_public`/`allowed_roles`) de otros paneles** — comprueba sesión con `/api/auth/me` y redirige a `/login` si no hay sesión, sin pasar por `middleware.ts` ni por la tabla de permisos de pantalla.
+**Rediseñado sobre el sistema Nova (ShadcnSpace)** — no usa `AppShell`/tokens del sistema viejo (`components/ui/`), sino `components/nova/` + `app/nova-theme.css`, igual que `/compras`, `/costes`, `/mrp` y `/muestras`. Ver §14 para el detalle de los patrones nuevos que aportó este panel (Combobox con búsqueda, selector de fecha única).
+
+**No sigue todavía el patrón de acceso configurable (`is_public`/`allowed_roles`) de otros paneles** — comprueba sesión con `/api/auth/me` y redirige a `/login` si no hay sesión, sin pasar por `middleware.ts` ni por la tabla de permisos de pantalla. Sí está registrado en `lib/panels.ts` (aparece en el nav y en la tabla `screens` de `/admin` → Pantallas), así que un admin puede restringirlo por rol ahí — solo falta que el propio panel comprube esos permisos en servidor.
 
 ---
 
@@ -33,7 +35,9 @@ Rama: `feature/loteadora`. Creada antes del rediseño UI/UX (PR #53), por lo que
 | `app/api/admin/loteadora-mensajes/route.ts` y `[id]/route.ts` | CRUD de plantillas (`loteadora_mensajes`: nombre + IDs de campo lote/cocida/caducidad) desde `/admin` → Plantillas |
 | `app/api/admin/loteadora-articulos/route.ts` y `[articuloId]/route.ts` | CRUD de asociaciones artículo→plantilla (`loteadora_articulo_mensajes`) desde `/admin` → Artículos → Plantilla |
 | `lib/loteadora-printer.ts` | Construye las tramas del protocolo TIJ y las envía por TCP (`buildRemoteFieldFrame`, `sendRemoteFields`, `getPrinterStatus`, `listMessageNames`, `loadPrintMessage`) |
-| `components/SingleSelect.tsx` | Desplegable de selección única con buscador (reutilizado de otros paneles) |
+| `components/nova/date-picker.tsx` | Selector de UNA fecha exacta (Popover + Calendar en modo `single`) — nuevo, no existía ningún panel Nova con selector de fecha única (solo rango, `date-range-picker.tsx`) |
+| `components/nova/ui/combobox.tsx` | Combobox de Base UI instalado por CLI para la búsqueda de artículo — primer uso en el proyecto, ver §14 |
+| `components/SingleSelect.tsx` | Desplegable de selección única con buscador del sistema viejo — ya **no** lo usa `/loteadora` (ver §14), pero sigue en uso en `/admin` → Artículos → Plantilla (§13), que no es Nova |
 | `lib/utils.ts` | `isoToJulian()` — convierte fecha ISO a formato Julian JDE (no usada aún por `page.tsx`, que tiene su propia función local `toJulianDay()`) |
 | `__tests__/loteadora-printer.test.ts` | Test de `buildRemoteFieldFrame` contra el ejemplo del manual del protocolo |
 
@@ -263,3 +267,25 @@ CRUD de `loteadora_articulo_mensajes` en `app/api/admin/loteadora-articulos/rout
 3. Asociar el artículo correspondiente en `/admin` → Artículos → Plantilla.
 
 Sin este último paso, `/loteadora` muestra un aviso ámbar en el selector de artículo y bloquea el envío (§6) — no hay plantilla "por defecto".
+
+---
+
+## 14. Rediseño sobre el sistema Nova (ShadcnSpace)
+
+`app/loteadora/page.tsx` se reescribió sobre `components/nova/` + `app/nova-theme.css` (mismo sistema que `/compras`, `/costes`, `/mrp`, `/muestras`) — ver `components/nova/README.md` para el mecanismo de aislamiento `[data-nova-theme]`, dark mode y la checklist general. **Alcance: solo el panel operativo `/loteadora`** — las pestañas de administración (Loteadoras, Plantillas, Artículos → Plantilla) en `/admin` siguen con el sistema viejo (§8, §13), igual que el resto de `/admin`, que todavía no es Nova.
+
+Toda la lógica de negocio (cálculo de lote/cocida/caducidad §5, protocolo TIJ §7-9, autocarga de plantilla §11, estado en vivo §10) es la misma que antes del rediseño — solo cambió la capa visual.
+
+### Dos patrones nuevos, no usados antes en ningún panel Nova
+
+- **Combobox con búsqueda de texto** (`components/nova/ui/combobox.tsx`): hasta este panel, ningún desplegable Nova necesitaba filtrar una lista grande por texto (los `Select` existentes son listas cortas cerradas). Se instaló por CLI oficial (`bunx --bun shadcn@latest add combobox`, primitivo nativo de Base UI `@base-ui/react/combobox`, no `cmdk`). El fichero instalado traía **dos bugs de registro** que hubo que corregir a mano (mismo tipo de arreglo legítimo que ya documenta `components/nova/README.md` para otros primitivos instalados):
+  - `import { cn } from "cn"` → debía ser `"@/lib/utils"` (y de paso el CLI añadió el paquete npm `cn` a `package.json`/`bun.lock` sin que nada lo usara — se quitó).
+  - `<ComboboxPrimitive.Portal>` sin `container={useNovaPortalContainer()}` — mismo bug de portal que ya tenían `popover.tsx`/`select.tsx` antes de parchearlos (ver README, sección "portal-container.tsx").
+  - **Patrón de uso** (`page.tsx`, selector de artículo): `items` es un array plano de **IDs (string)**, no de objetos `{value,label}` — mezclar ambos formatos (items como objetos pero `<ComboboxItem value={item.value}>` aplanado a string) rompe el filtrado y el texto mostrado tras seleccionar (el `itemToStringLabel` que se le pasa a `<Combobox>` recibe el valor ya resuelto, no el objeto). Con `items` como `string[]` + `itemToStringLabel={(id) => label de ese id}` todo es consistente de principio a fin.
+- **Selector de una fecha exacta** (`components/nova/date-picker.tsx`): no había bloque de "date picker" en el catálogo ShadcnSpace (comprobado con `searchBlocks`/`listComponents` antes de construirlo) ni un componente Nova para fecha única (solo `date-range-picker.tsx`, un rango). Se construyó a mano reutilizando `Calendar`+`Popover` ya instalados — mismo patrón artesanal que `month-range-picker.tsx`/`mode-toggle.tsx` cuando el catálogo no cubre algo.
+
+Ambos patrones quedan también anotados en `components/nova/README.md` para el siguiente panel que los necesite.
+
+### Dirección visual: "etiqueta/ticket"
+
+La vista previa de impresión (columna derecha) es el centro visual del panel, no el formulario: tarjeta con `border-2 border-dashed` (simula la línea de corte de una etiqueta), contenido centrado, lote/cocida/caducidad en grande con separadores punteados entre cada dato. El formulario (columna izquierda) se mantiene compacto a propósito — fabricación y cocida van lado a lado en vez de apiladas — para no competir visualmente con la vista previa. Columnas asimétricas (`lg:grid-cols-[1fr_1.2fr]`, más peso a la derecha).

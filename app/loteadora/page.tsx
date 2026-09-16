@@ -1,292 +1,313 @@
-"use client"
+"use client";
 
-import { useState, useEffect } from "react"
-import { Input } from "@/components/ui/input"
-import { Button } from "@/components/ui/button"
-import { Tag, CheckCircle2, XCircle, Loader2, Send, AlertTriangle, Calendar, Printer, PowerOff, Upload, Eraser } from "lucide-react"
-import Navbar from "@/components/Navbar"
-import { SingleSelect } from "@/components/SingleSelect"
-import { useRouter } from "next/navigation"
+// Panel operativo de la loteadora — rediseño sobre el sistema Nova (ShadcnSpace).
+// Primer panel Nova puramente de formulario (sin tabla/KPI numérico) y primero en
+// necesitar un desplegable con búsqueda por texto (Combobox) — ver
+// components/nova/README.md para el detalle de ambos patrones nuevos.
+// La lógica de negocio (cálculo de lote/cocida/caducidad, protocolo TIJ, plantillas
+// por artículo) es la misma que la versión anterior — ver docs/loteadora.md.
+import { useEffect, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
+import { toast } from "sonner";
+import {
+  CheckCircle2,
+  XCircle,
+  Loader2,
+  Send,
+  AlertTriangle,
+  Calendar as CalendarIcon,
+  Printer,
+  PowerOff,
+  Upload,
+  Eraser,
+} from "lucide-react";
+import Header from "@/components/shadcn-space/blocks/topbar-02/header";
+import { type ThemeMode } from "@/components/nova/mode-toggle";
+import { NovaPortalProvider } from "@/components/nova/portal-container";
+import DatePicker from "@/components/nova/date-picker";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/nova/ui/card";
+import { Button } from "@/components/nova/ui/button";
+import { Badge } from "@/components/nova/ui/badge";
+import { Input } from "@/components/nova/ui/input";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/nova/ui/select";
+import { Combobox, ComboboxContent, ComboboxEmpty, ComboboxInput, ComboboxItem, ComboboxList } from "@/components/nova/ui/combobox";
+import { Toaster } from "@/components/nova/ui/sonner";
 
 interface SessionUser { id: number; username: string; role: string; name: string; surname: string }
 interface PlantillaArticulo { messageName: string; lotFieldId: number; cocidaFieldId: number; expiryFieldId: number }
 interface Articulo { id: string; descripcion: string; diasCaducidad: number; plantilla: PlantillaArticulo | null }
 interface Loteadora { id: number; name: string }
-type EstadoLoteadoraValor = 'activa' | 'en_error' | 'standby' | 'apagada'
+type EstadoLoteadoraValor = "activa" | "en_error" | "standby" | "apagada";
 interface EstadoLoteadora { id: number; name: string; state: EstadoLoteadoraValor }
 
+// Colores fijos (enum cerrado de 4 estados) — mismo formato "bg-x/10 text-x" que el
+// resto de indicadores de estado en Nova (ver components/nova/mrp-materials-table.tsx).
 const ESTADO_INFO: Record<EstadoLoteadoraValor, { label: string; className: string; icon: typeof CheckCircle2 }> = {
-  activa: { label: 'Activa', className: 'bg-green-50 text-green-700 border-green-200', icon: CheckCircle2 },
-  en_error: { label: 'En error', className: 'bg-red-50 text-red-700 border-red-200', icon: XCircle },
-  standby: { label: 'Conectada (sin imprimir)', className: 'bg-amber-50 text-amber-700 border-amber-200', icon: AlertTriangle },
-  apagada: { label: 'Sin conexión', className: 'bg-gray-100 text-gray-500 border-gray-200', icon: PowerOff },
-}
+  activa: { label: "Activa", className: "bg-emerald-400/10 text-emerald-600", icon: CheckCircle2 },
+  en_error: { label: "En error", className: "bg-rose-400/10 text-rose-500", icon: XCircle },
+  standby: { label: "Conectada (sin imprimir)", className: "bg-amber-400/10 text-amber-600", icon: AlertTriangle },
+  apagada: { label: "Sin conexión", className: "bg-muted text-muted-foreground", icon: PowerOff },
+};
 
-// --- Utilidades de cálculo ---
+// --- Utilidades de cálculo (sin cambios respecto a la versión anterior) ---
 function toJulianDay(date: Date): number {
-  const start = new Date(date.getFullYear(), 0, 0)
-  return Math.floor((date.getTime() - start.getTime()) / 86400000)
+  const start = new Date(date.getFullYear(), 0, 0);
+  return Math.floor((date.getTime() - start.getTime()) / 86400000);
 }
-
 function toLote(date: Date): string {
-  const yy = String(date.getFullYear()).slice(-2)
-  const jd = String(toJulianDay(date)).padStart(3, '0')
-  return yy + jd
+  const yy = String(date.getFullYear()).slice(-2);
+  const jd = String(toJulianDay(date)).padStart(3, "0");
+  return yy + jd;
 }
-
 function addDays(date: Date, days: number): Date {
-  const d = new Date(date)
-  d.setDate(d.getDate() + days)
-  return d
+  const d = new Date(date);
+  d.setDate(d.getDate() + days);
+  return d;
 }
-
 function formatDateES(date: Date): string {
-  return date.toLocaleDateString('es-ES', { day: '2-digit', month: '2-digit', year: 'numeric' })
+  return date.toLocaleDateString("es-ES", { day: "2-digit", month: "2-digit", year: "numeric" });
 }
-
 function todayISO(): string {
-  const d = new Date()
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
-
 function parseFecha(val: string): Date | null {
-  if (!val) return null
-  const [y, m, d] = val.split('-').map(Number)
-  if (!y || !m || !d) return null
-  return new Date(y, m - 1, d)
+  if (!val) return null;
+  const [y, m, d] = val.split("-").map(Number);
+  if (!y || !m || !d) return null;
+  return new Date(y, m - 1, d);
 }
 
 export default function LoteadoraPage() {
-  const router = useRouter()
-  const [sessionUser, setSessionUser] = useState<SessionUser | null>(null)
+  const router = useRouter();
+  const [sessionUser, setSessionUser] = useState<SessionUser | null>(null);
+
+  const [mode, setMode] = useState<ThemeMode>("system");
+  const [systemPrefersDark, setSystemPrefersDark] = useState(false);
+  useEffect(() => {
+    const mq = window.matchMedia("(prefers-color-scheme: dark)");
+    setSystemPrefersDark(mq.matches);
+    const handler = (e: MediaQueryListEvent) => setSystemPrefersDark(e.matches);
+    mq.addEventListener("change", handler);
+    return () => mq.removeEventListener("change", handler);
+  }, []);
+  const effectiveTheme = mode === "system" ? (systemPrefersDark ? "dark" : "light") : mode;
+  const portalContainerRef = useRef<HTMLDivElement>(null);
 
   // Selección de artículo (búsqueda directa, sin marca)
-  const [articulos, setArticulos] = useState<Articulo[]>([])
-  const [selectedArticulo, setSelectedArticulo] = useState<Articulo | null>(null)
-  const [loadingArticulos, setLoadingArticulos] = useState(false)
+  const [articulos, setArticulos] = useState<Articulo[]>([]);
+  const [selectedArticulo, setSelectedArticulo] = useState<Articulo | null>(null);
+  const [loadingArticulos, setLoadingArticulos] = useState(false);
 
   // Formulario
-  const [fechaFab, setFechaFab] = useState(todayISO())
-  const [fechaCocida, setFechaCocida] = useState(todayISO())
-  const [diasCad, setDiasCad] = useState('')
-  const [diasDesdeJde, setDiasDesdeJde] = useState<number | null>(null)
-  const [modoManual, setModoManual] = useState(false)
+  const [fechaFab, setFechaFab] = useState(todayISO());
+  const [fechaCocida, setFechaCocida] = useState(todayISO());
+  const [diasCad, setDiasCad] = useState("");
+  const [diasDesdeJde, setDiasDesdeJde] = useState<number | null>(null);
+  const [modoManual, setModoManual] = useState(false);
 
   // Estado JDE
-  const [jdeOnline, setJdeOnline] = useState(true)
+  const [jdeOnline, setJdeOnline] = useState(true);
 
   // Loteadora de destino
-  const [loteadoras, setLoteadoras] = useState<Loteadora[]>([])
-  const [selectedLoteadora, setSelectedLoteadora] = useState('')
-  const [estadoLoteadoras, setEstadoLoteadoras] = useState<EstadoLoteadora[]>([])
-  const [loadingEstado, setLoadingEstado] = useState(false)
-  const [limpiandoBuffer, setLimpiandoBuffer] = useState(false)
-  const [bufferMensaje, setBufferMensaje] = useState<{ tipo: 'success' | 'error'; texto: string } | null>(null)
+  const [loteadoras, setLoteadoras] = useState<Loteadora[]>([]);
+  const [selectedLoteadora, setSelectedLoteadora] = useState("");
+  const [estadoLoteadoras, setEstadoLoteadoras] = useState<EstadoLoteadora[]>([]);
+  const [loadingEstado, setLoadingEstado] = useState(false);
+  const [limpiandoBuffer, setLimpiandoBuffer] = useState(false);
 
   // Plantilla (mensaje) a cargar en la loteadora seleccionada
-  const [mensajes, setMensajes] = useState<string[]>([])
-  const [selectedMensaje, setSelectedMensaje] = useState('')
-  const [loadingMensajes, setLoadingMensajes] = useState(false)
-  const [cargandoMensaje, setCargandoMensaje] = useState(false)
-  const [mensajeError, setMensajeError] = useState<string | null>(null)
-  const [mensajeSuccess, setMensajeSuccess] = useState(false)
+  const [mensajes, setMensajes] = useState<string[]>([]);
+  const [selectedMensaje, setSelectedMensaje] = useState("");
+  const [loadingMensajes, setLoadingMensajes] = useState(false);
+  const [cargandoMensaje, setCargandoMensaje] = useState(false);
 
   // Envío
-  const [sending, setSending] = useState(false)
-  const [enviado, setEnviado] = useState(false)
-  const [sendWarning, setSendWarning] = useState<string | null>(null)
-  const [sendError, setSendError] = useState<string | null>(null)
-  const [sendErrorDetail, setSendErrorDetail] = useState<string | null>(null)
-  const [showSendErrorDetail, setShowSendErrorDetail] = useState(false)
+  const [sending, setSending] = useState(false);
+  const [sendError, setSendError] = useState<string | null>(null);
+  const [sendErrorDetail, setSendErrorDetail] = useState<string | null>(null);
+  const [showSendErrorDetail, setShowSendErrorDetail] = useState(false);
 
-  useEffect(() => { checkSession() }, [])
+  useEffect(() => { checkSession(); }, []);
 
   useEffect(() => {
-    fetchArticulos()
-    fetchLoteadoras()
-    fetchEstadoLoteadoras()
+    fetchArticulos();
+    fetchLoteadoras();
+    fetchEstadoLoteadoras();
 
     // Estado en vivo: JDE y loteadoras se refrescan solos cada 60s mientras
     // el panel esté abierto (cada comprobación de loteadora abre y cierra
     // una conexión TCP breve — protocolo TIJ, comando 14).
     const interval = setInterval(() => {
-      fetchArticulos()
-      fetchEstadoLoteadoras()
-    }, 60000)
-    return () => clearInterval(interval)
-  }, [])
+      fetchArticulos();
+      fetchEstadoLoteadoras();
+    }, 60000);
+    return () => clearInterval(interval);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   useEffect(() => {
-    setMensajeError(null)
     if (!selectedLoteadora) {
-      setMensajes([])
-      setSelectedMensaje('')
-      return
+      setMensajes([]);
+      setSelectedMensaje("");
+      return;
     }
     // Se refresca el estado en vivo justo aquí (no solo cada 60s) para que el
     // aviso de "está imprimiendo" no vaya desacompasado del check real que
     // hace fetchMensajes en este mismo instante (protocolo §3.5.15 vs §3.5.20).
-    fetchEstadoLoteadoras()
-    fetchMensajes(selectedLoteadora)
-  }, [selectedLoteadora])
+    fetchEstadoLoteadoras();
+    fetchMensajes(selectedLoteadora);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedLoteadora]);
 
   // Autocarga de plantilla: si el artículo elegido tiene una plantilla
   // asociada (configurada en /admin), se carga sola en la loteadora sin
   // pedir confirmación — sustituye a la selección manual para ese caso.
   useEffect(() => {
-    if (!selectedLoteadora || !selectedArticulo?.plantilla) return
-    cargarMensaje(selectedArticulo.plantilla.messageName)
-  }, [selectedArticulo, selectedLoteadora])
+    if (!selectedLoteadora || !selectedArticulo?.plantilla) return;
+    cargarMensaje(selectedArticulo.plantilla.messageName);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedArticulo, selectedLoteadora]);
 
   const checkSession = async () => {
     try {
-      const res = await fetch('/api/auth/me')
-      if (res.ok) setSessionUser(await res.json())
-      else router.push('/login')
-    } catch { router.push('/login') }
-  }
+      const res = await fetch("/api/auth/me");
+      if (res.ok) setSessionUser(await res.json());
+      else router.push("/login");
+    } catch {
+      router.push("/login");
+    }
+  };
 
   const logout = async () => {
-    await fetch('/api/auth/logout', { method: 'POST' })
-    router.push('/login')
-  }
+    await fetch("/api/auth/logout", { method: "POST" });
+    router.push("/login");
+  };
 
   // También sirve como comprobación de vida de JDE (badge "JDE conectado"),
   // por eso se repite cada 60s junto al resto del estado en vivo — no toca la
   // selección de artículo ya hecha, solo refresca la lista disponible.
   const fetchArticulos = async () => {
-    setLoadingArticulos(true)
+    setLoadingArticulos(true);
     try {
-      const res = await fetch('/api/loteadora/articulos')
-      if (!res.ok) throw new Error()
-      setArticulos(await res.json())
-      setJdeOnline(true)
+      const res = await fetch("/api/loteadora/articulos");
+      if (!res.ok) throw new Error();
+      setArticulos(await res.json());
+      setJdeOnline(true);
     } catch {
-      setJdeOnline(false)
-      setArticulos([])
+      setJdeOnline(false);
+      setArticulos([]);
     } finally {
-      setLoadingArticulos(false)
+      setLoadingArticulos(false);
     }
-  }
+  };
 
   const fetchLoteadoras = async () => {
     try {
-      const res = await fetch('/api/loteadora/impresoras')
-      if (!res.ok) throw new Error()
-      setLoteadoras(await res.json())
+      const res = await fetch("/api/loteadora/impresoras");
+      if (!res.ok) throw new Error();
+      setLoteadoras(await res.json());
     } catch {
-      setLoteadoras([])
+      setLoteadoras([]);
     }
-  }
+  };
 
   const fetchEstadoLoteadoras = async () => {
-    setLoadingEstado(true)
+    setLoadingEstado(true);
     try {
-      const res = await fetch('/api/loteadora/estado')
-      if (!res.ok) throw new Error()
-      setEstadoLoteadoras(await res.json())
+      const res = await fetch("/api/loteadora/estado");
+      if (!res.ok) throw new Error();
+      setEstadoLoteadoras(await res.json());
     } catch {
-      setEstadoLoteadoras([])
+      setEstadoLoteadoras([]);
     } finally {
-      setLoadingEstado(false)
+      setLoadingEstado(false);
     }
-  }
+  };
 
   const fetchMensajes = async (loteadoraId: string) => {
-    setLoadingMensajes(true)
+    setLoadingMensajes(true);
     try {
-      const res = await fetch(`/api/loteadora/mensajes?loteadoraId=${loteadoraId}`)
-      const data = await res.json()
-      if (!res.ok) throw new Error(data.error || 'Error al listar las plantillas de la loteadora')
-      setMensajes(data.messages)
-      setSelectedMensaje('')
+      const res = await fetch(`/api/loteadora/mensajes?loteadoraId=${loteadoraId}`);
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Error al listar las plantillas de la loteadora");
+      setMensajes(data.messages);
+      setSelectedMensaje("");
     } catch (err: any) {
-      setMensajes([])
-      setSelectedMensaje('')
-      setMensajeError(err.message || 'Error al listar las plantillas de la loteadora')
+      setMensajes([]);
+      setSelectedMensaje("");
+      toast.error(err.message || "Error al listar las plantillas de la loteadora");
     } finally {
-      setLoadingMensajes(false)
+      setLoadingMensajes(false);
     }
-  }
+  };
 
   const cargarMensaje = async (messageName: string) => {
-    if (!selectedLoteadora || !messageName || cargandoMensaje) return
-    setSelectedMensaje(messageName)
-    setCargandoMensaje(true)
-    setMensajeError(null)
+    if (!selectedLoteadora || !messageName || cargandoMensaje) return;
+    setSelectedMensaje(messageName);
+    setCargandoMensaje(true);
     try {
-      const res = await fetch('/api/loteadora/cargar-mensaje', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+      const res = await fetch("/api/loteadora/cargar-mensaje", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ loteadoraId: Number(selectedLoteadora), messageName }),
-      })
-      const data = await res.json()
-      if (!res.ok) throw new Error(data.error || 'Error al cargar la plantilla')
-      setMensajeSuccess(true)
-      setTimeout(() => setMensajeSuccess(false), 3000)
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Error al cargar la plantilla");
+      toast.success("Plantilla cargada correctamente");
     } catch (err: any) {
-      setMensajeError(err.message || 'Error al cargar la plantilla')
+      toast.error(err.message || "Error al cargar la plantilla");
     } finally {
-      setCargandoMensaje(false)
+      setCargandoMensaje(false);
     }
-  }
+  };
 
-  const handleCargarMensaje = () => cargarMensaje(selectedMensaje)
+  const handleCargarMensaje = () => cargarMensaje(selectedMensaje);
 
   const handleLimpiarBuffer = async () => {
-    if (!selectedLoteadora || limpiandoBuffer) return
-    setLimpiandoBuffer(true)
-    setBufferMensaje(null)
+    if (!selectedLoteadora || limpiandoBuffer) return;
+    setLimpiandoBuffer(true);
     try {
-      const res = await fetch('/api/loteadora/limpiar-buffer', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+      const res = await fetch("/api/loteadora/limpiar-buffer", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ loteadoraId: Number(selectedLoteadora) }),
-      })
-      const data = await res.json()
-      if (!res.ok) throw new Error(data.error || 'Error al limpiar el buffer')
-      setBufferMensaje({ tipo: 'success', texto: 'Buffer de campos remotos vaciado' })
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Error al limpiar el buffer");
+      toast.success("Buffer de campos remotos vaciado");
     } catch (err: any) {
-      setBufferMensaje({ tipo: 'error', texto: err.message || 'Error al limpiar el buffer' })
+      toast.error(err.message || "Error al limpiar el buffer");
     } finally {
-      setLimpiandoBuffer(false)
-      setTimeout(() => setBufferMensaje(null), 5000)
+      setLimpiandoBuffer(false);
     }
-  }
+  };
 
-  const handleArticuloChange = (id: string) => {
-    const art = articulos.find(a => a.id === id) ?? null
-    setSelectedArticulo(art)
-    if (!art) return
+  const handleArticuloChange = (id: string | null) => {
+    const art = articulos.find((a) => a.id === id) ?? null;
+    setSelectedArticulo(art);
+    if (!art) return;
     if (art.diasCaducidad > 0) {
-      setDiasDesdeJde(art.diasCaducidad)
-      setDiasCad(String(art.diasCaducidad))
-      setModoManual(false)
+      setDiasDesdeJde(art.diasCaducidad);
+      setDiasCad(String(art.diasCaducidad));
+      setModoManual(false);
     } else {
-      setDiasDesdeJde(null)
-      setDiasCad('')
-      setModoManual(true)
+      setDiasDesdeJde(null);
+      setDiasCad("");
+      setModoManual(true);
     }
-  }
-
-  const limpiar = () => {
-    setSelectedArticulo(null)
-    setDiasDesdeJde(null)
-    setDiasCad('')
-    setModoManual(false)
-  }
+  };
 
   const handleEnviar = async () => {
-    if (!canSend || !fechaCaducidad) return
-    setSending(true)
-    setSendError(null)
-    setSendErrorDetail(null)
-    setShowSendErrorDetail(false)
-    setSendWarning(null)
+    if (!canSend || !fechaCaducidad) return;
+    setSending(true);
+    setSendError(null);
+    setSendErrorDetail(null);
+    setShowSendErrorDetail(false);
     try {
-      const res = await fetch('/api/loteadora/enviar', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+      const res = await fetch("/api/loteadora/enviar", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           loteadoraId: Number(selectedLoteadora),
           articuloId: selectedArticulo?.id,
@@ -294,420 +315,319 @@ export default function LoteadoraPage() {
           fechaCocida: cocida,
           fechaCaducidad: formatDateES(fechaCaducidad),
         }),
-      })
-      const data = await res.json()
+      });
+      const data = await res.json();
       if (!res.ok) {
-        setSendError(data.error || 'Error al enviar a la loteadora')
-        setSendErrorDetail(data.detail || null)
-        return
+        setSendError(data.error || "Error al enviar a la loteadora");
+        setSendErrorDetail(data.detail || null);
+        return;
       }
-      setEnviado(true)
-      setSendWarning(data.warning || null)
-      setTimeout(() => { setEnviado(false); setSendWarning(null) }, data.warning ? 8000 : 3000)
+      if (data.warning) {
+        toast.warning(`Enviado, pero con aviso: ${data.warning}`, { duration: 8000 });
+      } else {
+        toast.success("Mensaje enviado correctamente");
+      }
     } catch (err: any) {
-      setSendError(err.message || 'Error al enviar a la loteadora')
+      setSendError(err.message || "Error al enviar a la loteadora");
     } finally {
-      setSending(false)
+      setSending(false);
     }
-  }
+  };
 
   // Cálculos derivados
-  const fabDate = parseFecha(fechaFab)
-  const cocidaDate = parseFecha(fechaCocida)
-  const diasNum = parseInt(diasCad, 10)
-  const lote = fabDate ? toLote(fabDate) : null
-  const cocida = cocidaDate ? toLote(cocidaDate) : null
-  const fechaCaducidad = (cocidaDate && !isNaN(diasNum) && diasNum > 0) ? addDays(cocidaDate, diasNum) : null
-  const canSend = !!lote && !!cocida && !!fechaCaducidad && !!selectedArticulo?.plantilla && !!selectedLoteadora && !sending
-  const diasReadonly = !modoManual && jdeOnline && diasDesdeJde !== null
-  const canCargarMensaje = !!selectedLoteadora && !!selectedMensaje && !cargandoMensaje
+  const fabDate = parseFecha(fechaFab);
+  const cocidaDate = parseFecha(fechaCocida);
+  const diasNum = parseInt(diasCad, 10);
+  const lote = fabDate ? toLote(fabDate) : null;
+  const cocida = cocidaDate ? toLote(cocidaDate) : null;
+  const fechaCaducidad = cocidaDate && !isNaN(diasNum) && diasNum > 0 ? addDays(cocidaDate, diasNum) : null;
+  const canSend = !!lote && !!cocida && !!fechaCaducidad && !!selectedArticulo?.plantilla && !!selectedLoteadora && !sending;
+  const diasReadonly = !modoManual && jdeOnline && diasDesdeJde !== null;
+  const canCargarMensaje = !!selectedLoteadora && !!selectedMensaje && !cargandoMensaje;
+
+  const articuloIds = articulos.map((a) => a.id);
+  const articuloLabel = (id: string) => {
+    const a = articulos.find((x) => x.id === id);
+    return a ? `${a.id} — ${a.descripcion}` : id;
+  };
+  const articuloPlaceholder = loadingArticulos ? "Cargando…" : articulos.length === 0 ? "Sin artículos disponibles" : "Buscar por código o descripción…";
 
   return (
-    <main className="min-h-screen bg-gray-100 p-8 font-sans text-gray-900">
-      <div className="mx-auto max-w-5xl space-y-8">
+    <div data-nova-theme={effectiveTheme} ref={portalContainerRef} className="min-h-screen bg-sidebar text-foreground">
+      <NovaPortalProvider container={portalContainerRef}>
+        <div className="overflow-hidden bg-background md:m-2 md:rounded-xl md:shadow-sm md:outline md:outline-border">
+          <Header user={sessionUser} onLogout={logout} mode={mode} onModeChange={setMode} />
 
-        <Navbar currentPanel="loteadora" user={sessionUser} onLogout={logout} />
+          <main className="mx-auto max-w-5xl space-y-4 p-4 md:p-6">
+            <Card>
+              <CardHeader className="flex flex-wrap items-center justify-between gap-2 border-b pb-4">
+                <CardTitle>Loteadora</CardTitle>
+                <Badge className={jdeOnline ? "bg-emerald-400/10 text-emerald-600" : "bg-rose-400/10 text-rose-500"}>
+                  {jdeOnline ? <CheckCircle2 className="size-3" /> : <XCircle className="size-3" />}
+                  {jdeOnline ? "JDE conectado" : "JDE caído"}
+                </Badge>
+              </CardHeader>
+              <CardContent className="grid grid-cols-1 gap-6 pt-4 lg:grid-cols-[1fr_1.2fr] lg:divide-x lg:divide-border">
+                {/* ── Columna izquierda: formulario (compacto) ── */}
+                <div className="space-y-3 lg:pr-6">
+                  <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Datos del artículo</p>
 
-        <div className="bg-white rounded-xl shadow-sm border border-gray-200" style={{ borderTop: '3px solid #D30B15' }}>
-
-          {/* Cabecera */}
-          <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
-            <h1 className="text-base font-bold text-gray-800 flex items-center gap-2">
-              <Tag className="h-4 w-4" style={{ color: '#D30B15' }} />
-              Loteadora
-            </h1>
-            <div className={`flex items-center gap-1.5 text-xs font-medium px-2.5 py-1 rounded-full border ${jdeOnline ? 'bg-green-50 text-green-700 border-green-200' : 'bg-red-50 text-red-700 border-red-200'}`}>
-              {jdeOnline
-                ? <><CheckCircle2 className="h-3.5 w-3.5" />JDE conectado</>
-                : <><XCircle className="h-3.5 w-3.5" />JDE caído</>}
-            </div>
-          </div>
-
-          {/* Cuerpo en 2 columnas */}
-          <div className="grid grid-cols-1 lg:grid-cols-2 divide-y lg:divide-y-0 lg:divide-x divide-gray-100">
-
-            {/* ── Columna izquierda: formulario ── */}
-            <div className="p-6 space-y-5">
-              <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Datos del artículo</p>
-
-              {/* Artículo */}
-              <div className="grid gap-1.5">
-                <label htmlFor="articulo" className="text-xs font-semibold text-gray-700">
-                  Artículo
-                  {loadingArticulos && <Loader2 className="inline h-3 w-3 animate-spin ml-1.5 text-gray-400" />}
-                </label>
-                <div className={(!jdeOnline || loadingArticulos) ? 'opacity-50 pointer-events-none' : ''}>
-                  <SingleSelect
-                    label="artículo"
-                    showId
-                    allLabel={
-                      loadingArticulos
-                        ? 'Cargando…'
-                        : articulos.length === 0
-                          ? 'Sin artículos disponibles'
-                          : 'Buscar por código o descripción…'
-                    }
-                    value={selectedArticulo?.id || 'all'}
-                    onChange={id => id === 'all' ? setSelectedArticulo(null) : handleArticuloChange(id)}
-                    options={articulos.map(a => ({ id: a.id, description: a.descripcion }))}
-                  />
-                </div>
-              </div>
-
-              {selectedArticulo && (
-                <button
-                  type="button"
-                  onClick={limpiar}
-                  className="text-xs text-gray-400 hover:text-gray-600 underline w-fit"
-                >
-                  Limpiar selección
-                </button>
-              )}
-
-              {selectedArticulo && !selectedArticulo.plantilla && (
-                <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-md px-3 py-2 flex items-center gap-1.5">
-                  <AlertTriangle className="h-3.5 w-3.5 flex-shrink-0" />
-                  Este artículo no tiene una plantilla asociada — configúralo en /admin antes de poder enviar.
-                </p>
-              )}
-
-              {/* Fecha de fabricación */}
-              <div className="grid gap-1.5">
-                <label htmlFor="fechaFab" className="text-xs font-semibold text-gray-700">Fecha de fabricación</label>
-                <div className="flex gap-2">
-                  <Input
-                    id="fechaFab"
-                    type="date"
-                    value={fechaFab}
-                    onChange={e => setFechaFab(e.target.value)}
-                    className="flex-1"
-                  />
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    onClick={() => setFechaFab(todayISO())}
-                    className="text-xs text-gray-600 whitespace-nowrap"
-                  >
-                    <Calendar className="h-3.5 w-3.5" />
-                    Hoy
-                  </Button>
-                </div>
-              </div>
-
-              {/* Fecha de cocida (la caducidad se calcula a partir de esta, no de fabricación) */}
-              <div className="grid gap-1.5">
-                <label htmlFor="fechaCocida" className="text-xs font-semibold text-gray-700">Fecha de cocida</label>
-                <div className="flex gap-2">
-                  <Input
-                    id="fechaCocida"
-                    type="date"
-                    value={fechaCocida}
-                    onChange={e => setFechaCocida(e.target.value)}
-                    className="flex-1"
-                  />
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    onClick={() => setFechaCocida(todayISO())}
-                    className="text-xs text-gray-600 whitespace-nowrap"
-                  >
-                    <Calendar className="h-3.5 w-3.5" />
-                    Hoy
-                  </Button>
-                </div>
-              </div>
-
-              {/* Días de caducidad */}
-              <div className="grid gap-1.5">
-                <div className="flex items-center justify-between">
-                  <label htmlFor="diasCad" className="text-xs font-semibold text-gray-700">Días de caducidad</label>
-                  {diasDesdeJde !== null && !modoManual && (
-                    <span className="text-xs text-blue-600 bg-blue-50 border border-blue-200 px-2 py-0.5 rounded-full">desde JDE</span>
-                  )}
-                  {(!jdeOnline || modoManual) && (
-                    <span className="text-xs text-amber-700 bg-amber-50 border border-amber-200 px-2 py-0.5 rounded-full flex items-center gap-1">
-                      <AlertTriangle className="h-3 w-3" />manual
-                    </span>
-                  )}
-                </div>
-                <Input
-                  id="diasCad"
-                  type="number"
-                  min={1}
-                  max={9999}
-                  value={diasCad}
-                  onChange={e => setDiasCad(e.target.value)}
-                  placeholder="Nº de días"
-                  readOnly={diasReadonly}
-                  className={diasReadonly ? 'bg-gray-50 text-gray-500 cursor-default' : ''}
-                />
-                {jdeOnline && diasDesdeJde !== null && !modoManual && (
-                  <button type="button" onClick={() => setModoManual(true)}
-                    className="text-xs text-gray-400 hover:text-gray-600 text-left underline w-fit">
-                    Introducir manualmente
-                  </button>
-                )}
-                {modoManual && diasDesdeJde !== null && (
-                  <button type="button" onClick={() => { setModoManual(false); setDiasCad(String(diasDesdeJde)) }}
-                    className="text-xs text-gray-400 hover:text-gray-600 text-left underline w-fit">
-                    Usar valor de JDE ({diasDesdeJde} días)
-                  </button>
-                )}
-              </div>
-
-              {/* Loteadora de destino */}
-              <div className="grid gap-1.5">
-                <label htmlFor="loteadora" className="text-xs font-semibold text-gray-700">Loteadora</label>
-                <SingleSelect
-                  label="loteadora"
-                  allLabel={loteadoras.length === 0 ? 'Sin loteadoras configuradas' : 'Seleccionar loteadora…'}
-                  value={selectedLoteadora || 'all'}
-                  onChange={id => setSelectedLoteadora(id === 'all' ? '' : id)}
-                  options={loteadoras.map(l => ({ id: String(l.id), description: l.name }))}
-                />
-              </div>
-
-              {/* Limpiar buffer de campos remotos pendientes (comando 21) */}
-              {selectedLoteadora && (
-                <div className="grid gap-1.5">
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    onClick={handleLimpiarBuffer}
-                    disabled={limpiandoBuffer}
-                    className="text-xs text-gray-600 whitespace-nowrap w-fit"
-                    title="Vacía la cola de campos remotos pendientes (equivale a pulsar Clear en Ajustes de comunicación > Buffer en la máquina). No imprime nada."
-                  >
-                    {limpiandoBuffer
-                      ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                      : <Eraser className="h-3.5 w-3.5" />}
-                    Limpiar buffer
-                  </Button>
-                  {bufferMensaje && (
-                    <p className={`text-xs flex items-center gap-1 ${bufferMensaje.tipo === 'success' ? 'text-green-700' : 'text-red-700'}`}>
-                      {bufferMensaje.tipo === 'success' ? <CheckCircle2 className="h-3 w-3" /> : <XCircle className="h-3 w-3" />}
-                      {bufferMensaje.texto}
-                    </p>
-                  )}
-                </div>
-              )}
-
-              {/* Plantilla (mensaje) a cargar en la loteadora seleccionada */}
-              {selectedLoteadora && (
-                <div className="grid gap-1.5">
-                  <label htmlFor="mensaje" className="text-xs font-semibold text-gray-700">
-                    Plantilla
-                    {loadingMensajes && <Loader2 className="inline h-3 w-3 animate-spin ml-1.5 text-gray-400" />}
-                  </label>
-                  <div className="flex gap-2">
-                    <div className="flex-1">
-                      <SingleSelect
-                        label="plantilla"
-                        allLabel={mensajes.length === 0 ? 'Sin plantillas disponibles' : 'Seleccionar plantilla…'}
-                        value={selectedMensaje || 'all'}
-                        onChange={id => setSelectedMensaje(id === 'all' ? '' : id)}
-                        options={mensajes.map(m => ({ id: m, description: m }))}
-                      />
-                    </div>
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      onClick={handleCargarMensaje}
-                      disabled={!canCargarMensaje}
-                      className="text-xs text-gray-600 whitespace-nowrap"
+                  <div className="grid gap-1.5">
+                    <label className="text-xs font-semibold text-foreground">
+                      Artículo
+                      {loadingArticulos && <Loader2 className="ml-1.5 inline size-3 animate-spin text-muted-foreground" />}
+                    </label>
+                    <Combobox
+                      items={articuloIds}
+                      value={selectedArticulo?.id ?? null}
+                      onValueChange={(v) => handleArticuloChange(v as string | null)}
+                      itemToStringLabel={articuloLabel}
                     >
-                      {cargandoMensaje
-                        ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                        : <Upload className="h-3.5 w-3.5" />}
-                      Cargar plantilla
-                    </Button>
+                      <ComboboxInput placeholder={articuloPlaceholder} disabled={!jdeOnline || loadingArticulos} showClear />
+                      <ComboboxContent>
+                        <ComboboxEmpty>Sin resultados</ComboboxEmpty>
+                        <ComboboxList>
+                          {(id: string) => (
+                            <ComboboxItem key={id} value={id}>{articuloLabel(id)}</ComboboxItem>
+                          )}
+                        </ComboboxList>
+                      </ComboboxContent>
+                    </Combobox>
                   </div>
-                  {mensajeSuccess && (
-                    <p className="text-xs text-green-700 flex items-center gap-1">
-                      <CheckCircle2 className="h-3 w-3" />
-                      Plantilla cargada correctamente
+
+                  {selectedArticulo && !selectedArticulo.plantilla && (
+                    <p className="flex items-center gap-1.5 rounded-md border border-amber-500/20 bg-amber-400/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-400">
+                      <AlertTriangle className="size-3.5 flex-shrink-0" />
+                      Este artículo no tiene una plantilla asociada — configúralo en /admin antes de poder enviar.
                     </p>
                   )}
-                  {mensajeError && (
-                    <p className="text-xs text-red-700 flex items-center gap-1">
-                      <XCircle className="h-3 w-3" />
-                      {mensajeError}
-                    </p>
-                  )}
-                </div>
-              )}
-            </div>
 
-            {/* ── Columna derecha: preview + envío ── */}
-            <div className="p-6 flex flex-col gap-5">
-              <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Vista previa de impresión</p>
-
-              <div
-                className="rounded-lg border border-gray-200 bg-gray-50 p-5 space-y-4"
-                style={{ borderLeft: '3px solid #D30B15', borderRadius: '0 8px 8px 0' }}
-              >
-                <div className="pb-3 border-b border-gray-200">
-                  {selectedArticulo ? (
-                    <div className="flex items-baseline gap-2 flex-wrap">
-                      <span className="font-mono text-sm font-bold text-gray-900 bg-gray-200 px-2 py-0.5 rounded">
-                        {selectedArticulo.id}
-                      </span>
-                      <span className="text-sm font-semibold text-gray-800">{selectedArticulo.descripcion}</span>
+                  {/* Fabricación y cocida lado a lado — la caducidad se calcula desde cocida, no desde fabricación */}
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="grid gap-1.5">
+                      <label className="text-xs font-semibold text-foreground">Fabricación</label>
+                      <div className="flex gap-1.5">
+                        <div className="min-w-0 flex-1"><DatePicker value={fechaFab} onChange={setFechaFab} /></div>
+                        <Button type="button" variant="outline" size="icon-sm" onClick={() => setFechaFab(todayISO())} title="Hoy">
+                          <CalendarIcon className="size-3.5" />
+                        </Button>
+                      </div>
                     </div>
-                  ) : (
-                    <span className="text-sm text-gray-400">Ningún artículo seleccionado</span>
-                  )}
-                </div>
-                <div className="flex items-baseline gap-4">
-                  <span className="text-xs text-gray-500 w-16 flex-shrink-0 font-semibold uppercase tracking-wide">Lote</span>
-                  <span className={`font-mono text-3xl font-bold tracking-widest ${lote ? 'text-gray-900' : 'text-gray-200'}`}>
-                    {lote ?? '——'}
-                  </span>
-                </div>
-                <div className="flex items-baseline gap-4">
-                  <span className="text-xs text-gray-500 w-16 flex-shrink-0 font-semibold uppercase tracking-wide">Cocida</span>
-                  <span className={`font-mono text-3xl font-bold tracking-widest ${cocida ? 'text-gray-900' : 'text-gray-200'}`}>
-                    {cocida ?? '——'}
-                  </span>
-                </div>
-                <div className="flex items-baseline gap-4">
-                  <span className="text-xs text-gray-500 w-16 flex-shrink-0 font-semibold uppercase tracking-wide">F. Cad.</span>
-                  <span className={`font-mono text-3xl font-bold tracking-widest ${fechaCaducidad ? 'text-gray-900' : 'text-gray-200'}`}>
-                    {fechaCaducidad ? formatDateES(fechaCaducidad) : '——'}
-                  </span>
-                </div>
-              </div>
-
-              {fabDate && (
-                <div className="flex flex-wrap gap-2">
-                  <span className="text-xs bg-gray-100 text-gray-600 px-2.5 py-1 rounded-full">
-                    Lote — Año: {String(fabDate.getFullYear()).slice(-2)} · Día juliano: {toJulianDay(fabDate)}
-                  </span>
-                  {cocidaDate && (
-                    <span className="text-xs bg-gray-100 text-gray-600 px-2.5 py-1 rounded-full">
-                      Cocida — Año: {String(cocidaDate.getFullYear()).slice(-2)} · Día juliano: {toJulianDay(cocidaDate)}
-                    </span>
-                  )}
-                  {cocidaDate && fechaCaducidad && (
-                    <span className="text-xs bg-gray-100 text-gray-600 px-2.5 py-1 rounded-full">
-                      {formatDateES(cocidaDate)} + {diasNum} días
-                    </span>
-                  )}
-                </div>
-              )}
-
-              <div className="flex-1" />
-
-              {enviado && !sendWarning && (
-                <div className="flex items-center gap-2 bg-green-50 border border-green-200 rounded-lg px-4 py-3 text-sm text-green-700 font-medium">
-                  <CheckCircle2 className="h-4 w-4 flex-shrink-0" />
-                  Mensaje enviado correctamente
-                </div>
-              )}
-
-              {enviado && sendWarning && (
-                <div className="flex items-center gap-2 bg-amber-50 border border-amber-200 rounded-lg px-4 py-3 text-sm text-amber-800 font-medium">
-                  <AlertTriangle className="h-4 w-4 flex-shrink-0" />
-                  Enviado, pero con aviso: {sendWarning}
-                </div>
-              )}
-
-              {sendError && (
-                <div className="bg-red-50 border border-red-200 rounded-lg px-4 py-3 text-sm text-red-700 font-medium space-y-1">
-                  <div className="flex items-center gap-2">
-                    <XCircle className="h-4 w-4 flex-shrink-0" />
-                    {sendError}
+                    <div className="grid gap-1.5">
+                      <label className="text-xs font-semibold text-foreground">Cocida</label>
+                      <div className="flex gap-1.5">
+                        <div className="min-w-0 flex-1"><DatePicker value={fechaCocida} onChange={setFechaCocida} /></div>
+                        <Button type="button" variant="outline" size="icon-sm" onClick={() => setFechaCocida(todayISO())} title="Hoy">
+                          <CalendarIcon className="size-3.5" />
+                        </Button>
+                      </div>
+                    </div>
                   </div>
-                  {sendErrorDetail && (
-                    <div className="pl-6">
+
+                  <div className="grid gap-1.5">
+                    <div className="flex items-center justify-between">
+                      <label className="text-xs font-semibold text-foreground">Días de caducidad</label>
+                      {diasDesdeJde !== null && !modoManual && (
+                        <Badge variant="outline" className="text-sky-600">desde JDE</Badge>
+                      )}
+                      {(!jdeOnline || modoManual) && (
+                        <Badge className="gap-1 bg-amber-400/10 text-amber-600">
+                          <AlertTriangle className="size-3" />manual
+                        </Badge>
+                      )}
+                    </div>
+                    <Input
+                      type="number"
+                      min={1}
+                      max={9999}
+                      value={diasCad}
+                      onChange={(e) => setDiasCad(e.target.value)}
+                      placeholder="Nº de días"
+                      readOnly={diasReadonly}
+                      className={diasReadonly ? "bg-muted text-muted-foreground" : ""}
+                    />
+                    {jdeOnline && diasDesdeJde !== null && !modoManual && (
+                      <button type="button" onClick={() => setModoManual(true)} className="w-fit text-left text-xs text-muted-foreground underline hover:text-foreground">
+                        Introducir manualmente
+                      </button>
+                    )}
+                    {modoManual && diasDesdeJde !== null && (
                       <button
                         type="button"
-                        onClick={() => setShowSendErrorDetail(v => !v)}
-                        className="text-xs font-normal underline text-red-600 hover:text-red-800"
+                        onClick={() => { setModoManual(false); setDiasCad(String(diasDesdeJde)); }}
+                        className="w-fit text-left text-xs text-muted-foreground underline hover:text-foreground"
                       >
-                        {showSendErrorDetail ? 'Ocultar detalle' : 'Ver más'}
+                        Usar valor de JDE ({diasDesdeJde} días)
                       </button>
-                      {showSendErrorDetail && (
-                        <p className="text-xs font-normal font-mono text-red-600 mt-1">
-                          Código de estado de la máquina: {sendErrorDetail}
-                        </p>
+                    )}
+                  </div>
+
+                  <div className="grid gap-1.5">
+                    <label className="text-xs font-semibold text-foreground">Loteadora</label>
+                    <Select value={selectedLoteadora || undefined} onValueChange={(v) => setSelectedLoteadora(v as string)}>
+                      <SelectTrigger className="w-full">
+                        <SelectValue placeholder={loteadoras.length === 0 ? "Sin loteadoras configuradas" : "Seleccionar loteadora…"} />
+                      </SelectTrigger>
+                      <SelectContent align="start" alignItemWithTrigger={false}>
+                        {loteadoras.map((l) => (
+                          <SelectItem key={l.id} value={String(l.id)}>{l.name}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  {selectedLoteadora && (
+                    <div className="grid gap-1.5">
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={handleLimpiarBuffer}
+                        disabled={limpiandoBuffer}
+                        className="w-fit whitespace-nowrap"
+                        title="Vacía la cola de campos remotos pendientes (equivale a pulsar Clear en Ajustes de comunicación > Buffer en la máquina). No imprime nada."
+                      >
+                        {limpiandoBuffer ? <Loader2 className="size-3.5 animate-spin" /> : <Eraser className="size-3.5" />}
+                        Limpiar buffer
+                      </Button>
+                    </div>
+                  )}
+
+                  {selectedLoteadora && (
+                    <div className="grid gap-1.5">
+                      <label className="text-xs font-semibold text-foreground">
+                        Plantilla
+                        {loadingMensajes && <Loader2 className="ml-1.5 inline size-3 animate-spin text-muted-foreground" />}
+                      </label>
+                      <div className="flex gap-2">
+                        <div className="flex-1">
+                          <Select value={selectedMensaje || undefined} onValueChange={(v) => setSelectedMensaje(v as string)}>
+                            <SelectTrigger className="w-full">
+                              <SelectValue placeholder={mensajes.length === 0 ? "Sin plantillas disponibles" : "Seleccionar plantilla…"} />
+                            </SelectTrigger>
+                            <SelectContent align="start" alignItemWithTrigger={false}>
+                              {mensajes.map((m) => (
+                                <SelectItem key={m} value={m}>{m}</SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        <Button type="button" variant="outline" size="sm" onClick={handleCargarMensaje} disabled={!canCargarMensaje} className="whitespace-nowrap">
+                          {cargandoMensaje ? <Loader2 className="size-3.5 animate-spin" /> : <Upload className="size-3.5" />}
+                          Cargar plantilla
+                        </Button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                {/* ── Columna derecha: la etiqueta es el centro visual ── */}
+                <div className="flex flex-col gap-4 lg:pl-6">
+                  <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Vista previa de impresión</p>
+
+                  {/* Aspecto de etiqueta/cupón: el "perforado" queda solo en los separadores internos
+                      (línea discontinua alrededor de toda la tarjeta se lee como "zona vacía/placeholder"
+                      en la mayoría de sistemas de diseño — justo lo contrario de "esto es lo importante") */}
+                  <div className="rounded-xl border border-border bg-muted/30 p-6 shadow-sm">
+                    <div className="text-center">
+                      {selectedArticulo ? (
+                        <>
+                          <p className="font-mono text-xs text-muted-foreground">{selectedArticulo.id}</p>
+                          <p className="text-sm font-semibold text-foreground">{selectedArticulo.descripcion}</p>
+                        </>
+                      ) : (
+                        <p className="text-sm text-muted-foreground">Ningún artículo seleccionado</p>
+                      )}
+                    </div>
+                    <div className="mt-4 divide-y divide-dashed divide-border">
+                      {[
+                        { label: "Lote", value: lote },
+                        { label: "Cocida", value: cocida },
+                        { label: "F. Caducidad", value: fechaCaducidad ? formatDateES(fechaCaducidad) : null },
+                      ].map(({ label, value }) => (
+                        <div key={label} className="flex flex-col items-center gap-0.5 py-3 first:pt-0 last:pb-0">
+                          <span className="text-[11px] font-semibold uppercase tracking-[0.2em] text-muted-foreground">{label}</span>
+                          <span className={`font-mono text-4xl font-bold tracking-widest ${value ? "text-foreground" : "text-muted-foreground/25"}`}>
+                            {value ?? "——"}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  {fabDate && (
+                    <div className="flex flex-wrap justify-center gap-2">
+                      <Badge variant="secondary">Lote — Año: {String(fabDate.getFullYear()).slice(-2)} · Día juliano: {toJulianDay(fabDate)}</Badge>
+                      {cocidaDate && (
+                        <Badge variant="secondary">Cocida — Año: {String(cocidaDate.getFullYear()).slice(-2)} · Día juliano: {toJulianDay(cocidaDate)}</Badge>
+                      )}
+                      {cocidaDate && fechaCaducidad && (
+                        <Badge variant="secondary">{formatDateES(cocidaDate)} + {diasNum} días</Badge>
                       )}
                     </div>
                   )}
-                </div>
-              )}
 
-              <Button
-                onClick={handleEnviar}
-                disabled={!canSend}
-                className="w-full h-11 text-sm font-semibold text-white disabled:opacity-40"
-                style={canSend ? { backgroundColor: '#D30B15' } : {}}
-              >
-                {sending
-                  ? <><Loader2 className="h-4 w-4 animate-spin" />Enviando...</>
-                  : <><Send className="h-4 w-4" />Enviar a loteadora</>}
-              </Button>
-            </div>
+                  <div className="flex-1" />
 
-          </div>
-        </div>
-
-        {/* Estado de las loteadoras (en vivo, se refresca solo cada 60s) */}
-        <div className="bg-white rounded-xl shadow-sm border border-gray-200" style={{ borderTop: '3px solid #D30B15' }}>
-          <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
-            <h2 className="text-base font-bold text-gray-800 flex items-center gap-2">
-              <Printer className="h-4 w-4" style={{ color: '#D30B15' }} />
-              Estado de las loteadoras
-              {loadingEstado && <Loader2 className="h-3.5 w-3.5 animate-spin text-gray-400" />}
-            </h2>
-          </div>
-          <div className="p-6">
-            {estadoLoteadoras.length === 0 ? (
-              <p className="text-sm text-gray-400">No hay loteadoras habilitadas configuradas en /admin.</p>
-            ) : (
-              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-                {estadoLoteadoras.map(l => {
-                  const info = ESTADO_INFO[l.state]
-                  const Icon = info.icon
-                  return (
-                    <div key={l.id} className="flex items-center justify-between gap-2 border border-gray-200 rounded-lg px-4 py-2.5">
-                      <span className="text-sm font-medium text-gray-800 truncate">{l.name}</span>
-                      <span className={`flex items-center gap-1.5 text-xs font-medium px-2.5 py-1 rounded-full border whitespace-nowrap ${info.className}`}>
-                        <Icon className="h-3.5 w-3.5" />
-                        {info.label}
-                      </span>
+                  {sendError && (
+                    <div className="space-y-1 rounded-lg border border-rose-500/20 bg-rose-400/10 px-4 py-3 text-sm font-medium text-rose-600 dark:text-rose-400">
+                      <div className="flex items-center gap-2">
+                        <XCircle className="size-4 flex-shrink-0" />
+                        {sendError}
+                      </div>
+                      {sendErrorDetail && (
+                        <div className="pl-6">
+                          <button type="button" onClick={() => setShowSendErrorDetail((v) => !v)} className="text-xs font-normal underline hover:opacity-80">
+                            {showSendErrorDetail ? "Ocultar detalle" : "Ver más"}
+                          </button>
+                          {showSendErrorDetail && (
+                            <p className="mt-1 font-mono text-xs font-normal">Código de estado de la máquina: {sendErrorDetail}</p>
+                          )}
+                        </div>
+                      )}
                     </div>
-                  )
-                })}
-              </div>
-            )}
-          </div>
+                  )}
+
+                  <Button onClick={handleEnviar} disabled={!canSend} className="h-11 w-full text-sm font-semibold">
+                    {sending ? <><Loader2 className="size-4 animate-spin" />Enviando...</> : <><Send className="size-4" />Enviar a loteadora</>}
+                  </Button>
+                </div>
+              </CardContent>
+            </Card>
+
+            {/* Estado de las loteadoras (en vivo, se refresca solo cada 60s) */}
+            <Card>
+              <CardHeader className="flex flex-wrap items-center gap-2 border-b pb-4">
+                <Printer className="size-4 text-primary" />
+                <CardTitle>Estado de las loteadoras</CardTitle>
+                {loadingEstado && <Loader2 className="size-3.5 animate-spin text-muted-foreground" />}
+              </CardHeader>
+              <CardContent className="pt-4">
+                {estadoLoteadoras.length === 0 ? (
+                  <p className="text-sm text-muted-foreground">No hay loteadoras habilitadas configuradas en /admin.</p>
+                ) : (
+                  <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                    {estadoLoteadoras.map((l) => {
+                      const info = ESTADO_INFO[l.state];
+                      const Icon = info.icon;
+                      return (
+                        <div key={l.id} className="flex items-center justify-between gap-2 rounded-lg border border-border px-4 py-2.5">
+                          <span className="truncate text-sm font-medium text-foreground">{l.name}</span>
+                          <Badge className={`gap-1.5 whitespace-nowrap ${info.className}`}>
+                            <Icon className="size-3.5" />
+                            {info.label}
+                          </Badge>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          </main>
         </div>
-      </div>
-    </main>
-  )
+        <Toaster />
+      </NovaPortalProvider>
+    </div>
+  );
 }
