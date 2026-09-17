@@ -1,8 +1,11 @@
-import { NextResponse } from 'next/server';
-import { COOKIE_NAME } from '@/lib/auth';
+import { NextRequest, NextResponse } from 'next/server';
+import { COOKIE_NAME, cookieOptions } from '@/lib/auth';
 
-export async function POST() {
+export async function POST(req: NextRequest) {
   const res = NextResponse.json({ ok: true });
-  res.cookies.set(COOKIE_NAME, '', { httpOnly: true, maxAge: 0, path: '/' });
+  // Mismas opciones que al crearla (sameSite/secure/path) y maxAge 0: si los
+  // atributos no coinciden con los de la cookie original, el navegador puede
+  // no darlas por la misma y dejar la sesión sin borrar.
+  res.cookies.set(COOKIE_NAME, '', { ...cookieOptions(req), maxAge: 0 });
   return res;
 }

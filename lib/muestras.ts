@@ -32,7 +32,7 @@
 // JOIN por fila — mismo motivo. Ver ClickUp #869etmf6d.
 import { NextResponse } from 'next/server';
 import { getDb } from '@/lib/sqlite';
-import { verifySession } from '@/lib/auth';
+import { requireAccess } from '@/lib/permissions';
 import { getDbConnection } from '@/lib/db';
 
 const SYNC_INTERVAL_MS = 30 * 60 * 1000; // 30 min de fondo — además, se dispara solo al cambiar la lista de artículos
@@ -179,12 +179,9 @@ export function getArticleAllowlist(): { articulo: string; descripcion: string }
 
 // Acceso a la configuración de artículos: admin, o cualquier usuario con
 // users.can_configure_muestras = 1 (permiso suelto asignado por admin desde /admin).
+// La regla vive en lib/permissions.ts junto al resto de criterios de acceso;
+// esto es solo el nombre con el que la conocen las rutas de /muestras.
 export async function requireMuestrasConfigAccess(): Promise<NextResponse | null> {
-  const session = await verifySession();
-  if (!session) return NextResponse.json({ error: 'No autenticado' }, { status: 401 });
-  if (session.role === 'admin') return null;
-  const db = getDb();
-  const row = db.prepare('SELECT can_configure_muestras FROM users WHERE id = ?').get(session.id) as { can_configure_muestras: number } | undefined;
-  if (!row?.can_configure_muestras) return NextResponse.json({ error: 'No autorizado' }, { status: 403 });
-  return null;
+  const acceso = await requireAccess({ flag: 'can_configure_muestras' });
+  return acceso.ok ? null : acceso.denied;
 }
