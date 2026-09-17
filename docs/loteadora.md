@@ -15,7 +15,7 @@ Rama: `feature/loteadora`.
 
 **Rediseñado sobre el sistema Nova (ShadcnSpace)** — no usa `AppShell`/tokens del sistema viejo (`components/ui/`), sino `components/nova/` + `app/nova-theme.css`, igual que `/compras`, `/costes`, `/mrp` y `/muestras`. Ver §14 para el detalle de los patrones nuevos que aportó este panel (Combobox con búsqueda, selector de fecha única).
 
-**Sigue el patrón de acceso configurable (`is_public`/`allowed_roles`) del resto de paneles**, con una diferencia: es el único que nace **privado** (§16). Sus cuatro rutas que mandan comandos a la máquina pasan por `requireScreenAccess('loteadora')`, así que los permisos que configure un admin en `/admin` → Pantallas se aplican de verdad en servidor.
+**Sigue el patrón de acceso configurable (`is_public`/`allowed_roles`) del resto de paneles**, con una diferencia: es el único que nace **privado** (§16). Sus siete rutas pasan por `requireScreenAccess('loteadora')`, así que los permisos que configure un admin en `/admin` → Pantallas se aplican de verdad en servidor.
 
 ---
 
@@ -359,7 +359,7 @@ Este panel es el único que **nace privado**. El resto de paneles se seedean con
 ### Las dos mitades de la regla
 
 1. **`privado: true` en `lib/panels.ts`** → el seed de `screens` (`lib/sqlite.ts`) inserta la fila con `is_public = 0`. Sin esa marca, `requireScreenAccess` sale por `if (screen.is_public === 1) return null` (`lib/permissions.ts:38`) y el panel quedaría abierto **incluso sin sesión**.
-2. **`requireScreenAccess('loteadora')` en las cuatro rutas** que mandan comandos TIJ (`enviar`, `cargar-mensaje`, `limpiar-buffer`, `mensajes`), en lugar del `verifySession()` que tenían antes. La diferencia importa: `verifySession()` solo comprobaba "hay sesión", así que cualquier usuario logueado —con permiso sobre el panel o no— podía imprimir. Las tres rutas de solo lectura (`articulos`, `estado`, `impresoras`) siguen públicas a propósito: alimentan la vista en vivo y no mueven nada en la máquina.
+2. **`requireScreenAccess('loteadora')` en las cuatro rutas** que mandan comandos TIJ (`enviar`, `cargar-mensaje`, `limpiar-buffer`, `mensajes`), en lugar del `verifySession()` que tenían antes. La diferencia importa: `verifySession()` solo comprobaba "hay sesión", así que cualquier usuario logueado —con permiso sobre el panel o no— podía imprimir. Las tres rutas de solo lectura (`articulos`, `estado`, `impresoras`) **también** la llevan desde que el middleware cubre toda la API. Se dejaron abiertas al principio con el argumento de que "no mueven nada en la máquina", y era un mal argumento: `estado` abre una conexión TCP a cada loteadora en cada petición y `articulos` lanza una consulta a la F4101 completa, las dos sin sesión. Como el panel es privado, nadie anónimo tiene motivo para llamarlas.
 
 Ambas mitades están blindadas en `__tests__/loteadora-access.test.ts`, porque viven en archivos distintos y quitar cualquiera de las dos reabre el agujero en silencio.
 

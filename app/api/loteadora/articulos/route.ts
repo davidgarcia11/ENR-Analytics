@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server'
+import { requireScreenAccess } from '@/lib/permissions'
 import { getDbConnection } from '@/lib/db'
 import { getDb } from '@/lib/sqlite'
 
@@ -10,6 +11,9 @@ import { getDb } from '@/lib/sqlite'
 // IDs de campo (lote/cocida/caducidad) para que /loteadora pueda autocargarla
 // sin otra llamada.
 export async function GET() {
+  const denied = await requireScreenAccess('loteadora');
+  if (denied) return denied;
+
   let conn
   try {
     conn = await getDbConnection()

@@ -131,3 +131,86 @@ describe('Middleware — protección JWT de /api/admin/*', () => {
     expect(res.status).toBe(200)
   })
 })
+
+// ── Cobertura de toda la API (no solo /api/admin) ────────────────────────
+// El matcher pasó de /api/admin/:path* a /api/:path*. El middleware valida el
+// token y lo renueva; el permiso por pantalla lo sigue decidiendo requireAccess
+// dentro de la ruta, que es quien tiene la BD (aquí no hay SQLite).
+describe('Middleware — resto de la API', () => {
+  const req = (path: string, cookie?: string) =>
+    new NextRequest(`http://localhost${path}`, cookie ? { headers: { cookie: `session=${cookie}` } } : undefined)
+
+  const setCookie = (res: Response) => res.headers.get('set-cookie') ?? ''
+
+  it('ruta de panel sin cookie → pasa (la pantalla puede ser pública)', async () => {
+    const res = await middleware(req('/api/caducados'))
+    expect(res.status).toBe(200)
+  })
+
+  it('ruta de panel con token inválido → 401 y borra la cookie', async () => {
+    const res = await middleware(req('/api/caducados', 'basura'))
+    expect(res.status).toBe(401)
+    expect(setCookie(res)).toContain('Max-Age=0')
+  })
+
+  it('ruta de panel con token válido → pasa', async () => {
+    const token = await makeToken({ sub: '2', role: 'user', username: 'user1' })
+    const res = await middleware(req('/api/caducados', token))
+    expect(res.status).toBe(200)
+  })
+
+  it('login, logout, me, screen-permissions y jde-orders pasan aunque el token sea basura', async () => {
+    for (const ruta of ['/api/auth/login', '/api/auth/logout', '/api/auth/me', '/api/screen-permissions', '/api/jde-orders']) {
+      const res = await middleware(req(ruta, 'basura'))
+      expect(res.status).toBe(200)
+    }
+  })
+})
+
+// ── Caducidad deslizante ─────────────────────────────────────────────────
+describe('Middleware — renovación de la cookie', () => {
+  const req = (path: string, cookie: string) =>
+    new NextRequest(`http://localhost${path}`, { headers: { cookie: `session=${cookie}` } })
+
+  it('token recién emitido (7d) → no se renueva', async () => {
+    const token = await makeToken({ sub: '2', role: 'user', username: 'user1' })
+    const res = await middleware(req('/api/caducados', token))
+    expect(res.headers.get('set-cookie')).toBeNull()
+  })
+
+  it('token al que le quedan menos de 6 días → se renueva con uno nuevo', async () => {
+    const token = await makeToken({ sub: '2', role: 'user', username: 'user1' }, SECRET, '2d')
+    const res = await middleware(req('/api/caducados', token))
+    const cookie = res.headers.get('set-cookie') ?? ''
+    expect(cookie).toContain('session=')
+    expect(cookie).not.toContain(token)
+  })
+
+  it('el latido del provider no renueva: una pestaña olvidada no vive eternamente', async () => {
+    const token = await makeToken({ sub: '2', role: 'user', username: 'user1' }, SECRET, '2d')
+    for (const ruta of ['/api/auth/me', '/api/screen-permissions']) {
+      const res = await middleware(req(ruta, token))
+      expect(res.headers.get('set-cookie')).toBeNull()
+    }
+  })
+
+  it('la cookie renovada usa las mismas opciones que cookieOptions() de lib/auth', async () => {
+    const token = await makeToken({ sub: '2', role: 'user', username: 'user1' }, SECRET, '2d')
+    const cookie = (await middleware(req('/api/caducados', token))).headers.get('set-cookie') ?? ''
+
+    expect(cookie).toContain('HttpOnly')
+    expect(cookie).toContain('Max-Age=604800')
+    expect(cookie).toContain('Path=/')
+    expect(cookie.toLowerCase()).toContain('samesite=lax')
+    expect(cookie).not.toContain('Secure') // la request es http
+
+    // El middleware no puede importar lib/auth (arrastraría bcryptjs y
+    // next/headers al bundle edge), así que tiene su propia copia de estas
+    // opciones. Esto caza que una de las dos cambie sin la otra. No se importa
+    // cookieOptions porque otros tests mockean @/lib/auth y el mock se filtra.
+    const fuente = require('node:fs').readFileSync('lib/auth.ts', 'utf8')
+    expect(fuente).toContain('maxAge: 60 * 60 * 24 * 7')
+    expect(fuente).toContain("sameSite: 'lax' as const")
+    expect(fuente).toContain('httpOnly: true')
+  })
+})
