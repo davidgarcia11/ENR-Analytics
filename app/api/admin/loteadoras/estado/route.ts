@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { getDb } from '@/lib/sqlite';
-import { verifySession } from '@/lib/auth';
 import { getPrinterStatus } from '@/lib/loteadora-printer';
+import { requireAccess } from '@/lib/permissions';
 
 interface LoteadoraRow {
   id: number;
@@ -13,10 +13,8 @@ interface LoteadoraRow {
 // Estado en vivo (admin) de TODAS las loteadoras, habilitadas o no, para la
 // pestaña Loteadoras de /admin.
 export async function GET() {
-  const user = await verifySession();
-  if (!user || user.role !== 'admin') {
-    return NextResponse.json({ error: 'No autorizado' }, { status: 403 });
-  }
+  const acceso = await requireAccess({ role: 'admin' });
+  if (!acceso.ok) return acceso.denied;
 
   const db = getDb();
   const loteadoras = db.prepare('SELECT id, ip, port, slave_address FROM loteadoras').all() as LoteadoraRow[];

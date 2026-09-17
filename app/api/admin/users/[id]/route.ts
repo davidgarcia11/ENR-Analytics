@@ -1,14 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getDb } from '@/lib/sqlite';
-import { verifySession, hashPassword } from '@/lib/auth';
+import { hashPassword } from '@/lib/auth';
 import { PLANTS } from '@/lib/plants';
+import { requireAccess } from '@/lib/permissions';
 
 // PUT: editar datos de un usuario (solo admin)
 export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-  const user = await verifySession();
-  if (!user || user.role !== 'admin') {
-    return NextResponse.json({ error: 'No autorizado' }, { status: 403 });
-  }
+  const acceso = await requireAccess({ role: 'admin' });
+  if (!acceso.ok) return acceso.denied;
+  const user = acceso.user!;
 
   const { id } = await params;
   const userId = Number(id);
@@ -37,10 +37,8 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
 
 // PATCH: resetear contraseña de un usuario (solo admin)
 export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-  const user = await verifySession();
-  if (!user || user.role !== 'admin') {
-    return NextResponse.json({ error: 'No autorizado' }, { status: 403 });
-  }
+  const acceso = await requireAccess({ role: 'admin' });
+  if (!acceso.ok) return acceso.denied;
 
   const { id } = await params;
   const { password } = await req.json();
@@ -57,10 +55,9 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
 }
 
 export async function DELETE(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-  const user = await verifySession();
-  if (!user || user.role !== 'admin') {
-    return NextResponse.json({ error: 'No autorizado' }, { status: 403 });
-  }
+  const acceso = await requireAccess({ role: 'admin' });
+  if (!acceso.ok) return acceso.denied;
+  const user = acceso.user!;
 
   const { id } = await params;
   const userId = Number(id);

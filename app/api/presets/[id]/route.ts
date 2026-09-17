@@ -1,12 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getDb } from '@/lib/sqlite';
-import { verifySession } from '@/lib/auth';
+import { requireAccess } from '@/lib/permissions';
 
 export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-  const user = await verifySession();
-  if (!user) {
-    return NextResponse.json({ error: 'No autenticado' }, { status: 401 });
-  }
+  const acceso = await requireAccess({ sesion: true });
+  if (!acceso.ok) return acceso.denied;
+  const user = acceso.user!;
 
   const { id } = await params;
   const { name, filters } = await req.json();
@@ -36,10 +35,9 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
 }
 
 export async function DELETE(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-  const user = await verifySession();
-  if (!user) {
-    return NextResponse.json({ error: 'No autenticado' }, { status: 401 });
-  }
+  const acceso = await requireAccess({ sesion: true });
+  if (!acceso.ok) return acceso.denied;
+  const user = acceso.user!;
 
   const { id } = await params;
   const db = getDb();

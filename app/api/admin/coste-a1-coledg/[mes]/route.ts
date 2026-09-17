@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getDb } from '@/lib/sqlite';
+import { requireAdmin } from '@/lib/permissions';
 
 // PUT /api/admin/coste-a1-coledg/:mes — edita el código de ledger IELEDG de un mes existente.
 // DELETE /api/admin/coste-a1-coledg/:mes — borra el mapeo de un mes (p. ej. si se
@@ -8,6 +9,9 @@ export async function PUT(
   req: NextRequest,
   { params }: { params: Promise<{ mes: string }> }
 ) {
+  const denied = await requireAdmin();
+  if (denied) return denied;
+
   const { mes } = await params;
   if (!mes) {
     return NextResponse.json({ error: 'Mes requerido' }, { status: 400 });
@@ -45,6 +49,9 @@ export async function DELETE(
   _req: NextRequest,
   { params }: { params: Promise<{ mes: string }> }
 ) {
+  const denied = await requireAdmin();
+  if (denied) return denied;
+
   const { mes } = await params;
   if (!mes) {
     return NextResponse.json({ error: 'Mes requerido' }, { status: 400 });

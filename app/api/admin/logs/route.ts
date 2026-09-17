@@ -1,12 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { verifySession } from '@/lib/auth';
 import { getDb } from '@/lib/sqlite';
+import { requireAccess } from '@/lib/permissions';
 
 export async function GET(req: NextRequest) {
-  const user = await verifySession();
-  if (!user || user.role !== 'admin') {
-    return NextResponse.json({ error: 'No autorizado' }, { status: 403 });
-  }
+  const acceso = await requireAccess({ role: 'admin' });
+  if (!acceso.ok) return acceso.denied;
 
   const { searchParams } = new URL(req.url);
   const page = parseInt(searchParams.get('page') || '1');

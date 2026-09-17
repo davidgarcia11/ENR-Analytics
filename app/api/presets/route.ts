@@ -1,12 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getDb } from '@/lib/sqlite';
-import { verifySession } from '@/lib/auth';
+import { requireAccess } from '@/lib/permissions';
 
 export async function GET(req: NextRequest) {
-  const user = await verifySession();
-  if (!user) {
-    return NextResponse.json({ error: 'No autenticado' }, { status: 401 });
-  }
+  const acceso = await requireAccess({ sesion: true });
+  if (!acceso.ok) return acceso.denied;
+  const user = acceso.user!;
 
   const { searchParams } = new URL(req.url);
   const screen = searchParams.get('screen') || 'produccion';
@@ -19,10 +18,9 @@ export async function GET(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
-  const user = await verifySession();
-  if (!user) {
-    return NextResponse.json({ error: 'No autenticado' }, { status: 401 });
-  }
+  const acceso = await requireAccess({ sesion: true });
+  if (!acceso.ok) return acceso.denied;
+  const user = acceso.user!;
 
   try {
     const { name, filters, screen = 'produccion' } = await req.json();

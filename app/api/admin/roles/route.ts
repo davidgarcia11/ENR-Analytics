@@ -1,13 +1,20 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getDb } from '@/lib/sqlite';
+import { requireAdmin } from '@/lib/permissions';
 
 export async function GET() {
+  const denied = await requireAdmin();
+  if (denied) return denied;
+
   const db = getDb();
   const roles = db.prepare('SELECT id, name, label, created_at FROM roles ORDER BY id').all();
   return NextResponse.json(roles);
 }
 
 export async function POST(req: NextRequest) {
+  const denied = await requireAdmin();
+  if (denied) return denied;
+
   const { name, label } = await req.json();
 
   if (!name || !label) {
