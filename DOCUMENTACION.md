@@ -47,13 +47,13 @@ dashboard/
 ├── .gitignore                    ← Incluye /data/ para no subir la BD de usuarios
 ├── package.json                  ← Dependencias y scripts
 ├── next.config.ts                ← Configuración de Next.js (HSTS + serverExternalPackages)
-├── middleware.ts                 ← Puerta de toda /api: valida el JWT, renueva la cookie, exige admin en /api/admin/*
+├── proxy.ts                      ← Puerta de toda la app: filtra páginas y API, valida el JWT y renueva la cookie
 ├── tsconfig.json                 ← Configuración de TypeScript
 ├── postcss.config.mjs            ← Configuración de PostCSS (Tailwind v4)
 ├── eslint.config.mjs             ← Reglas de linting
 │
 ├── __tests__/                    ← Tests de seguridad (bun test)
-│   ├── middleware.test.ts        ← JWT forgery, expiración, bypass de rol, renovación deslizante
+│   ├── middleware.test.ts        ← JWT forgery, expiración, bypass de rol, renovación, filtrado de páginas
 │   ├── sanitization.test.ts      ← SQL injection, XSS en entradas de usuario
 │   ├── permissions.test.ts       ← requireAccess y envoltorios, con DB en memoria
 │   ├── admin-guards.test.ts      ← Protección del rol/pantalla admin, inyección
@@ -181,18 +181,41 @@ REFLEX_PASSWORD=<contraseña_reflex>
 - Cabecera HTTP `Strict-Transport-Security` para forzar HTTPS
 - `serverExternalPackages: ['better-sqlite3']` — necesario para que el módulo nativo de SQLite funcione en producción con `npm start`
 
-### `middleware.ts` — Puerta de entrada de toda la API
+### `proxy.ts` — Puerta de entrada de la app
 
-Matcher: `/api/:path*` (antes solo `/api/admin/*`). Hace lo que se puede hacer
-**sin BD**, porque corre en runtime edge y ahí no hay SQLite:
+**Se llamaba `middleware.ts`.** Next 16 lo dio por obsoleto en favor de `proxy.ts`,
+y el cambio no es cosmético: **el proxy corre siempre en runtime Node** (Next
+rechaza `export const runtime` ahí porque es implícito). Eso es lo que permite
+leer SQLite desde aquí, y por tanto filtrar **páginas** y no solo API.
+
+Matcher: todo menos los estáticos. Tiene que ser un literal, así que la lista de
+rutas de panel no se genera desde `PANELS`; se resuelve en código.
+
+**API** (`/api/*`):
 
 | Caso | Qué hace |
 |---|---|
 | Ruta de `SIN_SESION` | Pasa sin mirar nada |
 | `/api/admin/*` sin cookie o sin rol admin | 401 / 403 |
 | Token caducado o manipulado | 401 **y borra la cookie** |
-| Resto sin cookie | Pasa: la pantalla puede ser pública y eso solo lo sabe `requireAccess` |
+| Resto sin cookie | Pasa: `requireAccess` decide (y comprueba cosas que aquí no tocan, como la contraseña pendiente) |
 | Token válido al que le quedan < 6 días | Pasa y renueva la cookie (7 días más) |
+
+**Páginas:**
+
+| Caso | Qué hace |
+|---|---|
+| `/login`, `/cambiar-contrasena`, `/` | Pasan siempre (filtrarlas sería un bucle contra sí mismas) |
+| Ruta que no es panel ni API | Pasa |
+| Panel de `PANELS` | `accesoPantalla(key, role)` — la misma función que usa `requireAccess({screen})` |
+| `/admin`, `/admin/logs` | Exigen rol admin |
+| Cualquier negativa | **302 a `/login?next=<ruta>`**, no un JSON |
+
+Esto es lo que quita el parpadeo del panel antes de rebotar al login: la decisión
+se toma **antes de mandar una sola línea de HTML**, y funciona aunque el
+JavaScript del cliente no llegue a ejecutarse. `<RequireAccess>` sigue haciendo
+falta: cubre lo que el proxy no puede ver, que es la sesión caducándose con la
+pestaña ya abierta, sin ninguna petición de página de por medio.
 
 `SIN_SESION` = `/api/auth/login`, `/api/auth/logout`, `/api/auth/me`,
 `/api/screen-permissions`, `/api/jde-orders`. Los dos primeros se usan cuando
@@ -201,10 +224,10 @@ contestan solas; `jde-orders` se autentica con `x-api-key`, no con la cookie.
 
 **Tres decisiones que conviene entender:**
 
-- **El middleware no decide permisos por pantalla.** Podría exigir sesión en toda
-  la API, pero eso dejaría fuera a las pantallas marcadas públicas, que hoy se ven
-  sin login. La regla por pantalla vive en `requireAccess()`, que tiene SQLite
-  delante. El middleware es la capa de higiene del token, no la de permisos.
+- **El proxy no exige sesión en toda la API.** Podría, pero eso dejaría fuera a
+  las pantallas marcadas públicas, que hoy se ven sin login. En API es la capa de
+  higiene del token; quien decide sigue siendo `requireAccess()`, que además
+  comprueba la contraseña pendiente de cambio y que el usuario siga existiendo.
 - **Borrar la cookie al fallar** hace que el sistema se cure solo: la petición
   siguiente entra sin cookie y, si la pantalla es pública, funciona. Sin eso, un
   token podrido devolvía 401 para siempre.
@@ -1318,7 +1341,7 @@ bun test --watch   # modo watch (re-ejecuta al guardar)
 
 ```
 __tests__/
-  middleware.test.ts     ← Seguridad JWT y cobertura de toda /api
+  middleware.test.ts     ← Seguridad JWT, cobertura de toda /api y filtrado de páginas (prueba proxy.ts)
   sanitization.test.ts   ← Sanitización de entradas (SQL injection, XSS)
   permissions.test.ts    ← Sistema de permisos (requireAccess + envoltorios)
   admin-guards.test.ts   ← Reglas de protección del panel de administración
@@ -1326,7 +1349,7 @@ __tests__/
 
 ### Qué cubre cada archivo
 
-**`middleware.test.ts`** (20 tests) — Ataques contra el JWT y cobertura de toda la API:
+**`middleware.test.ts`** (27 tests) — Ataques contra el JWT, cobertura de toda la API y filtrado de páginas (importa `proxy.ts`):
 - Sin cookie, token inválido, texto no JWT → 401
 - JWT firmado con secreto incorrecto → 401
 - JWT expirado aunque tenga rol `admin` → 401
@@ -1340,6 +1363,14 @@ __tests__/
 - Token recién emitido → no renueva; con < 6 días → renueva con uno distinto
 - `/api/auth/me` y `/api/screen-permissions` nunca renuevan
 - La cookie renovada coincide con `cookieOptions()` de `lib/auth`
+- `/admin` sin sesión o con rol `user` → 302 a `/login?next=`
+- `/login`, `/cambiar-contrasena` y `/` nunca se filtran (si no, bucle)
+- Página de admin con token podrido → 302 y cookie borrada
+- La API sigue contestando JSON, no redirecciones
+
+> Solo se prueban aquí los caminos que **no** tocan la BD. La regla de pantalla
+> pública/privada vive en `accesoPantalla()` y se prueba en `permissions.test.ts`
+> con una BD en memoria.
 
 **`sanitization.test.ts`** (18 tests) — Función de limpieza de nombres de rol:
 - SQL injection clásica (`'; DROP TABLE roles; --`) → solo `[a-z0-9_]`

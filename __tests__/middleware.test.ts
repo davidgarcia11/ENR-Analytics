@@ -1,5 +1,5 @@
 /**
- * Tests de seguridad JWT para el middleware de /api/admin/*
+ * Tests de seguridad JWT para proxy.ts (el antiguo middleware.ts)
  *
  * Cubre:
  * - Sin cookie → 401
@@ -18,7 +18,7 @@ const SECRET = 'test-secret-key-for-tests-only-minimum-32-chars'
 process.env.JWT_SECRET = SECRET
 
 // Importar el middleware DESPUÉS de configurar JWT_SECRET
-const { middleware } = await import('../middleware')
+const { default: middleware } = await import('../proxy')
 
 function makeReq(cookie?: string): NextRequest {
   const headers: Record<string, string> = {}
@@ -212,5 +212,63 @@ describe('Middleware — renovación de la cookie', () => {
     expect(fuente).toContain('maxAge: 60 * 60 * 24 * 7')
     expect(fuente).toContain("sameSite: 'lax' as const")
     expect(fuente).toContain('httpOnly: true')
+  })
+})
+
+// ── Filtrado de páginas ──────────────────────────────────────────────────
+// Desde que esto es proxy.ts (runtime Node), también filtra páginas y no solo
+// API: la decisión se toma antes de mandar una línea de HTML.
+//
+// Aquí solo se prueban los caminos que NO tocan la BD (páginas de admin, rutas
+// libres, token podrido). La regla de pantalla pública/privada vive en
+// accesoPantalla() y se prueba en permissions.test.ts con una BD en memoria.
+describe('Proxy — filtrado de páginas', () => {
+  const req = (path: string, cookie?: string) =>
+    new NextRequest(`http://localhost${path}`, cookie ? { headers: { cookie: `session=${cookie}` } } : undefined)
+
+  const esRedirect = (res: Response) => res.status >= 300 && res.status < 400
+  const destino = (res: Response) => res.headers.get('location') ?? ''
+
+  it('/admin sin sesión → redirige al login con ?next=', async () => {
+    const res = await middleware(req('/admin'))
+    expect(esRedirect(res)).toBe(true)
+    expect(destino(res)).toContain('/login?next=%2Fadmin')
+  })
+
+  it('/admin/logs con rol user → redirige al login', async () => {
+    const token = await makeToken({ sub: '2', role: 'user', username: 'user1' })
+    const res = await middleware(req('/admin/logs', token))
+    expect(esRedirect(res)).toBe(true)
+    expect(destino(res)).toContain('%2Fadmin%2Flogs')
+  })
+
+  it('/admin con rol admin → pasa', async () => {
+    const token = await makeToken({ sub: '1', role: 'admin', username: 'admin' })
+    const res = await middleware(req('/admin', token))
+    expect(res.status).toBe(200)
+  })
+
+  it('/login, /cambiar-contrasena y / nunca se filtran (si no, bucle)', async () => {
+    for (const ruta of ['/login', '/cambiar-contrasena', '/']) {
+      expect((await middleware(req(ruta))).status).toBe(200)
+      const token = await makeToken({ sub: '2', role: 'user', username: 'user1' })
+      expect((await middleware(req(ruta, token))).status).toBe(200)
+    }
+  })
+
+  it('página de admin con token podrido → redirige y borra la cookie', async () => {
+    const res = await middleware(req('/admin', 'basura'))
+    expect(esRedirect(res)).toBe(true)
+    expect(res.headers.get('set-cookie') ?? '').toContain('Max-Age=0')
+  })
+
+  it('una ruta que no es panel ni API pasa sin tocar nada', async () => {
+    expect((await middleware(req('/algo-que-no-existe'))).status).toBe(200)
+  })
+
+  it('la API sigue contestando con JSON, no con redirecciones', async () => {
+    const res = await middleware(req('/api/admin/users'))
+    expect(res.status).toBe(401)
+    expect(await res.json()).toMatchObject({ error: 'No autenticado' })
   })
 })
