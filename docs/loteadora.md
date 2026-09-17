@@ -371,8 +371,12 @@ Como la pantalla nace privada, tras el primer despliegue **solo los admin entran
 
 ### Sesión caducada con el panel abierto
 
-La sesión solo se comprueba al montar la página, así que si el token caduca con el panel abierto (tablet de planta que no se cierra en días), el primer aviso es un 401 de alguna de las cuatro rutas protegidas. Antes se mostraba tal cual —"No autenticado"— como si fuera un error de la máquina. Ahora las cuatro llamadas pasan por `sesionCaducada(res)` (`app/loteadora/page.tsx`), que avisa con un toast claro y redirige a `/login?next=/loteadora`.
+Si el token caduca con el panel abierto (tablet de planta que no se cierra en días), antes te quedabas delante de una pantalla muerta y el primer aviso era un 401 mostrado tal cual —"No autenticado"— como si fuera un error de la máquina.
+
+Ahora lo lleva el `SessionProvider` compartido (ver `DOCUMENTACION.md`): revalida la sesión cada 60 s y al volver el foco a la pestaña, y las cuatro llamadas protegidas pasan por `useApiFetch`, que ante un 401 echa al login. El panel además va envuelto en `<RequireAccess screen="loteadora">`, así que no se pinta nada hasta saber si esta sesión puede entrar.
 
 `app/login/page.tsx` respeta ese `next` y devuelve al usuario al panel del que venía, en vez de mandarlo siempre al primero de `PANELS` (que era `/produccion`). Dos guardas: la ruta tiene que ser interna (empezar por `/` y no por `//`, o sería un open redirect) y el usuario tiene que tener acceso real a ese panel (si no, el panel lo rebotaría al login otra vez, en bucle).
 
-**Esto es provisional**: `sesionCaducada` es una función local de este panel. Forma parte de un plan más amplio de sesiones (un `SessionProvider` compartido que revalide cada 60s y al recuperar el foco, un `apiFetch` único que trate el 401 en todos los paneles, y middleware sobre toda la API) que va en ramas aparte, porque toca los 14 paneles y no solo este.
+`app/login/page.tsx` respeta el `next` y devuelve al usuario al panel del que venía, con dos guardas: ruta interna (o sería un open redirect) y acceso real a ese panel (o el panel lo rebotaría al login en bucle).
+
+Este panel fue el piloto del provider junto a `/produccion`. Los demás paneles se migran en una rama aparte; hasta entonces conviven los dos modelos.

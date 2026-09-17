@@ -15,11 +15,11 @@ import {
 // Iconos de la librería lucide-react para dar estilo visual
 import { Factory, Calendar, ChevronDown, ChevronsDown, ChevronRight, SearchX } from "lucide-react"
 import { AppShell } from "@/components/AppShell"
+import { RequireAccess, useApiFetch, useSession, type SessionUser } from "@/components/SessionProvider"
 import { KpiCard } from "@/components/KpiCard"
 import { Spinner } from "@/components/ui/spinner"
 import { EmptyState } from "@/components/ui/empty-state"
 import * as XLSX from 'xlsx'; // Librería 'xlsx' para generar archivos Excel
-import { useRouter } from "next/navigation"
 import { FilterPanel, AppliedFilters } from "@/components/FilterPanel"
 import MermaBreakdown, { MermaCode } from "@/components/MermaBreakdown"
 import MermaCellPopover from "@/components/MermaCellPopover"
@@ -59,7 +59,6 @@ function buildProductionParams(filtersArg: AppliedFilters): URLSearchParams {
   return params
 }
 
-interface SessionUser { id: number; username: string; role: string; name: string; surname: string; defaultPlant: string }
 
 // Fila de producción tal como la devuelve GET /api/production (fecha ya serializada a ISO string)
 interface ProductionRow {
@@ -218,11 +217,14 @@ function makeTodayFilters(plant: string = 'all'): AppliedFilters {
 }
 
 // Función principal del componente Dashboard
-export default function Dashboard() {
-  const router = useRouter()
+function DashboardPanel() {
 
   // --- AUTENTICACIÓN ---
-  const [sessionUser, setSessionUser] = useState<SessionUser | null>(null)
+  // Sesión, logout y manejo del 401 desde el provider compartido. Dentro de
+  // <RequireAccess> la sesión ya está resuelta en el primer render, así que
+  // `sessionUser` es fiable desde el principio (antes había que esperarlo).
+  const { user: sessionUser, logout } = useSession()
+  const apiFetch = useApiFetch()
   // Señal para abrir el panel de presets desde el botón del header (se incrementa)
   const [presetsSignal, setPresetsSignal] = useState(0)
 
@@ -262,13 +264,11 @@ export default function Dashboard() {
   // ya venga filtrada por la planta por defecto del usuario (si tiene una) y no
   // se vea primero "todas las plantas" y luego solo la suya.
   useEffect(() => {
-    (async () => {
-      const user = await checkSession()
-      const initial = makeTodayFilters(resolveInitialPlant(user) ?? 'all')
-      setAppliedFilters(initial)
-      fetchData(1, true, false, initial)
-      fetchGlobalBreakdown(initial)
-    })()
+    const initial = makeTodayFilters(resolveInitialPlant(sessionUser) ?? 'all')
+    setAppliedFilters(initial)
+    fetchData(1, true, false, initial)
+    fetchGlobalBreakdown(initial)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   // Pide el desglose global de merma para los filtros aplicados.
@@ -280,7 +280,7 @@ export default function Dashboard() {
     try {
       const params = buildProductionParams(filtersArg)
       params.append('mode', 'global')
-      const res = await fetch(`/api/production/merma-breakdown?${params.toString()}`)
+      const res = await apiFetch(`/api/production/merma-breakdown?${params.toString()}`)
       const json = await res.json()
       if (json && Array.isArray(json.codes)) {
         setGlobalBreakdown({ codes: json.codes, total: json.total || 0 })
@@ -297,37 +297,6 @@ export default function Dashboard() {
 
   // --- AUTENTICACIÓN ---
 
-  const checkSession = async (): Promise<SessionUser | null> => {
-    try {
-      const res = await fetch('/api/auth/me')
-      let user = null
-      if (res.ok) {
-        user = await res.json()
-        if (user.mustChangePassword) {
-          router.push('/cambiar-contrasena')
-          return null
-        }
-        setSessionUser(user)
-      }
-      const screensRes = await fetch('/api/screen-permissions')
-      if (screensRes.ok) {
-        const screens = await screensRes.json()
-        const mine = screens['produccion']
-        if (mine && !mine.is_public) {
-          if (!user || (user.role !== 'admin' && !mine.allowed_roles.includes(user.role))) {
-            router.push('/login')
-            return null
-          }
-        }
-      }
-      return user
-    } catch { return null /* no logueado, ok */ }
-  }
-
-  const logout = async () => {
-    await fetch('/api/auth/logout', { method: 'POST' })
-    setSessionUser(null)
-  }
 
   // --- FETCH DE DATOS ---
 
@@ -345,7 +314,7 @@ export default function Dashboard() {
       params.append('page', pageNum.toString())
       params.append('limit', allRecords ? '0' : '150')
 
-      const res = await fetch(`/api/production?${params.toString()}`)
+      const res = await apiFetch(`/api/production?${params.toString()}`)
       const json = await res.json()
 
       // La API devuelve { data: [...], sqlRowCount: N }
@@ -503,7 +472,7 @@ export default function Dashboard() {
     try {
       const matrixParams = buildProductionParams(appliedFilters)
       matrixParams.append('mode', 'matrix')
-      const res = await fetch(`/api/production/merma-breakdown?${matrixParams.toString()}`)
+      const res = await apiFetch(`/api/production/merma-breakdown?${matrixParams.toString()}`)
       const json = await res.json()
       const items: MermaMatrixItem[] = (json && Array.isArray(json.items)) ? json.items : []
       if (items.length > 0) {
@@ -701,5 +670,15 @@ export default function Dashboard() {
         />
 
     </AppShell>
+  )
+}
+
+// No se pinta nada hasta saber si esta sesión puede entrar — misma regla que
+// requireScreenAccess('produccion') en las rutas de datos.
+export default function DashboardPage() {
+  return (
+    <RequireAccess screen="produccion">
+      <DashboardPanel />
+    </RequireAccess>
   )
 }

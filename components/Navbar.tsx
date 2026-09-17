@@ -5,9 +5,10 @@ import { useRouter } from "next/navigation"
 import { useState, useEffect } from "react"
 import { User, LogOut, Settings, FileText, ChevronDown, BookmarkCheck } from "lucide-react"
 import { PANELS, type PanelKey } from "@/lib/panels"
+import { puedeAcceder, useSession } from "@/components/SessionProvider"
 
+// Contrato de la prop, no estado: las páginas aún sin migrar pasan su propio tipo
 interface SessionUser { id: number; username: string; role: string; name: string; surname: string }
-interface ScreenConfig { is_public: boolean; allowed_roles: string[] }
 
 interface NavbarProps {
   // Opcional: páginas que no son uno de los paneles listados en PANELS (ej. /admin/logs) no marcan ninguno como activo
@@ -17,27 +18,15 @@ interface NavbarProps {
   onPresetsClick?: () => void
 }
 
-function canAccessPanel(cfg: ScreenConfig | undefined, role: string | null): boolean {
-  if (!cfg) return true
-  if (cfg.is_public) return true
-  if (!role) return false
-  if (role === 'admin') return true
-  return cfg.allowed_roles.includes(role)
-}
-
 export default function Navbar({ currentPanel, user, onLogout, onPresetsClick }: NavbarProps) {
   const router = useRouter()
   const [open, setOpen] = useState(false)
-  const [screensConfig, setScreensConfig] = useState<Record<string, ScreenConfig>>({})
+  // Los permisos de pantalla los trae el provider (una llamada para toda la app,
+  // no una por navbar) y la regla de acceso es la misma que usa <RequireAccess>
+  // y requireAccess en servidor.
+  const { screens } = useSession()
 
-  useEffect(() => {
-    fetch('/api/screen-permissions')
-      .then(r => r.ok ? r.json() : {})
-      .then(setScreensConfig)
-      .catch(() => {})
-  }, [])
-
-  const visiblePanels = PANELS.filter(p => canAccessPanel(screensConfig[p.key], user?.role ?? null))
+  const visiblePanels = PANELS.filter(p => puedeAcceder(screens[p.key], user))
 
   const displayName = user
     ? (user.name ? `${user.name} ${user.surname || ''}`.trim() : user.username)
