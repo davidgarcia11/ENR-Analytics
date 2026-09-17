@@ -55,7 +55,7 @@ dashboard/
 ├── __tests__/                    ← Tests de seguridad (bun test)
 │   ├── middleware.test.ts        ← JWT forgery, expiración, bypass de rol
 │   ├── sanitization.test.ts      ← SQL injection, XSS en entradas de usuario
-│   ├── permissions.test.ts       ← requireScreenAccess con DB en memoria
+│   ├── permissions.test.ts       ← requireAccess y envoltorios, con DB en memoria
 │   ├── admin-guards.test.ts      ← Protección del rol/pantalla admin, inyección
 │   └── gs1.test.ts               ← Parser de códigos de barras GS1-128 (lib/gs1.ts)
 │
@@ -69,7 +69,7 @@ dashboard/
 │   ├── db.ts                     ← Conexión a Oracle
 │   ├── sqlite.ts                 ← Conexión a SQLite (usuarios, presets, migraciones, roles, pantallas)
 │   ├── auth.ts                   ← JWT, bcrypt, SessionUser, cookieOptions
-│   ├── permissions.ts            ← Control de acceso por pantalla (getAllScreensConfig, requireScreenAccess)
+│   ├── permissions.ts            ← Control de acceso: requireAccess (único) + envoltorios por pantalla/rol
 │   ├── panels.ts                 ← Fuente única de los paneles reales (clave, label, href, icono, descripción)
 │   ├── utils.ts                  ← Funciones auxiliares (fechas, cantidades, clases CSS)
 │   ├── reflex.ts                 ← Conexión a SQL Server (Reflex), análoga a db.ts para Oracle
@@ -488,10 +488,43 @@ El rol `admin` siempre tiene acceso a todo, hardcoded en la lógica (no solo en 
 
 ### `lib/permissions.ts`
 
+**Un único sitio decide si algo se permite.** Antes había tres mecanismos sueltos
+haciendo lo mismo con matices distintos: `requireScreenAccess` (permisos por
+pantalla), un `verifySession()` + comprobar rol copiado en cada ruta de `/admin`, y
+`requireMuestrasConfigAccess` (flag por usuario). Ahora los tres delegan en
+`requireAccess`, que es donde se toma la decisión y se construyen los cuerpos de
+error — los otros siguen existiendo solo como nombres cómodos para no tocar las ~20
+rutas que ya los llaman.
+
 | Función | Descripción |
 |---|---|
+| `requireAccess(rules)` | Comprueba todas las reglas recibidas (AND) y devuelve `{ok: true, user}` o `{ok: false, denied}` con el `NextResponse` ya montado |
+| `requireScreenAccess(screenKey)` | Envoltorio: `requireAccess({ screen })` → `NextResponse` 401/403 o `null` |
+| `requireAdmin()` | Envoltorio: `requireAccess({ role: 'admin' })` → `NextResponse` 401/403 o `null` |
 | `getAllScreensConfig()` | Devuelve `Record<string, ScreenConfig>` con `{ is_public, allowed_roles[] }` para cada pantalla |
-| `requireScreenAccess(screenKey)` | Usada en API routes: devuelve `NextResponse` 401/403 si no hay acceso, o `null` si está permitido |
+
+Reglas que acepta `requireAccess` (se pueden combinar; todas deben pasar):
+
+| Regla | Qué comprueba |
+|---|---|
+| `screen` | La fila de `screens`: sin registrar → pasa; `is_public` → pasa **sin sesión**; si no, exige sesión y que el rol esté en `screen_permissions` (admin siempre pasa) |
+| `role` | Exige sesión (401 si no) y que el rol coincida (403 si no) |
+| `flag` | Exige sesión y una columna booleana de `users` (hoy solo `can_configure_muestras`); admin siempre pasa |
+
+```ts
+const acceso = await requireAccess({ screen: 'costes' })
+if (!acceso.ok) return acceso.denied
+acceso.user // SessionUser | null — null si la pantalla es pública
+```
+
+Dos detalles que importan:
+
+- **`user` puede ser `null` con `ok: true`**: una pantalla pública se permite sin
+  sesión, así que no se puede asumir que haya usuario tras pasar el control.
+- **Una pantalla pública no cortocircuita el resto de reglas**: `{screen: 'X',
+  role: 'admin'}` sigue exigiendo admin aunque `X` sea pública. Hay test para esto.
+- La sesión se resuelve **como mucho una vez** por llamada, y solo si alguna regla
+  la necesita (una pantalla pública no paga el `jwtVerify`).
 
 ### `GET /api/screen-permissions`
 
@@ -1177,7 +1210,7 @@ bun test --watch   # modo watch (re-ejecuta al guardar)
 __tests__/
   middleware.test.ts     ← Seguridad JWT del middleware /api/admin/*
   sanitization.test.ts   ← Sanitización de entradas (SQL injection, XSS)
-  permissions.test.ts    ← Sistema de permisos por pantalla (requireScreenAccess)
+  permissions.test.ts    ← Sistema de permisos (requireAccess + envoltorios)
   admin-guards.test.ts   ← Reglas de protección del panel de administración
 ```
 
@@ -1199,7 +1232,7 @@ __tests__/
 - Rutas de sistema (`../../../etc/passwd`), null bytes, unicode, emojis
 - Cadenas muy largas (10.000 chars)
 
-**`permissions.test.ts`** (22 tests) — `requireScreenAccess` y `getAllScreensConfig`:
+**`permissions.test.ts`** (35 tests) — `requireAccess` (reglas `screen`/`role`/`flag` y su combinación), sus envoltorios `requireScreenAccess`/`requireAdmin`, y `getAllScreensConfig`:
 - Pantalla pública → `null` sin sesión
 - Clave desconocida → `null` (pasa sin restricción)
 - Pantalla privada sin sesión → 401
