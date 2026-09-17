@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { requireScreenAccess } from '@/lib/permissions';
 import { getDb } from '@/lib/sqlite';
 import { getPrinterStatus } from '@/lib/loteadora-printer';
 
@@ -14,6 +15,9 @@ interface LoteadoraRow {
 // de /loteadora. No expone ip/puerto/slave — cada consulta abre y cierra
 // una conexión TCP breve (protocolo TIJ, comando 14).
 export async function GET() {
+  const denied = await requireScreenAccess('loteadora');
+  if (denied) return denied;
+
   const db = getDb();
   const loteadoras = db.prepare(
     'SELECT id, name, ip, port, slave_address FROM loteadoras WHERE enabled = 1 ORDER BY name'

@@ -47,13 +47,13 @@ dashboard/
 ├── .gitignore                    ← Incluye /data/ para no subir la BD de usuarios
 ├── package.json                  ← Dependencias y scripts
 ├── next.config.ts                ← Configuración de Next.js (HSTS + serverExternalPackages)
-├── middleware.ts                 ← Protección de rutas /api/admin/* (verifica JWT + admin)
+├── middleware.ts                 ← Puerta de toda /api: valida el JWT, renueva la cookie, exige admin en /api/admin/*
 ├── tsconfig.json                 ← Configuración de TypeScript
 ├── postcss.config.mjs            ← Configuración de PostCSS (Tailwind v4)
 ├── eslint.config.mjs             ← Reglas de linting
 │
 ├── __tests__/                    ← Tests de seguridad (bun test)
-│   ├── middleware.test.ts        ← JWT forgery, expiración, bypass de rol
+│   ├── middleware.test.ts        ← JWT forgery, expiración, bypass de rol, renovación deslizante
 │   ├── sanitization.test.ts      ← SQL injection, XSS en entradas de usuario
 │   ├── permissions.test.ts       ← requireAccess y envoltorios, con DB en memoria
 │   ├── admin-guards.test.ts      ← Protección del rol/pantalla admin, inyección
@@ -181,13 +181,40 @@ REFLEX_PASSWORD=<contraseña_reflex>
 - Cabecera HTTP `Strict-Transport-Security` para forzar HTTPS
 - `serverExternalPackages: ['better-sqlite3']` — necesario para que el módulo nativo de SQLite funcione en producción con `npm start`
 
-### `middleware.ts` — Protección de rutas admin
+### `middleware.ts` — Puerta de entrada de toda la API
 
-Intercepta todas las peticiones a `/api/admin/*`. Verifica:
-1. Que existe un JWT válido en la cookie `session`
-2. Que el usuario tiene `role === 'admin'`
+Matcher: `/api/:path*` (antes solo `/api/admin/*`). Hace lo que se puede hacer
+**sin BD**, porque corre en runtime edge y ahí no hay SQLite:
 
-Si no cumple, devuelve 403.
+| Caso | Qué hace |
+|---|---|
+| Ruta de `SIN_SESION` | Pasa sin mirar nada |
+| `/api/admin/*` sin cookie o sin rol admin | 401 / 403 |
+| Token caducado o manipulado | 401 **y borra la cookie** |
+| Resto sin cookie | Pasa: la pantalla puede ser pública y eso solo lo sabe `requireAccess` |
+| Token válido al que le quedan < 6 días | Pasa y renueva la cookie (7 días más) |
+
+`SIN_SESION` = `/api/auth/login`, `/api/auth/logout`, `/api/auth/me`,
+`/api/screen-permissions`, `/api/jde-orders`. Los dos primeros se usan cuando
+no hay sesión; `me` y `screen-permissions` son el latido del `SessionProvider` y
+contestan solas; `jde-orders` se autentica con `x-api-key`, no con la cookie.
+
+**Tres decisiones que conviene entender:**
+
+- **El middleware no decide permisos por pantalla.** Podría exigir sesión en toda
+  la API, pero eso dejaría fuera a las pantallas marcadas públicas, que hoy se ven
+  sin login. La regla por pantalla vive en `requireAccess()`, que tiene SQLite
+  delante. El middleware es la capa de higiene del token, no la de permisos.
+- **Borrar la cookie al fallar** hace que el sistema se cure solo: la petición
+  siguiente entra sin cookie y, si la pantalla es pública, funciona. Sin eso, un
+  token podrido devolvía 401 para siempre.
+- **La renovación no se dispara en el latido.** Un panel abierto pide
+  `/api/auth/me` cada 60 s; si eso renovara, una tablet olvidada mantendría la
+  sesión viva indefinidamente y la caducidad de 7 días no significaría nada.
+
+`cookieOptions()` está duplicada aquí y en `lib/auth.ts` a propósito: importar
+`lib/auth` arrastraría `bcryptjs` y `next/headers` al bundle edge. Hay un test
+que falla si las dos copias dejan de coincidir.
 
 ### `tsconfig.json` — Alias `@/`
 
@@ -1273,7 +1300,7 @@ bun test --watch   # modo watch (re-ejecuta al guardar)
 
 ```
 __tests__/
-  middleware.test.ts     ← Seguridad JWT del middleware /api/admin/*
+  middleware.test.ts     ← Seguridad JWT y cobertura de toda /api
   sanitization.test.ts   ← Sanitización de entradas (SQL injection, XSS)
   permissions.test.ts    ← Sistema de permisos (requireAccess + envoltorios)
   admin-guards.test.ts   ← Reglas de protección del panel de administración
@@ -1281,7 +1308,7 @@ __tests__/
 
 ### Qué cubre cada archivo
 
-**`middleware.test.ts`** (11 tests) — Ataques contra el JWT de `/api/admin/*`:
+**`middleware.test.ts`** (20 tests) — Ataques contra el JWT y cobertura de toda la API:
 - Sin cookie, token inválido, texto no JWT → 401
 - JWT firmado con secreto incorrecto → 401
 - JWT expirado aunque tenga rol `admin` → 401
@@ -1289,6 +1316,12 @@ __tests__/
 - Algoritmo `"none"` (bypass clásico de JWT) → 401
 - Rol `user` o `supervisor` con JWT válido → 403
 - Admin con JWT válido → pasa (200)
+- Ruta de panel sin cookie → pasa (la pantalla puede ser pública)
+- Ruta de panel con token inválido → 401 y `Max-Age=0` en la cookie
+- Las 5 rutas de `SIN_SESION` pasan aunque el token sea basura
+- Token recién emitido → no renueva; con < 6 días → renueva con uno distinto
+- `/api/auth/me` y `/api/screen-permissions` nunca renuevan
+- La cookie renovada coincide con `cookieOptions()` de `lib/auth`
 
 **`sanitization.test.ts`** (18 tests) — Función de limpieza de nombres de rol:
 - SQL injection clásica (`'; DROP TABLE roles; --`) → solo `[a-z0-9_]`

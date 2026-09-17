@@ -32,11 +32,12 @@ describe('loteadora — pantalla privada por defecto', () => {
   })
 })
 
-describe('loteadora — rutas que actúan sobre la máquina', () => {
-  // Las que mandan comandos TIJ a la impresora. Las de solo lectura
-  // (articulos/estado/impresoras) son públicas a propósito: alimentan la vista
-  // en vivo y no mueven nada en la máquina.
-  const rutasProtegidas = ['enviar', 'cargar-mensaje', 'limpiar-buffer', 'mensajes']
+describe('loteadora — todas sus rutas exigen permiso de pantalla', () => {
+  // Las cuatro primeras mandan comandos TIJ a la impresora. Las tres de solo
+  // lectura también entran: `estado` abre una conexión TCP a cada máquina y
+  // `articulos` consulta la F4101 entera — no mover nada en la impresora no las
+  // hacía inofensivas, y el panel es privado, así que nadie anónimo las necesita.
+  const rutasProtegidas = ['enviar', 'cargar-mensaje', 'limpiar-buffer', 'mensajes', 'articulos', 'estado', 'impresoras']
 
   for (const ruta of rutasProtegidas) {
     it(`/api/loteadora/${ruta} exige requireScreenAccess('loteadora')`, () => {
