@@ -4,7 +4,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { useRouter } from "next/navigation";
+import { RequireAccess, useApiFetch, useSession } from "@/components/SessionProvider";
 import { toast } from "sonner";
 import { Filter, Loader2 } from "lucide-react";
 import Header from "@/components/shadcn-space/blocks/topbar-02/header";
@@ -17,16 +17,15 @@ import DateRangePicker, { type DateRange } from "@/components/nova/date-range-pi
 import { Button } from "@/components/nova/ui/button";
 import { Toaster } from "@/components/nova/ui/sonner";
 
-interface SessionUser { id: number; username: string; role: string; name: string; surname: string; canConfigureMuestras?: boolean }
 interface MuestrasResponse {
   muestras: Muestra[];
   resumen: { total: number; pendientes: number; enviados: number; completados: number };
   sinConfigurar?: boolean;
 }
 
-export default function MuestrasPage() {
-  const router = useRouter();
-  const [sessionUser, setSessionUser] = useState<SessionUser | null>(null);
+function MuestrasPagePanel() {
+  const { user: sessionUser, logout } = useSession();
+  const apiFetch = useApiFetch();
 
   const [mode, setMode] = useState<ThemeMode>("system");
   const [systemPrefersDark, setSystemPrefersDark] = useState(false);
@@ -39,19 +38,7 @@ export default function MuestrasPage() {
   }, []);
   const effectiveTheme = mode === "system" ? (systemPrefersDark ? "dark" : "light") : mode;
 
-  // Mismo patrón que el resto de paneles Nova — el control de acceso real lo hace
-  // requireScreenAccess('muestras') en api/muestras/route.ts.
-  useEffect(() => {
-    fetch("/api/auth/me")
-      .then((r) => (r.ok ? r.json() : null))
-      .then(setSessionUser)
-      .catch(() => setSessionUser(null));
-  }, []);
 
-  const logout = async () => {
-    await fetch("/api/auth/logout", { method: "POST" });
-    setSessionUser(null);
-  };
 
   // null = sin filtro de fechas (todo el histórico) — por defecto, para no esconder
   // pendientes antiguos. Ver comentario en date-range-picker.tsx.
@@ -64,11 +51,7 @@ export default function MuestrasPage() {
     const id = toast.loading("Consultando muestras…");
     try {
       const params = r ? new URLSearchParams({ startDate: r.startDate, endDate: r.endDate }) : null;
-      const res = await fetch(`/api/muestras${params ? `?${params.toString()}` : ""}`);
-      if (res.status === 401 || res.status === 403) {
-        router.push("/login");
-        return;
-      }
+      const res = await apiFetch(`/api/muestras${params ? `?${params.toString()}` : ""}`);
       const json: MuestrasResponse = await res.json();
       setData(json);
       toast.success(`${json.muestras.length} lotes encontrados`, { id });
@@ -78,7 +61,7 @@ export default function MuestrasPage() {
     } finally {
       setLoading(false);
     }
-  }, [router]);
+  }, [apiFetch]);
 
   // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => { fetchData(null); }, []);
@@ -99,7 +82,7 @@ export default function MuestrasPage() {
       return { muestras, resumen: recalcularResumen(muestras) };
     });
 
-    fetch("/api/muestras", {
+    apiFetch("/api/muestras", {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ articulo, lote, ...patch }),
@@ -125,7 +108,7 @@ export default function MuestrasPage() {
     });
 
     try {
-      const res = await fetch("/api/muestras", {
+      const res = await apiFetch("/api/muestras", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ items, estado }),
@@ -187,5 +170,13 @@ export default function MuestrasPage() {
         <Toaster />
       </NovaPortalProvider>
     </div>
+  );
+}
+
+export default function MuestrasPage() {
+  return (
+    <RequireAccess screen="muestras">
+      <MuestrasPagePanel />
+    </RequireAccess>
   );
 }

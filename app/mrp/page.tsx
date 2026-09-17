@@ -5,7 +5,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { useRouter } from "next/navigation";
+import { RequireAccess, useApiFetch, useSession } from "@/components/SessionProvider";
 import { toast } from "sonner";
 import { Download, Filter, Loader2 } from "lucide-react";
 import * as XLSX from "xlsx";
@@ -18,7 +18,6 @@ import MrpMaterialsTable, { agregarPorMes, type Material } from "@/components/no
 import { Button } from "@/components/nova/ui/button";
 import { Toaster } from "@/components/nova/ui/sonner";
 
-interface SessionUser { id: number; username: string; role: string; name: string; surname: string }
 
 function currentMonthRange(): MonthRange {
   const now = new Date();
@@ -36,9 +35,9 @@ interface MrpResponse {
   meta: { articulosPrevistos: number; meses: string[] };
 }
 
-export default function MrpPage() {
-  const router = useRouter();
-  const [sessionUser, setSessionUser] = useState<SessionUser | null>(null);
+function MrpPagePanel() {
+  const { user: sessionUser, logout } = useSession();
+  const apiFetch = useApiFetch();
 
   const [mode, setMode] = useState<ThemeMode>("system");
   const [systemPrefersDark, setSystemPrefersDark] = useState(false);
@@ -51,20 +50,7 @@ export default function MrpPage() {
   }, []);
   const effectiveTheme = mode === "system" ? (systemPrefersDark ? "dark" : "light") : mode;
 
-  // Mismo patrón que el resto de paneles (ver app/compras/page.tsx) — solo para
-  // mostrar quién ha entrado y poder cerrar sesión desde la cabecera. El control de
-  // acceso real ya lo hace requireScreenAccess('mrp') en api/mrp/route.ts.
-  useEffect(() => {
-    fetch("/api/auth/me")
-      .then((r) => (r.ok ? r.json() : null))
-      .then(setSessionUser)
-      .catch(() => setSessionUser(null));
-  }, []);
 
-  const logout = async () => {
-    await fetch("/api/auth/logout", { method: "POST" });
-    setSessionUser(null);
-  };
 
   const [range, setRange] = useState<MonthRange>(currentMonthRange);
   const [data, setData] = useState<MrpResponse | null>(null);
@@ -75,11 +61,7 @@ export default function MrpPage() {
     const id = toast.loading("Calculando explosión de compras…");
     try {
       const params = new URLSearchParams({ startDate: r.startDate, endDate: r.endDate });
-      const res = await fetch(`/api/mrp?${params.toString()}`);
-      if (res.status === 401 || res.status === 403) {
-        router.push("/login");
-        return;
-      }
+      const res = await apiFetch(`/api/mrp?${params.toString()}`);
       const json: MrpResponse = await res.json();
       setData(json);
       toast.success(`${json.materiales.length} materiales calculados`, { id });
@@ -89,7 +71,7 @@ export default function MrpPage() {
     } finally {
       setLoading(false);
     }
-  }, [router]);
+  }, [apiFetch]);
 
   // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => { fetchData(range); }, []);
@@ -175,5 +157,13 @@ export default function MrpPage() {
         <Toaster />
       </NovaPortalProvider>
     </div>
+  );
+}
+
+export default function MrpPage() {
+  return (
+    <RequireAccess screen="mrp">
+      <MrpPagePanel />
+    </RequireAccess>
   );
 }

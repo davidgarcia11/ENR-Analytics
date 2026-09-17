@@ -538,7 +538,7 @@ permisos (los dos navbars y las páginas).
 | `SessionProvider` | Mantiene `user` + `screens`. **No redirige por su cuenta.** |
 | `useSession()` | `{ user, screens, loading, refresh, logout, onSessionExpired }` |
 | `useApiFetch()` | `fetch` que ante un 401 echa al login en vez de dejar que el panel muestre "No autenticado" como un error cualquiera |
-| `RequireAccess` | Envuelve el contenido de una página: no pinta nada hasta saber si se puede entrar |
+| `RequireAccess` | Envuelve el contenido de una página: no pinta nada hasta saber si se puede entrar. `screen="caducados"` para un panel, `role="admin"` para `/admin` y `/admin/logs`, sin props para "basta con tener sesión" |
 | `puedeAcceder(cfg, user)` | La regla de acceso, la misma que `requireAccess({screen})` en servidor |
 
 **Qué arregla, en concreto:**
@@ -559,15 +559,45 @@ permisos (los dos navbars y las páginas).
 - Tras un login hay que llamar a `refresh()` **antes** de navegar. El provider guarda
   la sesión en memoria y no se entera solo: sin eso, `RequireAccess` sigue creyendo
   que no hay sesión y devuelve al login — bucle hasta la siguiente revalidación.
-  Ya está hecho en `app/login/page.tsx`; recuérdalo si aparece otro punto de entrada.
+  Ya está hecho en `app/login/page.tsx` y en `app/cambiar-contrasena/page.tsx` (ahí
+  el `mustChangePassword` obsoleto devolvería a la propia página de cambio, en bucle);
+  recuérdalo si aparece otro punto de entrada.
+- `user` cambia de identidad en cada revalidación (cada 60 s). Si un `useEffect`
+  depende de la sesión, depende de `user?.id`, **nunca del objeto** — si no, se
+  relanza cada minuto.
+
+**Cómo se monta una página (patrón único, ya aplicado a las 14):**
+
+```tsx
+function CaducadosPanel() {
+  const { user, logout } = useSession()   // sesión ya resuelta
+  const apiFetch = useApiFetch()          // 401 → login, automático
+  // ...
+}
+
+export default function CaducadosPage() {
+  return <RequireAccess screen="caducados"><CaducadosPanel /></RequireAccess>
+}
+```
+
+Excepciones, todas con su motivo:
+
+| Página | Por qué no sigue el patrón |
+|---|---|
+| `/login` | Es el único sitio que puede hablar con `/api/auth/me` por su cuenta: corre justo cuando no hay sesión que compartir |
+| `/cambiar-contrasena` | Puerta al revés: solo se entra **si** hay que cambiar la contraseña, y `RequireAccess` manda justo ahí |
+| `/` (portada) | No es un panel: con sesión desvía al primer panel permitido, sin sesión hace de escaparate |
+| `/admin`, `/admin/logs` | Se gobiernan por rol, no por `screens` → `RequireAccess role="admin"` |
+
+`__tests__/permissions.test.ts` tiene una guarda anti-regresión: falla si una
+página vuelve a llamar a `/api/auth/me` o se monta sin `<RequireAccess>`.
 
 ### `GET /api/screen-permissions`
 
 Endpoint **público** (sin autenticación) que devuelve la configuración de todas las pantallas. Lo consumen:
-- Cada página del dashboard en su `checkSession` para decidir si redirigir a `/login`
-- La `Navbar` para filtrar qué paneles mostrar en el dropdown
+- `SessionProvider`, que lo reparte al resto de la app (ninguna página lo pide ya por su cuenta)
 - La página `/login` para redirigir al primer panel accesible tras el login
-- La página `/` (inicio) para mostrar solo los paneles públicos
+- La pestaña "Pantallas" de `/admin`, que además lo edita
 
 Ejemplo de respuesta:
 ```json

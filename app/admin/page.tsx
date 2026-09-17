@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from "react"
 import { useRouter } from "next/navigation"
+import { RequireAccess, useApiFetch } from "@/components/SessionProvider"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
@@ -115,11 +116,11 @@ interface MuestrasSyncState {
 // Derivado de la fuente única de paneles — nunca declarar esta lista a mano aquí.
 const SCREEN_KEYS = PANELS.map(({ key, label }) => ({ key, label }))
 
-export default function AdminPage() {
+function AdminPanel() {
   const router = useRouter()
   const { toast } = useToast()
   const [activeTab, setActiveTab] = useState<Tab>('usuarios')
-  const [authorized, setAuthorized] = useState(false)
+  const apiFetch = useApiFetch()
 
   // Confirmación de borrado (sustituye a confirm() nativo): guarda la acción pendiente
   const [confirmState, setConfirmState] = useState<{ title: string; description: string; onConfirm: () => void } | null>(null)
@@ -230,7 +231,19 @@ export default function AdminPage() {
   const [muestrasSync, setMuestrasSync] = useState<MuestrasSyncState | null>(null)
   const [syncingMuestras, setSyncingMuestras] = useState(false)
 
-  useEffect(() => { checkAuth() }, [])
+  // El acceso ya lo garantiza <RequireAccess role="admin">; aquí solo se cargan datos.
+  useEffect(() => {
+    loadUsers()
+    loadRoles()
+    loadScreens()
+    loadJdeStatuses()
+    loadLoteadoras()
+    loadMensajes()
+    loadAsociaciones()
+    loadArticulosLoteadora()
+    loadColedgMensual()
+    loadMuestrasSync()
+  }, [])
 
   // Estado en vivo de las loteadoras: solo se comprueba mientras la pestaña
   // está activa (cada comprobación abre una conexión TCP breve a cada máquina).
@@ -241,34 +254,12 @@ export default function AdminPage() {
     return () => clearInterval(interval)
   }, [activeTab])
 
-  const checkAuth = async () => {
-    try {
-      const res = await fetch("/api/auth/me")
-      if (!res.ok) { router.push("/login"); return }
-      const data = await res.json()
-      if (data.role !== "admin") { router.push("/produccion"); return }
-      setAuthorized(true)
-      loadUsers()
-      loadRoles()
-      loadScreens()
-      loadJdeStatuses()
-      loadLoteadoras()
-      loadMensajes()
-      loadAsociaciones()
-      loadArticulosLoteadora()
-      loadColedgMensual()
-      loadMuestrasSync()
-    } catch {
-      router.push("/login")
-    }
-  }
-
   // ─── Carga de datos ──────────────────────────────────────────────────────────
 
   const loadUsers = async () => {
     setLoadingUsers(true)
     try {
-      const res = await fetch("/api/admin/users")
+      const res = await apiFetch("/api/admin/users")
       if (res.ok) setUsers(await res.json())
     } finally { setLoadingUsers(false) }
   }
@@ -276,14 +267,14 @@ export default function AdminPage() {
   const loadRoles = async () => {
     setLoadingRoles(true)
     try {
-      const res = await fetch("/api/admin/roles")
+      const res = await apiFetch("/api/admin/roles")
       if (res.ok) setRoles(await res.json())
     } finally { setLoadingRoles(false) }
   }
 
   const loadMuestrasSync = async () => {
     try {
-      const res = await fetch("/api/admin/muestras-sync")
+      const res = await apiFetch("/api/admin/muestras-sync")
       if (res.ok) setMuestrasSync(await res.json())
     } catch { /* silencioso */ }
   }
@@ -294,7 +285,7 @@ export default function AdminPage() {
   const syncMuestrasNow = async () => {
     setSyncingMuestras(true)
     try {
-      const res = await fetch("/api/admin/muestras-sync", { method: "POST" })
+      const res = await apiFetch("/api/admin/muestras-sync", { method: "POST" })
       const data = await res.json()
       if (!res.ok) { toast(data.error || "Error al sincronizar", "error"); return }
       toast(`Sincronizado — ${data.rows} lotes traídos`, "success")
@@ -309,7 +300,7 @@ export default function AdminPage() {
   const loadScreens = async () => {
     setLoadingScreens(true)
     try {
-      const res = await fetch("/api/screen-permissions")
+      const res = await apiFetch("/api/screen-permissions")
       if (res.ok) setScreens(await res.json())
     } finally { setLoadingScreens(false) }
   }
@@ -317,7 +308,7 @@ export default function AdminPage() {
   const loadJdeStatuses = async () => {
     setLoadingJdeStatuses(true)
     try {
-      const res = await fetch("/api/admin/jde-statuses")
+      const res = await apiFetch("/api/admin/jde-statuses")
       if (res.ok) {
         const data: JdeStatus[] = await res.json()
         setJdeStatuses(data)
@@ -336,7 +327,7 @@ export default function AdminPage() {
     }
     setJdeStatusError(""); setJdeStatusSuccess(""); setSavingJdeStatus(code)
     try {
-      const res = await fetch(`/api/admin/jde-statuses/${encodeURIComponent(code)}`, {
+      const res = await apiFetch(`/api/admin/jde-statuses/${encodeURIComponent(code)}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ description }),
@@ -355,14 +346,14 @@ export default function AdminPage() {
   const loadLoteadoras = async () => {
     setLoadingLoteadoras(true)
     try {
-      const res = await fetch("/api/admin/loteadoras")
+      const res = await apiFetch("/api/admin/loteadoras")
       if (res.ok) setLoteadoras(await res.json())
     } finally { setLoadingLoteadoras(false) }
   }
 
   const loadLoteadoraLiveStatus = async () => {
     try {
-      const res = await fetch("/api/admin/loteadoras/estado")
+      const res = await apiFetch("/api/admin/loteadoras/estado")
       if (!res.ok) return
       const data: { id: number; state: EstadoLoteadoraValor }[] = await res.json()
       setLoteadoraLiveStatus(Object.fromEntries(data.map(d => [d.id, d.state])))
@@ -375,7 +366,7 @@ export default function AdminPage() {
     e.preventDefault()
     setLoteadoraError(""); setLoteadoraSuccess(""); setCreatingLoteadora(true)
     try {
-      const res = await fetch("/api/admin/loteadoras", {
+      const res = await apiFetch("/api/admin/loteadoras", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -405,7 +396,7 @@ export default function AdminPage() {
     if (!editLoteadoraId) return
     setEditLoteadoraError("")
     try {
-      const res = await fetch(`/api/admin/loteadoras/${editLoteadoraId}`, {
+      const res = await apiFetch(`/api/admin/loteadoras/${editLoteadoraId}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -427,7 +418,7 @@ export default function AdminPage() {
   const loadMensajes = async () => {
     setLoadingMensajes(true)
     try {
-      const res = await fetch("/api/admin/loteadora-mensajes")
+      const res = await apiFetch("/api/admin/loteadora-mensajes")
       if (res.ok) setMensajes(await res.json())
     } finally { setLoadingMensajes(false) }
   }
@@ -435,7 +426,7 @@ export default function AdminPage() {
   const loadAsociaciones = async () => {
     setLoadingAsociaciones(true)
     try {
-      const res = await fetch("/api/admin/loteadora-articulos")
+      const res = await apiFetch("/api/admin/loteadora-articulos")
       if (res.ok) setAsociaciones(await res.json())
     } finally { setLoadingAsociaciones(false) }
   }
@@ -443,7 +434,7 @@ export default function AdminPage() {
   const loadArticulosLoteadora = async () => {
     setLoadingArticulosLoteadora(true)
     try {
-      const res = await fetch("/api/loteadora/articulos")
+      const res = await apiFetch("/api/loteadora/articulos")
       if (res.ok) setArticulosLoteadora(await res.json())
     } finally { setLoadingArticulosLoteadora(false) }
   }
@@ -454,7 +445,7 @@ export default function AdminPage() {
     e.preventDefault()
     setMensajeError(""); setMensajeSuccess(""); setCreatingMensaje(true)
     try {
-      const res = await fetch("/api/admin/loteadora-mensajes", {
+      const res = await apiFetch("/api/admin/loteadora-mensajes", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -482,7 +473,7 @@ export default function AdminPage() {
     if (!editMensajeId) return
     setEditMensajeError("")
     try {
-      const res = await fetch(`/api/admin/loteadora-mensajes/${editMensajeId}`, {
+      const res = await apiFetch(`/api/admin/loteadora-mensajes/${editMensajeId}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -504,7 +495,7 @@ export default function AdminPage() {
       description: `Se eliminará la plantilla "${name}" y las asociaciones de artículos que la usen. Esta acción no se puede deshacer.`,
       onConfirm: async () => {
         try {
-          const res = await fetch(`/api/admin/loteadora-mensajes/${id}`, { method: "DELETE" })
+          const res = await apiFetch(`/api/admin/loteadora-mensajes/${id}`, { method: "DELETE" })
           const data = await res.json()
           if (!res.ok) { toast(data.error || "Error al eliminar", "error"); return }
           loadMensajes(); loadAsociaciones()
@@ -520,7 +511,7 @@ export default function AdminPage() {
     e.preventDefault()
     setAsociacionError(""); setAsociacionSuccess(""); setCreandoAsociacion(true)
     try {
-      const res = await fetch("/api/admin/loteadora-articulos", {
+      const res = await apiFetch("/api/admin/loteadora-articulos", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ articuloId: nuevaAsociacionArticulo, mensajeId: Number(nuevaAsociacionMensaje) }),
@@ -539,7 +530,7 @@ export default function AdminPage() {
       description: `Se quitará la plantilla asociada al artículo "${articuloId}".`,
       onConfirm: async () => {
         try {
-          const res = await fetch(`/api/admin/loteadora-articulos/${articuloId}`, { method: "DELETE" })
+          const res = await apiFetch(`/api/admin/loteadora-articulos/${articuloId}`, { method: "DELETE" })
           const data = await res.json()
           if (!res.ok) { toast(data.error || "Error al eliminar", "error"); return }
           loadAsociaciones()
@@ -555,7 +546,7 @@ export default function AdminPage() {
       description: `Se eliminará la loteadora "${name}". Esta acción no se puede deshacer.`,
       onConfirm: async () => {
         try {
-          const res = await fetch(`/api/admin/loteadoras/${id}`, { method: "DELETE" })
+          const res = await apiFetch(`/api/admin/loteadoras/${id}`, { method: "DELETE" })
           const data = await res.json()
           if (!res.ok) { toast(data.error || "Error al eliminar", "error"); return }
           loadLoteadoras()
@@ -568,7 +559,7 @@ export default function AdminPage() {
   const loadColedgMensual = async () => {
     setLoadingColedgMensual(true)
     try {
-      const res = await fetch("/api/admin/coste-a1-coledg")
+      const res = await apiFetch("/api/admin/coste-a1-coledg")
       if (res.ok) {
         const data: ColedgMensual[] = await res.json()
         setColedgMensual(data)
@@ -583,7 +574,7 @@ export default function AdminPage() {
     e.preventDefault()
     setColedgError(""); setColedgSuccess(""); setCreatingColedg(true)
     try {
-      const res = await fetch("/api/admin/coste-a1-coledg", {
+      const res = await apiFetch("/api/admin/coste-a1-coledg", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ mes: newMesColedg, coledg: newColedgCodigo }),
@@ -604,7 +595,7 @@ export default function AdminPage() {
     }
     setColedgError(""); setColedgSuccess(""); setSavingColedg(mes)
     try {
-      const res = await fetch(`/api/admin/coste-a1-coledg/${encodeURIComponent(mes)}`, {
+      const res = await apiFetch(`/api/admin/coste-a1-coledg/${encodeURIComponent(mes)}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ coledg }),
@@ -626,7 +617,7 @@ export default function AdminPage() {
       description: `Se eliminará el código IELEDG configurado para "${mes}". El coste real de /costes dejará de tener dato para ese mes hasta que se vuelva a configurar.`,
       onConfirm: async () => {
         try {
-          const res = await fetch(`/api/admin/coste-a1-coledg/${encodeURIComponent(mes)}`, { method: "DELETE" })
+          const res = await apiFetch(`/api/admin/coste-a1-coledg/${encodeURIComponent(mes)}`, { method: "DELETE" })
           const data = await res.json()
           if (!res.ok) { toast(data.error || "Error al eliminar", "error"); return }
           loadColedgMensual()
@@ -642,7 +633,7 @@ export default function AdminPage() {
     e.preventDefault()
     setUserError(""); setUserSuccess(""); setCreating(true)
     try {
-      const res = await fetch("/api/admin/users", {
+      const res = await apiFetch("/api/admin/users", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ username: newUsername, password: newPassword, role: newRole, mustChangePassword: forceChange, name: newName, surname: newSurname, defaultPlant: newDefaultPlant }),
@@ -662,7 +653,7 @@ export default function AdminPage() {
       description: `Se eliminará el usuario "${username}". Esta acción no se puede deshacer.`,
       onConfirm: async () => {
         try {
-          const res = await fetch(`/api/admin/users/${id}`, { method: "DELETE" })
+          const res = await apiFetch(`/api/admin/users/${id}`, { method: "DELETE" })
           const data = await res.json()
           if (!res.ok) { toast(data.error || "Error al eliminar", "error"); return }
           loadUsers()
@@ -675,7 +666,7 @@ export default function AdminPage() {
   const resetUserPassword = async (id: number) => {
     if (!resetPassword || resetPassword.length < 4) { toast("La contraseña debe tener al menos 4 caracteres", "error"); return }
     try {
-      const res = await fetch(`/api/admin/users/${id}`, {
+      const res = await apiFetch(`/api/admin/users/${id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ password: resetPassword }),
@@ -692,7 +683,7 @@ export default function AdminPage() {
   // de datos del usuario — ver docs/muestras.md.
   const toggleMuestrasConfig = async (u: User) => {
     try {
-      const res = await fetch(`/api/admin/users/${u.id}/muestras-config`, {
+      const res = await apiFetch(`/api/admin/users/${u.id}/muestras-config`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ enabled: !u.canConfigureMuestras }),
@@ -712,7 +703,7 @@ export default function AdminPage() {
     if (!editUserId) return
     setEditError("")
     try {
-      const res = await fetch(`/api/admin/users/${editUserId}`, {
+      const res = await apiFetch(`/api/admin/users/${editUserId}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ username: editUsername, name: editName, surname: editSurname, role: editRole, defaultPlant: editDefaultPlant }),
@@ -729,7 +720,7 @@ export default function AdminPage() {
     e.preventDefault()
     setRoleError(""); setRoleSuccess(""); setCreatingRole(true)
     try {
-      const res = await fetch("/api/admin/roles", {
+      const res = await apiFetch("/api/admin/roles", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ name: newRoleName, label: newRoleLabel }),
@@ -748,7 +739,7 @@ export default function AdminPage() {
       description: `Se eliminará el rol "${label}". Los usuarios con ese rol pasarán a "user".`,
       onConfirm: async () => {
         try {
-          const res = await fetch(`/api/admin/roles/${id}`, { method: "DELETE" })
+          const res = await apiFetch(`/api/admin/roles/${id}`, { method: "DELETE" })
           const data = await res.json()
           if (!res.ok) { toast(data.error || "Error al eliminar el rol", "error"); return }
           loadRoles(); loadUsers()
@@ -776,7 +767,7 @@ export default function AdminPage() {
     setSavingScreen(key); setScreenSuccess("")
     try {
       const config = screens[key]
-      const res = await fetch(`/api/admin/screens/${key}`, {
+      const res = await apiFetch(`/api/admin/screens/${key}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ is_public: config.is_public, allowed_roles: config.allowed_roles }),
@@ -786,14 +777,6 @@ export default function AdminPage() {
       setScreenSuccess(`Pantalla guardada correctamente`)
       setTimeout(() => setScreenSuccess(""), 3000)
     } catch { toast("Error al guardar", "error") } finally { setSavingScreen(null) }
-  }
-
-  if (!authorized) {
-    return (
-      <div className="min-h-screen bg-background flex items-center justify-center">
-        <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" aria-hidden="true" />
-      </div>
-    )
   }
 
   return (
@@ -1749,5 +1732,13 @@ export default function AdminPage() {
         onConfirm={() => confirmState?.onConfirm()}
       />
     </div>
+  )
+}
+
+export default function AdminPage() {
+  return (
+    <RequireAccess role="admin">
+      <AdminPanel />
+    </RequireAccess>
   )
 }

@@ -2,7 +2,7 @@
 
 import * as React from "react"
 import { useState, useEffect, useRef, useCallback } from "react"
-import { useRouter } from "next/navigation"
+import { RequireAccess, useApiFetch, useSession } from "@/components/SessionProvider"
 import { AppShell } from "@/components/AppShell"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
@@ -17,7 +17,6 @@ import {
 import { parseGs1, type Gs1Fields } from "@/lib/gs1"
 import { plantReflexCode, FUNES_SUBPLANTS, funesSubplantLabel, plantHasSubplants } from "@/lib/plants"
 
-interface SessionUser { id: number; username: string; role: string; name: string; surname: string; defaultPlant: string }
 
 interface PaletDetalle {
     lote: string
@@ -157,9 +156,9 @@ function iconoMensaje(mensaje: string): LucideIcon {
     return AlertTriangle
 }
 
-export default function ConsultaStockPdaPage() {
-    const router = useRouter()
-    const [sessionUser, setSessionUser] = useState<SessionUser | null>(null)
+function ConsultaStockPdaPanel() {
+    const { user: sessionUser, logout } = useSession()
+    const apiFetch = useApiFetch()
     const [inputValue, setInputValue] = useState("")
     const [parsed, setParsed] = useState<Gs1Fields | null>(null)
     const [articulo, setArticulo] = useState<string | null>(null)
@@ -169,7 +168,7 @@ export default function ConsultaStockPdaPage() {
     const [loteEscaneado, setLoteEscaneado] = useState<string | null>(null)
     const [validacionSscc, setValidacionSscc] = useState<ValidacionSscc | null>(null)
     const [ackOpen, setAckOpen] = useState(false)
-    const [planta, setPlanta] = useState("")
+    const [planta, setPlanta] = useState(plantReflexCode(sessionUser?.defaultPlant) || "")
     const [subplanta, setSubplanta] = useState("")
     const [loading, setLoading] = useState(false)
     const [error, setError] = useState<string | null>(null)
@@ -186,37 +185,6 @@ export default function ConsultaStockPdaPage() {
         setCameraSupported(hasBarcodeDetector())
         inputRef.current?.focus()
     }, [])
-
-    // Comprobar sesión y permisos (mismo patrón que el resto de paneles)
-    useEffect(() => {
-        const checkAccess = async () => {
-            try {
-                const res = await fetch('/api/auth/me')
-                const user = res.ok ? await res.json() : null
-                if (user?.mustChangePassword) { router.push('/cambiar-contrasena'); return }
-                setSessionUser(user)
-                const defaultReflexCode = plantReflexCode(user?.defaultPlant)
-                if (defaultReflexCode) setPlanta(defaultReflexCode)
-                const screensRes = await fetch('/api/screen-permissions')
-                if (screensRes.ok) {
-                    const screens = await screensRes.json()
-                    const mine = screens['consulta_stock_pda']
-                    if (mine && !mine.is_public) {
-                        if (!user || (user.role !== 'admin' && !mine.allowed_roles.includes(user.role))) {
-                            router.push('/login')
-                            return
-                        }
-                    }
-                }
-            } catch { }
-        }
-        checkAccess()
-    }, [])
-
-    const logout = async () => {
-        await fetch('/api/auth/logout', { method: 'POST' })
-        setSessionUser(null)
-    }
 
     // Funes tiene dos naves y el stock del mismo artículo se reparte entre ellas, así que
     // hay que saber en cuál está el operario antes de poder decirle qué palet coger (ver
@@ -249,7 +217,7 @@ export default function ConsultaStockPdaPage() {
             params.set('sscc', sscc)
             if (planta) params.set('planta', planta)
             if (subplantaEfectiva) params.set('subplanta', subplantaEfectiva)
-            const res = await fetch(`/api/consulta-stock-pda?${params}`)
+            const res = await apiFetch(`/api/consulta-stock-pda?${params}`)
             const data = await res.json()
             if (!res.ok) throw new Error(data.error || `Error ${res.status}`)
             setArticulo(data.articulo)
@@ -330,7 +298,7 @@ export default function ConsultaStockPdaPage() {
         setAckOpen(false)
         if (!validacionSscc || !parsed?.sscc) return
         try {
-            await fetch('/api/consulta-stock-pda/confirmaciones', {
+            await apiFetch('/api/consulta-stock-pda/confirmaciones', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
@@ -695,5 +663,13 @@ export default function ConsultaStockPdaPage() {
                 })()}
             </Dialog>
         </AppShell>
+    )
+}
+
+export default function ConsultaStockPdaPage() {
+    return (
+        <RequireAccess screen="consulta_stock_pda">
+            <ConsultaStockPdaPanel />
+        </RequireAccess>
     )
 }
