@@ -5,7 +5,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useRouter } from "next/navigation";
+import { RequireAccess, useApiFetch, useSession } from "@/components/SessionProvider";
 import { toast } from "sonner";
 import { Download } from "lucide-react";
 import * as XLSX from "xlsx";
@@ -21,7 +21,6 @@ import { formatMesCorto, serieCosteMensual, serieProduccionMensual } from "@/com
 import { Button } from "@/components/nova/ui/button";
 import { Toaster } from "@/components/nova/ui/sonner";
 
-interface SessionUser { id: number; username: string; role: string; name: string; surname: string }
 
 interface CosteA1Response {
   finales: DespieceNode[];
@@ -37,9 +36,9 @@ function aplanar(nodos: DespieceNode[], raiz: string, nivel: number): (DespieceN
   ]);
 }
 
-export default function CosteA1Page() {
-  const router = useRouter();
-  const [sessionUser, setSessionUser] = useState<SessionUser | null>(null);
+function CosteA1PagePanel() {
+  const { user: sessionUser, logout } = useSession();
+  const apiFetch = useApiFetch();
 
   const [mode, setMode] = useState<ThemeMode>("system");
   const [systemPrefersDark, setSystemPrefersDark] = useState(false);
@@ -52,20 +51,7 @@ export default function CosteA1Page() {
   }, []);
   const effectiveTheme = mode === "system" ? (systemPrefersDark ? "dark" : "light") : mode;
 
-  // Mismo patrón que el resto de paneles (ver app/compras/page.tsx) — solo para
-  // mostrar quién ha entrado y poder cerrar sesión desde la cabecera. El control de
-  // acceso real ya lo hace requireScreenAccess('costes') en api/costes/route.ts.
-  useEffect(() => {
-    fetch("/api/auth/me")
-      .then((r) => (r.ok ? r.json() : null))
-      .then(setSessionUser)
-      .catch(() => setSessionUser(null));
-  }, []);
 
-  const logout = async () => {
-    await fetch("/api/auth/logout", { method: "POST" });
-    setSessionUser(null);
-  };
 
   const [data, setData] = useState<CosteA1Response | null>(null);
   const [loading, setLoading] = useState(false);
@@ -88,11 +74,7 @@ export default function CosteA1Page() {
         startDate: filtros.monthRange.startDate,
         endDate: filtros.monthRange.endDate,
       });
-      const res = await fetch(`/api/costes?${params}`);
-      if (res.status === 401 || res.status === 403) {
-        router.push("/login");
-        return;
-      }
+      const res = await apiFetch(`/api/costes?${params}`);
       // Bug real visto en directo: un corte de conexión con Oracle (NJS-500,
       // ECONNRESET) hace que la API devuelva 500 con `{ error: '...' }`, sin
       // `finales` — sin este chequeo, `json.finales.length` de más abajo
@@ -107,7 +89,7 @@ export default function CosteA1Page() {
     } finally {
       setLoading(false);
     }
-  }, [router, filtros.monthRange]);
+  }, [apiFetch, filtros.monthRange]);
 
   // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => { fetchData(); }, []);
@@ -293,5 +275,13 @@ export default function CosteA1Page() {
         <Toaster />
       </NovaPortalProvider>
     </div>
+  );
+}
+
+export default function CosteA1Page() {
+  return (
+    <RequireAccess screen="costes">
+      <CosteA1PagePanel />
+    </RequireAccess>
   );
 }

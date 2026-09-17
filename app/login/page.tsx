@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/button"
 import { Loader2 } from "lucide-react"
 import Image from "next/image"
 import { PANELS } from "@/lib/panels"
-import { useSession } from "@/components/SessionProvider"
+import { puedeAcceder, useSession } from "@/components/SessionProvider"
 
 export default function LoginPage() {
   const router = useRouter()
@@ -52,11 +52,10 @@ export default function LoginPage() {
         const screensRes = await fetch('/api/screen-permissions')
         if (screensRes.ok) {
           const screens = await screensRes.json()
-          const puedeAcceder = (p: typeof PANELS[number]) => {
-            const cfg = screens[p.key]
-            if (!cfg) return true
-            return cfg.is_public || data.role === 'admin' || cfg.allowed_roles.includes(data.role)
-          }
+          // Misma regla que el resto de la app, importada en vez de recopiada.
+          // No se lee `screens` del provider porque el refresh() de arriba aún
+          // no se ha reflejado en este render.
+          const tieneAcceso = (p: typeof PANELS[number]) => puedeAcceder(screens[p.key], data)
 
           // Si llegó aquí redirigido desde un panel (?next=/loteadora), volver a ese
           // panel en vez de al primero de la lista. Dos guardas imprescindibles: que
@@ -65,12 +64,16 @@ export default function LoginPage() {
           // Se lee de window y no con useSearchParams para no tener que envolver la
           // página en <Suspense>, que es lo que pide Next al prerenderizarla.
           const next = new URLSearchParams(window.location.search).get('next')
+          // /admin y /admin/logs no están en PANELS (se gobiernan por rol, no
+          // por `screens`), así que se resuelven aparte antes de mirar la lista.
+          if (next?.startsWith('/admin') && data.role === 'admin') { router.push(next); return }
+
           const destino = next && next.startsWith('/') && !next.startsWith('//')
-            ? PANELS.find(p => p.href === next && puedeAcceder(p))
+            ? PANELS.find(p => p.href === next && tieneAcceso(p))
             : undefined
           if (destino) { router.push(destino.href); return }
 
-          const first = PANELS.find(puedeAcceder)
+          const first = PANELS.find(tieneAcceso)
           if (first) { router.push(first.href); return }
           setError("No tienes acceso a ningún panel. Contacta con el administrador.")
           return

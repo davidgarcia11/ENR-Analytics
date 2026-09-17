@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useEffect } from "react"
 import { useRouter } from "next/navigation"
 import Image from "next/image"
 import Link from "next/link"
@@ -8,56 +8,25 @@ import { Loader2, Lock, ArrowRight } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { EmptyState } from "@/components/ui/empty-state"
 import { PANELS } from "@/lib/panels"
-
-interface ScreenConfig { is_public: boolean; allowed_roles: string[] }
-
-function canAccess(cfg: ScreenConfig | undefined, role: string | null): boolean {
-  if (!cfg) return true
-  if (cfg.is_public) return true
-  if (!role) return false
-  if (role === 'admin') return true
-  return cfg.allowed_roles.includes(role)
-}
+import { puedeAcceder, useSession } from "@/components/SessionProvider"
 
 export default function HomePage() {
   const router = useRouter()
-  const [checking, setChecking] = useState(true)
-  const [publicPanels, setPublicPanels] = useState<(typeof PANELS)[number][]>([])
-  const [privatePanels, setPrivatePanels] = useState<(typeof PANELS)[number][]>([])
+  const { user, screens, loading } = useSession()
 
+  // Con sesión, la portada no se llega a ver: es un desvío al primer panel
+  // permitido. Sin sesión, hace de escaparate de los paneles públicos.
   useEffect(() => {
-    const init = async () => {
-      try {
-        const [meRes, screensRes] = await Promise.all([
-          fetch('/api/auth/me'),
-          fetch('/api/screen-permissions'),
-        ])
-        const screens: Record<string, ScreenConfig> = screensRes.ok ? await screensRes.json() : {}
+    if (loading || !user) return
+    if (user.mustChangePassword) { router.push('/cambiar-contrasena'); return }
+    const first = PANELS.find(p => puedeAcceder(screens[p.key], user))
+    router.push(first ? first.href : '/login')
+  }, [loading, user, screens, router])
 
-        if (meRes.ok) {
-          const user = await meRes.json()
-          if (user.mustChangePassword) { router.push('/cambiar-contrasena'); return }
-          const first = PANELS.find(p => canAccess(screens[p.key], user.role))
-          if (first) { router.push(first.href); return }
-          router.push('/login')
-          return
-        }
+  const publicPanels = PANELS.filter(p => screens[p.key]?.is_public ?? true)
+  const privatePanels = PANELS.filter(p => !(screens[p.key]?.is_public ?? true))
 
-        const pub = PANELS.filter(p => screens[p.key]?.is_public ?? true)
-        const priv = PANELS.filter(p => !(screens[p.key]?.is_public ?? true))
-        setPublicPanels(pub)
-        setPrivatePanels(priv)
-      } catch {
-        setPublicPanels([...PANELS])
-        setPrivatePanels([])
-      } finally {
-        setChecking(false)
-      }
-    }
-    init()
-  }, [router])
-
-  if (checking) {
+  if (loading || user) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-background">
         <Loader2 className="h-4 w-4 animate-spin text-muted-foreground/50" aria-hidden="true" />

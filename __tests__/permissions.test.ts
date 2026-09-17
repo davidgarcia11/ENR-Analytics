@@ -311,3 +311,43 @@ describe('envoltorios — mismo resultado que el helper', () => {
     expect((await requireAdmin())!.status).toBe(401)
   })
 })
+
+// ── Control de acceso en cliente ──────────────────────────────────────────
+// Guarda anti-regresión de la migración a <SessionProvider>: antes cada página
+// se montaba su propio fetch('/api/auth/me') y su propia copia de la regla de
+// acceso (13 copias, 4 formas distintas). Si alguien vuelve a añadir una, este
+// test lo caza en vez de descubrirse cuando una copia se queda desfasada.
+describe('páginas: control de acceso centralizado', () => {
+  const { readdirSync, readFileSync, statSync } = require('node:fs') as typeof import('node:fs')
+  const { join, sep } = require('node:path') as typeof import('node:path')
+
+  const paginas: string[] = []
+  const recorrer = (dir: string) => {
+    for (const e of readdirSync(dir)) {
+      const p = join(dir, e)
+      if (statSync(p).isDirectory()) { if (e !== 'api') recorrer(p) }
+      else if (e === 'page.tsx') paginas.push(p)
+    }
+  }
+  recorrer('app')
+
+  // El login es el único sitio que puede hablar con la API de sesión por su
+  // cuenta: se ejecuta justo cuando todavía no hay sesión que compartir.
+  const exentas = [join('app', 'login', 'page.tsx')]
+
+  it('ninguna página consulta /api/auth/me por su cuenta', () => {
+    const culpables = paginas.filter(p => !exentas.includes(p) && readFileSync(p, 'utf8').includes('/api/auth/me'))
+    expect(culpables).toEqual([])
+  })
+
+  it('toda página de panel pasa por <RequireAccess>', () => {
+    const sinPuerta = paginas.filter(p => {
+      const ruta = p.split(sep).join('/')
+      // La portada y el login no son paneles; cambiar-contraseña tiene la puerta al revés.
+      if (ruta === 'app/page.tsx') return false
+      if (ruta.includes('login') || ruta.includes('cambiar-contrasena')) return false
+      return !readFileSync(p, 'utf8').includes('<RequireAccess')
+    })
+    expect(sinPuerta).toEqual([])
+  })
+})

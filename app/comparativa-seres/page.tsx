@@ -12,10 +12,9 @@ import { Loader2, Search, Download, X, AlertTriangle, CheckCircle2, ArrowLeftRig
 import { AppShell } from "@/components/AppShell"
 import { PresetPanel, PresetQuickSelect, usePresets } from "@/components/PresetPanel"
 import { ArticleMultiSelect } from "@/components/ArticleMultiSelect"
-import { useRouter } from "next/navigation"
+import { RequireAccess, useApiFetch, useSession } from "@/components/SessionProvider"
 import * as XLSX from 'xlsx'
 
-interface SessionUser { id: number; username: string; role: string; name: string; surname: string }
 
 interface Pedido {
     referencia: string;
@@ -86,9 +85,9 @@ function formatFecha(fecha: string | null | undefined) {
     return `${d}/${m}/${y}`
 }
 
-export default function ComparativaSeresPage() {
-    const router = useRouter()
-    const [sessionUser, setSessionUser] = useState<SessionUser | null>(null)
+function ComparativaSeresPanel() {
+    const { user: sessionUser, logout } = useSession()
+    const apiFetch = useApiFetch()
     const [loading, setLoading] = useState(false)
     const [result, setResult] = useState<ComparativaResult | null>(null)
     const [error, setError] = useState<string | null>(null)
@@ -118,40 +117,11 @@ export default function ComparativaSeresPage() {
         setSelectedDestinoMlnm(Array.isArray(f.selectedDestinoMlnm) ? f.selectedDestinoMlnm : [])
     }
 
-    // Comprobar sesión al montar
-    useEffect(() => {
-        const checkAccess = async () => {
-            try {
-                const res = await fetch('/api/auth/me')
-                const user = res.ok ? await res.json() : null
-                if (user?.mustChangePassword) { router.push('/cambiar-contrasena'); return }
-                setSessionUser(user)
-                const screensRes = await fetch('/api/screen-permissions')
-                if (screensRes.ok) {
-                    const screens = await screensRes.json()
-                    const mine = screens['comparativa']
-                    if (mine && !mine.is_public) {
-                        if (!user || (user.role !== 'admin' && !mine.allowed_roles.includes(user.role))) {
-                            router.push('/login')
-                            return
-                        }
-                    }
-                }
-            } catch { }
-        }
-        checkAccess()
-    }, [])
-
-    const logout = async () => {
-        await fetch('/api/auth/logout', { method: 'POST' })
-        setSessionUser(null)
-    }
-
     const fetchData = async () => {
         setLoading(true)
         setError(null)
         try {
-            const res = await fetch(`/api/comparativa-seres?days=${days}`)
+            const res = await apiFetch(`/api/comparativa-seres?days=${days}`)
             if (!res.ok) {
                 const data = await res.json()
                 throw new Error(data.error || `Error ${res.status}`)
@@ -173,10 +143,12 @@ export default function ComparativaSeresPage() {
         setSelectedDestinoMlnm([])
     }
 
-    // Descripciones JDE (requiere sesión)
+    // Descripciones JDE (requiere sesión). La dependencia es el id y no el
+    // objeto: el provider revalida cada 60s y devuelve un objeto nuevo cada vez,
+    // así que depender de él recargaría esto en bucle.
     useEffect(() => {
         if (sessionUser) {
-            fetch('/api/jde-statuses')
+            apiFetch('/api/jde-statuses')
                 .then(r => r.ok ? r.json() : [])
                 .then((rows: { code: string; description: string }[]) => {
                     const map: Record<string, string> = {}
@@ -185,7 +157,7 @@ export default function ComparativaSeresPage() {
                 })
                 .catch(err => console.error('No se pudieron cargar las descripciones de estado JDE:', err))
         }
-    }, [sessionUser])
+    }, [sessionUser?.id])
 
     const exportToExcel = () => {
         if (!result) return
@@ -601,5 +573,13 @@ export default function ComparativaSeresPage() {
                 )}
 
         </AppShell>
+    )
+}
+
+export default function ComparativaSeresPage() {
+    return (
+        <RequireAccess screen="comparativa">
+            <ComparativaSeresPanel />
+        </RequireAccess>
     )
 }

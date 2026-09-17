@@ -7,6 +7,7 @@ import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 import { Loader2, KeyRound } from "lucide-react"
 import Image from "next/image"
+import { useSession } from "@/components/SessionProvider"
 
 export default function ChangePasswordPage() {
   const router = useRouter()
@@ -14,22 +15,15 @@ export default function ChangePasswordPage() {
   const [confirmPassword, setConfirmPassword] = useState("")
   const [error, setError] = useState("")
   const [loading, setLoading] = useState(false)
-  const [checking, setChecking] = useState(true)
+  // Puerta al revés que el resto de páginas: aquí solo se entra SI hay que
+  // cambiar la contraseña. Por eso no usa <RequireAccess>, que manda justo aquí.
+  const { user, loading: checking, refresh } = useSession()
 
   useEffect(() => {
-    // Verificar que el usuario está logueado y necesita cambiar contraseña
-    fetch("/api/auth/me")
-      .then(r => {
-        if (!r.ok) { router.push("/login"); return null }
-        return r.json()
-      })
-      .then(data => {
-        if (!data) return
-        if (!data.mustChangePassword) router.push("/produccion")
-        else setChecking(false)
-      })
-      .catch(() => router.push("/login"))
-  }, [router])
+    if (checking) return
+    if (!user) { router.push("/login"); return }
+    if (!user.mustChangePassword) router.push("/produccion")
+  }, [checking, user, router])
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -59,6 +53,9 @@ export default function ChangePasswordPage() {
         return
       }
 
+      // Sin esto el provider seguiría con mustChangePassword=true y
+      // <RequireAccess> devolvería a esta misma página, en bucle.
+      await refresh()
       router.push("/produccion")
     } catch {
       setError("Error de conexión")
@@ -67,7 +64,7 @@ export default function ChangePasswordPage() {
     }
   }
 
-  if (checking) {
+  if (checking || !user || !user.mustChangePassword) {
     return (
       <div className="min-h-screen bg-background flex items-center justify-center">
         <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" aria-hidden="true" />

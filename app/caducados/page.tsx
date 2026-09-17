@@ -15,10 +15,9 @@ import { KpiCard } from "@/components/KpiCard"
 import { PresetPanel, PresetQuickSelect, usePresets } from "@/components/PresetPanel"
 import { ArticleMultiSelect } from "@/components/ArticleMultiSelect"
 import * as XLSX from 'xlsx'
-import { useRouter } from "next/navigation"
+import { RequireAccess, useApiFetch, useSession } from "@/components/SessionProvider"
 import { plantJdeCode } from "@/lib/plants"
 
-interface SessionUser { id: number; username: string; role: string; name: string; surname: string; defaultPlant: string }
 interface Plant { id: string; description: string }
 interface LotState { code: string; description: string }
 interface PaletRow {
@@ -112,10 +111,10 @@ const DEFAULT_SRP1 = ['10', '11', '12', '13', '14']
 // Prefiltro por defecto del filtro Ubicacion al acceder al panel (GENERICA)
 const DEFAULT_LOCATIONS = ['__blank__']
 
-export default function CaducadosPage() {
-  const router = useRouter()
+function CaducadosPanel() {
 
-  const [sessionUser, setSessionUser] = useState<SessionUser | null>(null)
+  const { user: sessionUser, logout } = useSession()
+  const apiFetch = useApiFetch()
   const [data, setData] = useState<PaletRow[]>([])
   const [summary, setSummary] = useState<Summary>({ totalPallets: 0, totalQuantity: 0, caducados: 0, obsoletos: 0, bloqueados: 0, ambos: 0 })
   const [loading, setLoading] = useState(false)
@@ -183,21 +182,18 @@ export default function CaducadosPage() {
   // filtrada por la planta por defecto del usuario (si tiene una) y no se vea
   // primero "todas las plantas" y luego solo la suya.
   useEffect(() => {
-    (async () => {
-      const user = await checkSession()
-      const code = plantJdeCode(user?.defaultPlant)
-      const initialPlants = code ? [code] : []
-      setSelectedPlants(initialPlants)
-      fetchPlants()
-      fetchData(initialPlants)
-    })()
+    const code = plantJdeCode(sessionUser?.defaultPlant)
+    const initialPlants = code ? [code] : []
+    setSelectedPlants(initialPlants)
+    fetchPlants()
+    fetchData(initialPlants)
     fetchLotStates()
     fetchCategories()
   }, [])
 
   const fetchPlants = async () => {
     try {
-      const res = await fetch('/api/plants?screen=caducados')
+      const res = await apiFetch('/api/plants?screen=caducados')
       if (res.ok) setPlants(await res.json())
     } catch { }
   }
@@ -205,8 +201,8 @@ export default function CaducadosPage() {
   const fetchCategories = async () => {
     try {
       const [r1, r2] = await Promise.all([
-        fetch('/api/categories?field=srp1&screen=caducados'),
-        fetch('/api/categories?field=srp2&screen=caducados'),
+        apiFetch('/api/categories?field=srp1&screen=caducados'),
+        apiFetch('/api/categories?field=srp2&screen=caducados'),
       ])
       if (r1.ok) setAvailableSrp1(await r1.json())
       if (r2.ok) setAvailableSrp2(await r2.json())
@@ -216,40 +212,11 @@ export default function CaducadosPage() {
   // Carga ligera: solo consulta F0005, sin ejecutar la query principal de stock
   const fetchLotStates = async () => {
     try {
-      const res = await fetch('/api/caducados?onlyLotStates=1')
+      const res = await apiFetch('/api/caducados?onlyLotStates=1')
       if (!res.ok) return
       const json = await res.json()
       if (json.lotStates?.length > 0) setAvailableLotStates(json.lotStates)
     } catch { }
-  }
-
-  const checkSession = async (): Promise<SessionUser | null> => {
-    try {
-      const res = await fetch('/api/auth/me')
-      let user = null
-      if (res.ok) {
-        user = await res.json()
-        if (user.mustChangePassword) { router.push('/cambiar-contrasena'); return null }
-        setSessionUser(user)
-      }
-      const screensRes = await fetch('/api/screen-permissions')
-      if (screensRes.ok) {
-        const screens = await screensRes.json()
-        const mine = screens['caducados']
-        if (mine && !mine.is_public) {
-          if (!user || (user.role !== 'admin' && !mine.allowed_roles.includes(user.role))) {
-            router.push('/login')
-            return null
-          }
-        }
-      }
-      return user
-    } catch { return null }
-  }
-
-  const logout = async () => {
-    await fetch('/api/auth/logout', { method: 'POST' })
-    setSessionUser(null)
   }
 
   // plantsOverride se usa solo en la carga inicial, cuando aún no ha dado tiempo
@@ -270,7 +237,7 @@ export default function CaducadosPage() {
       if (paletSearch.trim()) params.append('palet', paletSearch.trim())
       if (loteSearch.trim()) params.append('lote', loteSearch.trim())
 
-      const res = await fetch(`/api/caducados?${params.toString()}`)
+      const res = await apiFetch(`/api/caducados?${params.toString()}`)
       if (!res.ok) throw new Error('Error fetching data')
       const json = await res.json()
 
@@ -591,5 +558,13 @@ export default function CaducadosPage() {
       </Card>
 
     </AppShell>
+  )
+}
+
+export default function CaducadosPage() {
+  return (
+    <RequireAccess screen="caducados">
+      <CaducadosPanel />
+    </RequireAccess>
   )
 }
