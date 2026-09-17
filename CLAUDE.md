@@ -81,7 +81,7 @@ components/
     ui/                        # Primitivos shadcn instalados para Nova (button, card, table, select, popover...)
     README.md                  # Mecanismo de aislamiento, configuración, decisiones — leer antes de tocar UI Nova
   shadcn-space/blocks/          # Blocks del catálogo ShadcnSpace instalados tal cual (topbar-02, statistics-04, chart-15, chart-03, chart-04)
-middleware.ts                 # Protege /api/admin/* (JWT + role admin)
+proxy.ts                      # Puerta de toda la app: filtra páginas y API (runtime Node, lee SQLite)
 docs/                         # Documentación específica por panel
   design-system.md            # SISTEMA DE DISEÑO (viejo, components/ui/) — leer antes de tocar UI de un panel que NO sea Nova
   produccion.md               # Dashboard de producción — completo para juniors
@@ -130,7 +130,7 @@ docs/                         # Documentación específica por panel
 ### Autenticación
 - JWT firmado HS256, expira 7 días, cookie `session` httpOnly
 - `cookieOptions(req)` detecta HTTPS desde URL real (no NODE_ENV) para funcionar en LAN
-- `middleware.ts` protege rutas `/api/admin/*`
+- `proxy.ts` (el antiguo `middleware.ts`) filtra páginas y toda `/api`: valida el JWT, renueva la cookie y redirige al login antes de mandar HTML
 - Logging de consultas nunca bloquea la respuesta (try/catch independiente)
 
 ### Seguridad

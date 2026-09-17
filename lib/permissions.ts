@@ -27,6 +27,33 @@ export function getAllScreensConfig(): Record<string, ScreenConfig> {
   return result;
 }
 
+/**
+ * ¿Puede este rol ver esta pantalla? Es la regla de `screen`, aparte para que
+ * `proxy.ts` la use tal cual al filtrar páginas — si no, sería una cuarta copia.
+ * Devuelve el motivo, no un booleano, porque requireAccess necesita distinguir
+ * 401 de 403 (el proxy manda los dos al login igual).
+ */
+export type AccesoPantalla = 'ok' | 'sin-sesion' | 'sin-permiso';
+
+export function accesoPantalla(screenKey: string, role: string | null): AccesoPantalla {
+  const db = getDb();
+  const screen = db.prepare('SELECT id, is_public FROM screens WHERE key = ?').get(screenKey) as { id: number; is_public: number } | undefined;
+
+  // Pantalla sin registrar → sin restricción. Deliberado: un panel nuevo que
+  // todavía no se ha seedeado no debe quedar inaccesible por eso.
+  // Pantalla pública → pasa sin sesión (así están seedeados casi todos).
+  if (!screen || screen.is_public === 1) return 'ok';
+  if (!role) return 'sin-sesion';
+  if (role === 'admin') return 'ok';
+
+  const permitido = db.prepare(`
+    SELECT 1 FROM screen_permissions sp
+    JOIN roles r ON r.id = sp.role_id
+    WHERE sp.screen_id = ? AND r.name = ?
+  `).get(screen.id, role);
+  return permitido ? 'ok' : 'sin-permiso';
+}
+
 // ── Autorización: un único sitio ──────────────────────────────────────────
 // Antes había tres mecanismos sueltos haciendo lo mismo con matices distintos:
 // requireScreenAccess (permisos por pantalla), un `verifySession() + comprobar
@@ -74,23 +101,10 @@ export async function requireAccess(rules: AccessRule = {}): Promise<AccessResul
   if (rules.sesion && !(await getSession())) return noAutenticado();
 
   if (rules.screen) {
-    const screen = db.prepare('SELECT id, is_public FROM screens WHERE key = ?').get(rules.screen) as { id: number; is_public: number } | undefined;
-
-    // Pantalla sin registrar → sin restricción. Deliberado: un panel nuevo que
-    // todavía no se ha seedeado no debe quedar inaccesible por eso.
-    // Pantalla pública → pasa sin sesión (así están seedeados casi todos).
-    if (screen && screen.is_public !== 1) {
-      const user = await getSession();
-      if (!user) return noAutenticado();
-      if (user.role !== 'admin') {
-        const permitido = db.prepare(`
-          SELECT 1 FROM screen_permissions sp
-          JOIN roles r ON r.id = sp.role_id
-          WHERE sp.screen_id = ? AND r.name = ?
-        `).get(screen.id, user.role);
-        if (!permitido) return noAutorizado();
-      }
-    }
+    const user = await getSession();
+    const acceso = accesoPantalla(rules.screen, user?.role ?? null);
+    if (acceso === 'sin-sesion') return noAutenticado();
+    if (acceso === 'sin-permiso') return noAutorizado();
   }
 
   if (rules.role) {
