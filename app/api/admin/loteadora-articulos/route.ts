@@ -1,15 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getDb } from '@/lib/sqlite';
-import { verifySession } from '@/lib/auth';
+import { requireAccess } from '@/lib/permissions';
 
 // Lista las asociaciones artículo -> plantilla (solo SQLite; la descripción
 // del artículo se resuelve en el front cruzando con GET /api/loteadora/articulos,
 // para no duplicar aquí una consulta a Oracle).
 export async function GET() {
-  const user = await verifySession();
-  if (!user || user.role !== 'admin') {
-    return NextResponse.json({ error: 'No autorizado' }, { status: 403 });
-  }
+  const acceso = await requireAccess({ role: 'admin' });
+  if (!acceso.ok) return acceso.denied;
 
   const db = getDb();
   const asociaciones = db.prepare(
@@ -22,10 +20,8 @@ export async function GET() {
 }
 
 export async function POST(req: NextRequest) {
-  const user = await verifySession();
-  if (!user || user.role !== 'admin') {
-    return NextResponse.json({ error: 'No autorizado' }, { status: 403 });
-  }
+  const acceso = await requireAccess({ role: 'admin' });
+  if (!acceso.ok) return acceso.denied;
 
   const { articuloId, mensajeId } = await req.json();
   const cleanArticuloId = String(articuloId ?? '').trim();

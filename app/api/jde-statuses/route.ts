@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { getDb } from '@/lib/sqlite';
-import { verifySession } from '@/lib/auth';
+import { requireAccess } from '@/lib/permissions';
 
 // GET /api/jde-statuses
 // Devuelve las descripciones editables de los códigos SYEDSP de JDE.
@@ -8,10 +8,8 @@ import { verifySession } from '@/lib/auth';
 // "Descripción" y el export Excel. Requiere sesión (no debe ser público
 // para evitar exponer info interna a terceros).
 export async function GET() {
-    const user = await verifySession();
-    if (!user) {
-        return NextResponse.json({ error: 'No autenticado' }, { status: 401 });
-    }
+    const acceso = await requireAccess({ sesion: true });
+    if (!acceso.ok) return acceso.denied;
 
     try {
         const db = getDb();

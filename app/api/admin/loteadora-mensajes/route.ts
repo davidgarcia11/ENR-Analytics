@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getDb } from '@/lib/sqlite';
-import { verifySession } from '@/lib/auth';
+import { requireAccess } from '@/lib/permissions';
 
 // Valida y normaliza el body de alta/edición de un mensaje (plantilla).
 export function parseMensajeInput(body: any) {
@@ -35,10 +35,8 @@ export function parseMensajeInput(body: any) {
 }
 
 export async function GET() {
-  const user = await verifySession();
-  if (!user || user.role !== 'admin') {
-    return NextResponse.json({ error: 'No autorizado' }, { status: 403 });
-  }
+  const acceso = await requireAccess({ role: 'admin' });
+  if (!acceso.ok) return acceso.denied;
 
   const db = getDb();
   const mensajes = db.prepare(
@@ -48,10 +46,8 @@ export async function GET() {
 }
 
 export async function POST(req: NextRequest) {
-  const user = await verifySession();
-  if (!user || user.role !== 'admin') {
-    return NextResponse.json({ error: 'No autorizado' }, { status: 403 });
-  }
+  const acceso = await requireAccess({ role: 'admin' });
+  if (!acceso.ok) return acceso.denied;
 
   const body = await req.json();
   const parsed = parseMensajeInput(body);

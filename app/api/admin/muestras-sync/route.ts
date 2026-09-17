@@ -1,19 +1,11 @@
 import { NextResponse } from 'next/server';
-import { verifySession } from '@/lib/auth';
+import { requireAccess, requireAdmin } from '@/lib/permissions';
 import { getSyncState, runFullSync, getArticleAllowlist } from '@/lib/muestras';
 
 // Sincronización manual de /muestras — la sincronización real se dispara sola al
 // cambiar la lista de artículos visibles y cada 30 min de fondo (ver lib/muestras.ts);
 // esto es solo un botón de "hazlo ahora" para admin, sin barra de progreso por tramos
 // porque ya no hace falta (con la lista de artículos configurada, tarda segundos).
-async function requireAdmin() {
-  const user = await verifySession();
-  if (!user || user.role !== 'admin') {
-    return NextResponse.json({ error: 'No autorizado' }, { status: 403 });
-  }
-  return null;
-}
-
 export async function GET() {
   const denied = await requireAdmin();
   if (denied) return denied;
@@ -27,9 +19,9 @@ export async function GET() {
 }
 
 export async function POST() {
-  const denied = await requireAdmin();
-  if (denied) return denied;
-  const user = await verifySession();
+  const acceso = await requireAccess({ role: 'admin' });
+  if (!acceso.ok) return acceso.denied;
+  const user = acceso.user!;
   const result = await runFullSync({ trigger: 'manual', userId: user?.id, username: user?.username });
   if (!result.ok) {
     return NextResponse.json({ error: result.error }, { status: 500 });

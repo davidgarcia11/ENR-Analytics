@@ -1,7 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getDb } from '@/lib/sqlite';
+import { requireAdmin } from '@/lib/permissions';
 
 export async function PUT(req: NextRequest, { params }: { params: Promise<{ key: string }> }) {
+  const denied = await requireAdmin();
+  if (denied) return denied;
+
   const { key } = await params;
   const { is_public, allowed_roles } = await req.json() as { is_public: boolean; allowed_roles: string[] };
 

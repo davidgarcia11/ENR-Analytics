@@ -44,12 +44,13 @@ function createTestDb() {
       id       INTEGER PRIMARY KEY,
       username TEXT NOT NULL UNIQUE,
       role     TEXT NOT NULL,
-      can_configure_muestras INTEGER NOT NULL DEFAULT 0
+      can_configure_muestras INTEGER NOT NULL DEFAULT 0,
+      must_change_password   INTEGER NOT NULL DEFAULT 0
     );
 
-    INSERT INTO users VALUES (1, 'admin', 'admin',      0);
-    INSERT INTO users VALUES (2, 'user1', 'user',       0);
-    INSERT INTO users VALUES (3, 'sup1',  'supervisor', 1);
+    INSERT INTO users VALUES (1, 'admin', 'admin',      0, 0);
+    INSERT INTO users VALUES (2, 'user1', 'user',       0, 0);
+    INSERT INTO users VALUES (3, 'sup1',  'supervisor', 1, 0);
 
     INSERT INTO roles VALUES (1, 'admin',      'Administrador');
     INSERT INTO roles VALUES (2, 'user',       'Usuario');
@@ -309,6 +310,59 @@ describe('envoltorios — mismo resultado que el helper', () => {
     expect((await requireAdmin())!.status).toBe(403)
     sinSesion()
     expect((await requireAdmin())!.status).toBe(401)
+  })
+})
+
+// ── Cambio de contraseña obligatorio ──────────────────────────────────────
+// Hasta ahora esto solo lo impedía el cliente: con must_change_password = 1
+// bastaba llamar a la API a mano para seguir trabajando con la provisional.
+describe('requireAccess — must_change_password', () => {
+  const marcar = (id: number, v: number) =>
+    testDb.prepare('UPDATE users SET must_change_password = ? WHERE id = ?').run(v, id)
+
+  beforeEach(() => { marcar(1, 0); marcar(2, 0) })
+
+  it('usuario con la contraseña marcada → 403 aunque tenga permiso', async () => {
+    comoSuperv()
+    marcar(3, 1)
+    const res = await requireAccess({ screen: 'privado' })
+    expect(res.ok).toBe(false)
+    expect(!res.ok && res.denied.status).toBe(403)
+    marcar(3, 0)
+  })
+
+  it('admin con la contraseña marcada → 403 (no se salta por ser admin)', async () => {
+    comoAdmin()
+    marcar(1, 1)
+    expect((await requireAdmin())!.status).toBe(403)
+  })
+
+  it('también bloquea en una pantalla pública, que si no sería la puerta de atrás', async () => {
+    comoUser()
+    marcar(2, 1)
+    expect((await requireScreenAccess('produccion'))!.status).toBe(403)
+  })
+
+  it('el cuerpo del error trae mustChangePassword para que el cliente sepa a dónde mandarlo', async () => {
+    comoUser()
+    marcar(2, 1)
+    const res = await requireAccess({ screen: 'produccion' })
+    expect(!res.ok && await res.denied.json()).toMatchObject({ mustChangePassword: true })
+  })
+
+  it('sin la marca → pasa con normalidad', async () => {
+    comoUser()
+    expect(await requireScreenAccess('produccion')).toBeNull()
+  })
+
+  it('anónimo en pantalla pública no paga la comprobación → pasa', async () => {
+    sinSesion()
+    expect(await requireScreenAccess('produccion')).toBeNull()
+  })
+
+  it('token válido de un usuario ya borrado → 401', async () => {
+    _mockSession = { id: 99, username: 'fantasma', role: 'admin', name: '', surname: '' }
+    expect((await requireScreenAccess('produccion'))!.status).toBe(401)
   })
 })
 

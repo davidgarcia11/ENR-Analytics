@@ -520,8 +520,12 @@ haciendo lo mismo con matices distintos: `requireScreenAccess` (permisos por
 pantalla), un `verifySession()` + comprobar rol copiado en cada ruta de `/admin`, y
 `requireMuestrasConfigAccess` (flag por usuario). Ahora los tres delegan en
 `requireAccess`, que es donde se toma la decisión y se construyen los cuerpos de
-error — los otros siguen existiendo solo como nombres cómodos para no tocar las ~20
-rutas que ya los llaman.
+error — los otros siguen existiendo solo como nombres cómodos.
+
+Ya **no queda ninguna ruta** con su propio `verifySession() + comprobar rol`: eran
+16 y dejaban fuera dos reglas que solo viven aquí (contraseña pendiente de cambio y
+usuario borrado). `lib/auth.ts` sigue exportando `verifySession()`, pero fuera de
+`/api/auth/*` solo se usa para **saber quién es** el usuario, nunca para decidir.
 
 | Función | Descripción |
 |---|---|
@@ -537,6 +541,14 @@ Reglas que acepta `requireAccess` (se pueden combinar; todas deben pasar):
 | `screen` | La fila de `screens`: sin registrar → pasa; `is_public` → pasa **sin sesión**; si no, exige sesión y que el rol esté en `screen_permissions` (admin siempre pasa) |
 | `role` | Exige sesión (401 si no) y que el rol coincida (403 si no) |
 | `flag` | Exige sesión y una columna booleana de `users` (hoy solo `can_configure_muestras`); admin siempre pasa |
+| `sesion` | Exige sesión y nada más — rutas "de usuario" como los presets |
+
+Y dos comprobaciones que se aplican **siempre** que haya sesión, sin pedirlas:
+
+| Comprobación | Respuesta |
+|---|---|
+| `users.must_change_password = 1` | 403 `{ error, mustChangePassword: true }` |
+| El usuario ya no existe en `users` | 401 |
 
 ```ts
 const acceso = await requireAccess({ screen: 'costes' })
@@ -550,8 +562,14 @@ Dos detalles que importan:
   sesión, así que no se puede asumir que haya usuario tras pasar el control.
 - **Una pantalla pública no cortocircuita el resto de reglas**: `{screen: 'X',
   role: 'admin'}` sigue exigiendo admin aunque `X` sea pública. Hay test para esto.
-- La sesión se resuelve **como mucho una vez** por llamada, y solo si alguna regla
-  la necesita (una pantalla pública no paga el `jwtVerify`).
+- La sesión se resuelve **como mucho una vez** por llamada.
+- **El cambio de contraseña obligatorio se impone aquí, no en el cliente.** Antes
+  solo lo hacían `<RequireAccess>` y el login, así que bastaba con llamar a la API
+  a mano —o tener la pestaña ya abierta cuando un admin reseteaba la contraseña—
+  para seguir trabajando con la provisional. Se mira la tabla y no el JWT, porque
+  el token se emite al iniciar sesión y no se entera de un reseteo posterior.
+  `/api/auth/{me,change-password,logout}` no pasan por `requireAccess`, que es
+  justo lo que hace falta para poder cambiarla.
 
 ### Sesión en cliente: `components/SessionProvider.tsx`
 
@@ -1330,7 +1348,7 @@ __tests__/
 - Rutas de sistema (`../../../etc/passwd`), null bytes, unicode, emojis
 - Cadenas muy largas (10.000 chars)
 
-**`permissions.test.ts`** (35 tests) — `requireAccess` (reglas `screen`/`role`/`flag` y su combinación), sus envoltorios `requireScreenAccess`/`requireAdmin`, y `getAllScreensConfig`:
+**`permissions.test.ts`** (44 tests) — `requireAccess` (reglas `screen`/`role`/`flag`/`sesion` y su combinación), sus envoltorios `requireScreenAccess`/`requireAdmin`, `getAllScreensConfig` y las guardas anti-regresión del cliente:
 - Pantalla pública → `null` sin sesión
 - Clave desconocida → `null` (pasa sin restricción)
 - Pantalla privada sin sesión → 401
@@ -1339,6 +1357,11 @@ __tests__/
 - Rol `admin` → siempre `null` (bypass garantizado)
 - Inyección SQL en la clave de pantalla → tratada como literal (no hay esa pantalla → `null`)
 - `getAllScreensConfig` devuelve estructura `{ is_public, allowed_roles[] }` correcta
+- `must_change_password = 1` → 403 aunque tenga permiso, sea admin o la pantalla sea pública
+- El cuerpo del 403 trae `mustChangePassword` para que el cliente sepa a dónde mandarlo
+- Anónimo en pantalla pública no paga esa comprobación
+- Token válido de un usuario ya borrado → 401
+- Ninguna página llama a `/api/auth/me` ni se monta sin `<RequireAccess>`
 
 **`admin-guards.test.ts`** (19 tests) — Reglas de negocio en los handlers de admin:
 - Rol `admin` no se puede eliminar → 400

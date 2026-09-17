@@ -1,13 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getDb } from '@/lib/sqlite';
-import { verifySession } from '@/lib/auth';
 import { parseLoteadoraInput } from '../route';
+import { requireAccess } from '@/lib/permissions';
 
 export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-  const user = await verifySession();
-  if (!user || user.role !== 'admin') {
-    return NextResponse.json({ error: 'No autorizado' }, { status: 403 });
-  }
+  const acceso = await requireAccess({ role: 'admin' });
+  if (!acceso.ok) return acceso.denied;
 
   const { id } = await params;
   const loteadoraId = Number(id);
@@ -38,10 +36,8 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
 }
 
 export async function DELETE(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-  const user = await verifySession();
-  if (!user || user.role !== 'admin') {
-    return NextResponse.json({ error: 'No autorizado' }, { status: 403 });
-  }
+  const acceso = await requireAccess({ role: 'admin' });
+  if (!acceso.ok) return acceso.denied;
 
   const { id } = await params;
   const db = getDb();

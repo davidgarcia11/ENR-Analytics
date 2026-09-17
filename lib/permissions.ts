@@ -42,6 +42,8 @@ export interface AccessRule {
   role?: string;
   /** Exige un permiso suelto de la tabla `users` */
   flag?: 'can_configure_muestras';
+  /** Exige sesión y nada más — rutas "de usuario" como los presets */
+  sesion?: true;
 }
 
 export type AccessResult =
@@ -51,6 +53,7 @@ export type AccessResult =
 
 const noAutenticado = (): AccessResult => ({ ok: false, denied: NextResponse.json({ error: 'No autenticado' }, { status: 401 }) });
 const noAutorizado = (): AccessResult => ({ ok: false, denied: NextResponse.json({ error: 'No autorizado' }, { status: 403 }) });
+const debeCambiar = (): AccessResult => ({ ok: false, denied: NextResponse.json({ error: 'Debes cambiar la contraseña antes de seguir', mustChangePassword: true }, { status: 403 }) });
 
 /**
  * Comprueba todas las reglas recibidas (AND) y devuelve el usuario o la
@@ -67,6 +70,8 @@ export async function requireAccess(rules: AccessRule = {}): Promise<AccessResul
   // (una pantalla pública no debe pagar el jwtVerify).
   let cached: SessionUser | null | undefined;
   const getSession = async () => (cached === undefined ? (cached = await verifySession()) : cached);
+
+  if (rules.sesion && !(await getSession())) return noAutenticado();
 
   if (rules.screen) {
     const screen = db.prepare('SELECT id, is_public FROM screens WHERE key = ?').get(rules.screen) as { id: number; is_public: number } | undefined;
@@ -105,7 +110,26 @@ export async function requireAccess(rules: AccessRule = {}): Promise<AccessResul
     }
   }
 
-  return { ok: true, user: await getSession() };
+  // Contraseña marcada para cambio obligatorio: el token es válido y el usuario
+  // existe, pero no puede hacer nada más que cambiarla. Hasta aquí esto solo lo
+  // impedía el cliente (<RequireAccess> y el login), así que bastaba con llamar
+  // a la API a mano —o tener la pestaña ya abierta cuando un admin reseteaba la
+  // contraseña— para seguir trabajando con la contraseña provisional.
+  //
+  // No se mira el JWT sino la tabla: el token se emite al iniciar sesión y no se
+  // entera de que un admin ha reseteado la contraseña después.
+  //
+  // /api/auth/{me,change-password,logout} no pasan por aquí, que es justo lo que
+  // hace falta para poder cambiarla.
+  const user = await getSession();
+  if (user) {
+    const row = db.prepare('SELECT must_change_password FROM users WHERE id = ?').get(user.id) as { must_change_password: number } | undefined;
+    // Usuario borrado con el token todavía vivo: la misma consulta ya lo dice,
+    // así que se aprovecha. Antes seguía entrando hasta que caducaba el JWT.
+    if (!row) return noAutenticado();
+    if (row.must_change_password) return debeCambiar();
+  }
+  return { ok: true, user };
 }
 
 // Devuelve NextResponse 401/403 si no hay acceso, o null si está permitido.

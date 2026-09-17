@@ -1,10 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getDb } from '@/lib/sqlite';
+import { requireAdmin } from '@/lib/permissions';
 
 // GET /api/admin/coste-a1-coledg — lista mes -> código de ledger IELEDG (F30026).
 // POST /api/admin/coste-a1-coledg — añade un mes nuevo (no permite duplicar uno
 // existente, para eso está el PUT en [mes]/route.ts).
 export async function GET() {
+  const denied = await requireAdmin();
+  if (denied) return denied;
+
   try {
     const db = getDb();
     const rows = db
@@ -18,6 +22,9 @@ export async function GET() {
 }
 
 export async function POST(req: NextRequest) {
+  const denied = await requireAdmin();
+  if (denied) return denied;
+
   let body: { mes?: string; coledg?: string };
   try {
     body = await req.json();
