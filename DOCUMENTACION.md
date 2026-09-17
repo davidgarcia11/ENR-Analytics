@@ -526,6 +526,41 @@ Dos detalles que importan:
 - La sesión se resuelve **como mucho una vez** por llamada, y solo si alguna regla
   la necesita (una pantalla pública no paga el `jwtVerify`).
 
+### Sesión en cliente: `components/SessionProvider.tsx`
+
+Montado una vez en `app/layout.tsx`, envuelve toda la app. Sustituye al
+`fetch('/api/auth/me')` en un `useEffect` que cada panel se montaba por su cuenta
+(13 copias en cuatro formas distintas) y a las tres copias del filtrado de
+permisos (los dos navbars y las páginas).
+
+| Export | Para qué |
+|---|---|
+| `SessionProvider` | Mantiene `user` + `screens`. **No redirige por su cuenta.** |
+| `useSession()` | `{ user, screens, loading, refresh, logout, onSessionExpired }` |
+| `useApiFetch()` | `fetch` que ante un 401 echa al login en vez de dejar que el panel muestre "No autenticado" como un error cualquiera |
+| `RequireAccess` | Envuelve el contenido de una página: no pinta nada hasta saber si se puede entrar |
+| `puedeAcceder(cfg, user)` | La regla de acceso, la misma que `requireAccess({screen})` en servidor |
+
+**Qué arregla, en concreto:**
+
+- **Caducidad con el panel abierto.** La sesión se revalida cada 60 s y al volver
+  el foco a la pestaña (`visibilitychange`). Antes solo se comprobaba al montar:
+  una tablet de planta se quedaba con un panel muerto hasta que alguien tocaba algo.
+- **El "flash" del panel antes del login.** `RequireAccess` no pinta nada hasta
+  resolver sesión + permisos. Antes la página se pintaba y el `useEffect` decidía
+  después, de ahí el segundo de panel visible al que no tenías acceso.
+- **Volver a donde ibas.** Las redirecciones llevan `?next=<ruta>`, y el login lo
+  respeta si la ruta es interna y el usuario tiene acceso real a ese panel.
+
+**Dos cosas que hay que saber al usarlo:**
+
+- Dentro de `<RequireAccess>` la sesión **ya está resuelta en el primer render**, así
+  que `user` es fiable sin esperas ni `loading`.
+- Tras un login hay que llamar a `refresh()` **antes** de navegar. El provider guarda
+  la sesión en memoria y no se entera solo: sin eso, `RequireAccess` sigue creyendo
+  que no hay sesión y devuelve al login — bucle hasta la siguiente revalidación.
+  Ya está hecho en `app/login/page.tsx`; recuérdalo si aparece otro punto de entrada.
+
 ### `GET /api/screen-permissions`
 
 Endpoint **público** (sin autenticación) que devuelve la configuración de todas las pantallas. Lo consumen:

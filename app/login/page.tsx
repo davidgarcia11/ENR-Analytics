@@ -8,9 +8,14 @@ import { Button } from "@/components/ui/button"
 import { Loader2 } from "lucide-react"
 import Image from "next/image"
 import { PANELS } from "@/lib/panels"
+import { useSession } from "@/components/SessionProvider"
 
 export default function LoginPage() {
   const router = useRouter()
+  // El provider guarda la sesión en memoria y solo se revalida sola cada 60s.
+  // Sin avisarle aquí, al navegar al panel seguiría creyendo que no hay sesión
+  // y <RequireAccess> devolvería al login — bucle hasta el siguiente ciclo.
+  const { refresh } = useSession()
   const [username, setUsername] = useState("")
   const [password, setPassword] = useState("")
   const [error, setError] = useState("")
@@ -34,6 +39,8 @@ export default function LoginPage() {
         setError(data.error || "Error al iniciar sesión")
         return
       }
+
+      await refresh()
 
       if (data.mustChangePassword) {
         router.push("/cambiar-contrasena")

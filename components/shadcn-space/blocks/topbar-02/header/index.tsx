@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import Image from "next/image";
 import { usePathname } from "next/navigation";
+import { useSession } from "@/components/SessionProvider";
 import { Button } from "@/components/nova/ui/button";
 import {
   Sheet,
@@ -43,7 +44,9 @@ export default function Header({
   const [sheetOpen, setSheetOpen] = useState(false);
   const pathname = usePathname();
   const BREAKPOINT = 1024;
-  const [screensConfig, setScreensConfig] = useState<Record<string, ScreenConfig>>({});
+  // Los permisos de pantalla vienen del provider (una sola llamada para toda la
+  // app): antes este header y components/Navbar.tsx pedían cada uno lo mismo.
+  const { screens: screensConfig } = useSession();
   const navData = getNavData(user?.role ?? null, screensConfig);
 
   useEffect(() => {
@@ -57,16 +60,6 @@ export default function Header({
     window.addEventListener("resize", handleResize);
 
     return () => window.removeEventListener("resize", handleResize);
-  }, []);
-
-  // Mismo endpoint y misma regla de acceso que components/Navbar.tsx — sin esto, el
-  // nav mostraba siempre todos los paneles de lib/panels.ts, tuviera o no acceso real
-  // el usuario a cada uno.
-  useEffect(() => {
-    fetch("/api/screen-permissions")
-      .then((r) => (r.ok ? r.json() : {}))
-      .then(setScreensConfig)
-      .catch(() => {});
   }, []);
 
   return (

@@ -7,7 +7,6 @@
 // La lógica de negocio (cálculo de lote/cocida/caducidad, protocolo TIJ, plantillas
 // por artículo) es la misma que la versión anterior — ver docs/loteadora.md.
 import { useEffect, useRef, useState } from "react";
-import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import {
   CheckCircle2,
@@ -22,6 +21,7 @@ import {
   Eraser,
 } from "lucide-react";
 import Header from "@/components/shadcn-space/blocks/topbar-02/header";
+import { RequireAccess, useApiFetch, useSession } from "@/components/SessionProvider";
 import { type ThemeMode } from "@/components/nova/mode-toggle";
 import { NovaPortalProvider } from "@/components/nova/portal-container";
 import DatePicker from "@/components/nova/date-picker";
@@ -34,7 +34,6 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Combobox, ComboboxContent, ComboboxEmpty, ComboboxInput, ComboboxItem, ComboboxList } from "@/components/nova/ui/combobox";
 import { Toaster } from "@/components/nova/ui/sonner";
 
-interface SessionUser { id: number; username: string; role: string; name: string; surname: string }
 interface PlantillaArticulo { messageName: string; lotFieldId: number; cocidaFieldId: number; expiryFieldId: number; horaFieldId: number; turnoFieldId: number; lineaFieldId: number }
 interface Articulo { id: string; descripcion: string; diasCaducidad: number; plantilla: PlantillaArticulo | null }
 interface Loteadora { id: number; name: string; linea: string }
@@ -108,9 +107,11 @@ function defaultFormState(): LoteadoraFormState {
   };
 }
 
-export default function LoteadoraPage() {
-  const router = useRouter();
-  const [sessionUser, setSessionUser] = useState<SessionUser | null>(null);
+function LoteadoraPanel() {
+  // Sesión, logout y el manejo del 401 vienen del provider compartido
+  // (components/SessionProvider.tsx) — antes cada panel se los montaba aparte.
+  const { user: sessionUser, logout } = useSession();
+  const apiFetch = useApiFetch();
 
   const [mode, setMode] = useState<ThemeMode>("system");
   const [systemPrefersDark, setSystemPrefersDark] = useState(false);
@@ -182,8 +183,6 @@ export default function LoteadoraPage() {
   const [sendErrorDetail, setSendErrorDetail] = useState<string | null>(null);
   const [showSendErrorDetail, setShowSendErrorDetail] = useState(false);
 
-  useEffect(() => { checkSession(); }, []);
-
   useEffect(() => {
     fetchArticulos();
     fetchLoteadoras();
@@ -224,35 +223,6 @@ export default function LoteadoraPage() {
     cargarMensaje(selectedArticulo.plantilla.messageName);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedArticulo?.id, selectedArticulo?.plantilla?.messageName, selectedLoteadora]);
-
-  const LOGIN_URL = `/login?next=${encodeURIComponent("/loteadora")}`;
-
-  const checkSession = async () => {
-    try {
-      const res = await fetch("/api/auth/me");
-      if (res.ok) setSessionUser(await res.json());
-      else router.push(LOGIN_URL);
-    } catch {
-      router.push(LOGIN_URL);
-    }
-  };
-
-  // La sesión solo se comprueba al montar, así que si el token caduca con el
-  // panel abierto (tablet de planta que no se cierra en días), el primer aviso
-  // es un 401 de cualquiera de las cuatro rutas que exigen sesión. Sin esto se
-  // mostraba "No autenticado" como si fuera un error de la máquina.
-  // Provisional: lo sustituirá el SessionProvider/apiFetch compartido.
-  const sesionCaducada = (res: Response) => {
-    if (res.status !== 401) return false;
-    toast.error("Tu sesión ha caducado — vuelve a iniciar sesión");
-    router.push(LOGIN_URL);
-    return true;
-  };
-
-  const logout = async () => {
-    await fetch("/api/auth/logout", { method: "POST" });
-    router.push("/login");
-  };
 
   // También sirve como comprobación de vida de JDE (badge "JDE conectado"),
   // por eso se repite cada 60s junto al resto del estado en vivo — no toca la
@@ -298,8 +268,7 @@ export default function LoteadoraPage() {
   const fetchMensajes = async (loteadoraId: string) => {
     setLoadingMensajes(true);
     try {
-      const res = await fetch(`/api/loteadora/mensajes?loteadoraId=${loteadoraId}`);
-      if (sesionCaducada(res)) return;
+      const res = await apiFetch(`/api/loteadora/mensajes?loteadoraId=${loteadoraId}`);
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Error al listar las plantillas de la loteadora");
       setMensajes(data.messages);
@@ -316,12 +285,11 @@ export default function LoteadoraPage() {
     updateForm({ selectedMensaje: messageName });
     setCargandoMensaje(true);
     try {
-      const res = await fetch("/api/loteadora/cargar-mensaje", {
+      const res = await apiFetch("/api/loteadora/cargar-mensaje", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ loteadoraId: Number(selectedLoteadora), messageName }),
       });
-      if (sesionCaducada(res)) return;
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Error al cargar la plantilla");
       toast.success("Plantilla cargada correctamente");
@@ -338,12 +306,11 @@ export default function LoteadoraPage() {
     if (!selectedLoteadora || limpiandoBuffer) return;
     setLimpiandoBuffer(true);
     try {
-      const res = await fetch("/api/loteadora/limpiar-buffer", {
+      const res = await apiFetch("/api/loteadora/limpiar-buffer", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ loteadoraId: Number(selectedLoteadora) }),
       });
-      if (sesionCaducada(res)) return;
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Error al limpiar el buffer");
       toast.success("Buffer de campos remotos vaciado");
@@ -395,7 +362,7 @@ export default function LoteadoraPage() {
     setSendErrorDetail(null);
     setShowSendErrorDetail(false);
     try {
-      const res = await fetch("/api/loteadora/enviar", {
+      const res = await apiFetch("/api/loteadora/enviar", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -408,7 +375,6 @@ export default function LoteadoraPage() {
           turno,
         }),
       });
-      if (sesionCaducada(res)) return;
       const data = await res.json();
       if (!res.ok) {
         setSendError(data.error || "Error al enviar a la loteadora");
@@ -742,5 +708,16 @@ export default function LoteadoraPage() {
         <Toaster />
       </NovaPortalProvider>
     </div>
+  );
+}
+
+// El panel no se pinta hasta que el provider sabe si esta sesión puede entrar
+// (antes se veía un instante antes de rebotar al login). `screen="loteadora"`
+// aplica la misma regla que requireScreenAccess('loteadora') en servidor.
+export default function LoteadoraPage() {
+  return (
+    <RequireAccess screen="loteadora">
+      <LoteadoraPanel />
+    </RequireAccess>
   );
 }
