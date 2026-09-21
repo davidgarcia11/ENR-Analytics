@@ -314,8 +314,11 @@ con el que `serieCosteMensual()` combina varios artículos en un punto.
 
 **Fórmula, para cada mes `M`, sobre los finales filtrados `i = 1..N`:**
 
-- **Producción** (barras): `Σ producción_i,M` — suma directa, es la magnitud
-  en sí, no un coste medio que ponderar.
+- **Producción**: el gráfico de barras de producción por mes se ELIMINÓ (ver
+  §4.4) — su hueco lo ocupa ahora "Top artículos por impacto". La producción
+  sigue en el KPI "Producción total" y en la columna de la tabla, y la API
+  sigue devolviendo `produccionPorMes` (dato correcto ya calculado) aunque de
+  momento no lo consuma nadie.
 - **Real**: `Σ (costeReal_i,M × cantidad_i,M) / Σ cantidad_i,M` — cada
   artículo pesa según cuánto se produjo de ÉL ese mes. El peso es la cantidad
   de las órdenes costeadas (`costeRealPorMes[].cantidad`), **no** la
@@ -1267,23 +1270,102 @@ el archivo instalado (`components/shadcn-space/blocks/chart-0{3,4}/chart.tsx`)
 en vez de crear un wrapper aparte en `components/nova/` — mismo patrón que
 `chart-15`/`charts-15.tsx` en `/compras` (ver `components/nova/README.md`).
 
-- **`chart-03` ya no dibuja áreas, sino LÍNEAS** (`<Line>` en un `<LineChart>`,
-  sin los `linearGradient` del bloque original). Decisión tomada al revisar el
-  panel, preguntando si convenía más este gráfico o el formato de `/compras`
-  (barras agrupadas): lo que se compara aquí es un **ratio** (€ por unidad), no
-  una magnitud acumulable como las unidades/€ de `/compras`. Rellenar el área
-  bajo un coste unitario sugiere un volumen que no existe, y con las dos series
-  próximas las áreas translúcidas se solapan y tapan justo lo que interesa: la
-  distancia entre teórico y real. Barras agrupadas tampoco: una barra se lee
-  como "total del mes" y esto es una media ponderada. **Sin puntos por mes**
-  (pedido explícito: "no me gusta mucho que haya puntos por cada mes") — la
-  línea se lee más limpia y el `activeDot` del tooltip ya marca el mes al pasar
-  por encima. Única excepción, `dot={data.length === 1 ? { r: 4 } : false}`: con
-  un rango de un solo mes (el default del panel) una línea no dibuja nada, así
-  que ese punto suelto sí se pinta.
+- **`chart-03` no dibuja áreas, sino BARRAS AGRUPADAS** (`<Bar>` en un
+  `<BarChart>`, sin los `linearGradient` del bloque original) — mismo formato
+  que el gráfico mensual de `/compras` (`chart-15`), con `barGap`, `barSize` y
+  `radius` calcados de allí para que dos paneles Nova que enseñan lo mismo se
+  lean igual. Se llegó aquí en dos pasos, por si alguien recupera una versión
+  intermedia del historial: primero se pasó de áreas a líneas (el área bajo un
+  coste unitario sugiere un volumen que no existe, y con las series próximas
+  las áreas translúcidas se solapan y tapan la distancia entre teórico y real),
+  y después a barras por pedido explícito ("creo que es mejor de barras, ¿no?"),
+  que además comparan mejor punto a punto que midiendo el hueco entre dos
+  líneas. **Matiz que conviene recordar al tocar esto**: a diferencia de
+  `/compras`, aquí cada barra NO es un total del mes sino una media ponderada
+  (€ por unidad), así que las alturas no son sumables entre meses — por eso el
+  eje Y y el tooltip van en €/unidad.
+- **`chart-04` ya no enseña la producción por mes, sino los artículos con mayor
+  impacto € del rango, con un SELECTOR de dos pestañas** (5 de mayor sobrecoste
+  / 5 de mayor ahorro), **con el mismo diseño que `DeviationByFamilyChart`
+  de `/compras`** (`components/nova/deviation-by-family-chart.tsx`) — pedido
+  explícito: ya no es un chart de Recharts, son divs + Tailwind con barras
+  divergentes desde el centro y sin ejes. Ojo al color, que va AL REVÉS que en
+  compras: allí positivo (vender más de lo previsto) es verde; aquí positivo es
+  sobrecoste, o sea rojo — mismos tokens y mismo criterio que `DesviacionBadge`
+  y los KPI. El archivo se queda en `components/shadcn-space/blocks/chart-04/`
+  aunque ya no sea un bloque del catálogo, para no partir el historial de la
+  celda del grid que ocupa. Se cambió porque
+  el gráfico de producción (a) repetía forma justo al lado del de coste sin
+  añadir lectura, (b) enseñaba un dato que ya estaba dos veces en pantalla (KPI
+  "Producción total" y columna de la tabla) y (c) sale de F4111, que desde el
+  cambio del coste real ya no es la fuente que pondera el resto del panel — dos
+  cifras de "cuánto se produjo" a la vez solo invitaban a preguntas estériles.
+  El de ahora responde "¿QUIÉN se está comiendo el dinero?", que el KPI de
+  impacto (un agregado) no puede contestar. Detalles:
+  - Impacto por artículo = `(costeReal − costeA1) × cantidad costeada`, misma
+    fórmula y misma población que el KPI 2 (§3.6), pero sin agregar
+    (`topImpactoArticulos()`, `coste-a1-shared.tsx`).
+  - **Selector de dos pestañas** (`AnimatedTabs`, `tabs-08`) para cambiar entre
+    "Mayor sobrecoste" y "Mayor ahorro" — pedido explícito: *"como cambio para
+    ver los componentes de los 11 y 10 de un artículo"*, o sea el MISMO
+    componente y el mismo gesto que el selector del panel de desglose (§4.2),
+    para no inventar un patrón nuevo dentro del mismo panel.
+  - `extremosImpacto()` (`coste-a1-shared.tsx`) devuelve las dos listas ya
+    separadas: ordena de mayor sobrecoste a mayor ahorro, coge 5 de cada punta y
+    deduplica por código — con menos de 10 artículos las dos mitades se
+    solaparían y un mismo artículo saldría en las dos pestañas. Los "mejores"
+    se invierten para que la primera fila sea siempre la más destacada, igual
+    que en la otra pestaña.
+  - Hubo antes un top único por valor absoluto, con las dos colas en la misma
+    lista separadas por una línea; se descartó al pedirse el selector. De ahí
+    que las barras ahora **crezcan desde la izquierda** y no diverjan desde el
+    centro como en compras: dentro de una pestaña todas las filas son del mismo
+    signo, así que divergir no aportaba nada y desperdiciaba la mitad del ancho.
+    Cada pestaña escala a su propio máximo (compartir escala dejaría la pestaña
+    "pequeña" con todas las barras al mínimo). El color sigue distinguiendo el
+    signo con los mismos tokens que `DesviacionBadge` y los KPI: positivo rojo,
+    negativo verde.
+  - Cada fila lleva **el código Y la descripción** del artículo (pedido
+    explícito) en la misma línea —en dos líneas, con 10 filas, la tarjeta se iba
+    de alto— más su impacto en € (0 decimales: son importes de rango completo,
+    los céntimos son ruido). El código nunca se trunca (`shrink-0`), porque es
+    lo que se usa para cruzar con JDE; lo que cede es la descripción, que además
+    se repite entera en el `title`. Las barras se escalan al máximo absoluto de
+    la serie, con un mínimo del 3% para que los últimos del top no queden
+    invisibles.
+  - **Al pulsar una fila se selecciona ese artículo en el panel de desglose**
+    (`onSelect` → `setSelectedCodigo`): el gráfico señala al culpable y se entra
+    a su despiece sin buscarlo a mano en la tabla. Cada fila es un `<button>`,
+    no un `<div>`, para que funcione con teclado y lectores de pantalla.
+- **Las dos tarjetas de la fila miden lo mismo, y la que manda es "Artículos
+  por impacto"** (pedido explícito: que esa mida lo que mide su contenido, sin
+  espacio muerto abajo, y que la de coste se iguale a ella). Quién impone el
+  alto y quién se adapta es lo único delicado de esto:
+  - `chart-04` NO lleva `h-full` ni `flex-1` — alto natural, el de su contenido.
+    Sí lleva `contentClassName="min-h-[180px]"` en el `AnimatedTabs`, que es lo
+    que ocupan las 5 filas de una pestaña llena: sin ese suelo, un rango sin
+    datos encogía la tarjeta a poco más que el selector y arrastraba con ella a
+    la de coste, que se adapta a esta (caso real visto en pantalla).
+  - `chart-03` sí lleva `className="h-full"` desde `app/costes/page.tsx` (llena
+    su celda del grid, que ya se estira al alto de la fila) y dentro es `flex
+    flex-col` con el área del gráfico en `flex-1`.
+  - El `min-h-[200px]` del área del gráfico es **solo un suelo** por si la otra
+    tarjeta se queda muy corta (pocos artículos), no el alto de trabajo. Era
+    `h-[253px]` fijo en su día: con eso, era `chart-03` quien imponía el alto de
+    la fila, justo al revés de lo pedido.
+  - **`aspect-auto` en el `ChartContainer`, imprescindible**: ese componente
+    (`components/nova/ui/chart.tsx`) trae `aspect-video` de serie, así que con
+    el ancho de la tarjeta (~800px) se imponía ~450px de alto y la fila la
+    seguía marcando el gráfico de coste por mucho `h-full`/`flex-1` que se
+    pusiera — son propiedades distintas (aspect-ratio vs. height) y
+    `tailwind-merge` no las fusiona, así que el aspect-ratio ganaba.
+- **El selector de `chart-04` ocupa todo el ancho de la tarjeta**, también
+  pedido explícito: `listClassName="sm:w-full *:flex-1"` anula el `sm:w-fit` con
+  el que `tabs-08` deja el selector del ancho de sus etiquetas, y reparte las
+  dos pestañas a partes iguales.
 - **Mismo reparto 2/3-1/3** que la fila de tabla+desglose de abajo (`app/costes/page.tsx`):
-  el gráfico de líneas (`Coste real vs. teórico`) a la izquierda en `lg:col-span-2`,
-  el de barras (`Producción`) a la derecha en `lg:col-span-1`.
+  el gráfico de barras agrupadas (`Coste real vs. teórico`) a la izquierda en `lg:col-span-2`,
+  el de barras de impacto (`Artículos por impacto`) a la derecha en `lg:col-span-1`.
 - **Sin las tarjetas KPI del bloque original** ("Sales this year/last year" en
   chart-03, "$96,850 -5% Last 7 days" + desplegable "Weekly/Monthly/Yearly" en
   chart-04) — mismo criterio que ya se aplicó a `chart-15`: no hay un periodo

@@ -197,14 +197,38 @@ export function serieCosteMensual(finales: DespieceNode[], mesesRango: string[])
   });
 }
 
-export interface ProduccionMensualPunto { mes: string; produccion: number }
+export interface ImpactoArticulo { codigo: string; descripcion: string; impacto: number }
 
-// Suma directa (sin ponderar — es la magnitud en sí, no un coste medio) de la
-// producción de TODOS los finales pasados, mes a mes.
-export function serieProduccionMensual(finales: DespieceNode[], mesesRango: string[]): ProduccionMensualPunto[] {
-  const porFinal = finales.map((f) => new Map((f.produccionPorMes ?? []).map((p) => [p.mes, p.produccion])));
-  return mesesRango.map((mes) => ({
-    mes,
-    produccion: porFinal.reduce((s, m) => s + (m.get(mes) ?? 0), 0),
-  }));
+// Impacto económico de la desviación de cada artículo final en el rango:
+// (costeReal − costeA1) × cantidad costeada. Misma fórmula y misma población que
+// el KPI "Impacto de la desviación" (app/costes/page.tsx), pero por artículo en
+// vez de agregada — el gráfico responde a "¿QUIÉN se está comiendo el dinero?",
+// que el KPI (un número suelto) no puede contestar.
+//
+// Devuelve los `n` PEORES (mayor sobrecoste) y los `n` MEJORES (mayor ahorro)
+// en dos listas separadas — el gráfico enseña una u otra según la pestaña
+// elegida (pedido explícito, igual que se cambia de código en el panel de
+// desglose). Antes era un único top por valor absoluto: se perdía una de las
+// dos colas cuando todos los desvíos grandes caían del mismo lado.
+// Con menos de 2n artículos las dos mitades se solaparían, de ahí el
+// deduplicado por código: un artículo nunca sale en las dos pestañas.
+export function extremosImpacto(finales: DespieceNode[], n = 5): { peores: ImpactoArticulo[]; mejores: ImpactoArticulo[] } {
+  const conImpacto = finales
+    .map((f) => {
+      const cantidad = (f.costeRealPorMes ?? []).reduce((s, m) => s + m.cantidad, 0);
+      if (f.costeReal == null || f.costeA1 == null || cantidad <= 0) return null;
+      return { codigo: f.codigo, descripcion: f.descripcion, impacto: (f.costeReal - f.costeA1) * cantidad };
+    })
+    .filter((x): x is ImpactoArticulo => x !== null)
+    .sort((a, b) => b.impacto - a.impacto);
+
+  const peores = conImpacto.slice(0, n);
+  const vistos = new Set(peores.map((d) => d.codigo));
+  // Los mejores, del mayor ahorro al menor — `slice(-n)` los deja al revés
+  // (viene ordenado descendente), así que se invierte para que la primera fila
+  // de la pestaña sea siempre la más destacada, igual que en la de sobrecostes.
+  const mejores = conImpacto.slice(-n).filter((d) => !vistos.has(d.codigo)).reverse();
+  return { peores, mejores };
 }
+
+

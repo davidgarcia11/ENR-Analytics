@@ -1,7 +1,7 @@
 "use client";
 
 // Bloque "Chart 03 - Area Chart Gradient" de ShadcnSpace, adaptado a datos reales
-// y convertido a LÍNEAS (ver comentario junto a <Line> más abajo para el porqué)
+// y convertido a BARRAS AGRUPADAS (ver comentario junto a <Bar> más abajo)
 // (mismo patrón que chart-15/charts-15.tsx en /compras: se edita el archivo
 // instalado en el sitio, con un prop `data` real y una etiqueta por defecto —
 // no se crea un wrapper aparte en components/nova/). Las dos tarjetas KPI del
@@ -9,7 +9,7 @@
 // chart-15 — no hay un dato de "año anterior" que tenga sentido aquí, y con
 // leyenda de puntos en la cabecera (mismo patrón que Charts15) basta.
 import { Card, CardAction, CardContent, CardHeader, CardTitle } from "@/components/nova/ui/card";
-import { CartesianGrid, Line, LineChart, XAxis, YAxis } from "recharts";
+import { Bar, BarChart, CartesianGrid, XAxis, YAxis } from "recharts";
 import { ChartConfig, ChartContainer, ChartTooltip, ChartTooltipContent } from "@/components/nova/ui/chart";
 import { euros } from "@/components/nova/coste-a1-shared";
 
@@ -67,10 +67,23 @@ export default function Chart03({
           </div>
         </CardAction>
       </CardHeader>
-      <CardContent className="flex flex-col gap-1">
-        <div className="h-[253px] w-full">
-          <ChartContainer config={chartConfig} className="h-full w-full">
-            <LineChart accessibilityLayer data={data} margin={{ left: 0, right: 12 }}>
+      {/* Esta tarjeta es la que SE ADAPTA: `flex-1` aquí y en el div del
+          gráfico para llenar el alto que marque "Artículos por impacto" (que
+          mide lo que mide su contenido). El `min-h` es solo un suelo por si esa
+          otra tarjeta se queda muy corta —pocos artículos—, no el alto de
+          trabajo: si fuera alto (antes `h-[253px]` fijo) sería ESTA la que
+          impondría la altura de la fila, justo al revés de lo pedido. */}
+      <CardContent className="flex flex-1 flex-col gap-1">
+        <div className="min-h-[200px] w-full flex-1">
+          {/* `aspect-auto` es imprescindible: `ChartContainer`
+              (components/nova/ui/chart.tsx) trae `aspect-video` de serie, así
+              que con el ancho de esta tarjeta (~800px) se imponía ~450px de
+              alto y la fila la acababa marcando ESTE gráfico, no "Artículos por
+              impacto". `h-full` no lo arregla solo: son propiedades distintas
+              (aspect-ratio vs. height) y `tailwind-merge` no las fusiona, así
+              que el aspect-ratio seguía ganando. */}
+          <ChartContainer config={chartConfig} className="aspect-auto h-full w-full">
+            <BarChart accessibilityLayer data={data} barGap={6} margin={{ left: 0, right: 12 }}>
               {/* `var(--border)`, no `var(--color-border)` del bloque original —
                   bug real: `--color-border` solo existe en app/globals.css (el
                   sistema de diseño VIEJO, `--color-border: var(--border)`),
@@ -82,7 +95,7 @@ export default function Chart03({
                   (compras) y sí es sensible al tema. `strokeWidth` por defecto
                   (1, no 2) + `strokeOpacity={0.5}` — mismo criterio que
                   `chart-15` — para que la rejilla quede de fondo, no compita
-                  visualmente con las dos líneas de coste. */}
+                  visualmente con las barras de coste. */}
               <CartesianGrid vertical={false} strokeDasharray="3 3" stroke="var(--border)" strokeOpacity={0.5} />
               <XAxis dataKey="mes" tickLine={false} axisLine={false} tickMargin={10} />
               {/* 1 decimal, sin espacio antes de "€" (a diferencia de euros(),
@@ -100,7 +113,7 @@ export default function Chart03({
                 tickFormatter={(value: number) => `${value.toLocaleString("es-ES", { maximumFractionDigits: 1 })}€`}
               />
               <ChartTooltip
-                cursor={false}
+                cursor={{ fill: "var(--muted)" }}
                 content={
                   <ChartTooltipContent
                     indicator="dot"
@@ -108,36 +121,29 @@ export default function Chart03({
                   />
                 }
               />
-              {/* Líneas, no áreas — decisión explícita al revisar el panel: lo que
-                  se compara aquí es un RATIO (€ por unidad), no una magnitud
-                  acumulable como la de /compras (unidades/€ vendidos, ahí barras
-                  agrupadas sí tienen sentido). Rellenar bajo la curva sugiere un
-                  volumen que no existe, y con las dos series cerca las áreas
-                  translúcidas se solapan y tapan lo único que importa: la
-                  DISTANCIA entre teórico y real.
-                  Sin `dot` — la línea se lee más limpia y el tooltip ya marca el
-                  punto al pasar por encima (`activeDot`). La excepción es un
-                  rango de un solo mes (el default del panel): ahí una línea no
-                  dibuja nada, así que ese único punto sí se pinta. */}
-              <Line
+              {/* Barras agrupadas (teórico y real, una pareja por mes) — pedido
+                  explícito tras probar el bloque original (áreas con gradiente) y
+                  una versión intermedia de líneas. Mismo formato que el gráfico
+                  mensual de /compras (`chart-15`), de ahí `barGap`, `barSize` y
+                  `radius` calcados de allí: dos paneles Nova que enseñan lo mismo
+                  —dos magnitudes comparadas mes a mes— se leen igual.
+                  Un apunte por si alguien lo revisa: a diferencia de /compras,
+                  aquí cada barra NO es un total del mes sino una media ponderada
+                  (€ por unidad), así que las alturas no son sumables entre meses
+                  — el eje Y y el tooltip van en €/unidad para dejarlo claro. */}
+              <Bar
                 dataKey="teorico"
-                type="monotone"
-                stroke="var(--color-teorico)"
-                strokeWidth={2}
-                dot={data.length === 1 ? { r: 4 } : false}
-                activeDot={{ r: 5 }}
-                connectNulls
+                fill="var(--color-teorico)"
+                radius={[4, 4, 0, 0]}
+                barSize={11}
               />
-              <Line
+              <Bar
                 dataKey="real"
-                type="monotone"
-                stroke="var(--color-real)"
-                strokeWidth={2}
-                dot={data.length === 1 ? { r: 4 } : false}
-                activeDot={{ r: 5 }}
-                connectNulls
+                fill="var(--color-real)"
+                radius={[4, 4, 0, 0]}
+                barSize={11}
               />
-            </LineChart>
+            </BarChart>
           </ChartContainer>
         </div>
       </CardContent>
