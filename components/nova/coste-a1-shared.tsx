@@ -164,19 +164,24 @@ export function serieCosteMensual(finales: DespieceNode[], mesesRango: string[])
   // `.find()` dentro del bucle de meses — con hasta ~250 finales × 12 meses no
   // sería un problema de rendimiento real, pero así queda igual de claro y sin
   // el coste extra.
+  //
+  // El peso NO es la producción de F4111 (`produccionPorMes`, la del gráfico de
+  // barras) sino la cantidad producida en las órdenes que generaron el coste
+  // (`costeRealPorMes[].cantidad`) — coste y peso salen así de la misma fila y
+  // no hay forma de que un mes tenga coste pero peso 0.
   const porFinal = finales.map((f) => ({
     costeA1: f.costeA1,
-    produccionPorMes: new Map((f.produccionPorMes ?? []).map((p) => [p.mes, p.produccion])),
-    costeRealPorMes: new Map((f.costeRealPorMes ?? []).map((p) => [p.mes, p.costeReal])),
+    costeRealPorMes: new Map((f.costeRealPorMes ?? []).map((p) => [p.mes, p])),
   }));
   return mesesRango.map((mes) => {
     let sumaTeorico = 0;
     let sumaReal = 0;
     let sumaPesos = 0;
     for (const f of porFinal) {
-      const peso = f.produccionPorMes.get(mes) ?? 0;
+      const punto = f.costeRealPorMes.get(mes);
+      const peso = punto?.cantidad ?? 0;
       if (peso <= 0) continue;
-      const costeReal = f.costeRealPorMes.get(mes) ?? null;
+      const costeReal = punto?.costeReal ?? null;
       // Misma población en las dos series: sin coste real ese mes, este final
       // tampoco pesa en el Teórico de ese mes (aunque tenga costeA1).
       if (costeReal == null || f.costeA1 == null) continue;

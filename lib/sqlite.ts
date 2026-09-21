@@ -132,16 +132,11 @@ export function getDb(): Database.Database {
       created_at TEXT DEFAULT (datetime('now'))
     );
 
-    -- Mapeo mes -> código de ledger IELEDG de F30026 (coste real mensual, JDE). No hay
-    -- fórmula fiable para deducir el código de cada mes (mismo problema que COLEDG_VIGENTE
-    -- en api/compras/route.ts, pero mensual en vez de anual) — admin lo va añadiendo
-    -- a mano cada mes desde /admin. Usado por /api/costes para el coste real
-    -- ponderado por producción. Ver docs/costes.md.
-    CREATE TABLE IF NOT EXISTS coste_a1_coledg_mensual (
-      mes TEXT PRIMARY KEY,
-      coledg TEXT NOT NULL,
-      updated_at TEXT DEFAULT (datetime('now'))
-    );
+    -- (eliminada) coste_a1_coledg_mensual: mapeo mes -> ledger IELEDG de F30026 para el
+    -- coste real de /costes. Esos ledgers mensuales no existen en F30026, así que el coste
+    -- real salía siempre vacío; ahora sale de las órdenes de fabricación costeadas
+    -- (F554105 + F55CR001) y no hay nada que configurar. No se hace DROP a propósito: la
+    -- tabla queda huérfana en las instalaciones ya desplegadas, sin uso y sin molestar.
 
     -- Estado editable de /muestras (pendiente/enviado/completado) + observación libre por
     -- lote. No viene de JDE: es una capa propia sobre el listado de producción real
