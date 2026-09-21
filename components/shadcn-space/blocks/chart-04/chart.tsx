@@ -1,12 +1,8 @@
 "use client";
 
-// Bloque "Chart 04 - Bar Chart" de ShadcnSpace, adaptado a datos reales (mismo
-// patrón que chart-15/charts-15.tsx en /compras: se edita el archivo instalado
-// en el sitio). Sin el desplegable "Weekly/Monthly/Yearly" del original ni la
-// tarjeta KPI "$96,850 -5%".
-//
-// Enseñaba la PRODUCCIÓN por mes; sustituido (pedido explícito) por el "Top 10
-// artículos por impacto €" del rango. Motivos, por si alguien recupera la
+// Ocupa el hueco del bloque "Chart 04 - Bar Chart" de ShadcnSpace, que enseñaba
+// la PRODUCCIÓN por mes. Sustituido (pedido explícito) por el "Top 10 artículos
+// por impacto €" del rango. Motivos del cambio, por si alguien recupera la
 // versión anterior del historial:
 //   - repetía forma (otro gráfico de barras verticales) justo al lado del de
 //     coste, sin añadir una lectura nueva;
@@ -18,8 +14,19 @@
 //     preguntas que no llevaban a nada.
 // El de ahora responde "¿QUIÉN se está comiendo el dinero?", que es lo que el
 // KPI de impacto (un número agregado) no puede contestar.
+//
+// YA NO ES UN CHART DE RECHARTS: mismo diseño que `DeviationByFamilyChart` de
+// /compras (components/nova/deviation-by-family-chart.tsx) — pedido explícito —,
+// o sea divs + Tailwind con barras divergentes desde el centro, sin ejes. Se
+// mantiene en esta ruta (y no en components/nova/) para no partir en dos el
+// historial del archivo que ocupa esa celda del grid; si algún día molesta,
+// mover a components/nova/impacto-articulos-chart.tsx es copiar y pegar.
+//
+// Diferencia importante de color respecto al de compras: allí positivo (vender
+// más de lo previsto) es VERDE; aquí positivo es sobrecoste, o sea ROJO —
+// mismos tokens y mismo criterio que DesviacionBadge y los KPI del panel.
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/nova/ui/card";
-import { BarChart, Bar, Cell, XAxis, YAxis, ResponsiveContainer, Tooltip, type TooltipContentProps } from "recharts";
+import { cn } from "@/lib/utils";
 import type { ImpactoArticulo } from "@/components/nova/coste-a1-shared";
 
 // Impacto en € con 0 decimales — son importes de rango completo (miles de €),
@@ -27,21 +34,6 @@ import type { ImpactoArticulo } from "@/components/nova/coste-a1-shared";
 // cosa y va en el gráfico de al lado y en la tabla.
 const impactoEuros = (v: number) =>
   `${v > 0 ? "+" : ""}${v.toLocaleString("es-ES", { maximumFractionDigits: 0 })} €`;
-
-const CustomTooltip = ({ active, payload }: TooltipContentProps) => {
-  if (!active || !payload || !payload.length) return null;
-  const d = payload[0].payload as ImpactoArticulo;
-  return (
-    <div className="rounded-lg bg-[#1f2937] px-3 py-2 text-white shadow-lg">
-      <p className="text-sm font-semibold">{d.codigo}</p>
-      {d.descripcion && <p className="mb-1 max-w-[220px] text-xs text-white/70">{d.descripcion}</p>}
-      <div className="flex items-center gap-2 text-sm">
-        <span className="text-white/70">Impacto:</span>
-        <span className="font-semibold text-white">{impactoEuros(d.impacto)}</span>
-      </div>
-    </div>
-  );
-};
 
 export default function Chart04({
   className,
@@ -52,52 +44,75 @@ export default function Chart04({
   data: ImpactoArticulo[];
   onSelect?: (codigo: string) => void;
 }) {
+  const maxAbs = Math.max(...data.map((d) => Math.abs(d.impacto)), 1);
+
   return (
     <Card className={className}>
-      <CardHeader className="gap-1">
+      <CardHeader>
         <CardTitle className="text-lg font-medium text-foreground">Top artículos por impacto</CardTitle>
-        <p className="text-sm font-normal text-muted-foreground">Desviación en € del rango, artículos filtrados</p>
+        <p className="text-sm font-normal text-muted-foreground">Desviación en € del rango · artículos filtrados</p>
       </CardHeader>
-      <CardContent>
-        {/* Barras HORIZONTALES (`layout="vertical"` en recharts, que nombra el
-            layout por el eje de categorías): con 10 artículos y códigos de 10
-            dígitos, en vertical las etiquetas del eje X se solaparían o habría
-            que girarlas. El eje de valores va oculto — la cifra exacta está en
-            el tooltip y lo que importa de un vistazo es el ORDEN y el tamaño
-            relativo, no leer el importe en el eje. */}
-        <ResponsiveContainer width="100%" height={253}>
-          <BarChart data={data} layout="vertical" margin={{ top: 0, right: 8, left: 0, bottom: 0 }}>
-            <XAxis type="number" hide />
-            <YAxis
-              type="category"
-              dataKey="codigo"
-              axisLine={false}
-              tickLine={false}
-              tick={{ fontSize: 11, fontWeight: 400 }}
-              width={82}
-            />
-            <Tooltip cursor={{ fill: "transparent" }} content={CustomTooltip} />
-            {/* Color por signo, mismos tokens que DesviacionBadge y los KPI:
-                positivo = sobrecoste (destructive), negativo = ahorro (success).
-                `onClick` selecciona ese artículo en el panel de desglose — el
-                gráfico señala al culpable y de ahí se entra a ver su despiece
-                sin buscarlo a mano en la tabla. */}
-            <Bar
-              dataKey="impacto"
-              radius={[0, 4, 4, 0]}
-              barSize={14}
-              onClick={(d: unknown) => onSelect?.((d as ImpactoArticulo).codigo)}
-              className={onSelect ? "cursor-pointer" : undefined}
+      {/* flex-1 + justify-between, igual que en compras: la Card se estira a la
+          altura del gráfico de coste (grid sin items-start) y las filas se
+          reparten el alto disponible en vez de dejar hueco muerto debajo. */}
+      <CardContent className="flex flex-1 flex-col justify-between gap-3">
+        {data.length === 0 && (
+          <p className="text-sm text-muted-foreground">Sin artículos con coste real en el rango.</p>
+        )}
+        {data.map((d) => {
+          const sobrecoste = d.impacto > 0;
+          // Divergente desde el centro (0): mitad izquierda para los ahorros,
+          // mitad derecha para los sobrecostes. Escalado al máximo absoluto de
+          // la serie, así que cada mitad vale maxAbs. El mínimo de 3% evita que
+          // los últimos del top queden invisibles.
+          const anchoMitadPct = Math.max(3, (Math.abs(d.impacto) / maxAbs) * 100);
+          return (
+            <button
+              key={d.codigo}
+              type="button"
+              onClick={() => onSelect?.(d.codigo)}
+              title={d.descripcion || d.codigo}
+              // El clic selecciona ese artículo en el panel de desglose: el
+              // gráfico señala al culpable y se entra a su despiece sin buscarlo
+              // a mano en la tabla. <button> y no <div> para que funcione con
+              // teclado y lectores de pantalla.
+              className="w-full space-y-1 text-left"
             >
-              {data.map((d) => (
-                <Cell
-                  key={d.codigo}
-                  fill={d.impacto > 0 ? "var(--color-destructive)" : "var(--color-success)"}
-                />
-              ))}
-            </Bar>
-          </BarChart>
-        </ResponsiveContainer>
+              <div className="flex items-center justify-between gap-2 text-sm">
+                <span className="truncate font-medium text-foreground">{d.codigo}</span>
+                <span
+                  className={cn(
+                    "shrink-0 tabular-nums font-medium",
+                    sobrecoste ? "text-[color:var(--color-destructive)]" : "text-[color:var(--color-success)]"
+                  )}
+                >
+                  {impactoEuros(d.impacto)}
+                </span>
+              </div>
+              <div className="relative h-1.5">
+                {/* Carril de fondo a ancho completo — da la referencia visual del
+                    centro sin necesitar un marcador de 0 aparte. */}
+                <div className="absolute inset-0 rounded-full bg-muted" />
+                <div className="absolute inset-y-0 left-0 w-1/2 pr-px">
+                  {!sobrecoste && (
+                    <div
+                      className="absolute inset-y-0 right-0 rounded-full bg-[color:var(--color-success)] opacity-80"
+                      style={{ width: `${anchoMitadPct}%` }}
+                    />
+                  )}
+                </div>
+                <div className="absolute inset-y-0 right-0 w-1/2 pl-px">
+                  {sobrecoste && (
+                    <div
+                      className="absolute inset-y-0 left-0 rounded-full bg-[color:var(--color-destructive)] opacity-80"
+                      style={{ width: `${anchoMitadPct}%` }}
+                    />
+                  )}
+                </div>
+              </div>
+            </button>
+          );
+        })}
       </CardContent>
     </Card>
   );

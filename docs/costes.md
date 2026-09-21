@@ -1285,9 +1285,15 @@ en vez de crear un wrapper aparte en `components/nova/` — mismo patrón que
   (€ por unidad), así que las alturas no son sumables entre meses — por eso el
   eje Y y el tooltip van en €/unidad.
 - **`chart-04` ya no enseña la producción por mes, sino el TOP 10 DE ARTÍCULOS
-  POR IMPACTO €** del rango, en barras horizontales (`layout="vertical"` de
-  recharts, que nombra el layout por el eje de categorías — con 10 códigos de 10
-  dígitos, en vertical las etiquetas del eje X se solaparían). Se cambió porque
+  POR IMPACTO €** del rango, **con el mismo diseño que `DeviationByFamilyChart`
+  de `/compras`** (`components/nova/deviation-by-family-chart.tsx`) — pedido
+  explícito: ya no es un chart de Recharts, son divs + Tailwind con barras
+  divergentes desde el centro y sin ejes. Ojo al color, que va AL REVÉS que en
+  compras: allí positivo (vender más de lo previsto) es verde; aquí positivo es
+  sobrecoste, o sea rojo — mismos tokens y mismo criterio que `DesviacionBadge`
+  y los KPI. El archivo se queda en `components/shadcn-space/blocks/chart-04/`
+  aunque ya no sea un bloque del catálogo, para no partir el historial de la
+  celda del grid que ocupa. Se cambió porque
   el gráfico de producción (a) repetía forma justo al lado del de coste sin
   añadir lectura, (b) enseñaba un dato que ya estaba dos veces en pantalla (KPI
   "Producción total" y columna de la tabla) y (c) sale de F4111, que desde el
@@ -1302,15 +1308,18 @@ en vez de crear un wrapper aparte en `components/nova/` — mismo patrón que
     informativo como un sobrecoste grande (y suele delatar un teórico mal
     declarado). El color de la barra distingue el signo, con los mismos tokens
     que `DesviacionBadge` y los KPI: positivo rojo, negativo verde.
-  - Eje de valores oculto: la cifra exacta va en el tooltip (junto a la
-    descripción del artículo) y de un vistazo importan el orden y el tamaño
-    relativo, no leer importes en el eje.
-  - **Al pulsar una barra se selecciona ese artículo en el panel de desglose**
+  - Cada fila lleva el código y su impacto en € (0 decimales — son importes de
+    rango completo, los céntimos son ruido); la descripción del artículo va en
+    el `title`, al pasar por encima. Las barras se escalan al máximo absoluto de
+    la serie, con un mínimo del 3% para que los últimos del top no queden
+    invisibles.
+  - **Al pulsar una fila se selecciona ese artículo en el panel de desglose**
     (`onSelect` → `setSelectedCodigo`): el gráfico señala al culpable y se entra
-    a su despiece sin buscarlo a mano en la tabla.
+    a su despiece sin buscarlo a mano en la tabla. Cada fila es un `<button>`,
+    no un `<div>`, para que funcione con teclado y lectores de pantalla.
 - **Mismo reparto 2/3-1/3** que la fila de tabla+desglose de abajo (`app/costes/page.tsx`):
   el gráfico de barras agrupadas (`Coste real vs. teórico`) a la izquierda en `lg:col-span-2`,
-  el de barras horizontales (`Top artículos por impacto`) a la derecha en `lg:col-span-1`.
+  el de barras divergentes (`Top artículos por impacto`) a la derecha en `lg:col-span-1`.
 - **Sin las tarjetas KPI del bloque original** ("Sales this year/last year" en
   chart-03, "$96,850 -5% Last 7 days" + desplegable "Weekly/Monthly/Yearly" en
   chart-04) — mismo criterio que ya se aplicó a `chart-15`: no hay un periodo
