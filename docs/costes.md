@@ -200,7 +200,7 @@ ledger de coste real `'CR'`:
 | Tabla | Qué es | Campos usados |
 |---|---|---|
 | `F554105` (`CLLEDG='CR'`) | Una fila **por palet_lote**, con el coste real de la orden a la que pertenece | `CLURAB` = orden, `CLURDT` = fecha de la orden (juliano `CYYDDD`), `CLSTOC`/10000 = cantidad producida en la orden, `CLITM` = artículo (código **corto**) |
-| `F55CR001` (`CRLEDG='CR'`) | Desglose del coste real **de cada orden** por componente de coste | `CRDOCO` = orden, `CRCOST` = componente (`A1`, `X1`…`X9`, y `CR`), `CRUNCS`/10000 = importe de TODA la orden para ese componente |
+| `F55CR001` (`CRLEDG='CR'`) | Desglose del coste real **de cada orden** por componente de coste | `CRDOCO` = orden, `CRCOST` = componente (se usa solo `A1`; existen además `X1`…`X9` y `CR`), `CRUNCS`/10000 = importe de TODA la orden para ese componente |
 
 Reglas de cálculo, todas confirmadas con el usuario y verificadas a mano
 contra datos reales antes de escribir una línea de código (artículo
@@ -212,11 +212,14 @@ contra datos reales antes de escribir una línea de código (artículo
    sobre (artículo, orden, fecha, cantidad): sin él, una orden con 30 palets
    pesaría 30 veces.
 2. **`CRUNCS` es el importe de la orden entera, no unitario.** El coste
-   unitario de cada componente es `(CRUNCS/10000) / cantidad_de_la_orden`,
-   **redondeado a 4 decimales** por componente (no al final).
-3. **Excluir `CRCOST = 'CR'`.** Es el total de la orden; sumarlo junto a los
-   componentes contaría el coste dos veces. El coste unitario de la orden es
-   la suma de los demás componentes (`A1`, `X1`…`X9`).
+   unitario es `(CRUNCS/10000) / cantidad_de_la_orden`, **redondeado a 4
+   decimales**.
+3. **Solo `CRCOST = 'A1'`** (Material). Es el mismo componente de coste que el
+   teórico (§3.1, `F30026` con `IECOST='A1'`), así que las dos cifras comparan
+   lo mismo y la desviación es de coste de material — no la diferencia entre
+   "todo el coste" y "una parte", que es justo el error que tenía la primera
+   versión de este panel (§3.4.1). Los demás componentes (`X1`…`X9`) quedan
+   fuera, y `CR` también: es el total de la orden.
 4. **Media ponderada por la cantidad de las órdenes**, tanto para agregar las
    órdenes de un mes como para agregar los meses de un rango:
    `Σ(coste_unitario × cantidad) / Σ cantidad`. Como el peso es la cantidad de

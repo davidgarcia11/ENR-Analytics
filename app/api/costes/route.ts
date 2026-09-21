@@ -66,10 +66,11 @@
 //   la orden `CLURAB`, su fecha `CLURDT` y su cantidad `CLSTOC`/10000, iguales
 //   en todos los palets de la misma orden) cruzada con F55CR001
 //   (`CRLEDG='CR'`, `CRDOCO`=orden), que desglosa el coste de cada orden por
-//   componente (`CRCOST`: A1, X1...X9, y 'CR' que es el total y se excluye).
-//   `CRUNCS`/10000 es el importe de toda la orden: el coste unitario de cada
-//   componente es ese importe / cantidad de la orden, redondeado a 4 decimales,
-//   y el de la orden la suma de los componentes. El coste de un mes (o del
+//   componente (`CRCOST`: A1, X1...X9, y 'CR' que es el total), del que se coge
+//   SOLO `A1` (Material) — el mismo componente que el coste teórico, para que
+//   las dos cifras comparen lo mismo. `CRUNCS`/10000 es el importe de toda la
+//   orden: el coste unitario es ese importe / cantidad de la orden, redondeado
+//   a 4 decimales. El coste de un mes (o del
 //   rango entero) es la media PONDERADA por la cantidad producida de esas
 //   mismas órdenes — el peso sale de la misma fila que el coste, así que no
 //   puede haber coste sin peso. Un artículo sin órdenes en el rango (todo lo
@@ -425,11 +426,14 @@ export async function GET(req: NextRequest) {
     // cantidad son los de SU orden (CLURAB) repetidos en cada palet — de ahí el
     // DISTINCT (verificado con datos reales: la cantidad CLSTOC es idéntica en
     // todos los palets de una misma orden). F55CR001 (CRDOCO=orden,
-    // CRLEDG='CR') es el desglose por componente de coste (A1, X1...X9):
+    // CRLEDG='CR') es el desglose por componente de coste (A1, X1...X9, y 'CR'
+    // que es el total). Se coge SOLO CRCOST='A1' (Material): es el mismo
+    // componente que el coste teórico de §3.1 (F30026, IECOST='A1'), así que
+    // las dos cifras comparan lo mismo y la desviación es de coste de
+    // material, no la diferencia entre "todo el coste" y "una parte".
     // CRUNCS/10000 es el importe de TODA la orden, no unitario, así que se
     // divide entre la cantidad producida (CLSTOC/10000) y se redondea a 4
-    // decimales POR componente antes de sumarlos. CRCOST='CR' se excluye: es el
-    // total de la orden, sumarlo contaría el coste dos veces.
+    // decimales.
     //
     // Sustituye a la versión anterior (F30026 con un IELEDG distinto por mes,
     // mapeado a mano en /admin): esos ledgers mensuales no existen en F30026 —
@@ -453,7 +457,7 @@ export async function GET(req: NextRequest) {
                 SUM(ROUND((r.CRUNCS / 10000) / NULLIF(o.CANTIDAD, 0), 4)) AS COSTE_UNIT
          FROM ordenes o
          JOIN F55CR001 r ON r.CRDOCO = o.ORDEN
-         WHERE TRIM(r.CRLEDG) = 'CR' AND TRIM(r.CRCOST) <> 'CR'
+         WHERE TRIM(r.CRLEDG) = 'CR' AND TRIM(r.CRCOST) = 'A1'
          GROUP BY o.LARGO, o.FECHA_JDE, o.ORDEN, o.CANTIDAD
        )
        SELECT LARGO, FECHA_JDE,
