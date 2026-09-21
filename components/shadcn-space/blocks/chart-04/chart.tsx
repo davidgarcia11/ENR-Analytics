@@ -149,7 +149,11 @@ export default function Chart04({
         <p className="text-sm font-normal text-muted-foreground">Desviación en € del rango · artículos filtrados</p>
       </CardHeader>
       <CardContent className="flex flex-1 flex-col">
-        <AnimatedTabs tabs={tabs} />
+        {/* `sm:w-full` anula el `sm:w-fit` con el que `tabs-08` deja el selector
+            del ancho de sus etiquetas (pedido explícito: que ocupe todo el
+            ancho de la tarjeta), y `*:flex-1` reparte las dos pestañas a
+            partes iguales en vez de dejarlas pegadas a la izquierda. */}
+        <AnimatedTabs tabs={tabs} className="flex-1" listClassName="sm:w-full *:flex-1" />
       </CardContent>
     </Card>
   );

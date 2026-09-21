@@ -243,10 +243,10 @@ function CosteA1PagePanel() {
                     pedido explícito, "dos componentes arriba". */}
                 <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
                   <div className="lg:col-span-2">
-                    <CosteMensualChart data={serieCoste} />
+                    <CosteMensualChart data={serieCoste} className="h-full" />
                   </div>
                   <div className="lg:col-span-1">
-                    <TopImpactoChart data={topImpacto} onSelect={setSelectedCodigo} />
+                    <TopImpactoChart data={topImpacto} onSelect={setSelectedCodigo} className="h-full" />
                   </div>
                 </div>
                 {/* Vuelta a 2/3-1/3: el ancho exterior de tabla/panel no debía
