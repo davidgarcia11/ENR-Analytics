@@ -1267,8 +1267,19 @@ el archivo instalado (`components/shadcn-space/blocks/chart-0{3,4}/chart.tsx`)
 en vez de crear un wrapper aparte en `components/nova/` — mismo patrón que
 `chart-15`/`charts-15.tsx` en `/compras` (ver `components/nova/README.md`).
 
+- **`chart-03` ya no dibuja áreas, sino LÍNEAS** (`<Line>` en un `<LineChart>`,
+  sin los `linearGradient` del bloque original). Decisión tomada al revisar el
+  panel, preguntando si convenía más este gráfico o el formato de `/compras`
+  (barras agrupadas): lo que se compara aquí es un **ratio** (€ por unidad), no
+  una magnitud acumulable como las unidades/€ de `/compras`. Rellenar el área
+  bajo un coste unitario sugiere un volumen que no existe, y con las dos series
+  próximas las áreas translúcidas se solapan y tapan justo lo que interesa: la
+  distancia entre teórico y real. Barras agrupadas tampoco: una barra se lee
+  como "total del mes" y esto es una media ponderada. Los `dot` se dejan
+  visibles a propósito — con el rango por defecto (el mes en curso) solo hay un
+  punto, y una línea de un solo punto no dibuja nada.
 - **Mismo reparto 2/3-1/3** que la fila de tabla+desglose de abajo (`app/costes/page.tsx`):
-  el gráfico de área (`Coste real vs. teórico`) a la izquierda en `lg:col-span-2`,
+  el gráfico de líneas (`Coste real vs. teórico`) a la izquierda en `lg:col-span-2`,
   el de barras (`Producción`) a la derecha en `lg:col-span-1`.
 - **Sin las tarjetas KPI del bloque original** ("Sales this year/last year" en
   chart-03, "$96,850 -5% Last 7 days" + desplegable "Weekly/Monthly/Yearly" en
