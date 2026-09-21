@@ -1267,22 +1267,22 @@ el archivo instalado (`components/shadcn-space/blocks/chart-0{3,4}/chart.tsx`)
 en vez de crear un wrapper aparte en `components/nova/` — mismo patrón que
 `chart-15`/`charts-15.tsx` en `/compras` (ver `components/nova/README.md`).
 
-- **`chart-03` ya no dibuja áreas, sino LÍNEAS** (`<Line>` en un `<LineChart>`,
-  sin los `linearGradient` del bloque original). Decisión tomada al revisar el
-  panel, preguntando si convenía más este gráfico o el formato de `/compras`
-  (barras agrupadas): lo que se compara aquí es un **ratio** (€ por unidad), no
-  una magnitud acumulable como las unidades/€ de `/compras`. Rellenar el área
-  bajo un coste unitario sugiere un volumen que no existe, y con las dos series
-  próximas las áreas translúcidas se solapan y tapan justo lo que interesa: la
-  distancia entre teórico y real. Barras agrupadas tampoco: una barra se lee
-  como "total del mes" y esto es una media ponderada. **Sin puntos por mes**
-  (pedido explícito: "no me gusta mucho que haya puntos por cada mes") — la
-  línea se lee más limpia y el `activeDot` del tooltip ya marca el mes al pasar
-  por encima. Única excepción, `dot={data.length === 1 ? { r: 4 } : false}`: con
-  un rango de un solo mes (el default del panel) una línea no dibuja nada, así
-  que ese punto suelto sí se pinta.
+- **`chart-03` no dibuja áreas, sino BARRAS AGRUPADAS** (`<Bar>` en un
+  `<BarChart>`, sin los `linearGradient` del bloque original) — mismo formato
+  que el gráfico mensual de `/compras` (`chart-15`), con `barGap`, `barSize` y
+  `radius` calcados de allí para que dos paneles Nova que enseñan lo mismo se
+  lean igual. Se llegó aquí en dos pasos, por si alguien recupera una versión
+  intermedia del historial: primero se pasó de áreas a líneas (el área bajo un
+  coste unitario sugiere un volumen que no existe, y con las series próximas
+  las áreas translúcidas se solapan y tapan la distancia entre teórico y real),
+  y después a barras por pedido explícito ("creo que es mejor de barras, ¿no?"),
+  que además comparan mejor punto a punto que midiendo el hueco entre dos
+  líneas. **Matiz que conviene recordar al tocar esto**: a diferencia de
+  `/compras`, aquí cada barra NO es un total del mes sino una media ponderada
+  (€ por unidad), así que las alturas no son sumables entre meses — por eso el
+  eje Y y el tooltip van en €/unidad.
 - **Mismo reparto 2/3-1/3** que la fila de tabla+desglose de abajo (`app/costes/page.tsx`):
-  el gráfico de líneas (`Coste real vs. teórico`) a la izquierda en `lg:col-span-2`,
+  el gráfico de barras agrupadas (`Coste real vs. teórico`) a la izquierda en `lg:col-span-2`,
   el de barras (`Producción`) a la derecha en `lg:col-span-1`.
 - **Sin las tarjetas KPI del bloque original** ("Sales this year/last year" en
   chart-03, "$96,850 -5% Last 7 days" + desplegable "Weekly/Monthly/Yearly" en
