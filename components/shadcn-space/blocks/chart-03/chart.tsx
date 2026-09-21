@@ -75,7 +75,14 @@ export default function Chart03({
           impondría la altura de la fila, justo al revés de lo pedido. */}
       <CardContent className="flex flex-1 flex-col gap-1">
         <div className="min-h-[200px] w-full flex-1">
-          <ChartContainer config={chartConfig} className="h-full w-full">
+          {/* `aspect-auto` es imprescindible: `ChartContainer`
+              (components/nova/ui/chart.tsx) trae `aspect-video` de serie, así
+              que con el ancho de esta tarjeta (~800px) se imponía ~450px de
+              alto y la fila la acababa marcando ESTE gráfico, no "Artículos por
+              impacto". `h-full` no lo arregla solo: son propiedades distintas
+              (aspect-ratio vs. height) y `tailwind-merge` no las fusiona, así
+              que el aspect-ratio seguía ganando. */}
+          <ChartContainer config={chartConfig} className="aspect-auto h-full w-full">
             <BarChart accessibilityLayer data={data} barGap={6} margin={{ left: 0, right: 12 }}>
               {/* `var(--border)`, no `var(--color-border)` del bloque original —
                   bug real: `--color-border` solo existe en app/globals.css (el

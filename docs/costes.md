@@ -1349,6 +1349,12 @@ en vez de crear un wrapper aparte en `components/nova/` — mismo patrón que
     tarjeta se queda muy corta (pocos artículos), no el alto de trabajo. Era
     `h-[253px]` fijo en su día: con eso, era `chart-03` quien imponía el alto de
     la fila, justo al revés de lo pedido.
+  - **`aspect-auto` en el `ChartContainer`, imprescindible**: ese componente
+    (`components/nova/ui/chart.tsx`) trae `aspect-video` de serie, así que con
+    el ancho de la tarjeta (~800px) se imponía ~450px de alto y la fila la
+    seguía marcando el gráfico de coste por mucho `h-full`/`flex-1` que se
+    pusiera — son propiedades distintas (aspect-ratio vs. height) y
+    `tailwind-merge` no las fusiona, así que el aspect-ratio ganaba.
 - **El selector de `chart-04` ocupa todo el ancho de la tarjeta**, también
   pedido explícito: `listClassName="sm:w-full *:flex-1"` anula el `sm:w-fit` con
   el que `tabs-08` deja el selector del ancho de sus etiquetas, y reparte las
