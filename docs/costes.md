@@ -314,8 +314,11 @@ con el que `serieCosteMensual()` combina varios artículos en un punto.
 
 **Fórmula, para cada mes `M`, sobre los finales filtrados `i = 1..N`:**
 
-- **Producción** (barras): `Σ producción_i,M` — suma directa, es la magnitud
-  en sí, no un coste medio que ponderar.
+- **Producción**: el gráfico de barras de producción por mes se ELIMINÓ (ver
+  §4.4) — su hueco lo ocupa ahora "Top artículos por impacto". La producción
+  sigue en el KPI "Producción total" y en la columna de la tabla, y la API
+  sigue devolviendo `produccionPorMes` (dato correcto ya calculado) aunque de
+  momento no lo consuma nadie.
 - **Real**: `Σ (costeReal_i,M × cantidad_i,M) / Σ cantidad_i,M` — cada
   artículo pesa según cuánto se produjo de ÉL ese mes. El peso es la cantidad
   de las órdenes costeadas (`costeRealPorMes[].cantidad`), **no** la
@@ -1281,9 +1284,33 @@ en vez de crear un wrapper aparte en `components/nova/` — mismo patrón que
   `/compras`, aquí cada barra NO es un total del mes sino una media ponderada
   (€ por unidad), así que las alturas no son sumables entre meses — por eso el
   eje Y y el tooltip van en €/unidad.
+- **`chart-04` ya no enseña la producción por mes, sino el TOP 10 DE ARTÍCULOS
+  POR IMPACTO €** del rango, en barras horizontales (`layout="vertical"` de
+  recharts, que nombra el layout por el eje de categorías — con 10 códigos de 10
+  dígitos, en vertical las etiquetas del eje X se solaparían). Se cambió porque
+  el gráfico de producción (a) repetía forma justo al lado del de coste sin
+  añadir lectura, (b) enseñaba un dato que ya estaba dos veces en pantalla (KPI
+  "Producción total" y columna de la tabla) y (c) sale de F4111, que desde el
+  cambio del coste real ya no es la fuente que pondera el resto del panel — dos
+  cifras de "cuánto se produjo" a la vez solo invitaban a preguntas estériles.
+  El de ahora responde "¿QUIÉN se está comiendo el dinero?", que el KPI de
+  impacto (un agregado) no puede contestar. Detalles:
+  - Impacto por artículo = `(costeReal − costeA1) × cantidad costeada`, misma
+    fórmula y misma población que el KPI 2 (§3.6), pero sin agregar
+    (`topImpactoArticulos()`, `coste-a1-shared.tsx`).
+  - Ordenado por **valor absoluto**, no por sobrecoste: un ahorro grande es tan
+    informativo como un sobrecoste grande (y suele delatar un teórico mal
+    declarado). El color de la barra distingue el signo, con los mismos tokens
+    que `DesviacionBadge` y los KPI: positivo rojo, negativo verde.
+  - Eje de valores oculto: la cifra exacta va en el tooltip (junto a la
+    descripción del artículo) y de un vistazo importan el orden y el tamaño
+    relativo, no leer importes en el eje.
+  - **Al pulsar una barra se selecciona ese artículo en el panel de desglose**
+    (`onSelect` → `setSelectedCodigo`): el gráfico señala al culpable y se entra
+    a su despiece sin buscarlo a mano en la tabla.
 - **Mismo reparto 2/3-1/3** que la fila de tabla+desglose de abajo (`app/costes/page.tsx`):
   el gráfico de barras agrupadas (`Coste real vs. teórico`) a la izquierda en `lg:col-span-2`,
-  el de barras (`Producción`) a la derecha en `lg:col-span-1`.
+  el de barras horizontales (`Top artículos por impacto`) a la derecha en `lg:col-span-1`.
 - **Sin las tarjetas KPI del bloque original** ("Sales this year/last year" en
   chart-03, "$96,850 -5% Last 7 days" + desplegable "Weekly/Monthly/Yearly" en
   chart-04) — mismo criterio que ya se aplicó a `chart-15`: no hay un periodo

@@ -16,8 +16,8 @@ import Statistics from "@/components/shadcn-space/blocks/statistics-04/statistic
 import CosteA1Table, { CosteA1FilterBar, useCosteA1Filters, type DespieceNode } from "@/components/nova/coste-a1-table";
 import CosteA1DesglosePanel from "@/components/nova/coste-a1-desglose-panel";
 import CosteMensualChart from "@/components/shadcn-space/blocks/chart-03/chart";
-import ProduccionMensualChart from "@/components/shadcn-space/blocks/chart-04/chart";
-import { formatMesCorto, serieCosteMensual, serieProduccionMensual } from "@/components/nova/coste-a1-shared";
+import TopImpactoChart from "@/components/shadcn-space/blocks/chart-04/chart";
+import { formatMesCorto, serieCosteMensual, topImpactoArticulos } from "@/components/nova/coste-a1-shared";
 import { Button } from "@/components/nova/ui/button";
 import { Toaster } from "@/components/nova/ui/sonner";
 
@@ -145,12 +145,12 @@ function CosteA1PagePanel() {
 
   const portalContainerRef = useRef<HTMLDivElement>(null);
 
-  // Gráficos "Coste real vs. teórico" y "Producción" (arriba de la tabla) —
-  // agregan VARIOS finales a la vez, a diferencia de la tabla (un artículo por
-  // fila): mismos artículos que la tabla tiene filtrados en cada momento
-  // (búsqueda/familia, `filtros.filtered`), confirmado con el usuario. Ver
-  // serieCosteMensual()/serieProduccionMensual() (coste-a1-shared.tsx) para el
-  // porqué de la ponderación.
+  // Gráficos "Coste real vs. teórico" y "Top artículos por impacto" (arriba de
+  // la tabla) — agregan VARIOS finales a la vez, a diferencia de la tabla (un
+  // artículo por fila): mismos artículos que la tabla tiene filtrados en cada
+  // momento (búsqueda/familia, `filtros.filtered`), confirmado con el usuario.
+  // Ver serieCosteMensual()/topImpactoArticulos() (coste-a1-shared.tsx) para el
+  // porqué de la ponderación y del orden.
   const serieCoste = useMemo(
     () =>
       serieCosteMensual(filtros.filtered, data?.meta.mesesRango ?? []).map((p) => ({
@@ -160,14 +160,7 @@ function CosteA1PagePanel() {
       })),
     [filtros.filtered, data?.meta.mesesRango]
   );
-  const serieProduccion = useMemo(
-    () =>
-      serieProduccionMensual(filtros.filtered, data?.meta.mesesRango ?? []).map((p) => ({
-        mes: formatMesCorto(p.mes),
-        produccion: p.produccion,
-      })),
-    [filtros.filtered, data?.meta.mesesRango]
-  );
+  const topImpacto = useMemo(() => topImpactoArticulos(filtros.filtered), [filtros.filtered]);
 
   // KPI — pedido explícito de renovarlos: los 4 originales (Artículos
   // finales/Coste A1 medio/Sin coste A1/Artículos en los árboles) describían
@@ -253,7 +246,7 @@ function CosteA1PagePanel() {
                     <CosteMensualChart data={serieCoste} />
                   </div>
                   <div className="lg:col-span-1">
-                    <ProduccionMensualChart data={serieProduccion} />
+                    <TopImpactoChart data={topImpacto} onSelect={setSelectedCodigo} />
                   </div>
                 </div>
                 {/* Vuelta a 2/3-1/3: el ancho exterior de tabla/panel no debía

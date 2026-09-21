@@ -197,14 +197,27 @@ export function serieCosteMensual(finales: DespieceNode[], mesesRango: string[])
   });
 }
 
-export interface ProduccionMensualPunto { mes: string; produccion: number }
+export interface ImpactoArticulo { codigo: string; descripcion: string; impacto: number }
 
-// Suma directa (sin ponderar — es la magnitud en sí, no un coste medio) de la
-// producción de TODOS los finales pasados, mes a mes.
-export function serieProduccionMensual(finales: DespieceNode[], mesesRango: string[]): ProduccionMensualPunto[] {
-  const porFinal = finales.map((f) => new Map((f.produccionPorMes ?? []).map((p) => [p.mes, p.produccion])));
-  return mesesRango.map((mes) => ({
-    mes,
-    produccion: porFinal.reduce((s, m) => s + (m.get(mes) ?? 0), 0),
-  }));
+// Impacto económico de la desviación de cada artículo final en el rango:
+// (costeReal − costeA1) × cantidad costeada. Misma fórmula y misma población que
+// el KPI "Impacto de la desviación" (app/costes/page.tsx), pero por artículo en
+// vez de agregada — este gráfico es la respuesta a "¿QUIÉN se está comiendo el
+// dinero?", que el KPI (un número suelto) no puede dar.
+//
+// Ordenado por VALOR ABSOLUTO, no por sobrecoste: un ahorro de 20.000 € es tan
+// relevante de ver como un sobrecoste de 20.000 € (y si sale muy grande, suele
+// ser un coste teórico mal declarado, que también interesa detectar). El color
+// de cada barra ya distingue el signo.
+export function topImpactoArticulos(finales: DespieceNode[], top = 10): ImpactoArticulo[] {
+  return finales
+    .map((f) => {
+      const cantidad = (f.costeRealPorMes ?? []).reduce((s, m) => s + m.cantidad, 0);
+      if (f.costeReal == null || f.costeA1 == null || cantidad <= 0) return null;
+      return { codigo: f.codigo, descripcion: f.descripcion, impacto: (f.costeReal - f.costeA1) * cantidad };
+    })
+    .filter((x): x is ImpactoArticulo => x !== null)
+    .sort((a, b) => Math.abs(b.impacto) - Math.abs(a.impacto))
+    .slice(0, top);
 }
+
