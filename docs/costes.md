@@ -1342,6 +1342,10 @@ en vez de crear un wrapper aparte en `components/nova/` — mismo patrón que
   espacio muerto abajo, y que la de coste se iguale a ella). Quién impone el
   alto y quién se adapta es lo único delicado de esto:
   - `chart-04` NO lleva `h-full` ni `flex-1` — alto natural, el de su contenido.
+    Sí lleva `contentClassName="min-h-[180px]"` en el `AnimatedTabs`, que es lo
+    que ocupan las 5 filas de una pestaña llena: sin ese suelo, un rango sin
+    datos encogía la tarjeta a poco más que el selector y arrastraba con ella a
+    la de coste, que se adapta a esta (caso real visto en pantalla).
   - `chart-03` sí lleva `className="h-full"` desde `app/costes/page.tsx` (llena
     su celda del grid, que ya se estira al alto de la fila) y dentro es `flex
     flex-col` con el área del gráfico en `flex-1`.

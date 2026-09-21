@@ -59,7 +59,7 @@ function ListaImpacto({
   // mismo orden de magnitud, y compartir escala con la otra dejaría la pestaña
   // "pequeña" con todas las barras al mínimo.
   const maxAbs = Math.max(...items.map((d) => Math.abs(d.impacto)), 1);
-  if (items.length === 0) return <p className="py-6 text-sm text-muted-foreground">{vacio}</p>;
+  if (items.length === 0) return <p className="pt-6 text-sm text-muted-foreground">{vacio}</p>;
   return (
     <div className="flex flex-col gap-3">
       {items.map((d) => {
@@ -156,7 +156,11 @@ export default function Chart04({
             del ancho de sus etiquetas (pedido explícito: que ocupe todo el
             ancho de la tarjeta), y `*:flex-1` reparte las dos pestañas a
             partes iguales en vez de dejarlas pegadas a la izquierda. */}
-        <AnimatedTabs tabs={tabs} listClassName="sm:w-full *:flex-1" />
+        {/* `min-h` del área de contenido = lo que ocupan las 5 filas de una
+            pestaña llena. Sin él, un rango sin datos (o con una sola pestaña
+            vacía) encogía la tarjeta y descuadraba la de coste, que se adapta a
+            esta. Es un suelo, no un alto fijo: con 5 filas manda el contenido. */}
+        <AnimatedTabs tabs={tabs} listClassName="sm:w-full *:flex-1" contentClassName="min-h-[180px]" />
       </CardContent>
     </Card>
   );
