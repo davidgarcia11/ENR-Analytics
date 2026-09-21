@@ -148,12 +148,15 @@ export default function Chart04({
         <CardTitle className="text-lg font-medium text-foreground">Artículos por impacto</CardTitle>
         <p className="text-sm font-normal text-muted-foreground">Desviación en € del rango · artículos filtrados</p>
       </CardHeader>
-      <CardContent className="flex flex-1 flex-col">
+      {/* Sin `flex-1` ni `h-full`: esta tarjeta mide LO QUE MIDE SU CONTENIDO
+          (pedido explícito, "que no haya espacio hacia abajo") y es la que
+          marca el alto de la fila; la de coste es la que se adapta a ella. */}
+      <CardContent className="flex flex-col">
         {/* `sm:w-full` anula el `sm:w-fit` con el que `tabs-08` deja el selector
             del ancho de sus etiquetas (pedido explícito: que ocupe todo el
             ancho de la tarjeta), y `*:flex-1` reparte las dos pestañas a
             partes iguales en vez de dejarlas pegadas a la izquierda. */}
-        <AnimatedTabs tabs={tabs} className="flex-1" listClassName="sm:w-full *:flex-1" />
+        <AnimatedTabs tabs={tabs} listClassName="sm:w-full *:flex-1" />
       </CardContent>
     </Card>
   );

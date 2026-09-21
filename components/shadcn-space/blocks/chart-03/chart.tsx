@@ -67,14 +67,14 @@ export default function Chart03({
           </div>
         </CardAction>
       </CardHeader>
-      {/* `flex-1` + `min-h-0` aquí y en el div de dentro: las dos tarjetas de
-          esta fila (esta y "Artículos por impacto") tienen que medir lo mismo
-          —pedido explícito—, y la fila la marca la más alta. Con el alto fijo
-          de antes (`h-[253px]`) esta se quedaba corta y dejaba un hueco muerto
-          bajo el gráfico; ahora el ResponsiveContainer llena lo que haya, con
-          253px como mínimo para que no se aplaste si algún día la otra encoge. */}
+      {/* Esta tarjeta es la que SE ADAPTA: `flex-1` aquí y en el div del
+          gráfico para llenar el alto que marque "Artículos por impacto" (que
+          mide lo que mide su contenido). El `min-h` es solo un suelo por si esa
+          otra tarjeta se queda muy corta —pocos artículos—, no el alto de
+          trabajo: si fuera alto (antes `h-[253px]` fijo) sería ESTA la que
+          impondría la altura de la fila, justo al revés de lo pedido. */}
       <CardContent className="flex flex-1 flex-col gap-1">
-        <div className="min-h-[253px] w-full flex-1">
+        <div className="min-h-[200px] w-full flex-1">
           <ChartContainer config={chartConfig} className="h-full w-full">
             <BarChart accessibilityLayer data={data} barGap={6} margin={{ left: 0, right: 12 }}>
               {/* `var(--border)`, no `var(--color-border)` del bloque original —

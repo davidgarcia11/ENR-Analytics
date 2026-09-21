@@ -246,7 +246,7 @@ function CosteA1PagePanel() {
                     <CosteMensualChart data={serieCoste} className="h-full" />
                   </div>
                   <div className="lg:col-span-1">
-                    <TopImpactoChart data={topImpacto} onSelect={setSelectedCodigo} className="h-full" />
+                    <TopImpactoChart data={topImpacto} onSelect={setSelectedCodigo} />
                   </div>
                 </div>
                 {/* Vuelta a 2/3-1/3: el ancho exterior de tabla/panel no debía

@@ -1337,14 +1337,18 @@ en vez de crear un wrapper aparte en `components/nova/` — mismo patrón que
     (`onSelect` → `setSelectedCodigo`): el gráfico señala al culpable y se entra
     a su despiece sin buscarlo a mano en la tabla. Cada fila es un `<button>`,
     no un `<div>`, para que funcione con teclado y lectores de pantalla.
-- **Las dos tarjetas de la fila miden lo mismo** (pedido explícito). Se
-  consigue por CSS, sin fijar un alto común: las dos reciben `className="h-full"`
-  desde `app/costes/page.tsx` para llenar su celda del grid —que ya se estira al
-  alto de la fila—, y dentro cada una es `flex flex-col` con el contenido en
-  `flex-1`. En `chart-03` eso implicó cambiar el `h-[253px]` fijo del área del
-  gráfico por `min-h-[253px] flex-1`: con el alto fijo, cuando la otra tarjeta
-  era más alta quedaba un hueco muerto bajo el gráfico. El `min-h` se conserva
-  para que no se aplaste si algún día la de al lado encoge.
+- **Las dos tarjetas de la fila miden lo mismo, y la que manda es "Artículos
+  por impacto"** (pedido explícito: que esa mida lo que mide su contenido, sin
+  espacio muerto abajo, y que la de coste se iguale a ella). Quién impone el
+  alto y quién se adapta es lo único delicado de esto:
+  - `chart-04` NO lleva `h-full` ni `flex-1` — alto natural, el de su contenido.
+  - `chart-03` sí lleva `className="h-full"` desde `app/costes/page.tsx` (llena
+    su celda del grid, que ya se estira al alto de la fila) y dentro es `flex
+    flex-col` con el área del gráfico en `flex-1`.
+  - El `min-h-[200px]` del área del gráfico es **solo un suelo** por si la otra
+    tarjeta se queda muy corta (pocos artículos), no el alto de trabajo. Era
+    `h-[253px]` fijo en su día: con eso, era `chart-03` quien imponía el alto de
+    la fila, justo al revés de lo pedido.
 - **El selector de `chart-04` ocupa todo el ancho de la tarjeta**, también
   pedido explícito: `listClassName="sm:w-full *:flex-1"` anula el `sm:w-fit` con
   el que `tabs-08` deja el selector del ancho de sus etiquetas, y reparte las
