@@ -115,15 +115,16 @@ export default function Chart03({
                   volumen que no existe, y con las dos series cerca las áreas
                   translúcidas se solapan y tapan lo único que importa: la
                   DISTANCIA entre teórico y real.
-                  `dot` visible a propósito (no `dot={false}`): con el rango por
-                  defecto —el mes en curso— solo hay UN punto, y una línea de un
-                  solo punto no dibuja nada. */}
+                  Sin `dot` — la línea se lee más limpia y el tooltip ya marca el
+                  punto al pasar por encima (`activeDot`). La excepción es un
+                  rango de un solo mes (el default del panel): ahí una línea no
+                  dibuja nada, así que ese único punto sí se pinta. */}
               <Line
                 dataKey="teorico"
                 type="monotone"
                 stroke="var(--color-teorico)"
                 strokeWidth={2}
-                dot={{ r: 3 }}
+                dot={data.length === 1 ? { r: 4 } : false}
                 activeDot={{ r: 5 }}
                 connectNulls
               />
@@ -132,7 +133,7 @@ export default function Chart03({
                 type="monotone"
                 stroke="var(--color-real)"
                 strokeWidth={2}
-                dot={{ r: 3 }}
+                dot={data.length === 1 ? { r: 4 } : false}
                 activeDot={{ r: 5 }}
                 connectNulls
               />

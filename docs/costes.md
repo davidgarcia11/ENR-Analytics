@@ -1275,9 +1275,12 @@ en vez de crear un wrapper aparte en `components/nova/` — mismo patrón que
   bajo un coste unitario sugiere un volumen que no existe, y con las dos series
   próximas las áreas translúcidas se solapan y tapan justo lo que interesa: la
   distancia entre teórico y real. Barras agrupadas tampoco: una barra se lee
-  como "total del mes" y esto es una media ponderada. Los `dot` se dejan
-  visibles a propósito — con el rango por defecto (el mes en curso) solo hay un
-  punto, y una línea de un solo punto no dibuja nada.
+  como "total del mes" y esto es una media ponderada. **Sin puntos por mes**
+  (pedido explícito: "no me gusta mucho que haya puntos por cada mes") — la
+  línea se lee más limpia y el `activeDot` del tooltip ya marca el mes al pasar
+  por encima. Única excepción, `dot={data.length === 1 ? { r: 4 } : false}`: con
+  un rango de un solo mes (el default del panel) una línea no dibuja nada, así
+  que ese punto suelto sí se pinta.
 - **Mismo reparto 2/3-1/3** que la fila de tabla+desglose de abajo (`app/costes/page.tsx`):
   el gráfico de líneas (`Coste real vs. teórico`) a la izquierda en `lg:col-span-2`,
   el de barras (`Producción`) a la derecha en `lg:col-span-1`.
