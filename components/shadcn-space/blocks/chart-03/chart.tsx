@@ -1,6 +1,7 @@
 "use client";
 
 // Bloque "Chart 03 - Area Chart Gradient" de ShadcnSpace, adaptado a datos reales
+// y convertido a LÍNEAS (ver comentario junto a <Line> más abajo para el porqué)
 // (mismo patrón que chart-15/charts-15.tsx en /compras: se edita el archivo
 // instalado en el sitio, con un prop `data` real y una etiqueta por defecto —
 // no se crea un wrapper aparte en components/nova/). Las dos tarjetas KPI del
@@ -8,7 +9,7 @@
 // chart-15 — no hay un dato de "año anterior" que tenga sentido aquí, y con
 // leyenda de puntos en la cabecera (mismo patrón que Charts15) basta.
 import { Card, CardAction, CardContent, CardHeader, CardTitle } from "@/components/nova/ui/card";
-import { Area, AreaChart, CartesianGrid, XAxis, YAxis } from "recharts";
+import { CartesianGrid, Line, LineChart, XAxis, YAxis } from "recharts";
 import { ChartConfig, ChartContainer, ChartTooltip, ChartTooltipContent } from "@/components/nova/ui/chart";
 import { euros } from "@/components/nova/coste-a1-shared";
 
@@ -69,7 +70,7 @@ export default function Chart03({
       <CardContent className="flex flex-col gap-1">
         <div className="h-[253px] w-full">
           <ChartContainer config={chartConfig} className="h-full w-full">
-            <AreaChart accessibilityLayer data={data} margin={{ left: 0, right: 12 }}>
+            <LineChart accessibilityLayer data={data} margin={{ left: 0, right: 12 }}>
               {/* `var(--border)`, no `var(--color-border)` del bloque original —
                   bug real: `--color-border` solo existe en app/globals.css (el
                   sistema de diseño VIEJO, `--color-border: var(--border)`),
@@ -107,33 +108,36 @@ export default function Chart03({
                   />
                 }
               />
-              <defs>
-                <linearGradient id="fillTeorico" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="5%" stopColor="var(--color-teorico)" stopOpacity={0.3} />
-                  <stop offset="95%" stopColor="var(--color-teorico)" stopOpacity={0.1} />
-                </linearGradient>
-                <linearGradient id="fillReal" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="5%" stopColor="var(--color-real)" stopOpacity={0.3} />
-                  <stop offset="95%" stopColor="var(--color-real)" stopOpacity={0.1} />
-                </linearGradient>
-              </defs>
-              <Area
+              {/* Líneas, no áreas — decisión explícita al revisar el panel: lo que
+                  se compara aquí es un RATIO (€ por unidad), no una magnitud
+                  acumulable como la de /compras (unidades/€ vendidos, ahí barras
+                  agrupadas sí tienen sentido). Rellenar bajo la curva sugiere un
+                  volumen que no existe, y con las dos series cerca las áreas
+                  translúcidas se solapan y tapan lo único que importa: la
+                  DISTANCIA entre teórico y real.
+                  Sin `dot` — la línea se lee más limpia y el tooltip ya marca el
+                  punto al pasar por encima (`activeDot`). La excepción es un
+                  rango de un solo mes (el default del panel): ahí una línea no
+                  dibuja nada, así que ese único punto sí se pinta. */}
+              <Line
                 dataKey="teorico"
                 type="monotone"
-                fill="url(#fillTeorico)"
-                fillOpacity={0.4}
                 stroke="var(--color-teorico)"
+                strokeWidth={2}
+                dot={data.length === 1 ? { r: 4 } : false}
+                activeDot={{ r: 5 }}
                 connectNulls
               />
-              <Area
+              <Line
                 dataKey="real"
                 type="monotone"
-                fill="url(#fillReal)"
-                fillOpacity={0.4}
                 stroke="var(--color-real)"
+                strokeWidth={2}
+                dot={data.length === 1 ? { r: 4 } : false}
+                activeDot={{ r: 5 }}
                 connectNulls
               />
-            </AreaChart>
+            </LineChart>
           </ChartContainer>
         </div>
       </CardContent>

@@ -220,7 +220,18 @@ contra datos reales antes de escribir una línea de código (artículo
    "todo el coste" y "una parte", que es justo el error que tenía la primera
    versión de este panel (§3.4.1). Los demás componentes (`X1`…`X9`) quedan
    fuera, y `CR` también: es el total de la orden.
-4. **Media ponderada por la cantidad de las órdenes**, tanto para agregar las
+4. **Los componentes no tienen orden — se calculan aparte.** Todo lo que no
+   se fabrica con orden propia (envases, etiquetas, materia prima) sale en
+   `F554105` con `CLURAB = 0`, así que no hay nada que cruzar con `F55CR001`.
+   Para esos, el coste unitario real **ya viene dado** en `CLUNCS`/10000 de la
+   propia `F554105`, y es idéntico en todos los palet_lote del mismo día
+   (verificado con `1312800005`, julio 2026: 3,90 € en los 14 días del mes).
+   Ojo a la diferencia: en esas filas `CLSTOC` es la cantidad de **cada
+   palet** (varía dentro del mismo día), no la de una orden repetida — el peso
+   del día es la **suma** de los palets, no su máximo. Las dos vías (con orden
+   y sin ella) se unen con un `UNION ALL` en la misma consulta y desde ahí se
+   tratan igual.
+5. **Media ponderada por la cantidad**, tanto para agregar las
    órdenes de un mes como para agregar los meses de un rango:
    `Σ(coste_unitario × cantidad) / Σ cantidad`. Como el peso es la cantidad de
    las MISMAS órdenes que dan el coste, ponderar por meses y luego entre meses
@@ -1256,8 +1267,22 @@ el archivo instalado (`components/shadcn-space/blocks/chart-0{3,4}/chart.tsx`)
 en vez de crear un wrapper aparte en `components/nova/` — mismo patrón que
 `chart-15`/`charts-15.tsx` en `/compras` (ver `components/nova/README.md`).
 
+- **`chart-03` ya no dibuja áreas, sino LÍNEAS** (`<Line>` en un `<LineChart>`,
+  sin los `linearGradient` del bloque original). Decisión tomada al revisar el
+  panel, preguntando si convenía más este gráfico o el formato de `/compras`
+  (barras agrupadas): lo que se compara aquí es un **ratio** (€ por unidad), no
+  una magnitud acumulable como las unidades/€ de `/compras`. Rellenar el área
+  bajo un coste unitario sugiere un volumen que no existe, y con las dos series
+  próximas las áreas translúcidas se solapan y tapan justo lo que interesa: la
+  distancia entre teórico y real. Barras agrupadas tampoco: una barra se lee
+  como "total del mes" y esto es una media ponderada. **Sin puntos por mes**
+  (pedido explícito: "no me gusta mucho que haya puntos por cada mes") — la
+  línea se lee más limpia y el `activeDot` del tooltip ya marca el mes al pasar
+  por encima. Única excepción, `dot={data.length === 1 ? { r: 4 } : false}`: con
+  un rango de un solo mes (el default del panel) una línea no dibuja nada, así
+  que ese punto suelto sí se pinta.
 - **Mismo reparto 2/3-1/3** que la fila de tabla+desglose de abajo (`app/costes/page.tsx`):
-  el gráfico de área (`Coste real vs. teórico`) a la izquierda en `lg:col-span-2`,
+  el gráfico de líneas (`Coste real vs. teórico`) a la izquierda en `lg:col-span-2`,
   el de barras (`Producción`) a la derecha en `lg:col-span-1`.
 - **Sin las tarjetas KPI del bloque original** ("Sales this year/last year" en
   chart-03, "$96,850 -5% Last 7 days" + desplegable "Weekly/Monthly/Yearly" en
