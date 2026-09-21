@@ -241,11 +241,12 @@ simple que había para ese borde.
 mapeo mes→ledger mantenido desde `/admin`; con esta fuente el mes sale de la
 fecha de la orden (`CLURDT`) y no hace falta ninguna tabla auxiliar.
 
-**Filtro de planta**: esta consulta NO filtra por planta (a diferencia del
-coste teórico de §3.1, que fija `IEMMCU = 10999`) — la consulta se validó así
-contra datos reales y no apareció mezcla de plantas. Si en el futuro
-`F554105` recogiera órdenes de más de una planta, habría que añadir el filtro
-aquí.
+**Sin filtro de planta, a propósito**: a diferencia del coste teórico (§3.1)
+y del BOM, que van fijados a la planta `10999`, el coste real se calcula con
+las órdenes de **todas las plantas** — confirmado explícitamente con el
+usuario. El coste real de un artículo es lo que ha costado fabricarlo, se
+fabricara donde se fabricara; partirlo por planta daría un coste distinto del
+que maneja la empresa. No añadir `CLMCU` a esta consulta pensando que falta.
 
 **Desviación** (`desviacionPct()`, `coste-a1-shared.tsx`): `(costeReal −
 costeA1) / costeA1 × 100`. Positivo = el coste real sale más caro que el

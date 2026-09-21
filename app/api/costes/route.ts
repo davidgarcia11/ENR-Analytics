@@ -440,6 +440,9 @@ export async function GET(req: NextRequest) {
     // los códigos que se configuraban salían de F4105.COLEDG, que es otra serie
     // — y el coste real salía `null` para todo. Con esta fuente no hay nada que
     // configurar a mano.
+    // Sin filtro de planta a propósito (el coste teórico sí fija IEMMCU=10999):
+    // el coste real se calcula con las órdenes de TODAS las plantas — confirmado
+    // con el usuario, ver docs/costes.md §3.4.
     const startJdeCR = isoToJulian(startDateStr);
     const endJdeCR = isoToJulian(endDateStr);
     const costeRealResult = await conn.execute(
