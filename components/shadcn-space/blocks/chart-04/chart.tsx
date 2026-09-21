@@ -1,8 +1,8 @@
 "use client";
 
 // Ocupa el hueco del bloque "Chart 04 - Bar Chart" de ShadcnSpace, que enseñaba
-// la PRODUCCIÓN por mes. Sustituido (pedido explícito) por el "Top 10 artículos
-// por impacto €" del rango. Motivos del cambio, por si alguien recupera la
+// la PRODUCCIÓN por mes. Sustituido (pedido explícito) por los 5 artículos con
+// PEOR impacto € y los 5 con MEJOR impacto del rango. Motivos del cambio, por si alguien recupera la
 // versión anterior del historial:
 //   - repetía forma (otro gráfico de barras verticales) justo al lado del de
 //     coste, sin añadir una lectura nueva;
@@ -49,8 +49,8 @@ export default function Chart04({
   return (
     <Card className={className}>
       <CardHeader>
-        <CardTitle className="text-lg font-medium text-foreground">Top artículos por impacto</CardTitle>
-        <p className="text-sm font-normal text-muted-foreground">Desviación en € del rango · artículos filtrados</p>
+        <CardTitle className="text-lg font-medium text-foreground">Artículos por impacto</CardTitle>
+        <p className="text-sm font-normal text-muted-foreground">5 mayores sobrecostes y 5 mayores ahorros · € del rango</p>
       </CardHeader>
       {/* flex-1 + justify-between, igual que en compras: la Card se estira a la
           altura del gráfico de coste (grid sin items-start) y las filas se
@@ -59,8 +59,13 @@ export default function Chart04({
         {data.length === 0 && (
           <p className="text-sm text-muted-foreground">Sin artículos con coste real en el rango.</p>
         )}
-        {data.map((d) => {
+        {data.map((d, i) => {
           const sobrecoste = d.impacto > 0;
+          // Separador entre las dos colas: la lista viene ordenada de mayor
+          // sobrecoste a mayor ahorro (extremosImpacto()), así que el corte es
+          // el primer artículo que ya no es sobrecoste. Si todos caen del mismo
+          // lado no se dibuja ninguno.
+          const primerAhorro = !sobrecoste && i > 0 && data[i - 1].impacto > 0;
           // Divergente desde el centro (0): mitad izquierda para los ahorros,
           // mitad derecha para los sobrecostes. Escalado al máximo absoluto de
           // la serie, así que cada mitad vale maxAbs. El mínimo de 3% evita que
@@ -76,10 +81,17 @@ export default function Chart04({
               // gráfico señala al culpable y se entra a su despiece sin buscarlo
               // a mano en la tabla. <button> y no <div> para que funcione con
               // teclado y lectores de pantalla.
-              className="w-full space-y-1 text-left"
+              className={cn("w-full space-y-1 text-left", primerAhorro && "mt-1 border-t border-border pt-2")}
             >
               <div className="flex items-center justify-between gap-2 text-sm">
-                <span className="truncate font-medium text-foreground">{d.codigo}</span>
+                {/* Código Y descripción en la misma línea (pedido explícito) —
+                    en dos líneas, con 10 filas, la tarjeta se iba de alto. El
+                    código no se trunca nunca (`shrink-0`): es lo que se busca
+                    para cruzar con JDE; lo que cede es la descripción. */}
+                <span className="flex min-w-0 items-baseline gap-1.5">
+                  <span className="shrink-0 font-medium text-foreground">{d.codigo}</span>
+                  <span className="truncate text-xs text-muted-foreground">{d.descripcion}</span>
+                </span>
                 <span
                   className={cn(
                     "shrink-0 tabular-nums font-medium",

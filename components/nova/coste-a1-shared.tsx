@@ -202,22 +202,29 @@ export interface ImpactoArticulo { codigo: string; descripcion: string; impacto:
 // Impacto económico de la desviación de cada artículo final en el rango:
 // (costeReal − costeA1) × cantidad costeada. Misma fórmula y misma población que
 // el KPI "Impacto de la desviación" (app/costes/page.tsx), pero por artículo en
-// vez de agregada — este gráfico es la respuesta a "¿QUIÉN se está comiendo el
-// dinero?", que el KPI (un número suelto) no puede dar.
+// vez de agregada — el gráfico responde a "¿QUIÉN se está comiendo el dinero?",
+// que el KPI (un número suelto) no puede contestar.
 //
-// Ordenado por VALOR ABSOLUTO, no por sobrecoste: un ahorro de 20.000 € es tan
-// relevante de ver como un sobrecoste de 20.000 € (y si sale muy grande, suele
-// ser un coste teórico mal declarado, que también interesa detectar). El color
-// de cada barra ya distingue el signo.
-export function topImpactoArticulos(finales: DespieceNode[], top = 10): ImpactoArticulo[] {
-  return finales
+// Devuelve los `n` PEORES (mayor sobrecoste) y los `n` MEJORES (mayor ahorro),
+// en un único array ordenado de mayor sobrecoste a mayor ahorro — pedido
+// explícito, en vez del top por valor absoluto que había antes: así se ven las
+// dos colas siempre, y no una sola cuando todos los grandes desvíos caen del
+// mismo lado. Con menos de 2n artículos las dos mitades se solaparían, de ahí
+// el deduplicado por código.
+export function extremosImpacto(finales: DespieceNode[], n = 5): ImpactoArticulo[] {
+  const conImpacto = finales
     .map((f) => {
       const cantidad = (f.costeRealPorMes ?? []).reduce((s, m) => s + m.cantidad, 0);
       if (f.costeReal == null || f.costeA1 == null || cantidad <= 0) return null;
       return { codigo: f.codigo, descripcion: f.descripcion, impacto: (f.costeReal - f.costeA1) * cantidad };
     })
     .filter((x): x is ImpactoArticulo => x !== null)
-    .sort((a, b) => Math.abs(b.impacto) - Math.abs(a.impacto))
-    .slice(0, top);
+    .sort((a, b) => b.impacto - a.impacto);
+
+  const peores = conImpacto.slice(0, n);
+  const mejores = conImpacto.slice(-n);
+  const vistos = new Set(peores.map((d) => d.codigo));
+  return [...peores, ...mejores.filter((d) => !vistos.has(d.codigo))];
 }
+
 

@@ -17,7 +17,7 @@ import CosteA1Table, { CosteA1FilterBar, useCosteA1Filters, type DespieceNode } 
 import CosteA1DesglosePanel from "@/components/nova/coste-a1-desglose-panel";
 import CosteMensualChart from "@/components/shadcn-space/blocks/chart-03/chart";
 import TopImpactoChart from "@/components/shadcn-space/blocks/chart-04/chart";
-import { formatMesCorto, serieCosteMensual, topImpactoArticulos } from "@/components/nova/coste-a1-shared";
+import { extremosImpacto, formatMesCorto, serieCosteMensual } from "@/components/nova/coste-a1-shared";
 import { Button } from "@/components/nova/ui/button";
 import { Toaster } from "@/components/nova/ui/sonner";
 
@@ -149,7 +149,7 @@ function CosteA1PagePanel() {
   // la tabla) — agregan VARIOS finales a la vez, a diferencia de la tabla (un
   // artículo por fila): mismos artículos que la tabla tiene filtrados en cada
   // momento (búsqueda/familia, `filtros.filtered`), confirmado con el usuario.
-  // Ver serieCosteMensual()/topImpactoArticulos() (coste-a1-shared.tsx) para el
+  // Ver serieCosteMensual()/extremosImpacto() (coste-a1-shared.tsx) para el
   // porqué de la ponderación y del orden.
   const serieCoste = useMemo(
     () =>
@@ -160,7 +160,7 @@ function CosteA1PagePanel() {
       })),
     [filtros.filtered, data?.meta.mesesRango]
   );
-  const topImpacto = useMemo(() => topImpactoArticulos(filtros.filtered), [filtros.filtered]);
+  const topImpacto = useMemo(() => extremosImpacto(filtros.filtered), [filtros.filtered]);
 
   // KPI — pedido explícito de renovarlos: los 4 originales (Artículos
   // finales/Coste A1 medio/Sin coste A1/Artículos en los árboles) describían

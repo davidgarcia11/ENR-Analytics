@@ -1284,8 +1284,8 @@ en vez de crear un wrapper aparte en `components/nova/` — mismo patrón que
   `/compras`, aquí cada barra NO es un total del mes sino una media ponderada
   (€ por unidad), así que las alturas no son sumables entre meses — por eso el
   eje Y y el tooltip van en €/unidad.
-- **`chart-04` ya no enseña la producción por mes, sino el TOP 10 DE ARTÍCULOS
-  POR IMPACTO €** del rango, **con el mismo diseño que `DeviationByFamilyChart`
+- **`chart-04` ya no enseña la producción por mes, sino los 5 artículos con
+  PEOR impacto € y los 5 con MEJOR impacto** del rango, **con el mismo diseño que `DeviationByFamilyChart`
   de `/compras`** (`components/nova/deviation-by-family-chart.tsx`) — pedido
   explícito: ya no es un chart de Recharts, son divs + Tailwind con barras
   divergentes desde el centro y sin ejes. Ojo al color, que va AL REVÉS que en
@@ -1304,13 +1304,22 @@ en vez de crear un wrapper aparte en `components/nova/` — mismo patrón que
   - Impacto por artículo = `(costeReal − costeA1) × cantidad costeada`, misma
     fórmula y misma población que el KPI 2 (§3.6), pero sin agregar
     (`topImpactoArticulos()`, `coste-a1-shared.tsx`).
-  - Ordenado por **valor absoluto**, no por sobrecoste: un ahorro grande es tan
-    informativo como un sobrecoste grande (y suele delatar un teórico mal
-    declarado). El color de la barra distingue el signo, con los mismos tokens
-    que `DesviacionBadge` y los KPI: positivo rojo, negativo verde.
-  - Cada fila lleva el código y su impacto en € (0 decimales — son importes de
-    rango completo, los céntimos son ruido); la descripción del artículo va en
-    el `title`, al pasar por encima. Las barras se escalan al máximo absoluto de
+  - **Las dos colas, no un top por valor absoluto** (que es lo que hubo en una
+    primera versión): `extremosImpacto()` ordena de mayor sobrecoste a mayor
+    ahorro y se queda con los 5 de cada punta, deduplicando por código para
+    cuando hay menos de 10 artículos y las dos mitades se solaparían. Así
+    siempre se ven los dos lados, en vez de solo uno cuando todos los desvíos
+    grandes caen en el mismo sentido. Una línea fina separa los sobrecostes de
+    los ahorros (se calcula en el render: el primer artículo que ya no es
+    sobrecoste; si todos caen del mismo lado, no se dibuja). El color distingue
+    el signo con los mismos tokens que `DesviacionBadge` y los KPI: positivo
+    rojo, negativo verde.
+  - Cada fila lleva **el código Y la descripción** del artículo (pedido
+    explícito) en la misma línea —en dos líneas, con 10 filas, la tarjeta se iba
+    de alto— más su impacto en € (0 decimales: son importes de rango completo,
+    los céntimos son ruido). El código nunca se trunca (`shrink-0`), porque es
+    lo que se usa para cruzar con JDE; lo que cede es la descripción, que además
+    se repite entera en el `title`. Las barras se escalan al máximo absoluto de
     la serie, con un mínimo del 3% para que los últimos del top no queden
     invisibles.
   - **Al pulsar una fila se selecciona ese artículo en el panel de desglose**
@@ -1319,7 +1328,7 @@ en vez de crear un wrapper aparte en `components/nova/` — mismo patrón que
     no un `<div>`, para que funcione con teclado y lectores de pantalla.
 - **Mismo reparto 2/3-1/3** que la fila de tabla+desglose de abajo (`app/costes/page.tsx`):
   el gráfico de barras agrupadas (`Coste real vs. teórico`) a la izquierda en `lg:col-span-2`,
-  el de barras divergentes (`Top artículos por impacto`) a la derecha en `lg:col-span-1`.
+  el de barras divergentes (`Artículos por impacto`) a la derecha en `lg:col-span-1`.
 - **Sin las tarjetas KPI del bloque original** ("Sales this year/last year" en
   chart-03, "$96,850 -5% Last 7 days" + desplegable "Weekly/Monthly/Yearly" en
   chart-04) — mismo criterio que ya se aplicó a `chart-15`: no hay un periodo
