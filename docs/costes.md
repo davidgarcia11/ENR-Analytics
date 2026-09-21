@@ -7,8 +7,8 @@
 > existente de `screens` EN SITIO (conserva su `id`) para no dejar huérfanos
 > los permisos ya concedidos ni crear una fila nueva pública por defecto.
 > Nombres de archivo, componentes (`CosteA1Table`...) y la tabla
-> `coste_a1_coledg_mensual` NO cambiaron — son identificadores internos, no
-> URLs, y renombrarlos no aportaba nada visible. Verificado con `agent-browser`
+> NO cambiaron — son identificadores internos, no URLs, y renombrarlos no
+> aportaba nada visible. Verificado con `agent-browser`
 > tras reiniciar el servidor (para que la migración de SQLite corriera de
 > verdad): `/costes` carga, `/coste-a1` da 404, el nav apunta a `/costes`, la
 > pestaña "Pantallas" de `/admin` muestra una única fila "Costes" (sin
@@ -53,14 +53,11 @@ filtrado de logs históricos); solo se actualizó la etiqueta legible en
 | Archivo | Descripción |
 |---|---|
 | `app/costes/page.tsx` | Página cliente — KPIs, botón Exportar, layout a 2 columnas (tabla + panel de desglose), pide `startDate`/`endDate` a la API con el `monthRange` de los filtros |
-| `app/api/costes/route.ts` | API Route — construye los árboles, resuelve coste/descripción/familia y la producción real por final en el rango de fechas pedido (ver §3.3) |
+| `app/api/costes/route.ts` | API Route — construye los árboles, resuelve coste teórico/descripción/familia, el coste real por artículo y mes (§3.4) y la producción real por final en el rango de fechas pedido (§3.3) |
 | `components/nova/coste-a1-table.tsx` | Tabla jerárquica (columna izquierda, TanStack Table v8, `subRows` de profundidad variable) + buscador + filtro de familia + `MonthRangePicker`/"Filtrar" + orden por coste/nombre + selección del artículo que se ve en el panel de desglose |
 | `components/nova/month-range-picker.tsx` | Selector de rango de meses (reutilizado tal cual de `/compras`) — usado aquí para pedir la producción real |
 | `components/nova/coste-a1-desglose-panel.tsx` | Panel de desglose (columna derecha) — selector plano (`tabs-08`) con el artículo final + cada "11"/"10" del árbol completo por código, detalle (descripción/tipo/Coincide + lista de materiales) del nodo elegido (ver §4.2) |
 | `components/nova/coste-a1-shared.tsx` | Helpers compartidos entre tabla y panel: formateo (`euros`), poda 11/12 (`podar1112`), comprobación de coste (`estadoLocal`, `estadoSubarbol`, `Descuadre` — ver §4.2.4), desviación real vs. teórico (`desviacionPct`, píldora `DesviacionBadge` — ver §3.4, §4.1, §4.2.1), agregación mensual multi-artículo para los gráficos (`serieCosteMensual`, `serieProduccionMensual`, `formatMesCorto` — ver §3.5) |
-| `lib/sqlite.ts` | Tabla `coste_a1_coledg_mensual` (`mes` 'YYYY-MM' PK, `coledg`) — mapeo mes→código de ledger IELEDG de F30026, editable desde `/admin` (ver §3.4). Nombre de tabla/columna sin renombrar tras el cambio de fuente — es un identificador interno |
-| `app/api/admin/coste-a1-coledg/route.ts`, `.../[mes]/route.ts` | CRUD del mapeo mes→IELEDG (protegido por `middleware.ts`, rol admin) |
-| `app/admin/page.tsx` | Pestaña "Coste real (Costes)" — añadir/editar/borrar el código IELEDG de cada mes |
 | `components/shadcn-space/blocks/chart-03/chart.tsx` | Bloque "Area Chart Gradient" de ShadcnSpace, editado en el sitio (mismo patrón que `chart-15` en `/compras`) — "Coste real vs. teórico por mes" (ver §3.5, §4.4) |
 | `components/shadcn-space/blocks/chart-04/chart.tsx` | Bloque "Bar Chart" de ShadcnSpace, editado en el sitio — "Producción por mes" (ver §3.5, §4.4) |
 
@@ -188,111 +185,110 @@ la comparación nunca cuadraría).
 la raíz de `DespieceNode` — `undefined` en el resto del árbol, no se pide
 desglose de producción por componente.
 
-### 3.4 Coste real ponderado por mes (`F30026`)
+### 3.4 Coste real por artículo y mes (`F554105` + `F55CR001`)
 
 Pedido explícito, tras confirmar en `/compras` de dónde sale el coste
 presupuestado: "ahora hay que sacar el coste real de todos los artículos y
-componentes... el coste real por mes son varios campos". A diferencia de la
-producción (§3.3), que solo se pide para los finales, el coste real se
-calcula para **todos los nodos del árbol** — `DespieceNode.costeReal: number
-| null`.
+componentes". A diferencia de la producción (§3.3), que solo se pide para los
+finales, el coste real se calcula para **todos los nodos del árbol** —
+`DespieceNode.costeReal: number | null`.
 
-**CORREGIDO — la fuente cambió de `F4105` a `F30026`, MISMA tabla y MISMO
-componente de coste que el teórico (§3.1: `IECOST='A1'`).** La primera
-versión leía `F4105.COUNCS` (Coste Unitario), que es el coste TOTAL del
-ledger — Material + Mano de obra + Gastos generales + Amortización, etc.
-Comparar ese total contra el A1 (que es solo el componente Material)
-mezclaba dos magnitudes distintas: gran parte de la "desviación" no era una
-desviación real de coste, sino simplemente la diferencia entre "todo el
-coste" y "una parte del coste". Pedido explícito del usuario, que conoce el
-modelo de costes de JDE: leer el mismo componente A1 pero del ledger
-mensual real en vez del ledger `'07'` (Coste Estándar) que usa el teórico —
-así las dos cifras comparan lo mismo y la desviación es de coste de
-material, no un artefacto de qué partidas incluye cada ledger.
+**El coste real sale de las ÓRDENES DE FABRICACIÓN costeadas, no de una tabla
+de costes por artículo.** Dos tablas encadenadas, las dos filtradas por el
+ledger de coste real `'CR'`:
 
-**Un código de ledger (`IELEDG`) nuevo por mes, sin fórmula fiable.**
-Comprobado con datos reales (`F30026`, planta `10999`, `IECOST='A1'`):
-`IECSL` es una foto de coste por artículo y ledger, sin columna de mes
-propia — el mes lo codifica el propio valor de `IELEDG` (`'6M'`=enero 2026,
-`'6N'`=febrero...), que JDE va asignando sin ningún patrón año/mes→código
-deducible (mismo problema que `COLEDG_VIGENTE` en `api/compras/route.ts`,
-pero mensual en vez de anual). En vez de hardcodear el mapeo (como hace
-compras), aquí vive en SQLite (`coste_a1_coledg_mensual`, `lib/sqlite.ts` —
-el nombre de la tabla/columna no se renombró, sigue siendo solo un
-identificador interno de "código de ledger mensual") editable desde `/admin`
-("Coste real (Costes)") — cada mes que JDE genere un código nuevo, hay que
-añadirlo a mano ahí. Un mes del rango sin código configurado se ignora sin más
-(no bloquea el resto del cálculo) y se reporta en `meta.mesesSinConfigurar`
-de la respuesta de la API, para que sea visible que falta configurarlo.
+| Tabla | Qué es | Campos usados |
+|---|---|---|
+| `F554105` (`CLLEDG='CR'`) | Una fila **por palet_lote**, con el coste real de la orden a la que pertenece | `CLURAB` = orden, `CLURDT` = fecha de la orden (juliano `CYYDDD`), `CLSTOC`/10000 = cantidad producida en la orden, `CLITM` = artículo (código **corto**) |
+| `F55CR001` (`CRLEDG='CR'`) | Desglose del coste real **de cada orden** por componente de coste | `CRDOCO` = orden, `CRCOST` = componente (se usa solo `A1`; existen además `X1`…`X9` y `CR`), `CRUNCS`/10000 = importe de TODA la orden para ese componente |
 
-**Un solo mes → el valor de F30026 directamente. Varios meses → media
-ponderada por producción.** Con un único mes en el rango, no hace falta
-ponderar nada (un solo término). Con varios, cada mes pesa según cuánto se
-produjo — pero NO la producción del propio nodo (una materia prima no tiene
-órdenes de fabricación propias, F4801/F4111 no le aplican): pondera con la
-producción MENSUAL del artículo **final** (raíz) al que pertenece ese
-despiece, confirmado explícitamente con el usuario ("con la producción del
-artículo RAÍZ... cada componente hereda el peso mensual del artículo final al
-que pertenece"). Todo el árbol de un mismo final comparte los mismos pesos
-mensuales. Un mismo componente usado en dos finales distintos puede así tener
-un `costeReal` distinto en cada árbol — no es un bug, son dos ponderaciones
-distintas por diseño.
+Reglas de cálculo, todas confirmadas con el usuario y verificadas a mano
+contra datos reales antes de escribir una línea de código (artículo
+`1210100178`, julio 2026):
 
-Un mes sin coste en `F30026` para un código concreto se excluye del cálculo
-(ni numerador ni denominador) — no se trata como `0`. Si el peso total pesa
-`0` en todos los meses con coste disponible, se cae a una media simple entre
-esos meses en vez de devolver `null`.
+1. **Deduplicar por orden.** `F554105` repite el mismo coste y la misma
+   cantidad en cada palet de una misma orden — comprobado contando
+   `COUNT(DISTINCT CLSTOC)` por orden, que da siempre 1. De ahí el `DISTINCT`
+   sobre (artículo, orden, fecha, cantidad): sin él, una orden con 30 palets
+   pesaría 30 veces.
+2. **`CRUNCS` es el importe de la orden entera, no unitario.** El coste
+   unitario es `(CRUNCS/10000) / cantidad_de_la_orden`, **redondeado a 4
+   decimales**.
+3. **Solo `CRCOST = 'A1'`** (Material). Es el mismo componente de coste que el
+   teórico (§3.1, `F30026` con `IECOST='A1'`), así que las dos cifras comparan
+   lo mismo y la desviación es de coste de material — no la diferencia entre
+   "todo el coste" y "una parte", que es justo el error que tenía la primera
+   versión de este panel (§3.4.1). Los demás componentes (`X1`…`X9`) quedan
+   fuera, y `CR` también: es el total de la orden.
+4. **Los componentes no tienen orden — se calculan aparte.** Todo lo que no
+   se fabrica con orden propia (envases, etiquetas, materia prima) sale en
+   `F554105` con `CLURAB = 0`, así que no hay nada que cruzar con `F55CR001`.
+   Para esos, el coste unitario real **ya viene dado** en `CLUNCS`/10000 de la
+   propia `F554105`, y es idéntico en todos los palet_lote del mismo día
+   (verificado con `1312800005`, julio 2026: 3,90 € en los 14 días del mes).
+   Ojo a la diferencia: en esas filas `CLSTOC` es la cantidad de **cada
+   palet** (varía dentro del mismo día), no la de una orden repetida — el peso
+   del día es la **suma** de los palets, no su máximo. Las dos vías (con orden
+   y sin ella) se unen con un `UNION ALL` en la misma consulta y desde ahí se
+   tratan igual.
+5. **Media ponderada por la cantidad**, tanto para agregar las
+   órdenes de un mes como para agregar los meses de un rango:
+   `Σ(coste_unitario × cantidad) / Σ cantidad`. Como el peso es la cantidad de
+   las MISMAS órdenes que dan el coste, ponderar por meses y luego entre meses
+   da exactamente lo mismo que ponderar todas las órdenes del rango de una vez
+   — el desglose mensual existe porque lo necesitan los gráficos (§3.5), no
+   porque cambie la cifra.
 
-**Pregunta directa del usuario: "si se filtra por meses y un artículo justo
-esos meses no ha tenido producción, ¿qué coste real se pone, una media
-simple?" — sí, exactamente eso.** Este caso SÍ ocurre en la práctica, no es
-solo un "por si acaso": el filtro de obsoletos (§4.1.1) exige producción > 0
-solo para artículos MARCADOS obsoletos — un final activo con `costeA1` normal
-puede aparecer en la tabla con `produccion: 0` en el rango elegido sin
-problema (no se le exige producción para ser visible), y aun así tener coste
-real disponible en `F30026` para alguno de esos meses. En ese caso concreto,
-`sumaPesos` da `0` para TODOS los meses del rango (nada que ponderar) y
-`costeRealNodo()` cae a la media aritmética simple de los costes mensuales
-disponibles (`sumaSimple / n`) en vez de `null` — mismo criterio de "mejor un
-dato aproximado que ningún dato" que ya se aplicaba, solo que sin caveat de
-"no debería pasar": es un caso real y esperable, no un borde raro.
+**Cada nodo con SUS propias órdenes.** El coste real ya no se hereda del
+artículo final: cada código del árbol que tenga órdenes de fabricación
+propias (finales y semielaborados) tiene su propio coste real, y los que no
+las tienen (todo lo comprado) se quedan en `costeReal: null` — que es la
+respuesta correcta, no un hueco por rellenar. Eso elimina también el caso
+"coste sin peso" de la versión anterior: coste y peso salen de la misma fila,
+así que no puede haber uno sin el otro, y desaparece el fallback a media
+simple que había para ese borde.
 
-**Verificación de la versión F4105 (histórica, ya no aplica)**: la primera
-versión se verificó contra datos reales (`agent-browser` + consultas Oracle
-directas, artículo `1210400007`, enero–mayo 2026) y el `costeReal` ponderado
-coincidía a mano hasta el último decimal — pero era la versión INCORRECTA
-(coste total del ledger, no solo A1/Material), ver la corrección más arriba.
+**No hay nada que configurar a mano.** La versión anterior necesitaba un
+mapeo mes→ledger mantenido desde `/admin`; con esta fuente el mes sale de la
+fecha de la orden (`CLURDT`) y no hace falta ninguna tabla auxiliar.
 
-**Verificación de la versión F30026 — pendiente de producción, no de un bug.**
-Al probar contra la BD de pruebas, la consulta corregida devolvía
-`costeReal: null` para todos los artículos aunque `meta.mesesSinConfigurar`
-saliera vacío (los 5 meses del rango sí tenían código configurado en
-`/admin`). Se comprobó con una consulta directa a Oracle (artículo
-`1210100325`, `F30026`, `IEMMCU=10999`) que el problema NO es la consulta:
-los ledgers configurados en `/admin` para enero–mayo 2026 (`6M`...`6Q`) se
-habían sacado mirando `F4105.COLEDG` (versión anterior) y **no existen como
-`IELEDG` en F30026** — esa tabla tiene su propia serie de códigos de ledger,
-que en la BD de pruebas solo llega hasta `6C` (con datos de prueba
-desactualizados). Confirmado por el usuario: es la base de datos de pruebas,
-no la de producción — en producción existirán los ledgers mensuales
-correctos. **Pendiente**: una vez apuntando a producción, reconfigurar
-`/admin` → "Coste real (Costes)" con el `IELEDG` de F30026 real de cada mes
-(no reutilizar los códigos ya guardados, que son de F4105) y volver a
-verificar con datos reales.
-
-**`IEMMCU` (planta) se compara igual que en el coste teórico — sin bind, sin
-`TRIM`.** Al ser la MISMA tabla y columna que ya usa la consulta de §3.1
-(`IEMMCU = ${PLANTA}`, con `PLANTA` embebido como constante del código, nunca
-un valor de usuario), no hace falta repetir aquí el problema que sí tenía
-`F4105.COMCU` (`NCHAR`, requería bind como `STRING` para no disparar
-`ORA-01722` por conversión implícita CHAR→NUMBER) — ese problema era
-específico de F4105 y desapareció con la migración a F30026. `IELITM` e
-`IELEDG` sí se comparan con `TRIM(...)`, igual que en §3.1.
+**Sin filtro de planta, a propósito**: a diferencia del coste teórico (§3.1)
+y del BOM, que van fijados a la planta `10999`, el coste real se calcula con
+las órdenes de **todas las plantas** — confirmado explícitamente con el
+usuario. El coste real de un artículo es lo que ha costado fabricarlo, se
+fabricara donde se fabricara; partirlo por planta daría un coste distinto del
+que maneja la empresa. No añadir `CLMCU` a esta consulta pensando que falta.
 
 **Desviación** (`desviacionPct()`, `coste-a1-shared.tsx`): `(costeReal −
 costeA1) / costeA1 × 100`. Positivo = el coste real sale más caro que el
 estándar declarado (rojo); negativo o cero, verde. `null` si falta cualquiera
 de los dos datos o si `costeA1` es `0`.
+
+#### 3.4.1 Historia de la fuente del coste real (dos intentos fallidos)
+
+No es anécdota: las dos versiones anteriores llegaron a producción y ninguna
+daba un dato utilizable. Queda escrito para que nadie vuelva a proponerlas.
+
+1. **`F4105.COUNCS`** (primera versión). Es el coste unitario TOTAL del ledger
+   — Material + Mano de obra + Gastos generales + Amortización — comparado
+   contra un `costeA1` que es solo el componente Material. La "desviación" era
+   en su mayor parte la diferencia entre "todo el coste" y "una parte del
+   coste", no una desviación real. Se verificó al detalle y cuadraba hasta el
+   último decimal… midiendo lo que no era.
+2. **`F30026` con un `IELEDG` distinto por mes** (segunda versión). Misma
+   tabla y mismo componente `A1` que el teórico, cambiando solo el ledger,
+   con el mapeo mes→ledger en SQLite (`coste_a1_coledg_mensual`) y editable
+   en `/admin` → "Coste real (Costes)". **Nunca llegó a devolver un dato**:
+   esos ledgers mensuales no existen en `F30026` (los códigos que se
+   configuraron —`6M`…`6Q`— salieron de `F4105.COLEDG`, que es otra serie), así
+   que el coste real salía `null` para todos los artículos. Se achacó a la BD
+   de pruebas; al comprobarlo contra producción, tampoco.
+
+Con la versión actual se eliminaron: la tabla `coste_a1_coledg_mensual` (el
+`CREATE TABLE` sale de `lib/sqlite.ts`; **no** se hace `DROP`, la tabla queda
+huérfana y sin uso en las instalaciones ya desplegadas), las rutas
+`app/api/admin/coste-a1-coledg/`, la pestaña "Coste real (Costes)" de
+`/admin` y el campo `meta.mesesSinConfigurar` de la respuesta de la API.
 
 ### 3.5 Gráficos mensuales — agregado de VARIOS artículos, no de uno solo
 
@@ -312,17 +308,24 @@ media ponderada de TODO el rango para UN artículo; el gráfico necesita el
 detalle sin agregar de cada mes para poder combinar varios artículos él
 mismo, en el cliente (`serieCosteMensual()`/`serieProduccionMensual()`,
 `coste-a1-shared.tsx`, sobre `filtros.filtered` en `app/costes/page.tsx`).
-`costeRealPorMes[i].costeReal` es el valor RAW de F30026 de ese mes (sin
-ponderar por nada) — la ponderación entre artículos la hace
-`serieCosteMensual()`.
+`costeRealPorMes[i]` trae el coste de ESE mes (ya ponderado entre las órdenes
+del mes, §3.4) y `cantidad`, la producción de esas órdenes — que es el peso
+con el que `serieCosteMensual()` combina varios artículos en un punto.
 
 **Fórmula, para cada mes `M`, sobre los finales filtrados `i = 1..N`:**
 
-- **Producción** (barras): `Σ producción_i,M` — suma directa, es la magnitud
-  en sí, no un coste medio que ponderar.
-- **Real**: `Σ (costeReal_i,M × producción_i,M) / Σ producción_i,M` — cada
-  artículo pesa según cuánto se produjo de ÉL ese mes.
-- **Teórico**: `Σ (costeA1_i × producción_i,M) / Σ producción_i,M` — **también
+- **Producción**: el gráfico de barras de producción por mes se ELIMINÓ (ver
+  §4.4) — su hueco lo ocupa ahora "Top artículos por impacto". La producción
+  sigue en el KPI "Producción total" y en la columna de la tabla, y la API
+  sigue devolviendo `produccionPorMes` (dato correcto ya calculado) aunque de
+  momento no lo consuma nadie.
+- **Real**: `Σ (costeReal_i,M × cantidad_i,M) / Σ cantidad_i,M` — cada
+  artículo pesa según cuánto se produjo de ÉL ese mes. El peso es la cantidad
+  de las órdenes costeadas (`costeRealPorMes[].cantidad`), **no** la
+  producción de F4111 (`produccionPorMes`, la de las barras): coste y peso
+  tienen que salir de la misma fuente, si no un mes puede tener coste y peso
+  `0` a la vez.
+- **Teórico**: `Σ (costeA1_i × cantidad_i,M) / Σ cantidad_i,M` — **también
   ponderado**, aunque el coste A1 de cada artículo nunca cambia. Confirmado
   explícitamente con el usuario ("¿aunque sea teórico lo harías ponderado
   también?" → sí): es la misma lógica que una varianza de precio vs. volumen
@@ -334,8 +337,8 @@ ponderar por nada) — la ponderación entre artículos la hace
   valor (ver también nota siguiente).
 
 **Misma población en las dos series, mes a mes**: si a un artículo le falta
-el coste real de un mes (sin ledger configurado, o sin fila en F30026 para
-ese código), NO cuenta tampoco en el Teórico de ese mes, aunque sí tenga
+el coste real de un mes (ninguna orden costeada ese mes), NO cuenta tampoco
+en el Teórico de ese mes, aunque sí tenga
 coste A1 — para que Real y Teórico sean comparables punto a punto sobre
 exactamente los mismos artículos, y la diferencia entre las dos líneas sea
 solo desviación de coste, nunca un artefacto de comparar conjuntos distintos.
@@ -344,8 +347,8 @@ finales filtrados con producción ese mes, tengan o no coste real.
 
 **La tabla no cambia nada de esto** — cada fila sigue siendo un único
 artículo: su Teórico es siempre el valor fijo de F30026 (nunca una media), y
-su Real (si el rango es de varios meses) ya estaba ponderado por SUS PROPIOS
-meses desde antes (§3.4) — no por el peso de otros artículos. Son dos
+su Real (si el rango es de varios meses) ya viene ponderado por SUS PROPIAS
+órdenes (§3.4) — no por el peso de otros artículos. Son dos
 cálculos que conviven sin tocarse: tabla = coste por artículo, gráfico =
 coste medio de la cartera filtrada por mes.
 
@@ -366,15 +369,17 @@ directamente el de artículos finales, dejando los 3 actuales (`columns={3}`
 en `<Statistics>`, antes `columns={4}`):
 
 1. **Desviación media (real vs. teórico)** — el dato que faltaba: media
-   ponderada por producción, MISMA regla de "misma población" que
+   ponderada por la cantidad costeada, MISMA regla de "misma población" que
    `serieCosteMensual()` (§3.5) pero sobre el rango completo en vez de mes a
-   mes — usa directamente `costeReal`/`costeA1`/`produccion` ya agregados de
-   cada artículo (§3.4), sin repetir el desglose mensual. Solo entran los
-   artículos con coste real Y `producción > 0` en el rango. `—` si ninguno
-   cumple las dos condiciones.
+   mes — usa `costeReal`/`costeA1` ya agregados de cada artículo (§3.4) y,
+   como peso, `Σ costeRealPorMes[].cantidad` (helper `cantidadCosteada()` en
+   `app/costes/page.tsx`), no `produccion`. Solo entran los artículos con
+   coste real Y cantidad costeada > 0 en el rango. `—` si ninguno cumple las
+   dos condiciones.
 2. **Impacto de la desviación** (€) — `sumaRealPonderado - sumaTeoricoPonderado`
-   sobre la MISMA población que el KPI 1 (coste real Y `producción > 0` en el
-   rango) — traduce el % de desviación a dinero real (sobrecoste si es
+   sobre la MISMA población y con el MISMO peso que el KPI 1 (la cantidad de
+   las órdenes costeadas — es decir, el € es "sobre lo que realmente se
+   costeó", no sobre la producción de F4111) — traduce el % de desviación a dinero real (sobrecoste si es
    positivo, ahorro si es negativo). Sustituye a "Artículos con coste real"
    (`X / Y`, contador de cobertura de dato): pedido explícito de la directora
    financiera ("no los veo muy útiles para la directora financiera") —
@@ -1265,9 +1270,102 @@ el archivo instalado (`components/shadcn-space/blocks/chart-0{3,4}/chart.tsx`)
 en vez de crear un wrapper aparte en `components/nova/` — mismo patrón que
 `chart-15`/`charts-15.tsx` en `/compras` (ver `components/nova/README.md`).
 
+- **`chart-03` no dibuja áreas, sino BARRAS AGRUPADAS** (`<Bar>` en un
+  `<BarChart>`, sin los `linearGradient` del bloque original) — mismo formato
+  que el gráfico mensual de `/compras` (`chart-15`), con `barGap`, `barSize` y
+  `radius` calcados de allí para que dos paneles Nova que enseñan lo mismo se
+  lean igual. Se llegó aquí en dos pasos, por si alguien recupera una versión
+  intermedia del historial: primero se pasó de áreas a líneas (el área bajo un
+  coste unitario sugiere un volumen que no existe, y con las series próximas
+  las áreas translúcidas se solapan y tapan la distancia entre teórico y real),
+  y después a barras por pedido explícito ("creo que es mejor de barras, ¿no?"),
+  que además comparan mejor punto a punto que midiendo el hueco entre dos
+  líneas. **Matiz que conviene recordar al tocar esto**: a diferencia de
+  `/compras`, aquí cada barra NO es un total del mes sino una media ponderada
+  (€ por unidad), así que las alturas no son sumables entre meses — por eso el
+  eje Y y el tooltip van en €/unidad.
+- **`chart-04` ya no enseña la producción por mes, sino los artículos con mayor
+  impacto € del rango, con un SELECTOR de dos pestañas** (5 de mayor sobrecoste
+  / 5 de mayor ahorro), **con el mismo diseño que `DeviationByFamilyChart`
+  de `/compras`** (`components/nova/deviation-by-family-chart.tsx`) — pedido
+  explícito: ya no es un chart de Recharts, son divs + Tailwind con barras
+  divergentes desde el centro y sin ejes. Ojo al color, que va AL REVÉS que en
+  compras: allí positivo (vender más de lo previsto) es verde; aquí positivo es
+  sobrecoste, o sea rojo — mismos tokens y mismo criterio que `DesviacionBadge`
+  y los KPI. El archivo se queda en `components/shadcn-space/blocks/chart-04/`
+  aunque ya no sea un bloque del catálogo, para no partir el historial de la
+  celda del grid que ocupa. Se cambió porque
+  el gráfico de producción (a) repetía forma justo al lado del de coste sin
+  añadir lectura, (b) enseñaba un dato que ya estaba dos veces en pantalla (KPI
+  "Producción total" y columna de la tabla) y (c) sale de F4111, que desde el
+  cambio del coste real ya no es la fuente que pondera el resto del panel — dos
+  cifras de "cuánto se produjo" a la vez solo invitaban a preguntas estériles.
+  El de ahora responde "¿QUIÉN se está comiendo el dinero?", que el KPI de
+  impacto (un agregado) no puede contestar. Detalles:
+  - Impacto por artículo = `(costeReal − costeA1) × cantidad costeada`, misma
+    fórmula y misma población que el KPI 2 (§3.6), pero sin agregar
+    (`topImpactoArticulos()`, `coste-a1-shared.tsx`).
+  - **Selector de dos pestañas** (`AnimatedTabs`, `tabs-08`) para cambiar entre
+    "Mayor sobrecoste" y "Mayor ahorro" — pedido explícito: *"como cambio para
+    ver los componentes de los 11 y 10 de un artículo"*, o sea el MISMO
+    componente y el mismo gesto que el selector del panel de desglose (§4.2),
+    para no inventar un patrón nuevo dentro del mismo panel.
+  - `extremosImpacto()` (`coste-a1-shared.tsx`) devuelve las dos listas ya
+    separadas: ordena de mayor sobrecoste a mayor ahorro, coge 5 de cada punta y
+    deduplica por código — con menos de 10 artículos las dos mitades se
+    solaparían y un mismo artículo saldría en las dos pestañas. Los "mejores"
+    se invierten para que la primera fila sea siempre la más destacada, igual
+    que en la otra pestaña.
+  - Hubo antes un top único por valor absoluto, con las dos colas en la misma
+    lista separadas por una línea; se descartó al pedirse el selector. De ahí
+    que las barras ahora **crezcan desde la izquierda** y no diverjan desde el
+    centro como en compras: dentro de una pestaña todas las filas son del mismo
+    signo, así que divergir no aportaba nada y desperdiciaba la mitad del ancho.
+    Cada pestaña escala a su propio máximo (compartir escala dejaría la pestaña
+    "pequeña" con todas las barras al mínimo). El color sigue distinguiendo el
+    signo con los mismos tokens que `DesviacionBadge` y los KPI: positivo rojo,
+    negativo verde.
+  - Cada fila lleva **el código Y la descripción** del artículo (pedido
+    explícito) en la misma línea —en dos líneas, con 10 filas, la tarjeta se iba
+    de alto— más su impacto en € (0 decimales: son importes de rango completo,
+    los céntimos son ruido). El código nunca se trunca (`shrink-0`), porque es
+    lo que se usa para cruzar con JDE; lo que cede es la descripción, que además
+    se repite entera en el `title`. Las barras se escalan al máximo absoluto de
+    la serie, con un mínimo del 3% para que los últimos del top no queden
+    invisibles.
+  - **Al pulsar una fila se selecciona ese artículo en el panel de desglose**
+    (`onSelect` → `setSelectedCodigo`): el gráfico señala al culpable y se entra
+    a su despiece sin buscarlo a mano en la tabla. Cada fila es un `<button>`,
+    no un `<div>`, para que funcione con teclado y lectores de pantalla.
+- **Las dos tarjetas de la fila miden lo mismo, y la que manda es "Artículos
+  por impacto"** (pedido explícito: que esa mida lo que mide su contenido, sin
+  espacio muerto abajo, y que la de coste se iguale a ella). Quién impone el
+  alto y quién se adapta es lo único delicado de esto:
+  - `chart-04` NO lleva `h-full` ni `flex-1` — alto natural, el de su contenido.
+    Sí lleva `contentClassName="min-h-[180px]"` en el `AnimatedTabs`, que es lo
+    que ocupan las 5 filas de una pestaña llena: sin ese suelo, un rango sin
+    datos encogía la tarjeta a poco más que el selector y arrastraba con ella a
+    la de coste, que se adapta a esta (caso real visto en pantalla).
+  - `chart-03` sí lleva `className="h-full"` desde `app/costes/page.tsx` (llena
+    su celda del grid, que ya se estira al alto de la fila) y dentro es `flex
+    flex-col` con el área del gráfico en `flex-1`.
+  - El `min-h-[200px]` del área del gráfico es **solo un suelo** por si la otra
+    tarjeta se queda muy corta (pocos artículos), no el alto de trabajo. Era
+    `h-[253px]` fijo en su día: con eso, era `chart-03` quien imponía el alto de
+    la fila, justo al revés de lo pedido.
+  - **`aspect-auto` en el `ChartContainer`, imprescindible**: ese componente
+    (`components/nova/ui/chart.tsx`) trae `aspect-video` de serie, así que con
+    el ancho de la tarjeta (~800px) se imponía ~450px de alto y la fila la
+    seguía marcando el gráfico de coste por mucho `h-full`/`flex-1` que se
+    pusiera — son propiedades distintas (aspect-ratio vs. height) y
+    `tailwind-merge` no las fusiona, así que el aspect-ratio ganaba.
+- **El selector de `chart-04` ocupa todo el ancho de la tarjeta**, también
+  pedido explícito: `listClassName="sm:w-full *:flex-1"` anula el `sm:w-fit` con
+  el que `tabs-08` deja el selector del ancho de sus etiquetas, y reparte las
+  dos pestañas a partes iguales.
 - **Mismo reparto 2/3-1/3** que la fila de tabla+desglose de abajo (`app/costes/page.tsx`):
-  el gráfico de área (`Coste real vs. teórico`) a la izquierda en `lg:col-span-2`,
-  el de barras (`Producción`) a la derecha en `lg:col-span-1`.
+  el gráfico de barras agrupadas (`Coste real vs. teórico`) a la izquierda en `lg:col-span-2`,
+  el de barras de impacto (`Artículos por impacto`) a la derecha en `lg:col-span-1`.
 - **Sin las tarjetas KPI del bloque original** ("Sales this year/last year" en
   chart-03, "$96,850 -5% Last 7 days" + desplegable "Weekly/Monthly/Yearly" en
   chart-04) — mismo criterio que ya se aplicó a `chart-15`: no hay un periodo

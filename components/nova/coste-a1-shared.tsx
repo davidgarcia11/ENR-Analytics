@@ -17,8 +17,8 @@ export function euros(v: number): string {
   return `${v.toLocaleString("es-ES", { minimumFractionDigits: 2, maximumFractionDigits: 4 })} €`;
 }
 
-// Desviación del coste real (F30026, ponderado) frente al coste teórico
-// declarado (A1) en %. Positivo = el real sale más caro que el estándar.
+// Desviación del coste real (A1 de las órdenes costeadas, ponderado) frente al
+// coste teórico declarado (F30026, A1) en %. Positivo = el real sale más caro que el estándar.
 // `null` si falta cualquiera de los dos datos, o si el teórico es 0 (división
 // por cero sin sentido económico). Recibe solo los dos campos que hacen
 // falta (no el DespieceNode completo) para poder reutilizarse también desde
@@ -130,19 +130,19 @@ export function Descuadre({ estado, tono = "text" }: { estado: EstadoDescuadre; 
 // --- Gráfico "Coste real vs. teórico por mes" (coste-a1-monthly-charts.tsx) ---
 //
 // Agrega VARIOS finales a la vez (a diferencia de `costeReal`/`desviacionPct`,
-// que son por artículo) — mismo criterio de ponderación por producción que ya
-// usa la API para un solo artículo (ver app/api/costes/route.ts, §3.4 de
-// docs/costes.md), extendido para combinar varios artículos en un único
-// punto por mes: cada final pesa según CUÁNTO se produjo de él ese mes.
+// que son por artículo) — mismo criterio de ponderación que ya usa la API para
+// un solo artículo (ver app/api/costes/route.ts, §3.4 de docs/costes.md),
+// extendido para combinar varios artículos en un único punto por mes: cada
+// final pesa según la cantidad que se produjo de él ese mes en las órdenes que
+// dan el coste.
 //
-// Confirmado con el usuario: el Teórico del gráfico también se pondera por
-// producción (aunque el coste A1 de cada artículo, individualmente, nunca
-// cambia) — si no, la distancia entre las dos líneas mezclaría dos efectos
+// Confirmado con el usuario: el Teórico del gráfico también se pondera
+// (aunque el coste A1 de cada artículo, individualmente, nunca cambia) — si no, la distancia entre las dos líneas mezclaría dos efectos
 // distintos (desviación de coste real + cambio de mix de producción) en vez
 // de aislar solo el primero. Y las dos series usan la MISMA población de
-// artículos con peso en cada mes: un final sin coste real ese mes (sin
-// ledger configurado, o sin fila en F30026) tampoco cuenta en el Teórico de
-// ese mes, aunque sí tenga coste A1 — para que Real y Teórico sean
+// artículos con peso en cada mes: un final sin coste real ese mes (ninguna
+// orden costeada) tampoco cuenta en el Teórico de ese mes, aunque sí tenga
+// coste A1 — para que Real y Teórico sean
 // comparables punto a punto, no medias sobre conjuntos distintos.
 //
 // La tabla (por artículo) NO usa nada de esto — su Teórico sigue siendo
@@ -164,19 +164,24 @@ export function serieCosteMensual(finales: DespieceNode[], mesesRango: string[])
   // `.find()` dentro del bucle de meses — con hasta ~250 finales × 12 meses no
   // sería un problema de rendimiento real, pero así queda igual de claro y sin
   // el coste extra.
+  //
+  // El peso NO es la producción de F4111 (`produccionPorMes`, la del gráfico de
+  // barras) sino la cantidad producida en las órdenes que generaron el coste
+  // (`costeRealPorMes[].cantidad`) — coste y peso salen así de la misma fila y
+  // no hay forma de que un mes tenga coste pero peso 0.
   const porFinal = finales.map((f) => ({
     costeA1: f.costeA1,
-    produccionPorMes: new Map((f.produccionPorMes ?? []).map((p) => [p.mes, p.produccion])),
-    costeRealPorMes: new Map((f.costeRealPorMes ?? []).map((p) => [p.mes, p.costeReal])),
+    costeRealPorMes: new Map((f.costeRealPorMes ?? []).map((p) => [p.mes, p])),
   }));
   return mesesRango.map((mes) => {
     let sumaTeorico = 0;
     let sumaReal = 0;
     let sumaPesos = 0;
     for (const f of porFinal) {
-      const peso = f.produccionPorMes.get(mes) ?? 0;
+      const punto = f.costeRealPorMes.get(mes);
+      const peso = punto?.cantidad ?? 0;
       if (peso <= 0) continue;
-      const costeReal = f.costeRealPorMes.get(mes) ?? null;
+      const costeReal = punto?.costeReal ?? null;
       // Misma población en las dos series: sin coste real ese mes, este final
       // tampoco pesa en el Teórico de ese mes (aunque tenga costeA1).
       if (costeReal == null || f.costeA1 == null) continue;
@@ -192,14 +197,38 @@ export function serieCosteMensual(finales: DespieceNode[], mesesRango: string[])
   });
 }
 
-export interface ProduccionMensualPunto { mes: string; produccion: number }
+export interface ImpactoArticulo { codigo: string; descripcion: string; impacto: number }
 
-// Suma directa (sin ponderar — es la magnitud en sí, no un coste medio) de la
-// producción de TODOS los finales pasados, mes a mes.
-export function serieProduccionMensual(finales: DespieceNode[], mesesRango: string[]): ProduccionMensualPunto[] {
-  const porFinal = finales.map((f) => new Map((f.produccionPorMes ?? []).map((p) => [p.mes, p.produccion])));
-  return mesesRango.map((mes) => ({
-    mes,
-    produccion: porFinal.reduce((s, m) => s + (m.get(mes) ?? 0), 0),
-  }));
+// Impacto económico de la desviación de cada artículo final en el rango:
+// (costeReal − costeA1) × cantidad costeada. Misma fórmula y misma población que
+// el KPI "Impacto de la desviación" (app/costes/page.tsx), pero por artículo en
+// vez de agregada — el gráfico responde a "¿QUIÉN se está comiendo el dinero?",
+// que el KPI (un número suelto) no puede contestar.
+//
+// Devuelve los `n` PEORES (mayor sobrecoste) y los `n` MEJORES (mayor ahorro)
+// en dos listas separadas — el gráfico enseña una u otra según la pestaña
+// elegida (pedido explícito, igual que se cambia de código en el panel de
+// desglose). Antes era un único top por valor absoluto: se perdía una de las
+// dos colas cuando todos los desvíos grandes caían del mismo lado.
+// Con menos de 2n artículos las dos mitades se solaparían, de ahí el
+// deduplicado por código: un artículo nunca sale en las dos pestañas.
+export function extremosImpacto(finales: DespieceNode[], n = 5): { peores: ImpactoArticulo[]; mejores: ImpactoArticulo[] } {
+  const conImpacto = finales
+    .map((f) => {
+      const cantidad = (f.costeRealPorMes ?? []).reduce((s, m) => s + m.cantidad, 0);
+      if (f.costeReal == null || f.costeA1 == null || cantidad <= 0) return null;
+      return { codigo: f.codigo, descripcion: f.descripcion, impacto: (f.costeReal - f.costeA1) * cantidad };
+    })
+    .filter((x): x is ImpactoArticulo => x !== null)
+    .sort((a, b) => b.impacto - a.impacto);
+
+  const peores = conImpacto.slice(0, n);
+  const vistos = new Set(peores.map((d) => d.codigo));
+  // Los mejores, del mayor ahorro al menor — `slice(-n)` los deja al revés
+  // (viene ordenado descendente), así que se invierte para que la primera fila
+  // de la pestaña sea siempre la más destacada, igual que en la de sobrecostes.
+  const mejores = conImpacto.slice(-n).filter((d) => !vistos.has(d.codigo)).reverse();
+  return { peores, mejores };
 }
+
+

@@ -47,15 +47,15 @@ dashboard/
 ├── .gitignore                    ← Incluye /data/ para no subir la BD de usuarios
 ├── package.json                  ← Dependencias y scripts
 ├── next.config.ts                ← Configuración de Next.js (HSTS + serverExternalPackages)
-├── middleware.ts                 ← Protección de rutas /api/admin/* (verifica JWT + admin)
+├── proxy.ts                      ← Puerta de toda la app: filtra páginas y API, valida el JWT y renueva la cookie
 ├── tsconfig.json                 ← Configuración de TypeScript
 ├── postcss.config.mjs            ← Configuración de PostCSS (Tailwind v4)
 ├── eslint.config.mjs             ← Reglas de linting
 │
 ├── __tests__/                    ← Tests de seguridad (bun test)
-│   ├── middleware.test.ts        ← JWT forgery, expiración, bypass de rol
+│   ├── middleware.test.ts        ← JWT forgery, expiración, bypass de rol, renovación, filtrado de páginas
 │   ├── sanitization.test.ts      ← SQL injection, XSS en entradas de usuario
-│   ├── permissions.test.ts       ← requireScreenAccess con DB en memoria
+│   ├── permissions.test.ts       ← requireAccess y envoltorios, con DB en memoria
 │   ├── admin-guards.test.ts      ← Protección del rol/pantalla admin, inyección
 │   └── gs1.test.ts               ← Parser de códigos de barras GS1-128 (lib/gs1.ts)
 │
@@ -69,7 +69,7 @@ dashboard/
 │   ├── db.ts                     ← Conexión a Oracle
 │   ├── sqlite.ts                 ← Conexión a SQLite (usuarios, presets, migraciones, roles, pantallas)
 │   ├── auth.ts                   ← JWT, bcrypt, SessionUser, cookieOptions
-│   ├── permissions.ts            ← Control de acceso por pantalla (getAllScreensConfig, requireScreenAccess)
+│   ├── permissions.ts            ← Control de acceso: requireAccess (único) + envoltorios por pantalla/rol
 │   ├── panels.ts                 ← Fuente única de los paneles reales (clave, label, href, icono, descripción)
 │   ├── utils.ts                  ← Funciones auxiliares (fechas, cantidades, clases CSS)
 │   ├── reflex.ts                 ← Conexión a SQL Server (Reflex), análoga a db.ts para Oracle
@@ -181,13 +181,63 @@ REFLEX_PASSWORD=<contraseña_reflex>
 - Cabecera HTTP `Strict-Transport-Security` para forzar HTTPS
 - `serverExternalPackages: ['better-sqlite3']` — necesario para que el módulo nativo de SQLite funcione en producción con `npm start`
 
-### `middleware.ts` — Protección de rutas admin
+### `proxy.ts` — Puerta de entrada de la app
 
-Intercepta todas las peticiones a `/api/admin/*`. Verifica:
-1. Que existe un JWT válido en la cookie `session`
-2. Que el usuario tiene `role === 'admin'`
+**Se llamaba `middleware.ts`.** Next 16 lo dio por obsoleto en favor de `proxy.ts`,
+y el cambio no es cosmético: **el proxy corre siempre en runtime Node** (Next
+rechaza `export const runtime` ahí porque es implícito). Eso es lo que permite
+leer SQLite desde aquí, y por tanto filtrar **páginas** y no solo API.
 
-Si no cumple, devuelve 403.
+Matcher: todo menos los estáticos. Tiene que ser un literal, así que la lista de
+rutas de panel no se genera desde `PANELS`; se resuelve en código.
+
+**API** (`/api/*`):
+
+| Caso | Qué hace |
+|---|---|
+| Ruta de `SIN_SESION` | Pasa sin mirar nada |
+| `/api/admin/*` sin cookie o sin rol admin | 401 / 403 |
+| Token caducado o manipulado | 401 **y borra la cookie** |
+| Resto sin cookie | Pasa: `requireAccess` decide (y comprueba cosas que aquí no tocan, como la contraseña pendiente) |
+| Token válido al que le quedan < 6 días | Pasa y renueva la cookie (7 días más) |
+
+**Páginas:**
+
+| Caso | Qué hace |
+|---|---|
+| `/login`, `/cambiar-contrasena`, `/` | Pasan siempre (filtrarlas sería un bucle contra sí mismas) |
+| Ruta que no es panel ni API | Pasa |
+| Panel de `PANELS` | `accesoPantalla(key, role)` — la misma función que usa `requireAccess({screen})` |
+| `/admin`, `/admin/logs` | Exigen rol admin |
+| Cualquier negativa | **302 a `/login?next=<ruta>`**, no un JSON |
+
+Esto es lo que quita el parpadeo del panel antes de rebotar al login: la decisión
+se toma **antes de mandar una sola línea de HTML**, y funciona aunque el
+JavaScript del cliente no llegue a ejecutarse. `<RequireAccess>` sigue haciendo
+falta: cubre lo que el proxy no puede ver, que es la sesión caducándose con la
+pestaña ya abierta, sin ninguna petición de página de por medio.
+
+`SIN_SESION` = `/api/auth/login`, `/api/auth/logout`, `/api/auth/me`,
+`/api/screen-permissions`, `/api/jde-orders`. Los dos primeros se usan cuando
+no hay sesión; `me` y `screen-permissions` son el latido del `SessionProvider` y
+contestan solas; `jde-orders` se autentica con `x-api-key`, no con la cookie.
+
+**Tres decisiones que conviene entender:**
+
+- **El proxy no exige sesión en toda la API.** Podría, pero eso dejaría fuera a
+  las pantallas marcadas públicas, que hoy se ven sin login. En API es la capa de
+  higiene del token; quien decide sigue siendo `requireAccess()`, que además
+  comprueba la contraseña pendiente de cambio y que el usuario siga existiendo.
+- **Borrar la cookie al fallar** hace que el sistema se cure solo: la petición
+  siguiente entra sin cookie y, si la pantalla es pública, funciona. Sin eso, un
+  token podrido devolvía 401 para siempre.
+- **La renovación no se dispara en el latido.** Un panel abierto pide
+  `/api/auth/me` cada 60 s; si eso renovara, una tablet olvidada mantendría la
+  sesión viva indefinidamente y la caducidad de 7 días no significaría nada.
+
+`cookieOptions()` está duplicada aquí y en `lib/auth.ts` a propósito: importar
+`lib/auth` arrastraría `bcryptjs` y `next/headers` al bundle edge. Hay un test
+que falla si las dos copias dejan de coincidir.
 
 ### `tsconfig.json` — Alias `@/`
 
@@ -281,13 +331,6 @@ CREATE TABLE screen_permissions (
 CREATE TABLE jde_status_descriptions (
   code TEXT PRIMARY KEY,
   description TEXT NOT NULL,
-  updated_at TEXT DEFAULT (datetime('now'))
-);
-
--- Mapeo mes -> código de ledger IELEDG de F30026 (coste real mensual, JDE), editable desde /admin (ver docs/costes.md §3.4)
-CREATE TABLE coste_a1_coledg_mensual (
-  mes TEXT PRIMARY KEY,
-  coledg TEXT NOT NULL,
   updated_at TEXT DEFAULT (datetime('now'))
 );
 
@@ -440,14 +483,6 @@ Edición de las descripciones de los códigos `F47011.SYEDSP` que se muestran en
 - Persistencia en SQLite (tabla `jde_status_descriptions`). El seed inicial es idempotente (`INSERT OR IGNORE`), por lo que las ediciones manuales **no se sobreescriben** en futuros despliegues.
 - Cuando el admin guarda un cambio, el panel `/comparativa-seres` lo verá la próxima vez que se cargue (hace `fetch('/api/jde-statuses')` al montar).
 
-#### Pestaña Coste real (Costes)
-Mapeo mes → código de ledger `IELEDG` de `F30026` (mismo `IECOST='A1'` que el coste teórico, coste real mensual JDE) usado por `/costes` para ponderar el coste real por producción — ver `docs/costes.md` §3.4.
-
-- JDE genera un código `IELEDG` nuevo cada mes (ej. `'6M'` = enero 2026) sin fórmula deducible — hay que consultar `F30026` y añadirlo aquí cada vez que aparezca un mes nuevo.
-- Formulario **Añadir mes** (selector `<input type="month">` + código) y tabla de meses ya configurados, cada uno editable (input + botón **Guardar**) y borrable.
-- Persistencia en SQLite (tabla `coste_a1_coledg_mensual`, `mes` 'YYYY-MM' como clave primaria). Sin seed inicial — vacía hasta que el admin la rellene.
-- Un mes del rango de `/costes` sin código configurado aquí se ignora en el cálculo (no bloquea el resto) y se reporta en `meta.mesesSinConfigurar` de la respuesta de la API.
-
 ### APIs de administración
 
 | Método | Ruta | Descripción |
@@ -465,10 +500,6 @@ Mapeo mes → código de ledger `IELEDG` de `F30026` (mismo `IECOST='A1'` que el
 | PUT | `/api/admin/jde-statuses/:code` | Actualiza la descripción de un código existente. No permite crear ni borrar |
 | GET | `/api/jde-statuses` | Lista pública (con sesión) consumida por `/comparativa-seres` |
 | GET | `/api/admin/logs` | Logs de consultas con paginación, filtros y estadísticas (ver sección 7) |
-| GET | `/api/admin/coste-a1-coledg` | Lista el mapeo mes→código de ledger IELEDG (F30026, con `updated_at`) |
-| POST | `/api/admin/coste-a1-coledg` | Crea un mes nuevo (`mes` 'YYYY-MM' + `coledg`). 409 si el mes ya existe |
-| PUT | `/api/admin/coste-a1-coledg/:mes` | Actualiza el código de un mes existente |
-| DELETE | `/api/admin/coste-a1-coledg/:mes` | Elimina el mapeo de un mes |
 
 ---
 
@@ -488,18 +519,134 @@ El rol `admin` siempre tiene acceso a todo, hardcoded en la lógica (no solo en 
 
 ### `lib/permissions.ts`
 
+**Un único sitio decide si algo se permite.** Antes había tres mecanismos sueltos
+haciendo lo mismo con matices distintos: `requireScreenAccess` (permisos por
+pantalla), un `verifySession()` + comprobar rol copiado en cada ruta de `/admin`, y
+`requireMuestrasConfigAccess` (flag por usuario). Ahora los tres delegan en
+`requireAccess`, que es donde se toma la decisión y se construyen los cuerpos de
+error — los otros siguen existiendo solo como nombres cómodos.
+
+Ya **no queda ninguna ruta** con su propio `verifySession() + comprobar rol`: eran
+16 y dejaban fuera dos reglas que solo viven aquí (contraseña pendiente de cambio y
+usuario borrado). `lib/auth.ts` sigue exportando `verifySession()`, pero fuera de
+`/api/auth/*` solo se usa para **saber quién es** el usuario, nunca para decidir.
+
 | Función | Descripción |
 |---|---|
+| `requireAccess(rules)` | Comprueba todas las reglas recibidas (AND) y devuelve `{ok: true, user}` o `{ok: false, denied}` con el `NextResponse` ya montado |
+| `requireScreenAccess(screenKey)` | Envoltorio: `requireAccess({ screen })` → `NextResponse` 401/403 o `null` |
+| `requireAdmin()` | Envoltorio: `requireAccess({ role: 'admin' })` → `NextResponse` 401/403 o `null` |
 | `getAllScreensConfig()` | Devuelve `Record<string, ScreenConfig>` con `{ is_public, allowed_roles[] }` para cada pantalla |
-| `requireScreenAccess(screenKey)` | Usada en API routes: devuelve `NextResponse` 401/403 si no hay acceso, o `null` si está permitido |
+
+Reglas que acepta `requireAccess` (se pueden combinar; todas deben pasar):
+
+| Regla | Qué comprueba |
+|---|---|
+| `screen` | La fila de `screens`: sin registrar → pasa; `is_public` → pasa **sin sesión**; si no, exige sesión y que el rol esté en `screen_permissions` (admin siempre pasa) |
+| `role` | Exige sesión (401 si no) y que el rol coincida (403 si no) |
+| `flag` | Exige sesión y una columna booleana de `users` (hoy solo `can_configure_muestras`); admin siempre pasa |
+| `sesion` | Exige sesión y nada más — rutas "de usuario" como los presets |
+
+Y dos comprobaciones que se aplican **siempre** que haya sesión, sin pedirlas:
+
+| Comprobación | Respuesta |
+|---|---|
+| `users.must_change_password = 1` | 403 `{ error, mustChangePassword: true }` |
+| El usuario ya no existe en `users` | 401 |
+
+```ts
+const acceso = await requireAccess({ screen: 'costes' })
+if (!acceso.ok) return acceso.denied
+acceso.user // SessionUser | null — null si la pantalla es pública
+```
+
+Dos detalles que importan:
+
+- **`user` puede ser `null` con `ok: true`**: una pantalla pública se permite sin
+  sesión, así que no se puede asumir que haya usuario tras pasar el control.
+- **Una pantalla pública no cortocircuita el resto de reglas**: `{screen: 'X',
+  role: 'admin'}` sigue exigiendo admin aunque `X` sea pública. Hay test para esto.
+- La sesión se resuelve **como mucho una vez** por llamada.
+- **El cambio de contraseña obligatorio se impone aquí, no en el cliente.** Antes
+  solo lo hacían `<RequireAccess>` y el login, así que bastaba con llamar a la API
+  a mano —o tener la pestaña ya abierta cuando un admin reseteaba la contraseña—
+  para seguir trabajando con la provisional. Se mira la tabla y no el JWT, porque
+  el token se emite al iniciar sesión y no se entera de un reseteo posterior.
+  `/api/auth/{me,change-password,logout}` no pasan por `requireAccess`, que es
+  justo lo que hace falta para poder cambiarla.
+
+### Sesión en cliente: `components/SessionProvider.tsx`
+
+Montado una vez en `app/layout.tsx`, envuelve toda la app. Sustituye al
+`fetch('/api/auth/me')` en un `useEffect` que cada panel se montaba por su cuenta
+(13 copias en cuatro formas distintas) y a las tres copias del filtrado de
+permisos (los dos navbars y las páginas).
+
+| Export | Para qué |
+|---|---|
+| `SessionProvider` | Mantiene `user` + `screens`. **No redirige por su cuenta.** |
+| `useSession()` | `{ user, screens, loading, refresh, logout, onSessionExpired }` |
+| `useApiFetch()` | `fetch` que ante un 401 echa al login en vez de dejar que el panel muestre "No autenticado" como un error cualquiera |
+| `RequireAccess` | Envuelve el contenido de una página: no pinta nada hasta saber si se puede entrar. `screen="caducados"` para un panel, `role="admin"` para `/admin` y `/admin/logs`, sin props para "basta con tener sesión" |
+| `puedeAcceder(cfg, user)` | La regla de acceso, la misma que `requireAccess({screen})` en servidor |
+
+**Qué arregla, en concreto:**
+
+- **Caducidad con el panel abierto.** La sesión se revalida cada 60 s y al volver
+  el foco a la pestaña (`visibilitychange`). Antes solo se comprobaba al montar:
+  una tablet de planta se quedaba con un panel muerto hasta que alguien tocaba algo.
+- **El "flash" del panel antes del login.** `RequireAccess` no pinta nada hasta
+  resolver sesión + permisos. Antes la página se pintaba y el `useEffect` decidía
+  después, de ahí el segundo de panel visible al que no tenías acceso.
+- **Volver a donde ibas.** Las redirecciones llevan `?next=<ruta>`, y el login lo
+  respeta si la ruta es interna y el usuario tiene acceso real a ese panel.
+
+**Dos cosas que hay que saber al usarlo:**
+
+- Dentro de `<RequireAccess>` la sesión **ya está resuelta en el primer render**, así
+  que `user` es fiable sin esperas ni `loading`.
+- Tras un login hay que llamar a `refresh()` **antes** de navegar. El provider guarda
+  la sesión en memoria y no se entera solo: sin eso, `RequireAccess` sigue creyendo
+  que no hay sesión y devuelve al login — bucle hasta la siguiente revalidación.
+  Ya está hecho en `app/login/page.tsx` y en `app/cambiar-contrasena/page.tsx` (ahí
+  el `mustChangePassword` obsoleto devolvería a la propia página de cambio, en bucle);
+  recuérdalo si aparece otro punto de entrada.
+- `user` cambia de identidad en cada revalidación (cada 60 s). Si un `useEffect`
+  depende de la sesión, depende de `user?.id`, **nunca del objeto** — si no, se
+  relanza cada minuto.
+
+**Cómo se monta una página (patrón único, ya aplicado a las 14):**
+
+```tsx
+function CaducadosPanel() {
+  const { user, logout } = useSession()   // sesión ya resuelta
+  const apiFetch = useApiFetch()          // 401 → login, automático
+  // ...
+}
+
+export default function CaducadosPage() {
+  return <RequireAccess screen="caducados"><CaducadosPanel /></RequireAccess>
+}
+```
+
+Excepciones, todas con su motivo:
+
+| Página | Por qué no sigue el patrón |
+|---|---|
+| `/login` | Es el único sitio que puede hablar con `/api/auth/me` por su cuenta: corre justo cuando no hay sesión que compartir |
+| `/cambiar-contrasena` | Puerta al revés: solo se entra **si** hay que cambiar la contraseña, y `RequireAccess` manda justo ahí |
+| `/` (portada) | No es un panel: con sesión desvía al primer panel permitido, sin sesión hace de escaparate |
+| `/admin`, `/admin/logs` | Se gobiernan por rol, no por `screens` → `RequireAccess role="admin"` |
+
+`__tests__/permissions.test.ts` tiene una guarda anti-regresión: falla si una
+página vuelve a llamar a `/api/auth/me` o se monta sin `<RequireAccess>`.
 
 ### `GET /api/screen-permissions`
 
 Endpoint **público** (sin autenticación) que devuelve la configuración de todas las pantallas. Lo consumen:
-- Cada página del dashboard en su `checkSession` para decidir si redirigir a `/login`
-- La `Navbar` para filtrar qué paneles mostrar en el dropdown
+- `SessionProvider`, que lo reparte al resto de la app (ninguna página lo pide ya por su cuenta)
 - La página `/login` para redirigir al primer panel accesible tras el login
-- La página `/` (inicio) para mostrar solo los paneles públicos
+- La pestaña "Pantallas" de `/admin`, que además lo edita
 
 Ejemplo de respuesta:
 ```json
@@ -866,9 +1013,10 @@ Cada panel tiene su documentación específica en la carpeta `docs/`:
 | Comparativa SERES vs JDE | `/comparativa-seres` | [docs/seres-jde-comparativa.md](docs/seres-jde-comparativa.md) |
 | Consulta de stock por escaneo (FEFO, Reflex) | `/consulta-stock-pda` | [docs/consulta-stock-pda.md](docs/consulta-stock-pda.md) |
 | Compras (previsión de ventas vs. venta real, rediseño sobre sistema Nova) | `/compras` | [docs/compras.md](docs/compras.md) |
-| Explosión de compras (MRP) | `/mrp` | *(sin doc propio todavía — ver comentarios en `app/api/mrp/route.ts`)* |
+| Explosión de compras (MRP) | `/mrp` | [docs/mrp.md](docs/mrp.md) |
 | Coste A1 y despiece recursivo de materiales (sistema Nova) | `/costes` | [docs/costes.md](docs/costes.md) |
 | Control de muestras (pendiente/enviado/completado) | `/muestras` | [docs/muestras.md](docs/muestras.md) |
+| Loteadora | `/loteadora` | [docs/loteadora.md](docs/loteadora.md) |
 
 ### API externa — `GET /api/jde-orders`
 
@@ -1174,15 +1322,15 @@ bun test --watch   # modo watch (re-ejecuta al guardar)
 
 ```
 __tests__/
-  middleware.test.ts     ← Seguridad JWT del middleware /api/admin/*
+  middleware.test.ts     ← Seguridad JWT, cobertura de toda /api y filtrado de páginas (prueba proxy.ts)
   sanitization.test.ts   ← Sanitización de entradas (SQL injection, XSS)
-  permissions.test.ts    ← Sistema de permisos por pantalla (requireScreenAccess)
+  permissions.test.ts    ← Sistema de permisos (requireAccess + envoltorios)
   admin-guards.test.ts   ← Reglas de protección del panel de administración
 ```
 
 ### Qué cubre cada archivo
 
-**`middleware.test.ts`** (11 tests) — Ataques contra el JWT de `/api/admin/*`:
+**`middleware.test.ts`** (27 tests) — Ataques contra el JWT, cobertura de toda la API y filtrado de páginas (importa `proxy.ts`):
 - Sin cookie, token inválido, texto no JWT → 401
 - JWT firmado con secreto incorrecto → 401
 - JWT expirado aunque tenga rol `admin` → 401
@@ -1190,6 +1338,20 @@ __tests__/
 - Algoritmo `"none"` (bypass clásico de JWT) → 401
 - Rol `user` o `supervisor` con JWT válido → 403
 - Admin con JWT válido → pasa (200)
+- Ruta de panel sin cookie → pasa (la pantalla puede ser pública)
+- Ruta de panel con token inválido → 401 y `Max-Age=0` en la cookie
+- Las 5 rutas de `SIN_SESION` pasan aunque el token sea basura
+- Token recién emitido → no renueva; con < 6 días → renueva con uno distinto
+- `/api/auth/me` y `/api/screen-permissions` nunca renuevan
+- La cookie renovada coincide con `cookieOptions()` de `lib/auth`
+- `/admin` sin sesión o con rol `user` → 302 a `/login?next=`
+- `/login`, `/cambiar-contrasena` y `/` nunca se filtran (si no, bucle)
+- Página de admin con token podrido → 302 y cookie borrada
+- La API sigue contestando JSON, no redirecciones
+
+> Solo se prueban aquí los caminos que **no** tocan la BD. La regla de pantalla
+> pública/privada vive en `accesoPantalla()` y se prueba en `permissions.test.ts`
+> con una BD en memoria.
 
 **`sanitization.test.ts`** (18 tests) — Función de limpieza de nombres de rol:
 - SQL injection clásica (`'; DROP TABLE roles; --`) → solo `[a-z0-9_]`
@@ -1198,7 +1360,7 @@ __tests__/
 - Rutas de sistema (`../../../etc/passwd`), null bytes, unicode, emojis
 - Cadenas muy largas (10.000 chars)
 
-**`permissions.test.ts`** (22 tests) — `requireScreenAccess` y `getAllScreensConfig`:
+**`permissions.test.ts`** (44 tests) — `requireAccess` (reglas `screen`/`role`/`flag`/`sesion` y su combinación), sus envoltorios `requireScreenAccess`/`requireAdmin`, `getAllScreensConfig` y las guardas anti-regresión del cliente:
 - Pantalla pública → `null` sin sesión
 - Clave desconocida → `null` (pasa sin restricción)
 - Pantalla privada sin sesión → 401
@@ -1207,6 +1369,11 @@ __tests__/
 - Rol `admin` → siempre `null` (bypass garantizado)
 - Inyección SQL en la clave de pantalla → tratada como literal (no hay esa pantalla → `null`)
 - `getAllScreensConfig` devuelve estructura `{ is_public, allowed_roles[] }` correcta
+- `must_change_password = 1` → 403 aunque tenga permiso, sea admin o la pantalla sea pública
+- El cuerpo del 403 trae `mustChangePassword` para que el cliente sepa a dónde mandarlo
+- Anónimo en pantalla pública no paga esa comprobación
+- Token válido de un usuario ya borrado → 401
+- Ninguna página llama a `/api/auth/me` ni se monta sin `<RequireAccess>`
 
 **`admin-guards.test.ts`** (19 tests) — Reglas de negocio en los handlers de admin:
 - Rol `admin` no se puede eliminar → 400

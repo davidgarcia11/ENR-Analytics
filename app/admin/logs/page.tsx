@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useEffect } from "react"
-import { useRouter } from "next/navigation"
+import { RequireAccess, useApiFetch, useSession } from "@/components/SessionProvider"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
@@ -18,7 +18,6 @@ import * as XLSX from 'xlsx'
 import { DatePicker } from "@/components/DatePicker"
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from "recharts"
 
-interface SessionUser { id: number; username: string; role: string; name: string; surname: string }
 
 interface LogEntry {
   id: number
@@ -169,12 +168,11 @@ function formatTime(ms: number): string {
   return `${(ms / 1000).toFixed(1)}s`
 }
 
-export default function LogsPage() {
-  const router = useRouter()
+function LogsPanel() {
   const [logs, setLogs] = useState<LogEntry[]>([])
   const [loading, setLoading] = useState(true)
-  const [authorized, setAuthorized] = useState(false)
-  const [sessionUser, setSessionUser] = useState<SessionUser | null>(null)
+  const { user: sessionUser, logout } = useSession()
+  const apiFetch = useApiFetch()
   const [page, setPage] = useState(1)
   const [totalPages, setTotalPages] = useState(1)
   const [total, setTotal] = useState(0)
@@ -209,35 +207,12 @@ export default function LogsPage() {
   const [confirmFilterTrigger, setConfirmFilterTrigger] = useState(0)
 
   useEffect(() => {
-    checkAuth()
-  }, [])
+    loadLogs()
+  }, [page, filterTrigger, chartDays])
 
   useEffect(() => {
-    if (authorized) loadLogs()
-  }, [page, authorized, filterTrigger, chartDays])
-
-  useEffect(() => {
-    if (authorized && activeTab === 'confirmaciones') loadConfirmations()
-  }, [authorized, activeTab, confirmPage, confirmFilterTrigger])
-
-  const checkAuth = async () => {
-    try {
-      const res = await fetch("/api/auth/me")
-      if (!res.ok) { router.push("/login"); return }
-      const data = await res.json()
-      if (data.role !== "admin") { router.push("/produccion"); return }
-      setSessionUser(data)
-      setAuthorized(true)
-    } catch {
-      router.push("/login")
-    }
-  }
-
-  // Cierre de sesión para la Navbar del AppShell
-  const logout = async () => {
-    await fetch("/api/auth/logout", { method: "POST" })
-    router.push("/login")
-  }
+    if (activeTab === 'confirmaciones') loadConfirmations()
+  }, [activeTab, confirmPage, confirmFilterTrigger])
 
   const loadLogs = async () => {
     setLoading(true)
@@ -248,7 +223,7 @@ export default function LogsPage() {
       if (filterEndDate) params.set('endDate', filterEndDate)
       if (filterSource) params.set('source', filterSource)
 
-      const res = await fetch(`/api/admin/logs?${params}`)
+      const res = await apiFetch(`/api/admin/logs?${params}`)
       if (res.ok) {
         const data = await res.json()
         setLogs(data.logs)
@@ -289,7 +264,7 @@ export default function LogsPage() {
       if (filterConfirmStartDate) params.set('startDate', filterConfirmStartDate)
       if (filterConfirmEndDate) params.set('endDate', filterConfirmEndDate)
 
-      const res = await fetch(`/api/admin/scan-confirmations?${params}`)
+      const res = await apiFetch(`/api/admin/scan-confirmations?${params}`)
       if (res.ok) {
         const data = await res.json()
         setConfirmations(data.confirmations)
@@ -340,14 +315,6 @@ export default function LogsPage() {
     'Tiempo medio (s)': Number((d.avgTime / 1000).toFixed(1)),
     'Usuarios': d.uniqueUsers,
   }))
-
-  if (!authorized) {
-    return (
-      <div className="min-h-screen bg-background flex items-center justify-center">
-        <Spinner label="Comprobando permisos..." />
-      </div>
-    )
-  }
 
   return (
     <AppShell
@@ -791,5 +758,13 @@ export default function LogsPage() {
         </>
         )}
     </AppShell>
+  )
+}
+
+export default function LogsPage() {
+  return (
+    <RequireAccess role="admin">
+      <LogsPanel />
+    </RequireAccess>
   )
 }

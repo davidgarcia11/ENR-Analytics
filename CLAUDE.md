@@ -53,9 +53,9 @@ app/                          # Rutas Next.js (App Router)
     comparativa-seres/        # GET comparativa SERES vs JDE
     consulta-stock-pda/       # GET stock FEFO por EAN escaneado (Reflex/SQL Server)
     compras/                  # GET previsión (F3460) vs venta real (F4211), coste (F4105), gramaje (F554101) — jerárquico Familia>Canal>Artículo (Nova)
-    costes/                   # GET coste A1 (F30026) + despiece recursivo (F3002) + coste real ponderado (F30026, ledger mensual) — jerárquico (Nova)
+    costes/                   # GET coste A1 (F30026) + despiece recursivo (F3002) + coste real por órdenes costeadas (F554105 + F55CR001) — jerárquico (Nova)
     auth/                     # login, logout, me, change-password
-    admin/                    # users CRUD, logs, coste-a1-coledg (mapeo mes->ledger IELEDG para el coste real de /costes)
+    admin/                    # users CRUD, logs, roles, pantallas, loteadoras, muestras-sync
     mrp/                       # GET explosión recursiva de materiales a comprar a partir de previsión (F3460) + BOM (F3002) (Nova)
     muestras/                  # CRUD control de muestras pendientes/enviadas/completadas (Nova)
     presets/                  # CRUD presets de filtros
@@ -81,7 +81,7 @@ components/
     ui/                        # Primitivos shadcn instalados para Nova (button, card, table, select, popover...)
     README.md                  # Mecanismo de aislamiento, configuración, decisiones — leer antes de tocar UI Nova
   shadcn-space/blocks/          # Blocks del catálogo ShadcnSpace instalados tal cual (topbar-02, statistics-04, chart-15, chart-03, chart-04)
-middleware.ts                 # Protege /api/admin/* (JWT + role admin)
+proxy.ts                      # Puerta de toda la app: filtra páginas y API (runtime Node, lee SQLite)
 docs/                         # Documentación específica por panel
   design-system.md            # SISTEMA DE DISEÑO (viejo, components/ui/) — leer antes de tocar UI de un panel que NO sea Nova
   produccion.md               # Dashboard de producción — completo para juniors
@@ -130,7 +130,7 @@ docs/                         # Documentación específica por panel
 ### Autenticación
 - JWT firmado HS256, expira 7 días, cookie `session` httpOnly
 - `cookieOptions(req)` detecta HTTPS desde URL real (no NODE_ENV) para funcionar en LAN
-- `middleware.ts` protege rutas `/api/admin/*`
+- `proxy.ts` (el antiguo `middleware.ts`) filtra páginas y toda `/api`: valida el JWT, renueva la cookie y redirige al login antes de mandar HTML
 - Logging de consultas nunca bloquea la respuesta (try/catch independiente)
 
 ### Seguridad
@@ -223,7 +223,7 @@ Solo cuando se pida explícitamente usar Nova (no es el sistema por defecto toda
   - Cambios en el panel comparativa SERES vs JDE → `docs/seres-jde-comparativa.md`
   - Cambios en el panel de consulta de stock por escaneo → `docs/consulta-stock-pda.md`
   - Cambios en el panel de compras o en el sistema Nova (`/compras`, `api/compras`, `components/nova/`, `components/shadcn-space/`) → `docs/compras.md` y `components/nova/README.md`
-  - Cambios en el panel de costes (`/costes`, `api/costes`, `api/admin/coste-a1-coledg`) → `docs/costes.md`
+  - Cambios en el panel de costes (`/costes`, `api/costes`) → `docs/costes.md`
   - Cambios en el panel de MRP (`/mrp`, `api/mrp`) → `docs/mrp.md`
   - Cambios en el panel de muestras (`/muestras`, `api/muestras`) → `docs/muestras.md`
   - Nuevo panel → crear `docs/nombre-panel.md` y añadir referencia en `DOCUMENTACION.md` sección 9

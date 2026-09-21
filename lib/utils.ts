@@ -93,3 +93,14 @@ export function parseWasOqs(val: number | string): number {
 export function getDayOfYear(date: Date): number {
     return Math.floor((date.getTime() - new Date(date.getFullYear(), 0, 0).getTime()) / 86400000);
 }
+
+// Convierte una fecha ISO (YYYY-MM-DD) al formato Julian de JDE (CYYDDD)
+// Ej: '2024-01-15' → 124015
+export function isoToJulian(iso: string): number {
+    const [y, m, d] = iso.split('-').map(Number);
+    const date = new Date(y, m - 1, d);
+    const dayOfYear = getDayOfYear(date);
+    const c = Math.floor((y - 1900) / 100);
+    const yy = y - 1900 - c * 100;
+    return c * 100000 + yy * 1000 + dayOfYear;
+}

@@ -57,40 +57,39 @@
 //   CORTO (`WAITM`/`IMITM`) — el cruce sale de `F4101.IMITM`, añadido a la
 //   consulta de metadatos (paso G) solo para los finales, no para todo el
 //   árbol. La producción se agrega TAMBIÉN por mes (no solo el total del
-//   rango) — hace falta para ponderar el coste real (ver punto siguiente).
-// - Coste real por artículo y componente, en el mismo rango de fechas
-//   (`costeReal` en TODOS los nodos del árbol, no solo finales): MISMA tabla
-//   que el coste teórico, F30026, con el MISMO método de coste IECOST='A1'
-//   (Material) — para que sea comparable con el teórico hace falta el mismo
-//   componente de coste, no el coste unitario total del ledger (que suma
-//   Material + Mano de obra + Gastos + Amortización, etc. — ver corrección
-//   más abajo, en H.1). Lo único que cambia es el ledger: IELEDG='07' (Coste
-//   Estándar) para el teórico, un código IELEDG distinto por mes ('6M'=enero
-//   2026, '6N'=febrero...) para el real, sin fórmula fiable para deducirlo —
-//   igual problema que COLEDG_VIGENTE en api/compras/route.ts pero mensual en
-//   vez de anual, así que el mapeo mes->ledger vive en SQLite (tabla
-//   `coste_a1_coledg_mensual`, editable desde /admin) en vez de hardcodeado.
-//   Un mes del rango sin código configurado en esa tabla simplemente se
-//   ignora (no cuenta en el cálculo). Con un solo mes en el rango, el coste
-//   real es directamente el valor de F30026 de ese mes/ledger. Con varios
-//   meses, es la media PONDERADA por la producción real de cada mes — pero no
-//   la del propio nodo (una materia prima no tiene órdenes de fabricación
-//   propias): pondera con la producción mensual del artículo FINAL (raíz) al
-//   que pertenece ese despiece — todo el árbol de un mismo final comparte los
-//   mismos pesos mensuales, confirmado con el usuario. Si la producción total
-//   pesa 0 en todos los meses con coste disponible (caso raro: no debería
-//   pasar, solo se listan finales con producción en el rango), se cae a media
-//   simple entre esos meses en vez de dejar el dato vacío. Un mes sin coste
-//   en F30026 para ese código/ledger concreto se excluye del cálculo (ni
-//   cuenta en el numerador ni en el denominador), no se trata como 0.
-//   CORREGIDO (pedido explícito): al principio esta consulta leía F4105.COUNCS
-//   en vez de F30026.IECSL — F4105 da el coste unitario TOTAL del ledger, así
-//   que la "desviación real vs. teórico" mezclaba dos cosas distintas (coste
-//   total vs. solo Material) en vez de medir una desviación real de coste de
-//   material. Ver H.1 más abajo para el detalle de la consulta corregida.
+//   rango) — la usa el gráfico de barras "Producción por mes" (docs §3.5).
+//   NO se usa para ponderar el coste real: ese pondera con la cantidad de sus
+//   propias órdenes (ver punto siguiente).
+// - Coste real por artículo, en el mismo rango de fechas (`costeReal` en TODOS
+//   los nodos del árbol, no solo finales): sale de las ÓRDENES DE FABRICACIÓN
+//   realmente costeadas — F554105 (`CLLEDG='CR'`, una fila por palet_lote, con
+//   la orden `CLURAB`, su fecha `CLURDT` y su cantidad `CLSTOC`/10000, iguales
+//   en todos los palets de la misma orden) cruzada con F55CR001
+//   (`CRLEDG='CR'`, `CRDOCO`=orden), que desglosa el coste de cada orden por
+//   componente (`CRCOST`: A1, X1...X9, y 'CR' que es el total), del que se coge
+//   SOLO `A1` (Material) — el mismo componente que el coste teórico, para que
+//   las dos cifras comparen lo mismo. `CRUNCS`/10000 es el importe de toda la
+//   orden: el coste unitario es ese importe / cantidad de la orden, redondeado
+//   a 4 decimales.
+//   Los COMPONENTES (envases, etiquetas, materia prima) no tienen orden
+//   (`CLURAB = 0`) y por tanto no cruzan con F55CR001: su coste unitario real
+//   ya viene dado en F554105, `CLUNCS`/10000, igual en todos los palet_lote
+//   del mismo día, y ahí `CLSTOC` es la cantidad de CADA palet (no la de una
+//   orden), así que el peso del día es su suma. Las dos vías se unen con un
+//   UNION ALL y a partir de ahí se tratan igual (ver H.1).
+//   El coste de un mes (o del rango entero) es la media PONDERADA por la
+//   cantidad producida — el peso sale de la misma fila que el coste, así que no
+//   puede haber coste sin peso. Un artículo sin ningún movimiento costeado en
+//   el rango se queda con `costeReal: null`.
+//   HISTÓRICO: antes esto salía de F30026 con un IELEDG distinto por mes,
+//   mapeado a mano en /admin (tabla SQLite `coste_a1_coledg_mensual`, ya
+//   eliminada) — pero esos ledgers mensuales no existen en F30026 (los códigos
+//   que se configuraban eran de F4105.COLEDG, otra serie) y el coste real salía
+//   `null` para todo. Antes de eso se leyó F4105.COUNCS, que era el coste total
+//   del ledger y no el componente A1. Ver docs/costes.md §3.4.
 import { NextRequest, NextResponse } from 'next/server';
 import { getDbConnection } from '@/lib/db';
-import { getDayOfYear } from '@/lib/utils';
+import { getDayOfYear, isoToJulian } from '@/lib/utils';
 import { requireScreenAccess } from '@/lib/permissions';
 import { getDb } from '@/lib/sqlite';
 import { verifySession } from '@/lib/auth';
@@ -159,11 +158,11 @@ export interface DespieceNode {
   // cambia el catálogo).
   obsoleto: boolean; // F4101.IMSTKT = 'O' — mismo campo que ya usa /caducados
   costeA1: number | null;
-  // Coste real ponderado (F30026.IECSL, IECOST='A1', mismo componente que el
-  // teórico pero con el ledger mensual en vez de '07') en el rango de fechas
-  // pedido — en TODOS los nodos del árbol (a diferencia de `produccion`, que
-  // solo tiene valor en la raíz). `null` cuando ningún mes del rango tiene
-  // ledger configurado, o ninguno tiene coste en F30026 para este código. Ver
+  // Coste real unitario (F554105 + F55CR001) en el rango de fechas pedido,
+  // media ponderada por la cantidad producida de sus órdenes — en TODOS los
+  // nodos del árbol (a diferencia de `produccion`, que solo tiene valor en la
+  // raíz), cada uno con SUS propias órdenes. `null` si el artículo no tuvo
+  // ninguna orden costeada en el rango (todo lo comprado, p.ej.). Ver
   // comentario de cabecera del archivo.
   costeReal: number | null;
   cantidad: number; // cantidad de este artículo por unidad de su padre directo (1 en la raíz)
@@ -178,11 +177,13 @@ export interface DespieceNode {
   // mes" (`components/nova/coste-a1-monthly-chart.tsx`): ese gráfico agrega
   // VARIOS finales a la vez, así que necesita el detalle por mes de cada uno
   // por separado, no el agregado ya ponderado que da `costeReal`.
-  // `costeRealPorMes[i].costeReal` es el valor RAW de F30026 para ese mes (sin
-  // ponderar por nada) — la ponderación entre artículos la hace el frontend al
-  // construir la serie del gráfico.
+  // `costeRealPorMes[i].costeReal` es el coste de ESE mes (media ponderada de
+  // las órdenes del mes) y `cantidad` la producción de esas órdenes, que es el
+  // peso con el que el frontend combina varios artículos en un punto del
+  // gráfico y con el que los KPI ponderan el rango completo. `cantidad: 0`
+  // significa "sin órdenes ese mes" y va siempre con `costeReal: null`.
   produccionPorMes?: { mes: string; produccion: number }[];
-  costeRealPorMes?: { mes: string; costeReal: number | null }[];
+  costeRealPorMes?: { mes: string; costeReal: number | null; cantidad: number }[];
   children: DespieceNode[];
 }
 
@@ -204,22 +205,9 @@ export async function GET(req: NextRequest) {
   const startJdeProd = fechaAJdeProduccion(new Date(startDateStr));
   const endJdeProd = fechaAJdeProduccion(new Date(endDateStr));
 
-  // Meses calendario del rango (para el coste real) y su código COLEDG
-  // configurado en /admin — un mes sin código configurado se ignora, no
-  // bloquea el resto del cálculo.
+  // Meses calendario del rango — eje X de los gráficos mensuales y rejilla
+  // sobre la que se reparte el coste real de cada artículo (ver H.1).
   const mesesRango = mesesEntreFechas(new Date(startDateStr), new Date(endDateStr));
-  const coledgPorMes = new Map<string, string>();
-  try {
-    const db = getDb();
-    const placeholdersDb = mesesRango.map(() => '?').join(', ');
-    const filas = db
-      .prepare(`SELECT mes, coledg FROM coste_a1_coledg_mensual WHERE mes IN (${placeholdersDb})`)
-      .all(...mesesRango) as { mes: string; coledg: string }[];
-    filas.forEach((f) => coledgPorMes.set(f.mes, f.coledg));
-  } catch (e) {
-    console.error('Error leyendo coste_a1_coledg_mensual:', e);
-  }
-  const mesesSinConfigurar = mesesRango.filter((m) => !coledgPorMes.has(m));
 
   let conn;
   try {
@@ -267,7 +255,7 @@ export async function GET(req: NextRequest) {
       .sort();
 
     if (finales.length === 0) {
-      return NextResponse.json({ finales: [], meta: { totalFinales: 0, articulosDistintos: 0, mesesSinConfigurar, mesesRango } });
+      return NextResponse.json({ finales: [], meta: { totalFinales: 0, articulosDistintos: 0, mesesRango } });
     }
 
     // E) Construir el árbol de cada final (con corte de ciclos — un BOM real no
@@ -435,70 +423,128 @@ export async function GET(req: NextRequest) {
     );
     const costMap = new Map((costResult.rows as CostRow[]).map((r) => [r.LARGO, r.COSTE_RAW / 10000]));
 
-    // H.1) Coste real, para TODOS los códigos del árbol (no solo finales) — MISMA
-    // tabla que el coste teórico (F30026) y MISMO método de coste (IECOST='A1',
-    // Material) para que las dos cifras sean comparables: solo cambia el ledger
-    // (IELEDG), '07' (Coste Estándar) para el teórico, un código distinto por mes
-    // ('6M'=enero 2026, '6N'=febrero...) para el real, con mapeo configurado en
-    // `coste_a1_coledg_mensual` (ver más arriba).
+    // H.1) Coste real por artículo y mes (F554105 + F55CR001), para TODOS los
+    // códigos del árbol (no solo finales) — cada artículo con órdenes de
+    // fabricación propias tiene su propio coste real; los comprados (sin
+    // órdenes) se quedan en `null`, que es lo correcto.
     //
-    // Corregido — ANTES esta consulta leía F4105.COUNCS (Coste Unitario), que es
-    // el coste total del ledger (Material + Mano de obra + Gastos + Amortización,
-    // etc.), no solo el componente Material. Comparar ese total contra el A1
-    // (solo Material) mezclaba dos cosas distintas y no era una desviación real
-    // de coste, sino en gran parte la diferencia entre "todo" y "una parte".
-    // Pedido explícito del usuario, que conoce el modelo de costes de JDE: leer
-    // el MISMO componente A1 pero del ledger mensual en vez del '07' estándar.
-    const codigosColedg = Array.from(new Set(Array.from(coledgPorMes.values())));
-    const costeRealPorArticulo = new Map<string, Map<string, number>>(); // LARGO -> IELEDG -> coste
-    if (codigosColedg.length > 0) {
-      const coledgPlaceholders = codigosColedg.map((_, i) => `:cd${i}`).join(', ');
-      const coledgBinds: Record<string, string> = {};
-      codigosColedg.forEach((v, i) => { coledgBinds[`cd${i}`] = v; });
-      const costeRealResult = await conn.execute(
-        `SELECT TRIM(IELITM) AS LARGO, TRIM(IELEDG) AS COLEDG, IECSL AS COSTE_RAW
-         FROM F30026
-         WHERE TRIM(IECOST) = 'A1' AND IEMMCU = ${PLANTA} AND TRIM(IELEDG) IN (${coledgPlaceholders}) AND TRIM(IELITM) IN (${placeholders})`,
-        { ...coledgBinds, ...binds }
-      );
-      (costeRealResult.rows as { LARGO: string; COLEDG: string; COSTE_RAW: number }[]).forEach((r) => {
-        if (!costeRealPorArticulo.has(r.LARGO)) costeRealPorArticulo.set(r.LARGO, new Map());
-        costeRealPorArticulo.get(r.LARGO)!.set(r.COLEDG, r.COSTE_RAW / 10000);
-      });
+    // F554105 (CLLEDG='CR') tiene una fila por palet_lote, pero el coste y la
+    // cantidad son los de SU orden (CLURAB) repetidos en cada palet — de ahí el
+    // DISTINCT (verificado con datos reales: la cantidad CLSTOC es idéntica en
+    // todos los palets de una misma orden). F55CR001 (CRDOCO=orden,
+    // CRLEDG='CR') es el desglose por componente de coste (A1, X1...X9, y 'CR'
+    // que es el total). Se coge SOLO CRCOST='A1' (Material): es el mismo
+    // componente que el coste teórico de §3.1 (F30026, IECOST='A1'), así que
+    // las dos cifras comparan lo mismo y la desviación es de coste de
+    // material, no la diferencia entre "todo el coste" y "una parte".
+    // CRUNCS/10000 es el importe de TODA la orden, no unitario, así que se
+    // divide entre la cantidad producida (CLSTOC/10000) y se redondea a 4
+    // decimales.
+    //
+    // DOS CAMINOS, según haya orden de fabricación o no:
+    //   a) `CLURAB > 0` (artículos que se fabrican con orden propia): el de
+    //      arriba — dedup por orden y coste A1 desde F55CR001.
+    //   b) `CLURAB = 0` (componentes: envases, etiquetas, materia prima...):
+    //      no tienen orden, así que no hay nada que cruzar con F55CR001 — ahí
+    //      el coste unitario real ya viene dado en la propia F554105,
+    //      `CLUNCS`/10000. Comprobado con datos reales (1312800005, julio
+    //      2026): es el mismo valor en todos los palet_lote del día (y de
+    //      hecho del mes entero), mientras que `CLSTOC` sí varía palet a
+    //      palet — o sea que ahí CLSTOC es la cantidad DE CADA PALET, no la
+    //      de una orden, y el peso del día es su SUMA (a diferencia del
+    //      camino (a), donde CLSTOC se repite y se deduplica).
+    //   Las dos ramas devuelven (artículo, día, coste unitario, cantidad) y
+    //   se agregan juntas con un UNION ALL: a partir de ahí el tratamiento es
+    //   idéntico (media ponderada por cantidad, por mes y por rango).
+    //
+    // Sustituye a la versión anterior (F30026 con un IELEDG distinto por mes,
+    // mapeado a mano en /admin): esos ledgers mensuales no existen en F30026 —
+    // los códigos que se configuraban salían de F4105.COLEDG, que es otra serie
+    // — y el coste real salía `null` para todo. Con esta fuente no hay nada que
+    // configurar a mano.
+    // Sin filtro de planta a propósito (el coste teórico sí fija IEMMCU=10999):
+    // el coste real se calcula con las órdenes de TODAS las plantas — confirmado
+    // con el usuario, ver docs/costes.md §3.4.
+    const startJdeCR = isoToJulian(startDateStr);
+    const endJdeCR = isoToJulian(endDateStr);
+    const costeRealResult = await conn.execute(
+      `WITH ordenes AS (
+         SELECT DISTINCT TRIM(i.IMLITM) AS LARGO, c.CLURAB AS ORDEN,
+                c.CLURDT AS FECHA_JDE, c.CLSTOC / 10000 AS CANTIDAD
+         FROM F554105 c
+         JOIN F4101 i ON i.IMITM = c.CLITM
+         WHERE TRIM(c.CLLEDG) = 'CR'
+           AND c.CLURAB > 0
+           AND c.CLURDT BETWEEN :startJdeCR AND :endJdeCR
+           AND TRIM(i.IMLITM) IN (${placeholders})
+       ),
+       por_orden AS (
+         SELECT o.LARGO, o.FECHA_JDE, o.CANTIDAD,
+                SUM(ROUND((r.CRUNCS / 10000) / NULLIF(o.CANTIDAD, 0), 4)) AS COSTE_UNIT
+         FROM ordenes o
+         JOIN F55CR001 r ON r.CRDOCO = o.ORDEN
+         WHERE TRIM(r.CRLEDG) = 'CR' AND TRIM(r.CRCOST) = 'A1'
+         GROUP BY o.LARGO, o.FECHA_JDE, o.ORDEN, o.CANTIDAD
+       ),
+       sin_orden AS (
+         SELECT TRIM(i.IMLITM) AS LARGO, c.CLURDT AS FECHA_JDE,
+                MIN(c.CLUNCS) / 10000 AS COSTE_UNIT,
+                SUM(c.CLSTOC) / 10000 AS CANTIDAD
+         FROM F554105 c
+         JOIN F4101 i ON i.IMITM = c.CLITM
+         WHERE TRIM(c.CLLEDG) = 'CR'
+           AND (c.CLURAB IS NULL OR c.CLURAB = 0)
+           AND c.CLURDT BETWEEN :startJdeCR AND :endJdeCR
+           AND TRIM(i.IMLITM) IN (${placeholders})
+         GROUP BY TRIM(i.IMLITM), c.CLURDT
+       )
+       SELECT LARGO, FECHA_JDE,
+              SUM(COSTE_UNIT * CANTIDAD) AS IMPORTE,
+              SUM(CANTIDAD) AS CANTIDAD
+       FROM (SELECT LARGO, FECHA_JDE, COSTE_UNIT, CANTIDAD FROM por_orden
+             UNION ALL
+             SELECT LARGO, FECHA_JDE, COSTE_UNIT, CANTIDAD FROM sin_orden)
+       GROUP BY LARGO, FECHA_JDE`,
+      { startJdeCR, endJdeCR, ...binds }
+    );
+    // LARGO -> mes 'YYYY-MM' -> { importe, cantidad }. Se guardan los dos
+    // sumatorios en vez del coste ya dividido: así se pueden agregar varios
+    // meses (aquí) o varios artículos (en el frontend, para los gráficos) sin
+    // perder el peso de cada uno.
+    const costeRealPorArticulo = new Map<string, Map<string, { importe: number; cantidad: number }>>();
+    (costeRealResult.rows as { LARGO: string; FECHA_JDE: number; IMPORTE: number; CANTIDAD: number }[]).forEach((r) => {
+      // CLURDT lleva el prefijo de siglo (CYYDDD, p.ej. 126182); fechaJdeAMes()
+      // espera el valor sin él, igual que MOD(TO55TAREA, 100000) más arriba.
+      const mes = fechaJdeAMes(r.FECHA_JDE % 100000);
+      if (!costeRealPorArticulo.has(r.LARGO)) costeRealPorArticulo.set(r.LARGO, new Map());
+      const porMes = costeRealPorArticulo.get(r.LARGO)!;
+      const acc = porMes.get(mes) ?? { importe: 0, cantidad: 0 };
+      acc.importe += r.IMPORTE;
+      acc.cantidad += r.CANTIDAD;
+      porMes.set(mes, acc);
+    });
+
+    // Coste real del rango completo: media ponderada por la cantidad producida
+    // de las MISMAS órdenes que dan el coste — no por la producción de F4111,
+    // que es otra fuente y puede no cuadrar (antes sí lo era, y de ahí salían
+    // los casos de "coste sin peso" que había que parchear con una media
+    // simple). Con un solo mes en el rango es directamente el coste de ese mes.
+    // `null` si el artículo no tuvo órdenes en el rango.
+    function costeRealNodo(codigo: string): number | null {
+      const porMes = costeRealPorArticulo.get(codigo);
+      if (!porMes) return null;
+      let importe = 0;
+      let cantidad = 0;
+      porMes.forEach((v) => { importe += v.importe; cantidad += v.cantidad; });
+      return cantidad > 0 ? importe / cantidad : null;
     }
 
-    // Coste real ponderado de un código concreto, dados los pesos mensuales del
-    // FINAL al que pertenece (mismo peso para todo su árbol). Un mes sin coste
-    // en F30026 para este código se excluye (no cuenta ni en el numerador ni en
-    // el denominador). Si el peso total es 0 pero hay algún coste disponible,
-    // cae a media simple entre esos meses en vez de devolver null — ver
-    // comentario de cabecera del archivo.
-    function costeRealNodo(codigo: string, pesos: { mes: string; peso: number }[]): number | null {
-      const costesPorMes = costeRealPorArticulo.get(codigo);
-      if (!costesPorMes) return null;
-      let sumaPonderada = 0;
-      let sumaPesos = 0;
-      let sumaSimple = 0;
-      let n = 0;
-      for (const { mes, peso } of pesos) {
-        const coledg = coledgPorMes.get(mes);
-        if (!coledg) continue;
-        const coste = costesPorMes.get(coledg);
-        if (coste == null) continue;
-        sumaPonderada += coste * peso;
-        sumaPesos += peso;
-        sumaSimple += coste;
-        n += 1;
-      }
-      if (n === 0) return null;
-      return sumaPesos > 0 ? sumaPonderada / sumaPesos : sumaSimple / n;
-    }
-
-    // Asigna `costeReal` a todo el subárbol de un final, con los pesos
-    // mensuales (producción) de ESE final — no del propio nodo, ver cabecera.
-    function asignarCosteReal(n: DespieceNode, pesos: { mes: string; peso: number }[]): void {
-      n.costeReal = costeRealNodo(n.codigo, pesos);
-      n.children.forEach((c) => asignarCosteReal(c, pesos));
+    // Asigna `costeReal` a todo el subárbol — cada nodo con SUS propias órdenes.
+    // Antes heredaba los pesos mensuales del artículo final, porque el coste
+    // venía de una tabla que no sabía nada de órdenes de fabricación.
+    function asignarCosteReal(n: DespieceNode): void {
+      n.costeReal = costeRealNodo(n.codigo);
+      n.children.forEach(asignarCosteReal);
     }
 
     // I) Catálogo de familia (UDC 41/S2) y de categoría/tipo (UDC 41/S1) — mismo
@@ -549,13 +595,15 @@ export async function GET(req: NextRequest) {
     // mensuales (producción) de ESE final — ver asignarCosteReal() más arriba.
     finalesOut.forEach((f) => {
       f.produccion = produccionMap.get(f.codigo) ?? 0;
-      const pesos = mesesRango.map((mes) => ({ mes, peso: produccionMensualMap.get(f.codigo)?.get(mes) ?? 0 }));
-      asignarCosteReal(f, pesos);
-      f.produccionPorMes = pesos.map(({ mes, peso }) => ({ mes, produccion: peso }));
+      asignarCosteReal(f);
+      f.produccionPorMes = mesesRango.map((mes) => ({ mes, produccion: produccionMensualMap.get(f.codigo)?.get(mes) ?? 0 }));
       f.costeRealPorMes = mesesRango.map((mes) => {
-        const coledg = coledgPorMes.get(mes);
-        const coste = coledg ? costeRealPorArticulo.get(f.codigo)?.get(coledg) ?? null : null;
-        return { mes, costeReal: coste };
+        const acc = costeRealPorArticulo.get(f.codigo)?.get(mes);
+        return {
+          mes,
+          costeReal: acc && acc.cantidad > 0 ? acc.importe / acc.cantidad : null,
+          cantidad: acc?.cantidad ?? 0,
+        };
       });
     });
 
@@ -576,10 +624,6 @@ export async function GET(req: NextRequest) {
       meta: {
         totalFinales: finalesOut.length,
         articulosDistintos: codigos.length,
-        // Meses del rango sin código COLEDG configurado en /admin — el coste
-        // real de esos meses no entra en el cálculo. Vacío = rango totalmente
-        // cubierto.
-        mesesSinConfigurar,
         // Meses calendario 'YYYY-MM' del rango pedido, en orden — el frontend
         // los usa como eje X del gráfico mensual en vez de recalcularlos.
         mesesRango,

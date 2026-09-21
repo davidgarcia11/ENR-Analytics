@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getDb } from '@/lib/sqlite';
+import { requireAdmin } from '@/lib/permissions';
 
 // PUT /api/admin/jde-statuses/:code
 // Actualiza la descripción de un código de estado JDE existente.
@@ -10,6 +11,9 @@ export async function PUT(
     req: NextRequest,
     { params }: { params: Promise<{ code: string }> }
 ) {
+  const denied = await requireAdmin();
+  if (denied) return denied;
+
     const { code } = await params;
     if (!code) {
         return NextResponse.json({ error: 'Código requerido' }, { status: 400 });

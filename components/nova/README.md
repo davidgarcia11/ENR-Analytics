@@ -252,6 +252,42 @@ de intentar un script inline propio.
   para un modal grande centrado (ej. un panel de detalle/verificación), sobreescribe el
   ancho vía `className` en `<DialogContent>` (`w-[90vw] max-w-3xl` o similar) en vez de
   tocar el primitivo compartido.
+- **`Combobox` instalado** (`bunx --bun shadcn@latest add combobox`, panel de loteadora —
+  primer desplegable Nova con búsqueda de texto sobre una lista grande; los `Select`
+  existentes hasta entonces eran listas cortas cerradas): primitivo nativo de Base UI
+  (`@base-ui/react/combobox`), **no** `cmdk`. El fichero instalado trajo dos bugs de
+  registro que hubo que corregir a mano, mismo tipo de arreglo legítimo que el resto de
+  esta lista — no reinstales sin repetirlos:
+  - `import { cn } from "cn"` en vez de `"@/lib/utils"` (y el CLI añadió el paquete npm
+    `cn` como dependencia sin que nada lo usara — se quitó de `package.json`).
+  - `<ComboboxPrimitive.Portal>` sin `container={useNovaPortalContainer()}` — el mismo
+    bug de portal de siempre (ver más arriba), aplícalo igual que en
+    `popover.tsx`/`select.tsx`.
+  - **Uso**: pasa `items` como array plano del tipo del VALOR seleccionado (ej. `string[]`
+    de IDs), no como objetos `{value,label}` con `<ComboboxItem value={item.value}>`
+    aplanado — mezclar ambos formatos rompe el filtrado y el texto que se muestra tras
+    seleccionar. Si necesitas mostrar más que el propio valor (código + descripción),
+    pásale `itemToStringLabel={(id) => ...}` al `<Combobox>` y renderiza tú mismo el label
+    dentro de `<ComboboxItem>` — ver `app/loteadora/page.tsx` y `docs/loteadora.md` §14.
+- **No hay "date picker" de una fecha única en el catálogo ShadcnSpace** (comprobado con
+  `searchBlocks`/`listComponents` antes de construir uno) — solo el rango
+  (`date-range-picker.tsx`). Para una fecha exacta, `components/nova/date-picker.tsx`
+  (panel de loteadora) reutiliza `Calendar`+`Popover` ya instalados a mano, mismo patrón
+  artesanal que `month-range-picker.tsx`/`mode-toggle.tsx` cuando el catálogo no cubre
+  algo — reutilízalo en vez de construir otro desde cero.
+- **`Alert` instalado** (`bunx --bun shadcn@latest add alert`, panel de loteadora — para
+  sustituir avisos ámbar/error escritos a mano por `<p>`/`<div>` sueltos, ver
+  `docs/loteadora.md` §14): **no** viene del catálogo de ShadcnSpace (comprobado con
+  `searchBlocks`/`listComponents` — no tiene ningún componente de alerta/banner/callout,
+  solo bloques compuestos), sino del registro base de shadcn/ui, con el mismo comando
+  oficial. Mismo bug de registro que `Combobox` — no reinstales sin corregirlo:
+  - `import { cn } from "cn"` en vez de `"@/lib/utils"` (y el CLI volvió a añadir el
+    paquete npm `cn` a `package.json` sin que nada lo usara — se quitó otra vez).
+  - Solo trae variantes `default`/`destructive` (sin "warning"/"success") — para el aviso
+    ámbar se pasa el color por `className` en el propio `<Alert>` y `<AlertDescription>`
+    en vez de añadir una variante nueva al componente compartido (ver
+    `app/loteadora/page.tsx`). Sin problema de portal: `Alert` no usa
+    `*Primitive.Portal`, así que no necesita `useNovaPortalContainer()`.
 
 ## Cómo construir el siguiente panel Nova
 

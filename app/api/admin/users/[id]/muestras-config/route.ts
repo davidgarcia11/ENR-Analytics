@@ -1,15 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getDb } from '@/lib/sqlite';
-import { verifySession } from '@/lib/auth';
+import { requireAccess } from '@/lib/permissions';
 
 // Activa/desactiva el permiso suelto can_configure_muestras de un usuario — endpoint
 // propio (no el PUT general de edición) para poder alternarlo con un solo clic desde
 // la tabla de /admin, sin entrar en modo edición.
 export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-  const user = await verifySession();
-  if (!user || user.role !== 'admin') {
-    return NextResponse.json({ error: 'No autorizado' }, { status: 403 });
-  }
+  const acceso = await requireAccess({ role: 'admin' });
+  if (!acceso.ok) return acceso.denied;
 
   const { id } = await params;
   const { enabled } = await req.json();

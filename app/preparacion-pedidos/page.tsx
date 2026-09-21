@@ -20,7 +20,7 @@ import { AppShell } from "@/components/AppShell"
 import { KpiCard } from "@/components/KpiCard"
 import { PresetPanel, PresetQuickSelect, usePresets } from "@/components/PresetPanel"
 import * as XLSX from 'xlsx'
-import { useRouter } from "next/navigation"
+import { RequireAccess, useApiFetch, useSession } from "@/components/SessionProvider"
 import React from "react"
 import { plantJdeCode } from "@/lib/plants"
 
@@ -33,7 +33,6 @@ function matchesWildcard(value: string, pattern: string): boolean {
   return new RegExp('^' + escaped.replace(/\*/g, '.*') + '$', 'i').test(value)
 }
 
-interface SessionUser { id: number; username: string; role: string; name: string; surname: string; defaultPlant: string }
 
 interface LotDetail {
   lineNumber: number
@@ -79,11 +78,11 @@ interface Summary {
   pendientes: number
 }
 
-export default function PreparacionPedidos() {
-  const router = useRouter()
+function PreparacionPedidosPanel() {
 
   // Auth
-  const [sessionUser, setSessionUser] = useState<SessionUser | null>(null)
+  const { user: sessionUser, logout } = useSession()
+  const apiFetch = useApiFetch()
 
   // Data
   const [orders, setOrders] = useState<Order[]>([])
@@ -195,52 +194,21 @@ export default function PreparacionPedidos() {
   // filtrada por la planta por defecto del usuario (si tiene una) y no se vea
   // primero "todas las plantas" y luego solo la suya.
   useEffect(() => {
-    (async () => {
-      const user = await checkSession()
-      const code = plantJdeCode(user?.defaultPlant)
-      const initialPlants = code ? [code] : []
-      setSelectedPlants(initialPlants)
-      fetchPlants()
-      fetchData(initialPlants)
-    })()
-    fetch('/api/categories?field=srp2').then(r => r.ok ? r.json() : []).then(setAllFamilias).catch(() => {})
+    const code = plantJdeCode(sessionUser?.defaultPlant)
+    const initialPlants = code ? [code] : []
+    setSelectedPlants(initialPlants)
+    fetchPlants()
+    fetchData(initialPlants)
+    apiFetch('/api/categories?field=srp2').then(r => r.ok ? r.json() : []).then(setAllFamilias).catch(() => {})
   }, [])
 
   // --- DATOS ---
 
   const fetchPlants = async () => {
     try {
-      const res = await fetch('/api/plants')
+      const res = await apiFetch('/api/plants')
       if (res.ok) setPlants(await res.json())
     } catch { }
-  }
-
-  const checkSession = async (): Promise<SessionUser | null> => {
-    try {
-      const res = await fetch('/api/auth/me')
-      let user = null
-      if (res.ok) {
-        user = await res.json()
-        if (user.mustChangePassword) { router.push('/cambiar-contrasena'); return null }
-        setSessionUser(user)
-      }
-      const screensRes = await fetch('/api/screen-permissions')
-      if (screensRes.ok) {
-        const screens = await screensRes.json()
-        const mine = screens['pedidos']
-        if (mine && !mine.is_public) {
-          if (!user || (user.role !== 'admin' && !mine.allowed_roles.includes(user.role))) {
-            router.push('/login'); return null
-          }
-        }
-      }
-      return user
-    } catch { return null }
-  }
-
-  const logout = async () => {
-    await fetch('/api/auth/logout', { method: 'POST' })
-    setSessionUser(null)
   }
 
   // plantsOverride se usa solo en la carga inicial, cuando aún no ha dado tiempo
@@ -263,7 +231,7 @@ export default function PreparacionPedidos() {
       if (filters.deliveryStartDate) params.append('deliveryStartDate', filters.deliveryStartDate)
       if (filters.deliveryEndDate)   params.append('deliveryEndDate',   filters.deliveryEndDate)
 
-      const res  = await fetch(`/api/orders?${params.toString()}`)
+      const res  = await apiFetch(`/api/orders?${params.toString()}`)
       const json = await res.json()
 
       if (json.error) {
@@ -927,5 +895,13 @@ export default function PreparacionPedidos() {
         </Card>
 
     </AppShell>
+  )
+}
+
+export default function PreparacionPedidosPage() {
+  return (
+    <RequireAccess screen="pedidos">
+      <PreparacionPedidosPanel />
+    </RequireAccess>
   )
 }

@@ -5,7 +5,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useRouter } from "next/navigation";
+import { RequireAccess, useApiFetch, useSession } from "@/components/SessionProvider";
 import { toast } from "sonner";
 import { Download } from "lucide-react";
 import * as XLSX from "xlsx";
@@ -16,16 +16,15 @@ import Statistics from "@/components/shadcn-space/blocks/statistics-04/statistic
 import CosteA1Table, { CosteA1FilterBar, useCosteA1Filters, type DespieceNode } from "@/components/nova/coste-a1-table";
 import CosteA1DesglosePanel from "@/components/nova/coste-a1-desglose-panel";
 import CosteMensualChart from "@/components/shadcn-space/blocks/chart-03/chart";
-import ProduccionMensualChart from "@/components/shadcn-space/blocks/chart-04/chart";
-import { formatMesCorto, serieCosteMensual, serieProduccionMensual } from "@/components/nova/coste-a1-shared";
+import TopImpactoChart from "@/components/shadcn-space/blocks/chart-04/chart";
+import { extremosImpacto, formatMesCorto, serieCosteMensual } from "@/components/nova/coste-a1-shared";
 import { Button } from "@/components/nova/ui/button";
 import { Toaster } from "@/components/nova/ui/sonner";
 
-interface SessionUser { id: number; username: string; role: string; name: string; surname: string }
 
 interface CosteA1Response {
   finales: DespieceNode[];
-  meta: { totalFinales: number; articulosDistintos: number; mesesSinConfigurar: string[]; mesesRango: string[] };
+  meta: { totalFinales: number; articulosDistintos: number; mesesRango: string[] };
 }
 
 // Recorre el árbol para aplanarlo a filas (exportación Excel) y para las medias de
@@ -37,9 +36,9 @@ function aplanar(nodos: DespieceNode[], raiz: string, nivel: number): (DespieceN
   ]);
 }
 
-export default function CosteA1Page() {
-  const router = useRouter();
-  const [sessionUser, setSessionUser] = useState<SessionUser | null>(null);
+function CosteA1PagePanel() {
+  const { user: sessionUser, logout } = useSession();
+  const apiFetch = useApiFetch();
 
   const [mode, setMode] = useState<ThemeMode>("system");
   const [systemPrefersDark, setSystemPrefersDark] = useState(false);
@@ -52,20 +51,7 @@ export default function CosteA1Page() {
   }, []);
   const effectiveTheme = mode === "system" ? (systemPrefersDark ? "dark" : "light") : mode;
 
-  // Mismo patrón que el resto de paneles (ver app/compras/page.tsx) — solo para
-  // mostrar quién ha entrado y poder cerrar sesión desde la cabecera. El control de
-  // acceso real ya lo hace requireScreenAccess('costes') en api/costes/route.ts.
-  useEffect(() => {
-    fetch("/api/auth/me")
-      .then((r) => (r.ok ? r.json() : null))
-      .then(setSessionUser)
-      .catch(() => setSessionUser(null));
-  }, []);
 
-  const logout = async () => {
-    await fetch("/api/auth/logout", { method: "POST" });
-    setSessionUser(null);
-  };
 
   const [data, setData] = useState<CosteA1Response | null>(null);
   const [loading, setLoading] = useState(false);
@@ -88,11 +74,7 @@ export default function CosteA1Page() {
         startDate: filtros.monthRange.startDate,
         endDate: filtros.monthRange.endDate,
       });
-      const res = await fetch(`/api/costes?${params}`);
-      if (res.status === 401 || res.status === 403) {
-        router.push("/login");
-        return;
-      }
+      const res = await apiFetch(`/api/costes?${params}`);
       // Bug real visto en directo: un corte de conexión con Oracle (NJS-500,
       // ECONNRESET) hace que la API devuelva 500 con `{ error: '...' }`, sin
       // `finales` — sin este chequeo, `json.finales.length` de más abajo
@@ -107,7 +89,7 @@ export default function CosteA1Page() {
     } finally {
       setLoading(false);
     }
-  }, [router, filtros.monthRange]);
+  }, [apiFetch, filtros.monthRange]);
 
   // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => { fetchData(); }, []);
@@ -163,12 +145,12 @@ export default function CosteA1Page() {
 
   const portalContainerRef = useRef<HTMLDivElement>(null);
 
-  // Gráficos "Coste real vs. teórico" y "Producción" (arriba de la tabla) —
-  // agregan VARIOS finales a la vez, a diferencia de la tabla (un artículo por
-  // fila): mismos artículos que la tabla tiene filtrados en cada momento
-  // (búsqueda/familia, `filtros.filtered`), confirmado con el usuario. Ver
-  // serieCosteMensual()/serieProduccionMensual() (coste-a1-shared.tsx) para el
-  // porqué de la ponderación.
+  // Gráficos "Coste real vs. teórico" y "Top artículos por impacto" (arriba de
+  // la tabla) — agregan VARIOS finales a la vez, a diferencia de la tabla (un
+  // artículo por fila): mismos artículos que la tabla tiene filtrados en cada
+  // momento (búsqueda/familia, `filtros.filtered`), confirmado con el usuario.
+  // Ver serieCosteMensual()/extremosImpacto() (coste-a1-shared.tsx) para el
+  // porqué de la ponderación y del orden.
   const serieCoste = useMemo(
     () =>
       serieCosteMensual(filtros.filtered, data?.meta.mesesRango ?? []).map((p) => ({
@@ -178,14 +160,7 @@ export default function CosteA1Page() {
       })),
     [filtros.filtered, data?.meta.mesesRango]
   );
-  const serieProduccion = useMemo(
-    () =>
-      serieProduccionMensual(filtros.filtered, data?.meta.mesesRango ?? []).map((p) => ({
-        mes: formatMesCorto(p.mes),
-        produccion: p.produccion,
-      })),
-    [filtros.filtered, data?.meta.mesesRango]
-  );
+  const topImpacto = useMemo(() => extremosImpacto(filtros.filtered), [filtros.filtered]);
 
   // KPI — pedido explícito de renovarlos: los 4 originales (Artículos
   // finales/Coste A1 medio/Sin coste A1/Artículos en los árboles) describían
@@ -197,17 +172,19 @@ export default function CosteA1Page() {
   const visibles = filtros.filtered;
   // Coincide con la misma regla de "misma población" del gráfico
   // (serieCosteMensual, coste-a1-shared.tsx): solo entran en la desviación
-  // ponderada los artículos con coste real Y producción > 0 en el rango — un
-  // artículo con coste real pero sin producción no debe pesar en la media.
-  const conDesviacionPonderable = visibles.filter((n) => n.costeReal != null && n.costeA1 != null && (n.produccion ?? 0) > 0);
-  const sumaPesos = conDesviacionPonderable.reduce((s, n) => s + (n.produccion ?? 0), 0);
-  const sumaTeoricoPonderado = conDesviacionPonderable.reduce((s, n) => s + (n.costeA1 ?? 0) * (n.produccion ?? 0), 0);
-  const sumaRealPonderado = conDesviacionPonderable.reduce((s, n) => s + (n.costeReal ?? 0) * (n.produccion ?? 0), 0);
+  // ponderada los artículos con coste real Y cantidad costeada > 0 en el rango.
+  // El peso es la cantidad producida en las órdenes que generaron el coste
+  // (`costeRealPorMes[].cantidad`), no la producción de F4111 (`produccion`,
+  // otra fuente) — así el € del impacto es exactamente "sobre lo que se costeó".
+  const cantidadCosteada = (n: DespieceNode) => (n.costeRealPorMes ?? []).reduce((s, m) => s + m.cantidad, 0);
+  const conDesviacionPonderable = visibles.filter((n) => n.costeReal != null && n.costeA1 != null && cantidadCosteada(n) > 0);
+  const sumaPesos = conDesviacionPonderable.reduce((s, n) => s + cantidadCosteada(n), 0);
+  const sumaTeoricoPonderado = conDesviacionPonderable.reduce((s, n) => s + (n.costeA1 ?? 0) * cantidadCosteada(n), 0);
+  const sumaRealPonderado = conDesviacionPonderable.reduce((s, n) => s + (n.costeReal ?? 0) * cantidadCosteada(n), 0);
   const desviacionMedia = sumaPesos > 0 && sumaTeoricoPonderado > 0 ? ((sumaRealPonderado - sumaTeoricoPonderado) / sumaTeoricoPonderado) * 100 : null;
   // Impacto económico de la desviación en euros — sustituye a "Artículos con
   // coste real" (contador de catálogo, poco útil para una directora
-  // financiera). Mismo criterio de población que desviacionMedia: solo
-  // artículos con coste real Y producción > 0 pesan aquí.
+  // financiera). Mismo criterio de población y mismo peso que desviacionMedia.
   const impactoEuros = sumaPesos > 0 ? sumaRealPonderado - sumaTeoricoPonderado : null;
   const produccionTotal = visibles.reduce((s, n) => s + (n.produccion ?? 0), 0);
 
@@ -218,7 +195,7 @@ export default function CosteA1Page() {
           value: desviacionMedia != null
             ? `${desviacionMedia > 0 ? "+" : ""}${desviacionMedia.toLocaleString("es-ES", { minimumFractionDigits: 1, maximumFractionDigits: 1 })} %`
             : "—",
-          subValue: "Ponderada por producción, artículos filtrados",
+          subValue: "Ponderada por cantidad costeada, artículos filtrados",
           // Mismo criterio de color que DesviacionBadge (coste-a1-shared.tsx):
           // positivo = sobrecoste (destructive), negativo = ahorro (success).
           // Exactamente 0 o sin dato se queda en el color neutro.
@@ -266,10 +243,10 @@ export default function CosteA1Page() {
                     pedido explícito, "dos componentes arriba". */}
                 <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
                   <div className="lg:col-span-2">
-                    <CosteMensualChart data={serieCoste} />
+                    <CosteMensualChart data={serieCoste} className="h-full" />
                   </div>
                   <div className="lg:col-span-1">
-                    <ProduccionMensualChart data={serieProduccion} />
+                    <TopImpactoChart data={topImpacto} onSelect={setSelectedCodigo} />
                   </div>
                 </div>
                 {/* Vuelta a 2/3-1/3: el ancho exterior de tabla/panel no debía
@@ -293,5 +270,13 @@ export default function CosteA1Page() {
         <Toaster />
       </NovaPortalProvider>
     </div>
+  );
+}
+
+export default function CosteA1Page() {
+  return (
+    <RequireAccess screen="costes">
+      <CosteA1PagePanel />
+    </RequireAccess>
   );
 }

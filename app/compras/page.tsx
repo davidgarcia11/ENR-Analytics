@@ -5,7 +5,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { useRouter } from "next/navigation";
+import { RequireAccess, useApiFetch, useSession } from "@/components/SessionProvider";
 import * as XLSX from "xlsx";
 import { toast } from "sonner";
 import { Download, Filter, Loader2 } from "lucide-react";
@@ -33,7 +33,6 @@ function currentMonthRange(): MonthRange {
   };
 }
 
-interface SessionUser { id: number; username: string; role: string; name: string; surname: string }
 
 interface Metric {
   previsto: number;
@@ -105,8 +104,7 @@ function setColNumFmt(ws: XLSX.WorkSheet, colIdx: number, rowCount: number, fmt:
   }
 }
 
-export default function ComprasV2Page() {
-  const router = useRouter();
+function ComprasV2PagePanel() {
   const [drill, setDrill] = useState<DrillState>({ familia: null, canal: null, canalLabel: null });
   const [unit, setUnit] = useState<Unit>("unidades");
   // Por defecto, el mes en curso — el rango se aplica solo al pulsar "Filtrar", no en
@@ -114,7 +112,8 @@ export default function ComprasV2Page() {
   const [range, setRange] = useState<MonthRange>(currentMonthRange());
   const [data, setData] = useState<ApiResponse | null>(null);
   const [fetching, setFetching] = useState(false);
-  const [sessionUser, setSessionUser] = useState<SessionUser | null>(null);
+  const { user: sessionUser, logout } = useSession();
+  const apiFetch = useApiFetch();
 
   // Claro/Oscuro/Sistema — no persiste entre recargas (sin localStorage/sessionStorage,
   // según las reglas del proyecto): siempre empieza en "system".
@@ -135,17 +134,10 @@ export default function ComprasV2Page() {
     const params = new URLSearchParams();
     params.set("startDate", r.startDate);
     params.set("endDate", r.endDate);
-    fetch(`/api/compras?${params.toString()}`)
-      .then((res) => {
-        // Sin sesión (o sin permiso) requireScreenAccess('compras') devuelve 401/403
-        // con { error }, no la forma de ApiResponse — si se intenta pintar igualmente
-        // (data.resumen/data.familias undefined) la página revienta en vez de redirigir.
-        if (res.status === 401 || res.status === 403) {
-          router.push("/login");
-          return null;
-        }
-        return res.json();
-      })
+    apiFetch(`/api/compras?${params.toString()}`)
+      // El 401 lo resuelve useApiFetch (manda al login); el 403 no puede darse
+      // dentro de <RequireAccess screen="compras">.
+      .then((res) => (res.ok ? res.json() : null))
       .then((json) => {
         if (json) {
           setData(json);
@@ -163,20 +155,7 @@ export default function ComprasV2Page() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => { fetchData(range); }, []);
 
-  // Mismo patrón que el resto de paneles (ver app/caducados/page.tsx) — solo para
-  // mostrar quién ha entrado y poder cerrar sesión desde la cabecera. El control de
-  // acceso real ya lo hace requireScreenAccess('compras') en api/compras/route.ts.
-  useEffect(() => {
-    fetch("/api/auth/me")
-      .then((r) => (r.ok ? r.json() : null))
-      .then(setSessionUser)
-      .catch(() => setSessionUser(null));
-  }, []);
 
-  const logout = async () => {
-    await fetch("/api/auth/logout", { method: "POST" });
-    setSessionUser(null);
-  };
 
   const statisticsData = useMemo(() => {
     if (!data) return undefined;
@@ -405,5 +384,13 @@ export default function ComprasV2Page() {
       </div>
       <Toaster />
     </div>
+  );
+}
+
+export default function ComprasV2Page() {
+  return (
+    <RequireAccess screen="compras">
+      <ComprasV2PagePanel />
+    </RequireAccess>
   );
 }

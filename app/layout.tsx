@@ -3,6 +3,7 @@ import { Geist, Geist_Mono } from "next/font/google"; // Fuentes de Google optim
 import "./globals.css"; // Importamos los estilos globales (Tailwind, resets, etc.)
 import "./nova-theme.css"; // Tema Nova (ShadcnSpace) aislado bajo [data-nova-theme] — no afecta a los paneles existentes
 import { ToastProvider } from "@/components/ui/toast"; // Sistema de notificaciones global
+import { SessionProvider } from "@/components/SessionProvider"; // Sesión compartida: revalida sola y decide quién entra en cada panel
 
 // Configuración de la fuente Sans Serif (Geist)
 const geistSans = Geist({
@@ -37,7 +38,9 @@ export default function RootLayout({
         className={`${geistSans.variable} ${geistMono.variable}`}
       >
         {/* Aquí se inyecta el contenido de la página que estés visitando */}
-        <ToastProvider>{children}</ToastProvider>
+        <SessionProvider>
+          <ToastProvider>{children}</ToastProvider>
+        </SessionProvider>
       </body>
     </html>
   );

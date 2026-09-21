@@ -1,0 +1,14 @@
+import { NextRequest, NextResponse } from 'next/server';
+import { getDb } from '@/lib/sqlite';
+import { requireAccess } from '@/lib/permissions';
+
+export async function DELETE(_req: NextRequest, { params }: { params: Promise<{ articuloId: string }> }) {
+  const acceso = await requireAccess({ role: 'admin' });
+  if (!acceso.ok) return acceso.denied;
+
+  const { articuloId } = await params;
+  const db = getDb();
+  db.prepare('DELETE FROM loteadora_articulo_mensajes WHERE articulo_id = ?').run(articuloId);
+
+  return NextResponse.json({ ok: true });
+}

@@ -1,13 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getDb } from '@/lib/sqlite';
-import { verifySession, hashPassword } from '@/lib/auth';
+import { hashPassword } from '@/lib/auth';
 import { PLANTS } from '@/lib/plants';
+import { requireAccess } from '@/lib/permissions';
 
 export async function GET() {
-  const user = await verifySession();
-  if (!user || user.role !== 'admin') {
-    return NextResponse.json({ error: 'No autorizado' }, { status: 403 });
-  }
+  const acceso = await requireAccess({ role: 'admin' });
+  if (!acceso.ok) return acceso.denied;
 
   const db = getDb();
   const users = db.prepare('SELECT id, username, role, name, surname, default_plant AS defaultPlant, can_configure_muestras AS canConfigureMuestras, created_at FROM users ORDER BY id').all();
@@ -15,10 +14,9 @@ export async function GET() {
 }
 
 export async function POST(req: NextRequest) {
-  const user = await verifySession();
-  if (!user || user.role !== 'admin') {
-    return NextResponse.json({ error: 'No autorizado' }, { status: 403 });
-  }
+  const acceso = await requireAccess({ role: 'admin' });
+  if (!acceso.ok) return acceso.denied;
+  const user = acceso.user!;
 
   try {
     const { username, password, role, mustChangePassword, name, surname, defaultPlant } = await req.json();

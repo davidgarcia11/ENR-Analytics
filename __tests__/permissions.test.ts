@@ -40,6 +40,18 @@ function createTestDb() {
       PRIMARY KEY (screen_id, role_id)
     );
 
+    CREATE TABLE users (
+      id       INTEGER PRIMARY KEY,
+      username TEXT NOT NULL UNIQUE,
+      role     TEXT NOT NULL,
+      can_configure_muestras INTEGER NOT NULL DEFAULT 0,
+      must_change_password   INTEGER NOT NULL DEFAULT 0
+    );
+
+    INSERT INTO users VALUES (1, 'admin', 'admin',      0, 0);
+    INSERT INTO users VALUES (2, 'user1', 'user',       0, 0);
+    INSERT INTO users VALUES (3, 'sup1',  'supervisor', 1, 0);
+
     INSERT INTO roles VALUES (1, 'admin',      'Administrador');
     INSERT INTO roles VALUES (2, 'user',       'Usuario');
     INSERT INTO roles VALUES (3, 'supervisor', 'Supervisor');
@@ -62,7 +74,7 @@ let _mockSession: { id: number; username: string; role: string; name: string; su
 mock.module('@/lib/sqlite', () => ({ getDb: () => testDb }))
 mock.module('@/lib/auth',   () => ({ verifySession: async () => _mockSession }))
 
-const { requireScreenAccess, getAllScreensConfig } = await import('@/lib/permissions')
+const { requireAccess, requireScreenAccess, requireAdmin, getAllScreensConfig } = await import('@/lib/permissions')
 
 // ── Helpers ───────────────────────────────────────────────────────────────
 const sinSesion  = () => { _mockSession = null }
@@ -190,5 +202,206 @@ describe('getAllScreensConfig', () => {
 
   it('pantalla pública tiene allowed_roles como array', () => {
     expect(Array.isArray(getAllScreensConfig()['produccion'].allowed_roles)).toBe(true)
+  })
+})
+
+// ─────────────────────────────────────────────────────────────────────────
+// requireAccess: el helper único al que delegan los tres mecanismos que antes
+// vivían sueltos (pantalla, rol y flag por usuario).
+// ─────────────────────────────────────────────────────────────────────────
+describe('requireAccess — regla `screen`', () => {
+  it('pantalla pública sin sesión → ok, user null', async () => {
+    sinSesion()
+    const r = await requireAccess({ screen: 'produccion' })
+    expect(r.ok).toBe(true)
+    expect(r.ok && r.user).toBeNull()
+  })
+
+  it('pantalla privada con rol permitido → ok y devuelve el usuario', async () => {
+    comoSuperv()
+    const r = await requireAccess({ screen: 'privado' })
+    expect(r.ok).toBe(true)
+    expect(r.ok && r.user?.username).toBe('sup1')
+  })
+
+  it('pantalla privada con rol no permitido → 403', async () => {
+    comoUser()
+    const r = await requireAccess({ screen: 'privado' })
+    expect(r.ok).toBe(false)
+    expect(!r.ok && r.denied.status).toBe(403)
+  })
+})
+
+describe('requireAccess — regla `role`', () => {
+  it('sin sesión → 401 (no 403: el matiz importa para el cliente)', async () => {
+    sinSesion()
+    const r = await requireAccess({ role: 'admin' })
+    expect(!r.ok && r.denied.status).toBe(401)
+  })
+
+  it('rol distinto → 403', async () => {
+    comoUser()
+    const r = await requireAccess({ role: 'admin' })
+    expect(!r.ok && r.denied.status).toBe(403)
+  })
+
+  it('rol correcto → ok', async () => {
+    comoAdmin()
+    expect((await requireAccess({ role: 'admin' })).ok).toBe(true)
+  })
+})
+
+describe('requireAccess — regla `flag`', () => {
+  it('sin sesión → 401', async () => {
+    sinSesion()
+    const r = await requireAccess({ flag: 'can_configure_muestras' })
+    expect(!r.ok && r.denied.status).toBe(401)
+  })
+
+  it('usuario con el flag a 0 → 403', async () => {
+    comoUser()
+    const r = await requireAccess({ flag: 'can_configure_muestras' })
+    expect(!r.ok && r.denied.status).toBe(403)
+  })
+
+  it('usuario con el flag a 1 → ok', async () => {
+    comoSuperv()
+    expect((await requireAccess({ flag: 'can_configure_muestras' })).ok).toBe(true)
+  })
+
+  it('admin pasa aunque tenga el flag a 0', async () => {
+    comoAdmin()
+    expect((await requireAccess({ flag: 'can_configure_muestras' })).ok).toBe(true)
+  })
+})
+
+describe('requireAccess — varias reglas a la vez (AND)', () => {
+  it('una pantalla pública NO cortocircuita la regla de rol', async () => {
+    comoUser()
+    const r = await requireAccess({ screen: 'produccion', role: 'admin' })
+    expect(!r.ok && r.denied.status).toBe(403)
+  })
+
+  it('sin reglas → ok (no restringe nada)', async () => {
+    sinSesion()
+    expect((await requireAccess()).ok).toBe(true)
+  })
+})
+
+describe('envoltorios — mismo resultado que el helper', () => {
+  it('requireScreenAccess devuelve null donde requireAccess dice ok', async () => {
+    comoSuperv()
+    expect(await requireScreenAccess('privado')).toBeNull()
+    expect((await requireAccess({ screen: 'privado' })).ok).toBe(true)
+  })
+
+  it('requireScreenAccess propaga el 403 de requireAccess', async () => {
+    comoUser()
+    const wrapper = await requireScreenAccess('privado')
+    const helper = await requireAccess({ screen: 'privado' })
+    expect(wrapper!.status).toBe(403)
+    expect(!helper.ok && helper.denied.status).toBe(403)
+  })
+
+  it('requireAdmin: admin null, user 403, sin sesión 401', async () => {
+    comoAdmin()
+    expect(await requireAdmin()).toBeNull()
+    comoUser()
+    expect((await requireAdmin())!.status).toBe(403)
+    sinSesion()
+    expect((await requireAdmin())!.status).toBe(401)
+  })
+})
+
+// ── Cambio de contraseña obligatorio ──────────────────────────────────────
+// Hasta ahora esto solo lo impedía el cliente: con must_change_password = 1
+// bastaba llamar a la API a mano para seguir trabajando con la provisional.
+describe('requireAccess — must_change_password', () => {
+  const marcar = (id: number, v: number) =>
+    testDb.prepare('UPDATE users SET must_change_password = ? WHERE id = ?').run(v, id)
+
+  beforeEach(() => { marcar(1, 0); marcar(2, 0) })
+
+  it('usuario con la contraseña marcada → 403 aunque tenga permiso', async () => {
+    comoSuperv()
+    marcar(3, 1)
+    const res = await requireAccess({ screen: 'privado' })
+    expect(res.ok).toBe(false)
+    expect(!res.ok && res.denied.status).toBe(403)
+    marcar(3, 0)
+  })
+
+  it('admin con la contraseña marcada → 403 (no se salta por ser admin)', async () => {
+    comoAdmin()
+    marcar(1, 1)
+    expect((await requireAdmin())!.status).toBe(403)
+  })
+
+  it('también bloquea en una pantalla pública, que si no sería la puerta de atrás', async () => {
+    comoUser()
+    marcar(2, 1)
+    expect((await requireScreenAccess('produccion'))!.status).toBe(403)
+  })
+
+  it('el cuerpo del error trae mustChangePassword para que el cliente sepa a dónde mandarlo', async () => {
+    comoUser()
+    marcar(2, 1)
+    const res = await requireAccess({ screen: 'produccion' })
+    expect(!res.ok && await res.denied.json()).toMatchObject({ mustChangePassword: true })
+  })
+
+  it('sin la marca → pasa con normalidad', async () => {
+    comoUser()
+    expect(await requireScreenAccess('produccion')).toBeNull()
+  })
+
+  it('anónimo en pantalla pública no paga la comprobación → pasa', async () => {
+    sinSesion()
+    expect(await requireScreenAccess('produccion')).toBeNull()
+  })
+
+  it('token válido de un usuario ya borrado → 401', async () => {
+    _mockSession = { id: 99, username: 'fantasma', role: 'admin', name: '', surname: '' }
+    expect((await requireScreenAccess('produccion'))!.status).toBe(401)
+  })
+})
+
+// ── Control de acceso en cliente ──────────────────────────────────────────
+// Guarda anti-regresión de la migración a <SessionProvider>: antes cada página
+// se montaba su propio fetch('/api/auth/me') y su propia copia de la regla de
+// acceso (13 copias, 4 formas distintas). Si alguien vuelve a añadir una, este
+// test lo caza en vez de descubrirse cuando una copia se queda desfasada.
+describe('páginas: control de acceso centralizado', () => {
+  const { readdirSync, readFileSync, statSync } = require('node:fs') as typeof import('node:fs')
+  const { join, sep } = require('node:path') as typeof import('node:path')
+
+  const paginas: string[] = []
+  const recorrer = (dir: string) => {
+    for (const e of readdirSync(dir)) {
+      const p = join(dir, e)
+      if (statSync(p).isDirectory()) { if (e !== 'api') recorrer(p) }
+      else if (e === 'page.tsx') paginas.push(p)
+    }
+  }
+  recorrer('app')
+
+  // El login es el único sitio que puede hablar con la API de sesión por su
+  // cuenta: se ejecuta justo cuando todavía no hay sesión que compartir.
+  const exentas = [join('app', 'login', 'page.tsx')]
+
+  it('ninguna página consulta /api/auth/me por su cuenta', () => {
+    const culpables = paginas.filter(p => !exentas.includes(p) && readFileSync(p, 'utf8').includes('/api/auth/me'))
+    expect(culpables).toEqual([])
+  })
+
+  it('toda página de panel pasa por <RequireAccess>', () => {
+    const sinPuerta = paginas.filter(p => {
+      const ruta = p.split(sep).join('/')
+      // La portada y el login no son paneles; cambiar-contraseña tiene la puerta al revés.
+      if (ruta === 'app/page.tsx') return false
+      if (ruta.includes('login') || ruta.includes('cambiar-contrasena')) return false
+      return !readFileSync(p, 'utf8').includes('<RequireAccess')
+    })
+    expect(sinPuerta).toEqual([])
   })
 })
