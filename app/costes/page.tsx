@@ -24,7 +24,7 @@ import { Toaster } from "@/components/nova/ui/sonner";
 
 interface CosteA1Response {
   finales: DespieceNode[];
-  meta: { totalFinales: number; articulosDistintos: number; mesesSinConfigurar: string[]; mesesRango: string[] };
+  meta: { totalFinales: number; articulosDistintos: number; mesesRango: string[] };
 }
 
 // Recorre el árbol para aplanarlo a filas (exportación Excel) y para las medias de
@@ -179,17 +179,19 @@ function CosteA1PagePanel() {
   const visibles = filtros.filtered;
   // Coincide con la misma regla de "misma población" del gráfico
   // (serieCosteMensual, coste-a1-shared.tsx): solo entran en la desviación
-  // ponderada los artículos con coste real Y producción > 0 en el rango — un
-  // artículo con coste real pero sin producción no debe pesar en la media.
-  const conDesviacionPonderable = visibles.filter((n) => n.costeReal != null && n.costeA1 != null && (n.produccion ?? 0) > 0);
-  const sumaPesos = conDesviacionPonderable.reduce((s, n) => s + (n.produccion ?? 0), 0);
-  const sumaTeoricoPonderado = conDesviacionPonderable.reduce((s, n) => s + (n.costeA1 ?? 0) * (n.produccion ?? 0), 0);
-  const sumaRealPonderado = conDesviacionPonderable.reduce((s, n) => s + (n.costeReal ?? 0) * (n.produccion ?? 0), 0);
+  // ponderada los artículos con coste real Y cantidad costeada > 0 en el rango.
+  // El peso es la cantidad producida en las órdenes que generaron el coste
+  // (`costeRealPorMes[].cantidad`), no la producción de F4111 (`produccion`,
+  // otra fuente) — así el € del impacto es exactamente "sobre lo que se costeó".
+  const cantidadCosteada = (n: DespieceNode) => (n.costeRealPorMes ?? []).reduce((s, m) => s + m.cantidad, 0);
+  const conDesviacionPonderable = visibles.filter((n) => n.costeReal != null && n.costeA1 != null && cantidadCosteada(n) > 0);
+  const sumaPesos = conDesviacionPonderable.reduce((s, n) => s + cantidadCosteada(n), 0);
+  const sumaTeoricoPonderado = conDesviacionPonderable.reduce((s, n) => s + (n.costeA1 ?? 0) * cantidadCosteada(n), 0);
+  const sumaRealPonderado = conDesviacionPonderable.reduce((s, n) => s + (n.costeReal ?? 0) * cantidadCosteada(n), 0);
   const desviacionMedia = sumaPesos > 0 && sumaTeoricoPonderado > 0 ? ((sumaRealPonderado - sumaTeoricoPonderado) / sumaTeoricoPonderado) * 100 : null;
   // Impacto económico de la desviación en euros — sustituye a "Artículos con
   // coste real" (contador de catálogo, poco útil para una directora
-  // financiera). Mismo criterio de población que desviacionMedia: solo
-  // artículos con coste real Y producción > 0 pesan aquí.
+  // financiera). Mismo criterio de población y mismo peso que desviacionMedia.
   const impactoEuros = sumaPesos > 0 ? sumaRealPonderado - sumaTeoricoPonderado : null;
   const produccionTotal = visibles.reduce((s, n) => s + (n.produccion ?? 0), 0);
 
@@ -200,7 +202,7 @@ function CosteA1PagePanel() {
           value: desviacionMedia != null
             ? `${desviacionMedia > 0 ? "+" : ""}${desviacionMedia.toLocaleString("es-ES", { minimumFractionDigits: 1, maximumFractionDigits: 1 })} %`
             : "—",
-          subValue: "Ponderada por producción, artículos filtrados",
+          subValue: "Ponderada por cantidad costeada, artículos filtrados",
           // Mismo criterio de color que DesviacionBadge (coste-a1-shared.tsx):
           // positivo = sobrecoste (destructive), negativo = ahorro (success).
           // Exactamente 0 o sin dato se queda en el color neutro.

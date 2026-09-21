@@ -53,7 +53,7 @@ export default function Chart03({
       <CardHeader>
         <CardTitle className="text-lg font-medium text-foreground">Coste real vs. teórico</CardTitle>
         <p className="text-sm font-normal text-muted-foreground">
-          Media ponderada por producción mensual, artículos filtrados
+          Media ponderada por cantidad costeada, artículos filtrados
         </p>
         <CardAction className="flex items-center gap-4">
           <div className="flex items-center gap-1.5 text-sm">

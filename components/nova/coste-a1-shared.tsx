@@ -17,8 +17,8 @@ export function euros(v: number): string {
   return `${v.toLocaleString("es-ES", { minimumFractionDigits: 2, maximumFractionDigits: 4 })} €`;
 }
 
-// Desviación del coste real (F30026, ponderado) frente al coste teórico
-// declarado (A1) en %. Positivo = el real sale más caro que el estándar.
+// Desviación del coste real (A1 de las órdenes costeadas, ponderado) frente al
+// coste teórico declarado (F30026, A1) en %. Positivo = el real sale más caro que el estándar.
 // `null` si falta cualquiera de los dos datos, o si el teórico es 0 (división
 // por cero sin sentido económico). Recibe solo los dos campos que hacen
 // falta (no el DespieceNode completo) para poder reutilizarse también desde
@@ -130,19 +130,19 @@ export function Descuadre({ estado, tono = "text" }: { estado: EstadoDescuadre; 
 // --- Gráfico "Coste real vs. teórico por mes" (coste-a1-monthly-charts.tsx) ---
 //
 // Agrega VARIOS finales a la vez (a diferencia de `costeReal`/`desviacionPct`,
-// que son por artículo) — mismo criterio de ponderación por producción que ya
-// usa la API para un solo artículo (ver app/api/costes/route.ts, §3.4 de
-// docs/costes.md), extendido para combinar varios artículos en un único
-// punto por mes: cada final pesa según CUÁNTO se produjo de él ese mes.
+// que son por artículo) — mismo criterio de ponderación que ya usa la API para
+// un solo artículo (ver app/api/costes/route.ts, §3.4 de docs/costes.md),
+// extendido para combinar varios artículos en un único punto por mes: cada
+// final pesa según la cantidad que se produjo de él ese mes en las órdenes que
+// dan el coste.
 //
-// Confirmado con el usuario: el Teórico del gráfico también se pondera por
-// producción (aunque el coste A1 de cada artículo, individualmente, nunca
-// cambia) — si no, la distancia entre las dos líneas mezclaría dos efectos
+// Confirmado con el usuario: el Teórico del gráfico también se pondera
+// (aunque el coste A1 de cada artículo, individualmente, nunca cambia) — si no, la distancia entre las dos líneas mezclaría dos efectos
 // distintos (desviación de coste real + cambio de mix de producción) en vez
 // de aislar solo el primero. Y las dos series usan la MISMA población de
-// artículos con peso en cada mes: un final sin coste real ese mes (sin
-// ledger configurado, o sin fila en F30026) tampoco cuenta en el Teórico de
-// ese mes, aunque sí tenga coste A1 — para que Real y Teórico sean
+// artículos con peso en cada mes: un final sin coste real ese mes (ninguna
+// orden costeada) tampoco cuenta en el Teórico de ese mes, aunque sí tenga
+// coste A1 — para que Real y Teórico sean
 // comparables punto a punto, no medias sobre conjuntos distintos.
 //
 // La tabla (por artículo) NO usa nada de esto — su Teórico sigue siendo
@@ -164,19 +164,24 @@ export function serieCosteMensual(finales: DespieceNode[], mesesRango: string[])
   // `.find()` dentro del bucle de meses — con hasta ~250 finales × 12 meses no
   // sería un problema de rendimiento real, pero así queda igual de claro y sin
   // el coste extra.
+  //
+  // El peso NO es la producción de F4111 (`produccionPorMes`, la del gráfico de
+  // barras) sino la cantidad producida en las órdenes que generaron el coste
+  // (`costeRealPorMes[].cantidad`) — coste y peso salen así de la misma fila y
+  // no hay forma de que un mes tenga coste pero peso 0.
   const porFinal = finales.map((f) => ({
     costeA1: f.costeA1,
-    produccionPorMes: new Map((f.produccionPorMes ?? []).map((p) => [p.mes, p.produccion])),
-    costeRealPorMes: new Map((f.costeRealPorMes ?? []).map((p) => [p.mes, p.costeReal])),
+    costeRealPorMes: new Map((f.costeRealPorMes ?? []).map((p) => [p.mes, p])),
   }));
   return mesesRango.map((mes) => {
     let sumaTeorico = 0;
     let sumaReal = 0;
     let sumaPesos = 0;
     for (const f of porFinal) {
-      const peso = f.produccionPorMes.get(mes) ?? 0;
+      const punto = f.costeRealPorMes.get(mes);
+      const peso = punto?.cantidad ?? 0;
       if (peso <= 0) continue;
-      const costeReal = f.costeRealPorMes.get(mes) ?? null;
+      const costeReal = punto?.costeReal ?? null;
       // Misma población en las dos series: sin coste real ese mes, este final
       // tampoco pesa en el Teórico de ese mes (aunque tenga costeA1).
       if (costeReal == null || f.costeA1 == null) continue;
