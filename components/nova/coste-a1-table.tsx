@@ -364,11 +364,11 @@ function buildColumns(sortBy: SortBy, sortDir: "asc" | "desc") {
         </span>
       ),
     }),
-    // Coste real: media ponderada por producción mensual de F30026.IECSL
-    // (IECOST='A1') en el rango de fechas (ver app/api/costes/route.ts,
-    // apartado "Coste real"). "—" cuando ningún mes del rango tiene ledger
-    // configurado en /admin, o F30026 no tiene coste para ese ledger en esos
-    // meses.
+    // Coste real: coste A1 de las órdenes de fabricación costeadas del rango
+    // (F554105 + F55CR001, CRCOST='A1'), media ponderada por la cantidad
+    // producida en esas órdenes — ver app/api/costes/route.ts, apartado H.1, y
+    // docs/costes.md §3.4. "—" cuando el artículo no tuvo ninguna orden
+    // costeada en el rango (todo lo comprado, p.ej.).
     columnHelper.display({
       id: "costeReal",
       header: () => <SortableHeaderLabel label="Real" active={sortBy === "costeReal"} dir={sortDir} align="right" />,

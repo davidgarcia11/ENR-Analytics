@@ -17,8 +17,8 @@ export function euros(v: number): string {
   return `${v.toLocaleString("es-ES", { minimumFractionDigits: 2, maximumFractionDigits: 4 })} €`;
 }
 
-// Desviación del coste real (F30026, ponderado) frente al coste teórico
-// declarado (A1) en %. Positivo = el real sale más caro que el estándar.
+// Desviación del coste real (A1 de las órdenes costeadas, ponderado) frente al
+// coste teórico declarado (F30026, A1) en %. Positivo = el real sale más caro que el estándar.
 // `null` si falta cualquiera de los dos datos, o si el teórico es 0 (división
 // por cero sin sentido económico). Recibe solo los dos campos que hacen
 // falta (no el DespieceNode completo) para poder reutilizarse también desde
@@ -130,19 +130,19 @@ export function Descuadre({ estado, tono = "text" }: { estado: EstadoDescuadre; 
 // --- Gráfico "Coste real vs. teórico por mes" (coste-a1-monthly-charts.tsx) ---
 //
 // Agrega VARIOS finales a la vez (a diferencia de `costeReal`/`desviacionPct`,
-// que son por artículo) — mismo criterio de ponderación por producción que ya
-// usa la API para un solo artículo (ver app/api/costes/route.ts, §3.4 de
-// docs/costes.md), extendido para combinar varios artículos en un único
-// punto por mes: cada final pesa según CUÁNTO se produjo de él ese mes.
+// que son por artículo) — mismo criterio de ponderación que ya usa la API para
+// un solo artículo (ver app/api/costes/route.ts, §3.4 de docs/costes.md),
+// extendido para combinar varios artículos en un único punto por mes: cada
+// final pesa según la cantidad que se produjo de él ese mes en las órdenes que
+// dan el coste.
 //
-// Confirmado con el usuario: el Teórico del gráfico también se pondera por
-// producción (aunque el coste A1 de cada artículo, individualmente, nunca
-// cambia) — si no, la distancia entre las dos líneas mezclaría dos efectos
+// Confirmado con el usuario: el Teórico del gráfico también se pondera
+// (aunque el coste A1 de cada artículo, individualmente, nunca cambia) — si no, la distancia entre las dos líneas mezclaría dos efectos
 // distintos (desviación de coste real + cambio de mix de producción) en vez
 // de aislar solo el primero. Y las dos series usan la MISMA población de
-// artículos con peso en cada mes: un final sin coste real ese mes (sin
-// ledger configurado, o sin fila en F30026) tampoco cuenta en el Teórico de
-// ese mes, aunque sí tenga coste A1 — para que Real y Teórico sean
+// artículos con peso en cada mes: un final sin coste real ese mes (ninguna
+// orden costeada) tampoco cuenta en el Teórico de ese mes, aunque sí tenga
+// coste A1 — para que Real y Teórico sean
 // comparables punto a punto, no medias sobre conjuntos distintos.
 //
 // La tabla (por artículo) NO usa nada de esto — su Teórico sigue siendo
