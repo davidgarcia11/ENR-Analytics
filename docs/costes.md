@@ -220,7 +220,18 @@ contra datos reales antes de escribir una línea de código (artículo
    "todo el coste" y "una parte", que es justo el error que tenía la primera
    versión de este panel (§3.4.1). Los demás componentes (`X1`…`X9`) quedan
    fuera, y `CR` también: es el total de la orden.
-4. **Media ponderada por la cantidad de las órdenes**, tanto para agregar las
+4. **Los componentes no tienen orden — se calculan aparte.** Todo lo que no
+   se fabrica con orden propia (envases, etiquetas, materia prima) sale en
+   `F554105` con `CLURAB = 0`, así que no hay nada que cruzar con `F55CR001`.
+   Para esos, el coste unitario real **ya viene dado** en `CLUNCS`/10000 de la
+   propia `F554105`, y es idéntico en todos los palet_lote del mismo día
+   (verificado con `1312800005`, julio 2026: 3,90 € en los 14 días del mes).
+   Ojo a la diferencia: en esas filas `CLSTOC` es la cantidad de **cada
+   palet** (varía dentro del mismo día), no la de una orden repetida — el peso
+   del día es la **suma** de los palets, no su máximo. Las dos vías (con orden
+   y sin ella) se unen con un `UNION ALL` en la misma consulta y desde ahí se
+   tratan igual.
+5. **Media ponderada por la cantidad**, tanto para agregar las
    órdenes de un mes como para agregar los meses de un rango:
    `Σ(coste_unitario × cantidad) / Σ cantidad`. Como el peso es la cantidad de
    las MISMAS órdenes que dan el coste, ponderar por meses y luego entre meses

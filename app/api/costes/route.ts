@@ -70,11 +70,17 @@
 //   SOLO `A1` (Material) — el mismo componente que el coste teórico, para que
 //   las dos cifras comparen lo mismo. `CRUNCS`/10000 es el importe de toda la
 //   orden: el coste unitario es ese importe / cantidad de la orden, redondeado
-//   a 4 decimales. El coste de un mes (o del
-//   rango entero) es la media PONDERADA por la cantidad producida de esas
-//   mismas órdenes — el peso sale de la misma fila que el coste, así que no
-//   puede haber coste sin peso. Un artículo sin órdenes en el rango (todo lo
-//   comprado, p.ej.) se queda con `costeReal: null`, que es lo correcto.
+//   a 4 decimales.
+//   Los COMPONENTES (envases, etiquetas, materia prima) no tienen orden
+//   (`CLURAB = 0`) y por tanto no cruzan con F55CR001: su coste unitario real
+//   ya viene dado en F554105, `CLUNCS`/10000, igual en todos los palet_lote
+//   del mismo día, y ahí `CLSTOC` es la cantidad de CADA palet (no la de una
+//   orden), así que el peso del día es su suma. Las dos vías se unen con un
+//   UNION ALL y a partir de ahí se tratan igual (ver H.1).
+//   El coste de un mes (o del rango entero) es la media PONDERADA por la
+//   cantidad producida — el peso sale de la misma fila que el coste, así que no
+//   puede haber coste sin peso. Un artículo sin ningún movimiento costeado en
+//   el rango se queda con `costeReal: null`.
 //   HISTÓRICO: antes esto salía de F30026 con un IELEDG distinto por mes,
 //   mapeado a mano en /admin (tabla SQLite `coste_a1_coledg_mensual`, ya
 //   eliminada) — pero esos ledgers mensuales no existen en F30026 (los códigos
@@ -435,6 +441,22 @@ export async function GET(req: NextRequest) {
     // divide entre la cantidad producida (CLSTOC/10000) y se redondea a 4
     // decimales.
     //
+    // DOS CAMINOS, según haya orden de fabricación o no:
+    //   a) `CLURAB > 0` (artículos que se fabrican con orden propia): el de
+    //      arriba — dedup por orden y coste A1 desde F55CR001.
+    //   b) `CLURAB = 0` (componentes: envases, etiquetas, materia prima...):
+    //      no tienen orden, así que no hay nada que cruzar con F55CR001 — ahí
+    //      el coste unitario real ya viene dado en la propia F554105,
+    //      `CLUNCS`/10000. Comprobado con datos reales (1312800005, julio
+    //      2026): es el mismo valor en todos los palet_lote del día (y de
+    //      hecho del mes entero), mientras que `CLSTOC` sí varía palet a
+    //      palet — o sea que ahí CLSTOC es la cantidad DE CADA PALET, no la
+    //      de una orden, y el peso del día es su SUMA (a diferencia del
+    //      camino (a), donde CLSTOC se repite y se deduplica).
+    //   Las dos ramas devuelven (artículo, día, coste unitario, cantidad) y
+    //   se agregan juntas con un UNION ALL: a partir de ahí el tratamiento es
+    //   idéntico (media ponderada por cantidad, por mes y por rango).
+    //
     // Sustituye a la versión anterior (F30026 con un IELEDG distinto por mes,
     // mapeado a mano en /admin): esos ledgers mensuales no existen en F30026 —
     // los códigos que se configuraban salían de F4105.COLEDG, que es otra serie
@@ -452,6 +474,7 @@ export async function GET(req: NextRequest) {
          FROM F554105 c
          JOIN F4101 i ON i.IMITM = c.CLITM
          WHERE TRIM(c.CLLEDG) = 'CR'
+           AND c.CLURAB > 0
            AND c.CLURDT BETWEEN :startJdeCR AND :endJdeCR
            AND TRIM(i.IMLITM) IN (${placeholders})
        ),
@@ -462,11 +485,25 @@ export async function GET(req: NextRequest) {
          JOIN F55CR001 r ON r.CRDOCO = o.ORDEN
          WHERE TRIM(r.CRLEDG) = 'CR' AND TRIM(r.CRCOST) = 'A1'
          GROUP BY o.LARGO, o.FECHA_JDE, o.ORDEN, o.CANTIDAD
+       ),
+       sin_orden AS (
+         SELECT TRIM(i.IMLITM) AS LARGO, c.CLURDT AS FECHA_JDE,
+                MIN(c.CLUNCS) / 10000 AS COSTE_UNIT,
+                SUM(c.CLSTOC) / 10000 AS CANTIDAD
+         FROM F554105 c
+         JOIN F4101 i ON i.IMITM = c.CLITM
+         WHERE TRIM(c.CLLEDG) = 'CR'
+           AND (c.CLURAB IS NULL OR c.CLURAB = 0)
+           AND c.CLURDT BETWEEN :startJdeCR AND :endJdeCR
+           AND TRIM(i.IMLITM) IN (${placeholders})
+         GROUP BY TRIM(i.IMLITM), c.CLURDT
        )
        SELECT LARGO, FECHA_JDE,
               SUM(COSTE_UNIT * CANTIDAD) AS IMPORTE,
               SUM(CANTIDAD) AS CANTIDAD
-       FROM por_orden
+       FROM (SELECT LARGO, FECHA_JDE, COSTE_UNIT, CANTIDAD FROM por_orden
+             UNION ALL
+             SELECT LARGO, FECHA_JDE, COSTE_UNIT, CANTIDAD FROM sin_orden)
        GROUP BY LARGO, FECHA_JDE`,
       { startJdeCR, endJdeCR, ...binds }
     );
