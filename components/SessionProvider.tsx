@@ -28,7 +28,8 @@ export interface SessionUser {
   surname: string
   mustChangePassword: boolean
   defaultPlant: string
-  canConfigureMuestras: boolean
+  /** Permisos sueltos asignados (lib/permisos.ts). El admin los tiene todos sin que aparezcan aquí — usa tienePermiso() */
+  permisos: string[]
 }
 
 export interface ScreenConfig {
@@ -173,16 +174,24 @@ export function puedeAcceder(cfg: ScreenConfig | undefined, user: { role: string
  * Envuelve el contenido de una página. No pinta nada hasta saber si se puede
  * entrar — es lo que quita el "flash" del panel antes de rebotar al login.
  */
-export function RequireAccess({ screen, role, children }: { screen?: string; role?: string; children: React.ReactNode }) {
+export function RequireAccess({ screen, role, allow, children }: {
+  screen?: string
+  role?: string
+  /** Regla propia para pantallas que no son ni panel ni de un solo rol (ej. /admin, por permisos) */
+  allow?: (user: SessionUser) => boolean
+  children: React.ReactNode
+}) {
   const { user, screens, loading } = useSession()
   const router = useRouter()
   const pathname = usePathname()
 
-  // `role` es para /admin y /admin/logs, que no son paneles de `screens` sino
-  // pantallas de rol. Sin ninguno de los dos, basta con tener sesión.
-  const permitido = role
-    ? user?.role === role
-    : screen ? puedeAcceder(screens[screen], user) : !!user
+  // `role` es para /admin/logs, que no es panel de `screens` sino pantalla de rol.
+  // Sin ninguno, basta con tener sesión.
+  const permitido = allow
+    ? !!user && allow(user)
+    : role
+      ? user?.role === role
+      : screen ? puedeAcceder(screens[screen], user) : !!user
   const debeCambiarContrasena = !!user?.mustChangePassword
 
   useEffect(() => {

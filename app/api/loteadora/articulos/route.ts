@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server'
-import { requireScreenAccess } from '@/lib/permissions'
+import { requireAccess, requireScreenAccess } from '@/lib/permissions'
 import { getDbConnection } from '@/lib/db'
 import { getDb } from '@/lib/sqlite'
 
@@ -11,8 +11,13 @@ import { getDb } from '@/lib/sqlite'
 // IDs de campo (lote/cocida/caducidad) para que /loteadora pueda autocargarla
 // sin otra llamada.
 export async function GET() {
+  // También lo usa /admin → Artículos → Plantilla como buscador, así que basta con
+  // una de las dos: acceso a la pantalla /loteadora o el permiso de asignar artículos.
   const denied = await requireScreenAccess('loteadora');
-  if (denied) return denied;
+  if (denied) {
+    const acceso = await requireAccess({ permiso: 'admin.loteadora.articulos' });
+    if (!acceso.ok) return denied;
+  }
 
   let conn
   try {

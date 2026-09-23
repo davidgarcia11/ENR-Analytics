@@ -33,11 +33,11 @@ Rama: `feature/loteadora`.
 | `app/api/admin/loteadoras/route.ts` y `[id]/route.ts` | CRUD de loteadoras (IP/puerto/slave) desde `/admin` (solo admin) |
 | `app/api/admin/loteadoras/estado/route.ts` | GET admin — estado en vivo de **todas** las loteadoras (habilitadas o no) |
 | `app/api/admin/loteadora-mensajes/route.ts` y `[id]/route.ts` | CRUD de plantillas (`loteadora_mensajes`: nombre + IDs de campo lote/cocida/caducidad) desde `/admin` → Plantillas |
-| `app/api/admin/loteadora-articulos/route.ts` y `[articuloId]/route.ts` | CRUD de asociaciones artículo→plantilla (`loteadora_articulo_mensajes`) desde `/admin` → Artículos → Plantilla |
+| `app/api/admin/loteadora-articulos/route.ts` y `[articuloId]/route.ts` | CRUD de asociaciones artículo→plantilla (`loteadora_articulo_mensajes`) desde `/admin` → Loteadora › Artículos. Abierto también a usuarios no admin con el permiso `admin.loteadora.articulos`, por su rol o como extra (DOCUMENTACION.md §5b) |
 | `lib/loteadora-printer.ts` | Construye las tramas del protocolo TIJ y las envía por TCP (`buildRemoteFieldFrame`, `sendRemoteFields`, `getPrinterStatus`, `listMessageNames`, `loadPrintMessage`) |
 | `components/nova/date-picker.tsx` | Selector de UNA fecha exacta (Popover + Calendar en modo `single`) — nuevo, no existía ningún panel Nova con selector de fecha única (solo rango, `date-range-picker.tsx`) |
 | `components/nova/ui/combobox.tsx` | Combobox de Base UI instalado por CLI para la búsqueda de artículo — primer uso en el proyecto, ver §14 |
-| `components/SingleSelect.tsx` | Desplegable de selección única con buscador del sistema viejo — ya **no** lo usa `/loteadora` (ver §14), pero sigue en uso en `/admin` → Artículos → Plantilla (§13), que no es Nova |
+| `components/nova/admin/loteadoras.tsx`, `plantillas.tsx`, `articulos-plantilla.tsx` | Secciones de `/admin` (Nova) que configuran este panel — el buscador de artículo de Loteadora › Artículos usa el mismo `Combobox` que `/loteadora` |
 | `lib/utils.ts` | `isoToJulian()` — convierte fecha ISO a formato Julian JDE (no usada aún por `page.tsx`, que tiene su propia función local `toJulianDay()`) |
 | `__tests__/loteadora-printer.test.ts` | Test de `buildRemoteFieldFrame` contra el ejemplo del manual del protocolo |
 | `__tests__/loteadora-access.test.ts` | Blinda las dos mitades del control de acceso del panel (§16): la marca `privado` en PANELS y el guard de las 4 rutas |
@@ -261,11 +261,11 @@ Un artículo solo puede tener una plantilla a la vez (`articulo_id` es clave pri
 
 CRUD de `loteadora_mensajes` en `app/api/admin/loteadora-mensajes/route.ts` (GET/POST) y `[id]/route.ts` (PUT/DELETE). Valida: nombre no vacío y único, los seis IDs de campo (lote/cocida/caducidad/hora/turno/línea) enteros 0-255 y **distintos entre sí** (misma idea que la validación de `loteadoras`, extendida a 6 campos).
 
-### Admin — pestaña "Artículos → Plantilla"
+### Admin — Loteadora › Artículos
 
-CRUD de `loteadora_articulo_mensajes` en `app/api/admin/loteadora-articulos/route.ts` (GET/POST, upsert por `articulo_id`) y `[articuloId]/route.ts` (DELETE). El buscador de artículo reutiliza `GET /api/loteadora/articulos` (el mismo catálogo que ya usa `/loteadora`, con `<SingleSelect showId>`); `POST` valida `articuloId` con el regex ya usado en el proyecto (`/^\d{10}$/`) y que `mensajeId` exista.
+CRUD de `loteadora_articulo_mensajes` en `app/api/admin/loteadora-articulos/route.ts` (GET/POST, upsert por `articulo_id`) y `[articuloId]/route.ts` (DELETE). La sección (`components/nova/admin/articulos-plantilla.tsx`) hace la asociación en un diálogo: el buscador de artículo reutiliza `GET /api/loteadora/articulos` (el mismo catálogo y el mismo `Combobox` que `/loteadora`) y avisa si el artículo ya tiene plantilla (se sustituye); `POST` valida `articuloId` con el regex ya usado en el proyecto (`/^\d{10}$/`) y que `mensajeId` exista.
 
-**Bug corregido: el desplegable del `SingleSelect` se recortaba.** La tarjeta "Asociar Artículo a Plantilla" usa `<Card accent>`, y `accent` añade `overflow-hidden` (`components/ui/card.tsx`) para que el borde superior rojo respete las esquinas redondeadas — pero eso también recortaba el menú del `SingleSelect`, que se posiciona con `position: absolute` dentro de esa misma tarjeta (no usa portal, a diferencia de los primitivos Nova — ver `components/nova/README.md` sobre `NovaPortalProvider`). Arreglado localmente pasando `className="overflow-visible"` a esa tarjeta concreta (`app/admin/page.tsx`), sin tocar el componente `Card` compartido ni su comportamiento en el resto de `/admin`.
+Esta sección (Loteadora › Artículos) la puede abrir también un usuario no admin con el permiso `admin.loteadora.articulos`, por su rol o como extra (DOCUMENTACION.md §5b): solo ve esta sección de `/admin`, puede leer las plantillas (`GET /api/admin/loteadora-mensajes`) pero no crearlas ni editarlas.
 
 ### Cómo llega a `/loteadora`
 
@@ -275,7 +275,7 @@ CRUD de `loteadora_articulo_mensajes` en `app/api/admin/loteadora-articulos/rout
 
 1. Crear el mensaje en la loteadora con sus Field Module (lote/cocida/caducidad) — igual que se hacía antes para una única plantilla, ver §7.
 2. Registrar esa misma plantilla en `/admin` → Plantillas, con el nombre **exacto** y los mismos IDs de campo.
-3. Asociar el artículo correspondiente en `/admin` → Artículos → Plantilla.
+3. Asociar el artículo correspondiente en `/admin` → Loteadora › Artículos.
 
 Sin este último paso, `/loteadora` muestra un aviso ámbar en el selector de artículo y bloquea el envío (§6) — no hay plantilla "por defecto".
 
@@ -283,7 +283,7 @@ Sin este último paso, `/loteadora` muestra un aviso ámbar en el selector de ar
 
 ## 14. Rediseño sobre el sistema Nova (ShadcnSpace)
 
-`app/loteadora/page.tsx` se reescribió sobre `components/nova/` + `app/nova-theme.css` (mismo sistema que `/compras`, `/costes`, `/mrp`, `/muestras`) — ver `components/nova/README.md` para el mecanismo de aislamiento `[data-nova-theme]`, dark mode y la checklist general. **Alcance: solo el panel operativo `/loteadora`** — las pestañas de administración (Loteadoras, Plantillas, Artículos → Plantilla) en `/admin` siguen con el sistema viejo (§8, §13), igual que el resto de `/admin`, que todavía no es Nova.
+`app/loteadora/page.tsx` se reescribió sobre `components/nova/` + `app/nova-theme.css` (mismo sistema que `/compras`, `/costes`, `/mrp`, `/muestras`) — ver `components/nova/README.md` para el mecanismo de aislamiento `[data-nova-theme]`, dark mode y la checklist general. **Alcance original: solo el panel operativo `/loteadora`.** Las secciones de administración (Loteadora › Máquinas, Plantillas y Artículos) se pasaron a Nova después, junto con todo `/admin` — ver DOCUMENTACION.md §5.
 
 Toda la lógica de negocio (cálculo de lote/cocida/caducidad §5, protocolo TIJ §7-9, autocarga de plantilla §11, estado en vivo §10) es la misma que antes del rediseño — solo cambió la capa visual.
 

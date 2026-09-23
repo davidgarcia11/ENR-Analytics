@@ -5,6 +5,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { RequireAccess, useApiFetch, useSession } from "@/components/SessionProvider";
+import { tienePermiso } from "@/lib/permisos";
 import { toast } from "sonner";
 import { Filter, Loader2 } from "lucide-react";
 import Header from "@/components/shadcn-space/blocks/topbar-02/header";
@@ -122,7 +123,7 @@ function MuestrasPagePanel() {
   }, [fetchData, range]);
 
   const portalContainerRef = useRef<HTMLDivElement>(null);
-  const puedeConfigurar = sessionUser?.role === "admin" || !!sessionUser?.canConfigureMuestras;
+  const puedeConfigurar = tienePermiso(sessionUser, "muestras.config");
 
   const stats = data
     ? [

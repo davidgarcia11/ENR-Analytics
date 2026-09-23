@@ -34,8 +34,10 @@ export function parseMensajeInput(body: any) {
   return { value: { name, lotFieldId, cocidaFieldId, expiryFieldId, horaFieldId, turnoFieldId, lineaFieldId } };
 }
 
+// Lectura abierta también a quien asigna artículos a plantillas (necesita el
+// desplegable); crear/editar/borrar siguen siendo solo de admin.
 export async function GET() {
-  const acceso = await requireAccess({ role: 'admin' });
+  const acceso = await requireAccess({ permiso: 'admin.loteadora.articulos' });
   if (!acceso.ok) return acceso.denied;
 
   const db = getDb();

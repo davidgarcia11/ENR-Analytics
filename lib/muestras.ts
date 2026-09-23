@@ -177,11 +177,11 @@ export function getArticleAllowlist(): { articulo: string; descripcion: string }
   return db.prepare('SELECT articulo, descripcion FROM sample_article_filter ORDER BY articulo').all() as { articulo: string; descripcion: string }[];
 }
 
-// Acceso a la configuración de artículos: admin, o cualquier usuario con
-// users.can_configure_muestras = 1 (permiso suelto asignado por admin desde /admin).
+// Acceso a la configuración de artículos: admin, o cualquier usuario con el permiso
+// 'muestras.config' (user_permissions, asignado por admin desde /admin → Usuarios).
 // La regla vive en lib/permissions.ts junto al resto de criterios de acceso;
 // esto es solo el nombre con el que la conocen las rutas de /muestras.
 export async function requireMuestrasConfigAccess(): Promise<NextResponse | null> {
-  const acceso = await requireAccess({ flag: 'can_configure_muestras' });
+  const acceso = await requireAccess({ permiso: 'muestras.config' });
   return acceso.ok ? null : acceso.denied;
 }

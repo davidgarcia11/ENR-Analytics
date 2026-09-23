@@ -71,6 +71,15 @@ export function getDb(): Database.Database {
       PRIMARY KEY (screen_id, role_id)
     );
 
+    -- Permisos de configuración concedidos a un ROL (catálogo en lib/permisos.ts).
+    -- Lo que puede hacer un usuario = lo de su rol + sus extras en user_permissions.
+    CREATE TABLE IF NOT EXISTS role_permissions (
+      role_id    INTEGER NOT NULL REFERENCES roles(id) ON DELETE CASCADE,
+      permission TEXT NOT NULL,
+      created_at TEXT DEFAULT (datetime('now')),
+      PRIMARY KEY (role_id, permission)
+    );
+
     -- Descripciones editables para los códigos de estado SYEDSP de JDE.
     -- Se usan en /comparativa-seres (tooltip del badge, columna Descripción,
     -- Excel) y son editables por admin desde /admin.
@@ -156,7 +165,7 @@ export function getDb(): Database.Database {
     -- Lista global de artículos visibles en /muestras (si está vacía, se ven todos —
     -- comportamiento abierto por defecto hasta que admin/responsable la configuran).
     -- NO es por usuario: es una única lista compartida, editable por admin y por
-    -- cualquier usuario con users.can_configure_muestras = 1 (ver más abajo).
+    -- cualquier usuario con el permiso 'muestras.config' (lib/permisos.ts).
     CREATE TABLE IF NOT EXISTS sample_article_filter (
       articulo TEXT PRIMARY KEY,
       descripcion TEXT NOT NULL DEFAULT '',
@@ -190,6 +199,16 @@ export function getDb(): Database.Database {
       last_error TEXT
     );
     INSERT OR IGNORE INTO sample_sync_state (id) VALUES (1);
+
+    -- Permisos sueltos por usuario (no por rol): acceso a una configuración concreta
+    -- para alguien que no es admin. El catálogo de claves vive en lib/permisos.ts;
+    -- el admin los tiene todos sin necesidad de fila aquí.
+    CREATE TABLE IF NOT EXISTS user_permissions (
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      permission TEXT NOT NULL,
+      created_at TEXT DEFAULT (datetime('now')),
+      PRIMARY KEY (user_id, permission)
+    );
   `);
 
   // Migración: BDs creadas con el esquema anterior (backfill por tramos) no tienen
@@ -216,11 +235,14 @@ export function getDb(): Database.Database {
   if (!columns.some(c => c.name === 'default_plant')) {
     _db.exec("ALTER TABLE users ADD COLUMN default_plant TEXT NOT NULL DEFAULT ''");
   }
-  // Permiso suelto (no un rol): quién puede editar sample_article_filter además de
-  // admin. Se marca por usuario individual desde /admin, no por rol — petición
-  // explícita del usuario ("si quiero que un usuario concreto tenga eso").
-  if (!columns.some(c => c.name === 'can_configure_muestras')) {
-    _db.exec("ALTER TABLE users ADD COLUMN can_configure_muestras INTEGER NOT NULL DEFAULT 0");
+  // Migración: la columna suelta can_configure_muestras pasa a ser el permiso
+  // 'muestras.config' de user_permissions (quien lo tenía lo conserva) y se quita.
+  if (columns.some(c => c.name === 'can_configure_muestras')) {
+    _db.transaction(() => {
+      _db!.exec(`INSERT OR IGNORE INTO user_permissions (user_id, permission)
+                 SELECT id, 'muestras.config' FROM users WHERE can_configure_muestras = 1`);
+      _db!.exec("ALTER TABLE users DROP COLUMN can_configure_muestras");
+    })();
   }
 
   // Migración: añadir columna source a query_logs si no existe

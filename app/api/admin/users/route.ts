@@ -3,14 +3,21 @@ import { getDb } from '@/lib/sqlite';
 import { hashPassword } from '@/lib/auth';
 import { PLANTS } from '@/lib/plants';
 import { requireAccess } from '@/lib/permissions';
+import { esPermiso } from '@/lib/permisos';
 
 export async function GET() {
   const acceso = await requireAccess({ role: 'admin' });
   if (!acceso.ok) return acceso.denied;
 
   const db = getDb();
-  const users = db.prepare('SELECT id, username, role, name, surname, default_plant AS defaultPlant, can_configure_muestras AS canConfigureMuestras, created_at FROM users ORDER BY id').all();
-  return NextResponse.json(users);
+  const users = db.prepare('SELECT id, username, role, name, surname, default_plant AS defaultPlant, created_at FROM users ORDER BY id').all() as { id: number }[];
+  const filas = db.prepare('SELECT user_id, permission FROM user_permissions').all() as { user_id: number; permission: string }[];
+  const permisosPorUsuario = new Map<number, string[]>();
+  for (const f of filas) {
+    if (!esPermiso(f.permission)) continue;
+    permisosPorUsuario.set(f.user_id, [...(permisosPorUsuario.get(f.user_id) ?? []), f.permission]);
+  }
+  return NextResponse.json(users.map((u) => ({ ...u, permisos: permisosPorUsuario.get(u.id) ?? [] })));
 }
 
 export async function POST(req: NextRequest) {

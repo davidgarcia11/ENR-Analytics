@@ -44,7 +44,7 @@ planta `10999`).
 `source: 'coste_a1'` — el valor del log NO se renombró junto con la key de
 permiso (no había ningún motivo funcional, y así no cambia el criterio de
 filtrado de logs históricos); solo se actualizó la etiqueta legible en
-`SOURCE_LABELS` (`app/admin/logs/page.tsx`) de "Coste A1" a "Costes".
+`SOURCE_LABELS` (entonces en `app/admin/logs/page.tsx`, hoy en `components/nova/admin/logs-consultas.tsx`) de "Coste A1" a "Costes".
 
 ---
 

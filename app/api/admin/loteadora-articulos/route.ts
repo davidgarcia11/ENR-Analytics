@@ -6,7 +6,7 @@ import { requireAccess } from '@/lib/permissions';
 // del artículo se resuelve en el front cruzando con GET /api/loteadora/articulos,
 // para no duplicar aquí una consulta a Oracle).
 export async function GET() {
-  const acceso = await requireAccess({ role: 'admin' });
+  const acceso = await requireAccess({ permiso: 'admin.loteadora.articulos' });
   if (!acceso.ok) return acceso.denied;
 
   const db = getDb();
@@ -20,7 +20,7 @@ export async function GET() {
 }
 
 export async function POST(req: NextRequest) {
-  const acceso = await requireAccess({ role: 'admin' });
+  const acceso = await requireAccess({ permiso: 'admin.loteadora.articulos' });
   if (!acceso.ok) return acceso.denied;
 
   const { articuloId, mensajeId } = await req.json();

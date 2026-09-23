@@ -2,7 +2,7 @@
 
 // Panel de configuración de /muestras: qué artículos aparecen en el listado (lista
 // global, no por usuario — ver docs/muestras.md). Solo se monta si el usuario tiene
-// permiso (admin o can_configure_muestras) — el propio /api/muestras/config vuelve a
+// permiso (admin o 'muestras.config', lib/permisos.ts) — el propio /api/muestras/config vuelve a
 // comprobarlo en el servidor, esto es solo para no mostrar el botón a quien no puede
 // usarlo.
 import { useEffect, useState } from "react";

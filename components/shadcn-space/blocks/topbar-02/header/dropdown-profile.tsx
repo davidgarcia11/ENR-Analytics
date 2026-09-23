@@ -19,6 +19,7 @@ import {
   LogOut,
   Settings,
 } from "lucide-react";
+import { puedeEntrarEnAdmin } from "@/lib/permisos";
 
 export interface SessionUser {
   id: number;
@@ -26,6 +27,7 @@ export interface SessionUser {
   role: string;
   name: string;
   surname: string;
+  permisos?: string[];
 }
 
 type Props = {
@@ -84,17 +86,21 @@ const ProfileDropdown = ({ trigger, user, onLogout, onPresetsClick, defaultOpen,
               <span>Suscripciones de notificaciones</span>
             </DropdownMenuItem>
 
-            {user.role === "admin" && (
+            {/* Panel admin: admin, o quien tenga algún permiso que desbloquee una
+                sección de /admin (lib/permisos.ts). Logs sigue siendo solo de admin. */}
+            {puedeEntrarEnAdmin({ role: user.role, permisos: user.permisos ?? [] }) && (
               <>
                 <DropdownMenuSeparator />
                 <DropdownMenuItem className={itemClass} onClick={() => (window.location.href = "/admin")}>
                   <Settings size={18} className="text-foreground" />
-                  <span>Panel admin</span>
+                  <span>{user.role === "admin" ? "Panel admin" : "Configuración"}</span>
                 </DropdownMenuItem>
-                <DropdownMenuItem className={itemClass} onClick={() => (window.location.href = "/admin/logs")}>
-                  <FileText size={18} className="text-foreground" />
-                  <span>Logs</span>
-                </DropdownMenuItem>
+                {user.role === "admin" && (
+                  <DropdownMenuItem className={itemClass} onClick={() => (window.location.href = "/admin/logs")}>
+                    <FileText size={18} className="text-foreground" />
+                    <span>Logs</span>
+                  </DropdownMenuItem>
+                )}
               </>
             )}
 
