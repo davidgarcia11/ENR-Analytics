@@ -88,7 +88,7 @@ En ambos casos el usuario puede forzar el modo manual con el enlace "Introducir 
 
 ## 5. Cálculo de lote, cocida y fecha de caducidad
 
-Todo el cálculo es local en el cliente (`app/loteadora/page.tsx`), sin llamada a Oracle:
+Todo el cálculo es local en el cliente (`app/loteadora/page.tsx`), sin llamada a Oracle. **"Fecha Fresco" (lote) y "Fecha Cocida" no son selectores de calendario** — el operario las introduce a mano porque en planta rellenan estos campos de memoria y no necesariamente con la fecha real (ver más abajo):
 
 ```typescript
 function toJulianDay(date: Date): number {
@@ -96,17 +96,25 @@ function toJulianDay(date: Date): number {
   return Math.floor((date.getTime() - start.getTime()) / 86400000)
 }
 
-function toLote(date: Date): string {
-  const yy = String(date.getFullYear()).slice(-2)
-  const jd = String(toJulianDay(date)).padStart(3, '0')
-  return yy + jd  // ej: 2026-01-15 → "26015"
+// Reconstruye una fecha real a partir de año + día juliano (inverso de toJulianDay).
+function fromJulianDay(year: number, day: number): Date {
+  const d = new Date(year, 0, 1)
+  d.setDate(d.getDate() + day - 1)
+  return d
+}
+
+// Si el día introducido es POSTERIOR al día juliano de hoy, pertenece al año
+// que acaba de terminar (ej. hoy 2 de enero, cocida día 364 → año anterior).
+function resolveCocidaYear(julianDay: number, today: Date): number {
+  const todayJulian = toJulianDay(today)
+  return julianDay > todayJulian ? today.getFullYear() - 1 : today.getFullYear()
 }
 ```
 
-- **Lote** = año (2 dígitos) + día juliano de la **fecha de fabricación**, con padding a 3 dígitos (`AAJJJ`).
-- **Cocida** = mismo formato `AAJJJ`, pero sobre la **fecha de cocida** — es un campo independiente de fabricación, con su propio selector y botón "Hoy".
-- **Fecha de caducidad** = **fecha de cocida** + días de caducidad (JDE o manual) — ya **no** se calcula desde fabricación. Fabricación solo interviene en el lote.
-- **Hora** (`HHmm`) = hora del reloj del cliente en el instante exacto de pulsar "Enviar" — **no** es un campo editable como fabricación/cocida. La vista previa muestra un reloj en vivo (se recalcula cada segundo, `toHHmm(new Date())`) para que el operario vea qué hora se mandaría si pulsase ahora, pero el valor que de verdad viaja al servidor se recalcula de nuevo en `handleEnviar()` en el momento del click, no el que estaba pintado en pantalla un instante antes.
+- **Lote ("Fecha Fresco")** = campo de texto libre (solo dígitos, máx. 6 caracteres), **se envía tal cual lo escribe el operario, sin transformar**. En planta no siempre meten una fecha con el formato `AAJJJ`: a veces escriben el lote completo (`263221`), a veces sin el turno al final (`26322`) — no hay cálculo posible ni deseable aquí, por eso ya no es un `DatePicker`.
+- **Cocida ("Fecha Cocida")** = el operario solo introduce el **día juliano** (numérico, 1-366, máx. 3 caracteres) — el año no lo escribe nadie, se infiere con `resolveCocidaYear()`. El valor final que se envía (formato `AAJJJ`, igual que antes) sale de `año_resuelto (2 dígitos) + día_juliano (3 dígitos, padding)`. Cuando se aplica el año anterior, la vista previa muestra un badge ámbar "Año anterior (AAJJJ)" junto al campo para que el operario lo pueda verificar antes de enviar.
+- **Fecha de caducidad** = **fecha de cocida** (reconstruida con `fromJulianDay(año_resuelto, día_juliano)`) + días de caducidad (JDE o manual) — no se calcula desde el lote/fresco, que es texto libre sin fecha real detrás.
+- **Hora** (`HHmm`) = hora del reloj del cliente en el instante exacto de pulsar "Enviar" — **no** es un campo editable. La vista previa muestra un reloj en vivo (se recalcula cada segundo, `toHHmm(new Date())`) para que el operario vea qué hora se mandaría si pulsase ahora, pero el valor que de verdad viaja al servidor se recalcula de nuevo en `handleEnviar()` en el momento del click, no el que estaba pintado en pantalla un instante antes.
 - **Turno** = `1`, `2` o `3` — a diferencia de la hora, este sí lo elige el usuario a mano (desplegable, sin valor por defecto), porque no hay forma de deducirlo de la fecha/hora sin conocer los horarios reales de cada turno en cada planta.
 - **Línea de fabricación** = tampoco la elige el usuario en `/loteadora` — depende **solo de la loteadora seleccionada** (`loteadoras.linea`, asignada una vez en `/admin` → Loteadoras, ver §8). Al elegir una loteadora sin línea configurada, aparece un aviso ámbar bajo el selector y se bloquea el envío, igual que un artículo sin plantilla asociada.
 
@@ -322,8 +330,8 @@ Los tres mensajes de aviso/error del panel (artículo sin plantilla, loteadora s
 ```typescript
 interface LoteadoraFormState {
   selectedArticuloId: string | null;
-  fechaFab: string;
-  fechaCocida: string;
+  loteManual: string;      // "Fecha Fresco" — texto libre, se envía tal cual (§5)
+  cocidaJulianDay: string; // "Fecha Cocida" — solo el día juliano, el año se infiere (§5)
   diasCad: string;
   diasDesdeJde: number | null;
   modoManual: boolean;
@@ -334,7 +342,7 @@ interface LoteadoraFormState {
 
 `currentForm = formStates[selectedLoteadora] ?? defaultFormState()` es el formulario activo; `updateForm(patch)` escribe siempre sobre la clave de la loteadora seleccionada en ese momento. `selectedArticulo` ya no es estado propio: se deriva cada render de `articulos.find(a => a.id === currentForm.selectedArticuloId)` — evita duplicar el objeto artículo (que ya vive en `articulos`, refrescado cada 60s) dentro de cada sesión.
 
-**Compatibilidad con el JSX existente:** en vez de tocar cada campo del formulario en el JSX, `fechaFab`/`fechaCocida`/`diasCad`/`diasDesdeJde`/`modoManual`/`turno`/`selectedMensaje` se desestructuran de `currentForm` como constantes locales, y sus "setters" (`setFechaFab`, `setTurno`...) son wrappers de una línea sobre `updateForm` — el resto del componente (inputs, `DatePicker`, `Select`) no cambió una sola línea.
+**Compatibilidad con el JSX existente:** en vez de tocar cada campo del formulario en el JSX, `loteManual`/`cocidaJulianDay`/`diasCad`/`diasDesdeJde`/`modoManual`/`turno`/`selectedMensaje` se desestructuran de `currentForm` como constantes locales, y sus "setters" (`setLoteManual`, `setTurno`...) son wrappers de una línea sobre `updateForm` — el resto del componente (`Select`, botones) no cambió una sola línea. (El `DatePicker` que usaban originalmente "Fabricación"/"Cocida" se quitó al pasar esos dos campos a introducción manual, ver §5.)
 
 ### Qué pasa al elegir una loteadora (`handleLoteadoraSelect`)
 

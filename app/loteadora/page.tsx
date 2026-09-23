@@ -24,7 +24,6 @@ import Header from "@/components/shadcn-space/blocks/topbar-02/header";
 import { RequireAccess, useApiFetch, useSession } from "@/components/SessionProvider";
 import { type ThemeMode } from "@/components/nova/mode-toggle";
 import { NovaPortalProvider } from "@/components/nova/portal-container";
-import DatePicker from "@/components/nova/date-picker";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/nova/ui/card";
 import { Alert, AlertDescription } from "@/components/nova/ui/alert";
 import { Button } from "@/components/nova/ui/button";
@@ -45,8 +44,12 @@ interface EstadoLoteadora { id: number; name: string; state: EstadoLoteadoraValo
 // de loteadora no mezcle ni pierda lo que había en cada una.
 interface LoteadoraFormState {
   selectedArticuloId: string | null;
-  fechaFab: string;
-  fechaCocida: string;
+  // Lote (antes "fabricación"): texto libre tal cual lo escribe el operario
+  // (ej. "263221", a veces con el turno al final) — se envía sin tocar, no se
+  // calcula. Ver "Fecha Fresco" en la UI y docs/loteadora.md §5.
+  loteManual: string;
+  // Cocida: solo el día juliano (1-366); el año se infiere (resolveCocidaYear).
+  cocidaJulianDay: string;
   diasCad: string;
   diasDesdeJde: number | null;
   modoManual: boolean;
@@ -63,15 +66,16 @@ const ESTADO_INFO: Record<EstadoLoteadoraValor, { label: string; className: stri
   apagada: { label: "Sin conexión", className: "bg-muted text-muted-foreground", icon: PowerOff },
 };
 
-// --- Utilidades de cálculo (sin cambios respecto a la versión anterior) ---
+// --- Utilidades de cálculo ---
 function toJulianDay(date: Date): number {
   const start = new Date(date.getFullYear(), 0, 0);
   return Math.floor((date.getTime() - start.getTime()) / 86400000);
 }
-function toLote(date: Date): string {
-  const yy = String(date.getFullYear()).slice(-2);
-  const jd = String(toJulianDay(date)).padStart(3, "0");
-  return yy + jd;
+// Reconstruye una fecha real a partir de año + día juliano (inverso de toJulianDay).
+function fromJulianDay(year: number, day: number): Date {
+  const d = new Date(year, 0, 1);
+  d.setDate(d.getDate() + day - 1);
+  return d;
 }
 function addDays(date: Date, days: number): Date {
   const d = new Date(date);
@@ -84,21 +88,19 @@ function formatDateES(date: Date): string {
 function toHHmm(date: Date): string {
   return `${String(date.getHours()).padStart(2, "0")}${String(date.getMinutes()).padStart(2, "0")}`;
 }
-function todayISO(): string {
-  const d = new Date();
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-}
-function parseFecha(val: string): Date | null {
-  if (!val) return null;
-  const [y, m, d] = val.split("-").map(Number);
-  if (!y || !m || !d) return null;
-  return new Date(y, m - 1, d);
+// La cocida se introduce solo como día juliano (1-366): el año no lo escribe
+// el operario, se infiere. Si el día introducido es POSTERIOR al día juliano
+// de hoy, es que pertenece al año que acaba de terminar (ej. hoy 2 de enero,
+// cocida día 364 → año anterior, no el actual — ver docs/loteadora.md §5).
+function resolveCocidaYear(julianDay: number, today: Date): number {
+  const todayJulian = toJulianDay(today);
+  return julianDay > todayJulian ? today.getFullYear() - 1 : today.getFullYear();
 }
 function defaultFormState(): LoteadoraFormState {
   return {
     selectedArticuloId: null,
-    fechaFab: todayISO(),
-    fechaCocida: todayISO(),
+    loteManual: "",
+    cocidaJulianDay: "",
     diasCad: "",
     diasDesdeJde: null,
     modoManual: false,
@@ -154,7 +156,7 @@ function LoteadoraPanel() {
   // Formulario activo: el de la loteadora seleccionada ahora mismo (o el
   // "borrador" sin loteadora todavía, clave "").
   const currentForm = formStates[selectedLoteadora] ?? defaultFormState();
-  const { fechaFab, fechaCocida, diasCad, diasDesdeJde, modoManual, turno, selectedMensaje } = currentForm;
+  const { loteManual, cocidaJulianDay, diasCad, diasDesdeJde, modoManual, turno, selectedMensaje } = currentForm;
   const selectedArticulo = articulos.find((a) => a.id === currentForm.selectedArticuloId) ?? null;
   const updateForm = (patch: Partial<LoteadoraFormState>) => {
     setFormStates((prev) => ({
@@ -162,8 +164,16 @@ function LoteadoraPanel() {
       [selectedLoteadora]: { ...(prev[selectedLoteadora] ?? defaultFormState()), ...patch },
     }));
   };
-  const setFechaFab = (v: string) => updateForm({ fechaFab: v });
-  const setFechaCocida = (v: string) => updateForm({ fechaCocida: v });
+  // Solo dígitos — ambos campos son numéricos (ver anotaciones de David: lote
+  // hasta 6 caracteres, cocida hasta 3).
+  const setLoteManual = (v: string) => updateForm({ loteManual: v.replace(/\D/g, "").slice(0, 6) });
+  const setCocidaJulianDay = (v: string) => {
+    const digits = v.replace(/\D/g, "").slice(0, 3);
+    // El día juliano no puede superar 366 — si escriben más, se tope ahí (el
+    // mínimo válido, 1, ya lo exige cocidaValida al calcular/enviar).
+    const num = parseInt(digits, 10);
+    updateForm({ cocidaJulianDay: !isNaN(num) && num > 366 ? "366" : digits });
+  };
   const setDiasCad = (v: string) => updateForm({ diasCad: v });
   const setModoManual = (v: boolean) => updateForm({ modoManual: v });
   const setTurno = (v: string) => updateForm({ turno: v });
@@ -394,12 +404,17 @@ function LoteadoraPanel() {
   };
 
   // Cálculos derivados
-  const fabDate = parseFecha(fechaFab);
-  const cocidaDate = parseFecha(fechaCocida);
+  const lote = loteManual.trim() || null; // se envía tal cual, sin transformar
+  const cocidaDiaNum = parseInt(cocidaJulianDay, 10);
+  const cocidaValida = !isNaN(cocidaDiaNum) && cocidaDiaNum >= 1 && cocidaDiaNum <= 366;
+  const cocidaYear = cocidaValida ? resolveCocidaYear(cocidaDiaNum, ahora) : null;
+  const cocidaAnioAnterior = cocidaValida && cocidaYear !== ahora.getFullYear();
+  const cocida = cocidaValida ? `${String(cocidaYear).slice(-2)}${String(cocidaDiaNum).padStart(3, "0")}` : null;
   const diasNum = parseInt(diasCad, 10);
-  const lote = fabDate ? toLote(fabDate) : null;
-  const cocida = cocidaDate ? toLote(cocidaDate) : null;
-  const fechaCaducidad = cocidaDate && !isNaN(diasNum) && diasNum > 0 ? addDays(cocidaDate, diasNum) : null;
+  const fechaCaducidad =
+    cocidaValida && cocidaYear !== null && !isNaN(diasNum) && diasNum > 0
+      ? addDays(fromJulianDay(cocidaYear, cocidaDiaNum), diasNum)
+      : null;
   const loteadoraSeleccionada = loteadoras.find((l) => String(l.id) === selectedLoteadora) ?? null;
   const lineaLoteadora = loteadoraSeleccionada?.linea || null;
   const canSend = !!lote && !!cocida && !!fechaCaducidad && !!turno && !!lineaLoteadora && !!selectedArticulo?.plantilla && !!selectedLoteadora && !sending;
@@ -465,25 +480,44 @@ function LoteadoraPanel() {
                     </Alert>
                   )}
 
-                  {/* Fabricación y cocida lado a lado — la caducidad se calcula desde cocida, no desde fabricación */}
+                  {/* Fecha Fresco (lote) y Fecha Cocida lado a lado — ambas de introducción
+                      manual: el operario escribe el contenido exacto del lote (tal cual se
+                      envía) y solo el día juliano de la cocida (el año se infiere, ver
+                      resolveCocidaYear). La caducidad se calcula desde cocida, no desde
+                      fabricación. */}
                   <div className="grid grid-cols-2 gap-3">
                     <div className="grid gap-1.5">
-                      <label className="text-xs font-semibold text-foreground">Fabricación</label>
-                      <div className="flex gap-1.5">
-                        <div className="min-w-0 flex-1"><DatePicker value={fechaFab} onChange={setFechaFab} /></div>
-                        <Button type="button" variant="outline" size="icon-sm" onClick={() => setFechaFab(todayISO())} title="Hoy">
-                          <CalendarIcon className="size-3.5" />
-                        </Button>
-                      </div>
+                      <label className="text-xs font-semibold text-foreground">Fecha Fresco</label>
+                      <Input
+                        type="text"
+                        inputMode="numeric"
+                        value={loteManual}
+                        onChange={(e) => setLoteManual(e.target.value)}
+                        placeholder="Ej: 263221"
+                        maxLength={6}
+                      />
                     </div>
                     <div className="grid gap-1.5">
-                      <label className="text-xs font-semibold text-foreground">Cocida</label>
-                      <div className="flex gap-1.5">
-                        <div className="min-w-0 flex-1"><DatePicker value={fechaCocida} onChange={setFechaCocida} /></div>
-                        <Button type="button" variant="outline" size="icon-sm" onClick={() => setFechaCocida(todayISO())} title="Hoy">
-                          <CalendarIcon className="size-3.5" />
-                        </Button>
+                      {/* El aviso va en línea con la etiqueta (no debajo del input) para que
+                          no cambie de alto al aparecer/desaparecer y desplace el resto del
+                          formulario — mismo patrón que los badges de "Días de caducidad". */}
+                      <div className="flex items-center justify-between gap-2">
+                        <label className="text-xs font-semibold text-foreground">Fecha Cocida</label>
+                        {cocidaAnioAnterior && (
+                          <Badge variant="outline" className="gap-1 text-amber-600">
+                            <CalendarIcon className="size-3" />
+                            Año anterior ({cocida})
+                          </Badge>
+                        )}
                       </div>
+                      <Input
+                        type="text"
+                        inputMode="numeric"
+                        value={cocidaJulianDay}
+                        onChange={(e) => setCocidaJulianDay(e.target.value)}
+                        placeholder="Día juliano (1-366)"
+                        maxLength={3}
+                      />
                     </div>
                   </div>
 
