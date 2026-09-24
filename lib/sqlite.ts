@@ -10,13 +10,43 @@ const DB_PATH = path.join(process.cwd(), 'data', 'app.db');
 
 let _db: Database.Database | null = null;
 
+// Copia de seguridad al arrancar: la primera vez que el proceso abre la BD, ANTES
+// de crear tablas o aplicar migraciones, se guarda una copia completa en
+// data/backups/ (VACUUM INTO, consistente aunque haya escrituras). Cada despliegue
+// reinicia el servidor, así que siempre queda la BD tal como estaba antes de que la
+// versión nueva la toque. Se conservan las COPIAS_A_GUARDAR más recientes.
+// Nunca impide arrancar: si falla, se registra el error y se sigue.
+// ponytail: una copia por arranque, no por versión; subir COPIAS_A_GUARDAR si se reinicia mucho.
+const COPIAS_A_GUARDAR = 10;
+export function copiaDeSeguridad(db: Database.Database, dir: string, conservar = COPIAS_A_GUARDAR): string | null {
+  try {
+    fs.mkdirSync(dir, { recursive: true });
+    // Hora local en el nombre: es la que se busca al querer "la de antes de desplegar"
+    const d = new Date();
+    const p = (n: number) => String(n).padStart(2, '0');
+    const cuando = `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}-${p(d.getHours())}-${p(d.getMinutes())}-${p(d.getSeconds())}`;
+    const destino = path.join(dir, `app-${cuando}.db`);
+    if (fs.existsSync(destino)) return null; // dos arranques en el mismo segundo
+    db.exec(`VACUUM INTO '${destino.replace(/'/g, "''")}'`);
+    const copias = fs.readdirSync(dir).filter((f) => /^app-[\d-]+\.db$/.test(f)).sort();
+    for (const vieja of copias.slice(0, Math.max(0, copias.length - conservar))) fs.unlinkSync(path.join(dir, vieja));
+    console.log(`[sqlite] Copia de seguridad de la BD: ${destino}`);
+    return destino;
+  } catch (err) {
+    console.error('[sqlite] No se pudo hacer la copia de seguridad de la BD al arrancar:', err);
+    return null;
+  }
+}
+
 export function getDb(): Database.Database {
   if (_db) return _db;
 
   fs.mkdirSync(path.dirname(DB_PATH), { recursive: true });
+  const existia = fs.existsSync(DB_PATH);
   _db = new Database(DB_PATH);
   _db.pragma('journal_mode = WAL');
   _db.pragma('foreign_keys = ON');
+  if (existia) copiaDeSeguridad(_db, path.join(path.dirname(DB_PATH), 'backups'));
 
   // Crear tablas si no existen
   _db.exec(`

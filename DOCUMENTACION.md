@@ -261,6 +261,15 @@ Permite importar así: `import { getDbConnection } from '@/lib/db'`
 
 ### `lib/sqlite.ts` — Inicialización y migraciones
 
+**Copia de seguridad automática al arrancar** (`copiaDeSeguridad()`):
+- La primera vez que el proceso abre `data/app.db`, **antes de crear tablas o aplicar migraciones**, se guarda una copia completa en `data/backups/app-AAAA-MM-DD-HH-mm-ss.db`, con hora local. Se hace con `VACUUM INTO`, así que la copia es consistente aunque haya escrituras.
+- Cada despliegue reinicia el servidor, así que siempre queda la BD **tal como estaba antes de que la versión nueva la toque**.
+- Se conservan las **10 más recientes** (`COPIAS_A_GUARDAR`); las anteriores se borran solas. Si el servidor se reinicia a menudo, sube ese número.
+- Nunca impide arrancar: si la copia falla, se registra el error en el log y se sigue.
+- Una BD nueva (el archivo no existía) no se copia.
+- `data/` está en `.gitignore`, así que las copias no se suben.
+- **Para restaurar:** parar el servidor, copiar la copia elegida encima de `data/app.db` (y borrar `app.db-wal` / `app.db-shm` si existen) y arrancar.
+
 **Tablas:**
 
 ```sql
