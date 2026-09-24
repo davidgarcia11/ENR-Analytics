@@ -37,6 +37,8 @@ Rama: `feature/loteadora`.
 | `app/api/admin/loteadoras/estado/route.ts` | GET admin — estado en vivo de **todas** las loteadoras (habilitadas o no) |
 | `app/api/admin/loteadora-mensajes/route.ts` y `[id]/route.ts` | CRUD de plantillas (nombre + campos con piezas) desde `/admin` → Loteadora › Plantillas |
 | `app/api/admin/loteadora-datos-fijos/route.ts` y `[id]/route.ts` | Lista y cambia los datos fijos de las plantillas (precio, nº de certificado) desde `/admin` → Loteadora › Datos fijos |
+| `app/api/admin/loteadora-mensajes/[id]/crear-en-maquina/route.ts` | POST — crea (o sustituye) en una loteadora el mensaje de una plantilla con el comando `1C`, con la disposición automática. Solo admin; rechaza con `409` si la máquina está imprimiendo (§13) |
+| `app/api/admin/loteadora-articulos/copia/route.ts` | GET exporta / POST importa **solo las asociaciones** artículo → plantilla (botones de la sección Artículos). Abierta al permiso `admin.loteadora.articulos`: ignora las plantillas del archivo y exige que cada artículo apunte a una que ya exista (§13) |
 | `app/api/admin/loteadora-copia/route.ts` | GET exporta / POST importa en JSON las plantillas y las asociaciones de artículos (botones Exportar/Importar de Plantillas, solo admin, §13) |
 | `app/api/admin/loteadora-articulos/route.ts` y `[articuloId]/route.ts` | CRUD de asociaciones artículo→plantilla (`loteadora_articulo_mensajes`) desde `/admin` → Loteadora › Artículos. Abierto también a usuarios no admin con el permiso `admin.loteadora.articulos`, por su rol o como extra (DOCUMENTACION.md §5b) |
 | `lib/loteadora-printer.ts` | Construye las tramas del protocolo TIJ y las envía por TCP (`buildRemoteFieldFrame`, `sendRemoteFields`, `getPrinterStatus`, `listMessageNames`, `loadPrintMessage`) |
@@ -73,6 +75,11 @@ ORDER BY TRIM(IMDSC1)
 - `IMSTKT NOT IN ('O','U')` = excluye artículos obsoletos/de baja (códigos de tipo de stock)
 - `IMSLD` = días de caducidad del artículo en JDE (`NVL` a 0 si viene nulo)
 
+**Familia de cada artículo y filtro por loteadora** (sept. 2026):
+- La consulta devuelve también `familia` (`IMSRP2`) y `familiaDesc`, con un `LEFT JOIN` a `prodctl.f0005` por la UDC `41`/`S2`. Es la misma familia que usan producción, pedidos, caducados, compras y MRP.
+- Al elegir loteadora, el buscador solo ofrece los artículos de sus `familias` (§8). Si no tiene ninguna, los ofrece todos. Si no queda ninguno, pone "Sin artículos disponibles para esta loteadora".
+- En `/admin` → Máquinas, el selector de familias (varias, con chips) se rellena con las familias de esta misma lista. Así solo aparecen familias que tienen artículos de loteadora (hoy tortilla, pimiento asado, patata, migas, verduras, comercializado y otros elaborados).
+
 Si en el futuro este listado resultara demasiado grande para cargarlo entero de una vez (hoy se asume un volumen similar al de las ~130 marcas que se cargaban antes), la alternativa sería una búsqueda contra el servidor con parámetro `q` y límite de resultados, en vez de traer todo el catálogo — no implementado porque no hacía falta.
 
 ### Estado JDE caído
@@ -93,7 +100,7 @@ En ambos casos el usuario puede forzar el modo manual con el enlace "Introducir 
 
 ## 5. Cálculo de lote, cocida y fecha de caducidad
 
-Todo el cálculo es local en el cliente (`app/loteadora/page.tsx`), sin llamada a Oracle. **"Fecha Fresco" (lote) y "Fecha Cocida" no son selectores de calendario** — el operario las introduce a mano porque en planta rellenan estos campos de memoria y no necesariamente con la fecha real (ver más abajo):
+Todo el cálculo es local en el cliente (`app/loteadora/page.tsx`), sin llamada a Oracle. **"Lote Fresco" (lote) y "Juliano Cocida" no son selectores de calendario** — el operario las introduce a mano porque en planta rellenan estos campos de memoria y no necesariamente con la fecha real (ver más abajo):
 
 ```typescript
 function toJulianDay(date: Date): number {
@@ -116,14 +123,14 @@ function resolveCocidaYear(julianDay: number, today: Date): number {
 }
 ```
 
-- **Lote ("Fecha Fresco")** = campo de texto libre (solo dígitos, máx. 6 caracteres), **se envía tal cual lo escribe el operario, sin transformar**. En planta no siempre meten una fecha con el formato `AAJJJ`: a veces escriben el lote completo (`263221`), a veces sin el turno al final (`26322`) — no hay cálculo posible ni deseable aquí, por eso ya no es un `DatePicker`.
-- **Cocida ("Fecha Cocida")** = el operario solo introduce el **día juliano** (numérico, 1-366, máx. 3 caracteres) — el año no lo escribe nadie, se infiere con `resolveCocidaYear()`. Cómo se imprime lo decide cada plantilla (§13): `AAJJJ`, `AJJJ` o `JJJ`, o como fecha (`DD/MM/AA`, `DD/MM/AAAA`, `MM/DD/AA`, `MM/DD/AAAA`), p. ej. `PROD: 21/09/26`. Cuando se aplica el año anterior, la vista previa muestra un badge ámbar "Año anterior (AAJJJ)" junto al campo para que el operario lo pueda verificar antes de enviar.
+- **Lote ("Lote Fresco")** = campo de texto libre (solo dígitos, máx. 6 caracteres), **se envía tal cual lo escribe el operario, sin transformar**. En planta no siempre meten una fecha con el formato `AAJJJ`: a veces escriben el lote completo (`263221`), a veces sin el turno al final (`26322`) — no hay cálculo posible ni deseable aquí, por eso ya no es un `DatePicker`.
+- **Cocida ("Juliano Cocida")** = el operario solo introduce el **día juliano** (numérico, 1-366, máx. 3 caracteres) — el año no lo escribe nadie, se infiere con `resolveCocidaYear()`. Cómo se imprime lo decide cada plantilla (§13): `AAJJJ`, `AJJJ` o `JJJ`, o como fecha (`DD/MM/AA`, `DD/MM/AAAA`, `MM/DD/AA`, `MM/DD/AAAA`), p. ej. `PROD: 21/09/26`. Cuando se aplica el año anterior, la vista previa muestra un badge ámbar "Año anterior (AAJJJ)" junto al campo para que el operario lo pueda verificar antes de enviar.
 - **Fecha de caducidad** = **fecha de cocida** (reconstruida con `fromJulianDay(año_resuelto, día_juliano)`) + días de caducidad (JDE o manual) — no se calcula desde el lote/fresco, que es texto libre sin fecha real detrás.
 - **Hora** (`HHmm`) = hora del reloj del cliente en el instante exacto de pulsar "Enviar" — **no** es un campo editable. La vista previa muestra un reloj en vivo (se recalcula cada segundo, `toHHmm(new Date())`) para que el operario vea qué hora se mandaría si pulsase ahora, pero el valor que de verdad viaja al servidor se recalcula de nuevo en `handleEnviar()` en el momento del click, no el que estaba pintado en pantalla un instante antes.
 - **Turno** = `1`, `2` o `3` — a diferencia de la hora, este sí lo elige el usuario a mano (desplegable, sin valor por defecto), porque no hay forma de deducirlo de la fecha/hora sin conocer los horarios reales de cada turno en cada planta.
 - **Línea de fabricación** = tampoco la elige el usuario en `/loteadora` — depende **solo de la loteadora seleccionada** (`loteadoras.linea`, asignada una vez en `/admin` → Loteadoras, ver §8). Al elegir una loteadora sin línea configurada, aparece un aviso ámbar bajo el selector y se bloquea el envío, igual que un artículo sin plantilla asociada.
 
-**Qué se pide depende de la plantilla del artículo** (`variablesUsadas()`): si la plantilla no usa el fresco, no aparece "Fecha Fresco"; si no usa turno, no se pide; la cocida aparece si se usa la cocida o la caducidad (que sale de ella). Sin artículo, o con un artículo sin plantilla, se enseña todo. La vista previa pinta una casilla **por cada campo de la máquina** con el texto exacto que se imprimirá (`componerCampos()`, la misma función que usa el servidor al enviar), y debajo las piezas que lo forman o, en ámbar, lo que falta por rellenar.
+**Qué se pide depende de la plantilla del artículo** (`variablesUsadas()`): si la plantilla no usa el fresco, no aparece "Lote Fresco"; si no usa turno, no se pide; la cocida aparece si se usa la cocida o la caducidad (que sale de ella). Sin artículo, o con un artículo sin plantilla, se enseña todo. La vista previa pinta una casilla **por cada campo de la máquina** con el texto exacto que se imprimirá (`componerCampos()`, la misma función que usa el servidor al enviar), y debajo las piezas que lo forman o, en ámbar, lo que falta por rellenar.
 
 ---
 
@@ -191,6 +198,7 @@ Como puede haber varias impresoras físicas, la configuración de cada una vive 
 | `ip` / `port` | IP y puerto Ethernet de la máquina |
 | `slave_address` | Slave Address configurada en la máquina (por defecto `0`) |
 | `enabled` | Si aparece en el desplegable de `/loteadora` |
+| `familias` | Familias de artículo (`F4101.IMSRP2`) que se ofrecen en `/loteadora` al elegir esta máquina, códigos separados por comas. **Vacío = todas.** Se eligen en `/admin` → Máquinas, entre las familias que tienen artículos de loteadora. Solo filtra el buscador de artículos: no es un control de seguridad en el envío (§3) |
 | `linea` | Línea de fabricación que alimenta esta loteadora (texto libre, ej. "Línea 1") — obligatoria al crear/editar. Se envía como campo remoto más en `/api/loteadora/enviar` (§6), resuelta **solo por loteadora**, nunca por artículo/plantilla ni introducida por el operario en `/loteadora` |
 
 **Ya no guarda IDs de campo** (`lot_field_id`/`expiry_field_id` se eliminaron con `ALTER TABLE ... DROP COLUMN` en `lib/sqlite.ts`) — desde que la plantilla decide esos IDs (§13), tenerlos también aquí era una segunda fuente de configuración redundante. Cuidado si se toca `app/api/admin/loteadoras/route.ts`/`[id]/route.ts`: no deben volver a referenciar esas columnas (motivo real de un bug ya corregido — el `SELECT`/`INSERT`/`UPDATE` seguía nombrándolas después de la migración, y el `GET` fallaba en silencio dejando la pestaña Loteadoras vacía en `/admin`).
@@ -213,7 +221,7 @@ Ejemplo real configurado durante el desarrollo de esta función: IP `192.168.111
   - Las posiciones van en la misma unidad que guarda el `.msg`: en `Arial-MonoBold` de tamaño 35, un carácter ocupa 21 puntos y las líneas van cada 36.
   - **No hay módulo de reloj** en el `1C`, así que el reloj (`HHmm`) se inserta a mano en la máquina después de crear el mensaje.
   - Los 17 mensajes del "nuevo loteado" (`N01_…` a `N17_…`) se crearon así en la Loteadora Pruebas, dejando hueco para el reloj. Después se exportan por USB al resto de máquinas.
-  - Aún no hay botón en `/admin`: se crearon con un script.
+  - Se crearon con un script. Desde entonces se hace con **"Crear en la loteadora…"** en `/admin` → Plantillas (§13).
 - `loadPrintMessage(config, messageName)`: encadena el comando `1E` (Load Print Message) y, si tiene éxito, el `01` (Update Print contents) para aplicarlo. Lanza un error claro si la plantilla no existe en la máquina (`P_Status=10`) o si falla cualquiera de los dos pasos. Con la impresión parada (`12`) no falla: devuelve un `warning` (§11). Entre `1E` y `01` espera `LOAD_APPLY_DELAY_MS` (1 s). El ACK de `1E` solo confirma que el mensaje existe; si el `01` llegaba antes de que la máquina terminara de leerlo, aplicaba el mensaje anterior. Se vio en planta: la plantilla decía "cargada" pero no cambiaba, y había que cargarla dos veces. Si vuelve a pasar, sube esa constante.
 - **Cola por máquina:** `sendCommand` encola los comandos a una misma IP:puerto, porque el protocolo solo admite un cliente a la vez. El estado cada 60 s, el listado de plantillas y la carga ya no abren conexiones simultáneas. La cola vive en memoria del proceso, así que vale con un único servidor Next.
 
@@ -228,6 +236,11 @@ Tanto `/loteadora` como la pestaña **Loteadoras** de `/admin` muestran el estad
 - `/admin` → Loteadoras: badge adicional junto a "Habilitada/Deshabilitada" (`GET /api/admin/loteadoras/estado`, todas, se comprueba solo mientras esa pestaña está activa).
 
 Cada comprobación abre y cierra una conexión TCP breve por loteadora (el protocolo solo admite un cliente a la vez) — no se mantiene ninguna conexión persistente.
+
+**Último envío** (sept. 2026): debajo de cada loteadora, en "Estado de las loteadoras", sale lo último que se le mandó desde el panel: plantilla, texto de cada campo, hora y quién lo envió.
+- `POST /api/loteadora/enviar` lo guarda tras cada envío correcto en `loteadora_ultimo_envio`, una fila por loteadora que se sobrescribe, y `GET /api/loteadora/estado` lo devuelve como `ultimoEnvio`.
+- El envío usa `requireAccess({ screen: 'loteadora' })` en vez de `requireScreenAccess`, para tener el usuario. Es la misma regla; `__tests__/loteadora-access.test.ts` acepta las dos formas.
+- **Es lo último que mandó el panel, no lo que tiene la máquina.** La máquina no tiene comando para preguntárselo. El aviso de "contenido impreso" (`AE`) exigiría una conexión abierta permanente, y el protocolo solo admite un cliente. Si se cambia algo a mano en la pantalla de la máquina, el panel no se entera.
 
 Al seleccionar una loteadora se fuerza además un refresco inmediato de `estadoLoteadoras` (no solo esperar al ciclo de 60s), para que la sección de estado no vaya desacompasada del check en vivo que hace `fetchMensajes()` al abrir el selector de plantilla (§11).
 
@@ -332,10 +345,28 @@ Un artículo solo puede tener una plantilla a la vez (`articulo_id` es clave pri
 
 **Migración desde el modelo anterior** (6 columnas fijas `lot/cocida/expiry/hora/turno/linea_field_id` en `loteadora_mensajes`): al arrancar, cada columna se convierte en un campo con una sola pieza de ese tipo, sin literales, y la caducidad en `DD/MM/AAAA` (lo que se imprimía hasta entonces), así que las plantillas existentes siguen enviando exactamente lo mismo; si dos columnas compartían ID (las añadidas más tarde valían 0 por defecto) gana la primera. Después se eliminan las columnas. **Antes de tocar nada se guarda una copia completa de la BD** junto a `app.db` (`app.db.pre-plantillas-campos-<fecha>`, con `VACUUM INTO`): para volver atrás, restaurar ese fichero y desplegar la versión anterior.
 
+**Crear el mensaje en la máquina desde el admin** (menú de cada plantilla → **"Crear en la loteadora…"**; también se ofrece al guardar una plantilla nueva):
+- Cada campo tiene su **línea** (1-3) y la casilla **"Reloj detrás"**. Se guardan en la tabla `loteadora_mensaje_campos`, que viaja con Exportar/Importar.
+- La disposición es **automática** (`disponerCampos()` en `lib/loteadora-plantilla.ts`, igual que se crearon los `N01`…`N17`):
+  - En cada línea, los campos van de izquierda a derecha en su orden, separados por un espacio.
+  - Tras los que llevan reloj queda un hueco de 4 caracteres más un espacio.
+  - La longitud de cada campo sale de sus piezas (`largoPieza()`: Fresco 6, línea 2, fechas según su formato, datos fijos al menos 6…).
+  - Letra `Arial-MonoBold` de tamaño 35 con una o dos líneas, y 23 con tres.
+- El constructor enseña **"Así quedará en la etiqueta"**, línea a línea, con `HHmm` en el hueco del reloj. Es la misma disposición con la que se crea en la máquina.
+- La ruta `POST /api/admin/loteadora-mensajes/:id/crear-en-maquina` (`{loteadoraId}`):
+  - no crea si la máquina está imprimiendo;
+  - manda el `1C` y comprueba que el mensaje aparece en la lista `1F`;
+  - responde si ya existía (`existia`).
+- **El reloj se mete a mano** después, porque el `1C` no tiene módulo de reloj. **Si el mensaje ya existía, se sustituye entero y se pierde el reloj** que tuviera. El diálogo lo avisa.
+- Las plantillas anteriores a esta función quedan con todos sus campos en la línea 1. Los `N01`…`N17` reciben su disposición real con la migración `disposicion-nuevo-loteado`, una sola vez y solo si no tienen ninguna guardada.
+- Diferencia mínima con el script original: en `N01` y `N13`, el reloj se creó con un espacio más delante. Si se vuelven a crear desde el admin, el campo de después queda un carácter más a la izquierda.
+
 **Copia de seguridad: Exportar / Importar** (botones de `/admin` → Plantillas, solo admin; `exportarCopia` / `importarCopia` en `lib/loteadora-plantilla.ts`, ruta `/api/admin/loteadora-copia`):
 - **Exportar** descarga `plantillas-loteadora-<fecha>.json` con todas las plantillas y las asociaciones artículo → plantilla. Las asociaciones van **por nombre de plantilla**, porque los IDs internos cambian entre BD.
 - **Importar** sube ese archivo y **valida todo antes de escribir**: plantillas con `validarPlantilla`, sin nombres repetidos, y artículos de 10 dígitos cuya plantilla esté en el archivo o en la BD. Si algo falla, no se importa nada.
 - Sin marcar **"Sustituir las que ya existan"**, solo añade lo que falta: plantillas con un nombre nuevo y artículos sin asociar. Marcada, sustituye los campos de las plantillas con el mismo nombre y reasocia los artículos que apuntaban a otra. Sirve para restaurar una copia.
+- En la sección **Artículos** hay también Exportar/Importar, pero **solo de las asociaciones** (`/api/admin/loteadora-articulos/copia`). Esa sección la puede abrir un usuario no admin con el permiso `admin.loteadora.articulos`, así que desde ahí nunca se crean ni tocan plantillas: las del archivo se ignoran. Acepta también un archivo de la copia completa.
+- Los botones y el diálogo son un único componente, `BotonesCopia`, en `components/nova/admin/comun.tsx`.
 - Nunca borra nada que no esté en el archivo. Al terminar muestra cuántas plantillas y asociaciones se crearon, se sustituyeron o se dejaron sin tocar.
 - Los tests están en `__tests__/loteadora-plantilla.test.ts`, con una BD en memoria.
 
@@ -410,8 +441,8 @@ Los tres mensajes de aviso/error del panel (artículo sin plantilla, loteadora s
 ```typescript
 interface LoteadoraFormState {
   selectedArticuloId: string | null;
-  loteManual: string;      // "Fecha Fresco" — texto libre, se envía tal cual (§5)
-  cocidaJulianDay: string; // "Fecha Cocida" — solo el día juliano, el año se infiere (§5)
+  loteManual: string;      // "Lote Fresco" — texto libre, se envía tal cual (§5)
+  cocidaJulianDay: string; // "Juliano Cocida" — solo el día juliano, el año se infiere (§5)
   diasCad: string;
   diasDesdeJde: number | null;
   modoManual: boolean;
@@ -468,3 +499,30 @@ Ahora lo lleva el `SessionProvider` compartido (ver `DOCUMENTACION.md`): revalid
 `app/login/page.tsx` respeta el `next` y devuelve al usuario al panel del que venía, con dos guardas: ruta interna (o sería un open redirect) y acceso real a ese panel (o el panel lo rebotaría al login en bucle).
 
 Este panel fue el piloto del provider junto a `/produccion`. Los demás paneles se migran en una rama aparte; hasta entonces conviven los dos modelos.
+
+---
+
+## 17. Zonas: quién ve cada loteadora
+
+Cada loteadora puede tener una **zona** (Funes 1, Funes 2, Pasteurizado...). Es informativa, se ve en el selector de `/loteadora`, en su estado y en Máquinas, y además decide **qué loteadoras ve cada rol o usuario**.
+
+- **Las zonas se gestionan en `/admin` → Loteadora › Zonas**, solo admin (`components/nova/admin/zonas.tsx`, rutas `/api/admin/zonas` y `/api/admin/zonas/:id`).
+  - Se crean, renombran y borran ahí.
+  - Nacen tres, **Funes 1, Funes 2 y Pasteurizado**, una sola vez por BD (migración `zonas-iniciales`); si se borra una, no reaparece.
+  - En cada zona se eligen los **roles** (casillas) y los **usuarios** (buscador) que la ven.
+- **La zona de cada máquina** se elige en Máquinas (`loteadoras.zona_id`). Al borrar una zona, sus loteadoras se quedan sin zona (`ON DELETE SET NULL`).
+- **Tablas:** `zonas`, `role_zonas` y `user_zonas`.
+
+**Reglas** (`zonasVisibles()` / `puedeVerLoteadora()` en `lib/loteadora-zonas.ts`, con tests en `__tests__/loteadora-zonas.test.ts`):
+1. El **admin** ve todas.
+2. Si el usuario tiene **zonas propias**, ve solo esas: **sustituyen** a las de su rol, no se suman. Sirven para restringir o ampliar a una persona sin crear un rol.
+3. Si no, las de **su rol**.
+4. **Sin zonas** en el usuario ni en su rol → ve **todas**. Nada cambia hasta que se configura algo.
+5. Un usuario restringido **no ve las loteadoras sin zona**. Una máquina recién dada de alta no aparece a quien no debe hasta que se le asigna zona.
+
+**Se aplica en servidor**, no solo en pantalla:
+- `impresoras` y `estado` devuelven solo las loteadoras visibles.
+- `enviar`, `cargar-mensaje`, `limpiar-buffer` y `mensajes` responden `404` ("…sin acceso (zona)") si la loteadora no es visible para el usuario, aunque se llame a la API directamente.
+- Por eso estas rutas usan `requireAccess({ screen: 'loteadora' })`, que da el usuario, en vez de `requireScreenAccess`. La regla de pantalla es la misma, y `__tests__/loteadora-access.test.ts` acepta las dos formas.
+
+Relación con producción: las "sub-plantas" de `/produccion` (Funes 1 / Funes 2 / Funes Past.) están fijas en el código porque salen de JDE (primer dígito de `TO55TAREA`, ver `docs/produccion.md`). Las zonas de la loteadora son otra cosa: una lista propia, editable desde el admin.

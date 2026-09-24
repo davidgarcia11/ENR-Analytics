@@ -10,13 +10,43 @@ const DB_PATH = path.join(process.cwd(), 'data', 'app.db');
 
 let _db: Database.Database | null = null;
 
+// Copia de seguridad al arrancar: la primera vez que el proceso abre la BD, ANTES
+// de crear tablas o aplicar migraciones, se guarda una copia completa en
+// data/backups/ (VACUUM INTO, consistente aunque haya escrituras). Cada despliegue
+// reinicia el servidor, así que siempre queda la BD tal como estaba antes de que la
+// versión nueva la toque. Se conservan las COPIAS_A_GUARDAR más recientes.
+// Nunca impide arrancar: si falla, se registra el error y se sigue.
+// ponytail: una copia por arranque, no por versión; subir COPIAS_A_GUARDAR si se reinicia mucho.
+const COPIAS_A_GUARDAR = 10;
+export function copiaDeSeguridad(db: Database.Database, dir: string, conservar = COPIAS_A_GUARDAR): string | null {
+  try {
+    fs.mkdirSync(dir, { recursive: true });
+    // Hora local en el nombre: es la que se busca al querer "la de antes de desplegar"
+    const d = new Date();
+    const p = (n: number) => String(n).padStart(2, '0');
+    const cuando = `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}-${p(d.getHours())}-${p(d.getMinutes())}-${p(d.getSeconds())}`;
+    const destino = path.join(dir, `app-${cuando}.db`);
+    if (fs.existsSync(destino)) return null; // dos arranques en el mismo segundo
+    db.exec(`VACUUM INTO '${destino.replace(/'/g, "''")}'`);
+    const copias = fs.readdirSync(dir).filter((f) => /^app-[\d-]+\.db$/.test(f)).sort();
+    for (const vieja of copias.slice(0, Math.max(0, copias.length - conservar))) fs.unlinkSync(path.join(dir, vieja));
+    console.log(`[sqlite] Copia de seguridad de la BD: ${destino}`);
+    return destino;
+  } catch (err) {
+    console.error('[sqlite] No se pudo hacer la copia de seguridad de la BD al arrancar:', err);
+    return null;
+  }
+}
+
 export function getDb(): Database.Database {
   if (_db) return _db;
 
   fs.mkdirSync(path.dirname(DB_PATH), { recursive: true });
+  const existia = fs.existsSync(DB_PATH);
   _db = new Database(DB_PATH);
   _db.pragma('journal_mode = WAL');
   _db.pragma('foreign_keys = ON');
+  if (existia) copiaDeSeguridad(_db, path.join(path.dirname(DB_PATH), 'backups'));
 
   // Crear tablas si no existen
   _db.exec(`
@@ -106,6 +136,26 @@ export function getDb(): Database.Database {
       created_at TEXT DEFAULT (datetime('now'))
     );
 
+    -- Zonas de las loteadoras (Funes 1, Funes 2, Pasteurizado...), gestionadas en
+    -- /admin → Zonas. A cada zona se le asignan roles y usuarios: deciden qué
+    -- loteadoras ve cada uno. Reglas en lib/loteadora-zonas.ts.
+    CREATE TABLE IF NOT EXISTS zonas (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      nombre TEXT NOT NULL UNIQUE,
+      created_at TEXT DEFAULT (datetime('now'))
+    );
+    CREATE TABLE IF NOT EXISTS role_zonas (
+      role_id INTEGER NOT NULL REFERENCES roles(id) ON DELETE CASCADE,
+      zona_id INTEGER NOT NULL REFERENCES zonas(id) ON DELETE CASCADE,
+      PRIMARY KEY (role_id, zona_id)
+    );
+    -- Zonas propias de un usuario: SUSTITUYEN a las de su rol (no se suman).
+    CREATE TABLE IF NOT EXISTS user_zonas (
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      zona_id INTEGER NOT NULL REFERENCES zonas(id) ON DELETE CASCADE,
+      PRIMARY KEY (user_id, zona_id)
+    );
+
     -- Plantillas/mensajes configurados en las loteadoras (nombre global, debe
     -- coincidir exacto con el mensaje creado en la máquina). Sus campos (Field
     -- Module) y lo que se imprime en cada uno viven en loteadora_mensaje_segmentos.
@@ -127,6 +177,28 @@ export function getDb(): Database.Database {
       valor TEXT,
       nombre TEXT,
       formato TEXT
+    );
+
+    -- Dónde va cada campo en la etiqueta (línea 1-3 y si lleva detrás el hueco
+    -- del reloj): solo sirve para crear el mensaje en la máquina (comando 1C),
+    -- ver disponerCampos() en lib/loteadora-plantilla.ts.
+    CREATE TABLE IF NOT EXISTS loteadora_mensaje_campos (
+      mensaje_id INTEGER NOT NULL REFERENCES loteadora_mensajes(id) ON DELETE CASCADE,
+      field_id INTEGER NOT NULL,
+      linea INTEGER NOT NULL DEFAULT 1,
+      reloj INTEGER NOT NULL DEFAULT 0,
+      PRIMARY KEY (mensaje_id, field_id)
+    );
+
+    -- Último envío hecho desde /loteadora a cada máquina (se sobrescribe en cada
+    -- envío correcto): se enseña en "Estado de las loteadoras". Es lo último que
+    -- mandó el panel, no lo que tenga la máquina si se cambió a mano en ella.
+    CREATE TABLE IF NOT EXISTS loteadora_ultimo_envio (
+      loteadora_id INTEGER PRIMARY KEY REFERENCES loteadoras(id) ON DELETE CASCADE,
+      plantilla TEXT NOT NULL,
+      campos TEXT NOT NULL,          -- JSON: [{ fieldId, texto }]
+      usuario TEXT,
+      enviado_at TEXT DEFAULT CURRENT_TIMESTAMP
     );
 
     -- Asociación artículo (F4101.IMLITM) -> plantilla. Global: el mismo
@@ -289,6 +361,16 @@ export function getDb(): Database.Database {
   if (!loteadoraColumns.some(c => c.name === 'linea')) {
     _db.exec("ALTER TABLE loteadoras ADD COLUMN linea TEXT NOT NULL DEFAULT ''");
   }
+  // Familias de artículo (F4101.IMSRP2) que ofrece /loteadora para esta máquina,
+  // separadas por comas. Vacío = todas.
+  if (!loteadoraColumns.some(c => c.name === 'familias')) {
+    _db.exec("ALTER TABLE loteadoras ADD COLUMN familias TEXT NOT NULL DEFAULT ''");
+  }
+  // Zona de la loteadora (informativa y para decidir quién la ve). Al borrar la
+  // zona, la loteadora se queda sin zona.
+  if (!loteadoraColumns.some(c => c.name === 'zona_id')) {
+    _db.exec('ALTER TABLE loteadoras ADD COLUMN zona_id INTEGER REFERENCES zonas(id) ON DELETE SET NULL');
+  }
 
   // Migración: las plantillas tenían un ID de campo fijo por dato (columnas
   // lot/cocida/expiry/hora/turno/linea_field_id). Pasan a campos con piezas
@@ -344,6 +426,33 @@ export function getDb(): Database.Database {
         guardarCampos(_db!, Number(insertar.run(p.name).lastInsertRowid), p.campos);
       }
       _db!.prepare("INSERT INTO migraciones (clave) VALUES ('plantillas-nuevo-loteado')").run();
+    })();
+  }
+
+  // Disposición (línea y hueco del reloj) de los N01…N17 en las BD donde ya se
+  // dieron de alta sin ella (v1.10.0). Una sola vez; solo a las plantillas que
+  // aún no tengan ninguna disposición guardada, para no pisar lo ajustado a mano.
+  if (!_db.prepare("SELECT 1 FROM migraciones WHERE clave = 'disposicion-nuevo-loteado'").get()) {
+    _db.transaction(() => {
+      const idDe = _db!.prepare('SELECT id FROM loteadora_mensajes WHERE name = ?');
+      const tiene = _db!.prepare('SELECT 1 FROM loteadora_mensaje_campos WHERE mensaje_id = ?');
+      const insertar = _db!.prepare('INSERT OR IGNORE INTO loteadora_mensaje_campos (mensaje_id, field_id, linea, reloj) VALUES (?, ?, ?, ?)');
+      for (const p of plantillasIniciales as { name: string; campos: Campo[] }[]) {
+        const m = idDe.get(p.name) as { id: number } | undefined;
+        if (!m || tiene.get(m.id)) continue;
+        for (const c of p.campos) insertar.run(m.id, c.fieldId, c.linea ?? 1, c.reloj ? 1 : 0);
+      }
+      _db!.prepare("INSERT INTO migraciones (clave) VALUES ('disposicion-nuevo-loteado')").run();
+    })();
+  }
+
+  // Zonas iniciales, una sola vez por BD (luego se gestionan en /admin → Zonas;
+  // si se borra una no reaparece).
+  if (!_db.prepare("SELECT 1 FROM migraciones WHERE clave = 'zonas-iniciales'").get()) {
+    _db.transaction(() => {
+      const insertar = _db!.prepare('INSERT OR IGNORE INTO zonas (nombre) VALUES (?)');
+      for (const nombre of ['Funes 1', 'Funes 2', 'Pasteurizado']) insertar.run(nombre);
+      _db!.prepare("INSERT INTO migraciones (clave) VALUES ('zonas-iniciales')").run();
     })();
   }
 

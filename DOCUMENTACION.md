@@ -261,6 +261,15 @@ Permite importar así: `import { getDbConnection } from '@/lib/db'`
 
 ### `lib/sqlite.ts` — Inicialización y migraciones
 
+**Copia de seguridad automática al arrancar** (`copiaDeSeguridad()`):
+- La primera vez que el proceso abre `data/app.db`, **antes de crear tablas o aplicar migraciones**, se guarda una copia completa en `data/backups/app-AAAA-MM-DD-HH-mm-ss.db`, con hora local. Se hace con `VACUUM INTO`, así que la copia es consistente aunque haya escrituras.
+- Cada despliegue reinicia el servidor, así que siempre queda la BD **tal como estaba antes de que la versión nueva la toque**.
+- Se conservan las **10 más recientes** (`COPIAS_A_GUARDAR`); las anteriores se borran solas. Si el servidor se reinicia a menudo, sube ese número.
+- Nunca impide arrancar: si la copia falla, se registra el error en el log y se sigue.
+- Una BD nueva (el archivo no existía) no se copia.
+- `data/` está en `.gitignore`, así que las copias no se suben.
+- **Para restaurar:** parar el servidor, copiar la copia elegida encima de `data/app.db` (y borrar `app.db-wal` / `app.db-shm` si existen) y arrancar.
+
 **Tablas:**
 
 ```sql
@@ -476,7 +485,7 @@ Las cookies con `secure: true` no funcionan sobre HTTP (solo HTTPS). Cuando el d
   | Grupo | Secciones |
   |---|---|
   | Accesos | Usuarios, Roles y permisos |
-  | Loteadora | Máquinas, Plantillas (constructor de campos), Artículos, Datos fijos |
+  | Loteadora | Máquinas, Zonas, Plantillas (constructor de campos), Artículos, Datos fijos |
   | Datos | Estados JDE, Muestras, Logs de consultas y Confirmaciones PDA (estas dos, solo admin; §7) |
 
 - **Cabecera fina** del área de contenido: botón del sidebar + ruta ("Accesos › Roles y
@@ -576,6 +585,8 @@ sincronización, último error) y botón "Sincronizar ahora" — ver
 | PUT | `/api/admin/jde-statuses/:code` | Actualiza la descripción de un código existente. No permite crear ni borrar |
 | GET | `/api/jde-statuses` | Lista pública (con sesión) consumida por `/comparativa-seres` |
 | GET | `/api/admin/logs` | Logs de consultas con paginación, filtros y estadísticas (ver sección 7) |
+| GET / POST | `/api/admin/zonas` · PUT / DELETE `/api/admin/zonas/:id` | Zonas de las loteadoras y roles/usuarios que ven cada una (solo admin, ver `docs/loteadora.md` §17) |
+| GET / POST | `/api/admin/loteadora-articulos/copia` | Exporta / importa solo las asociaciones artículo → plantilla (sección Artículos; abierta al permiso `admin.loteadora.articulos`) |
 | GET / POST | `/api/admin/loteadora-copia` | Exporta / importa en JSON las plantillas de la loteadora y sus asociaciones de artículos (botones de `/admin` → Plantillas, ver `docs/loteadora.md` §13) |
 
 Todas son solo de admin salvo las abiertas a un permiso en `RUTAS_ADMIN_POR_PERMISO`

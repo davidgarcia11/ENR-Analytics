@@ -5,7 +5,7 @@
  */
 import { describe, it, expect } from 'bun:test'
 import {
-  componerCampos, exportarCopia, filasACampos, formatearCaducidad, formatearCocida, importarCopia, validarPlantilla, variablesUsadas,
+  componerCampos, disponerCampos, exportarCopia, lineasEtiqueta, filasACampos, formatearCaducidad, formatearCocida, importarCopia, validarPlantilla, variablesUsadas,
   type Campo, type ValoresEtiqueta,
 } from '@/lib/loteadora-plantilla'
 
@@ -154,10 +154,12 @@ describe('copia de seguridad (exportar / importar)', () => {
       CREATE TABLE loteadora_mensaje_segmentos (id INTEGER PRIMARY KEY AUTOINCREMENT, mensaje_id INTEGER NOT NULL,
         orden INTEGER NOT NULL, field_id INTEGER NOT NULL, tipo TEXT NOT NULL, valor TEXT, nombre TEXT, formato TEXT);
       CREATE TABLE loteadora_articulo_mensajes (articulo_id TEXT PRIMARY KEY, mensaje_id INTEGER NOT NULL);
+      CREATE TABLE loteadora_mensaje_campos (mensaje_id INTEGER NOT NULL, field_id INTEGER NOT NULL,
+        linea INTEGER NOT NULL DEFAULT 1, reloj INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (mensaje_id, field_id));
     `)
     return db
   }
-  const campos = (fmt: string) => [{ fieldId: 1, piezas: [{ tipo: 'texto', valor: 'CAD ' }, { tipo: 'caducidad', formato: fmt }] }]
+  const campos = (fmt: string) => [{ fieldId: 1, piezas: [{ tipo: 'texto', valor: 'CAD ' }, { tipo: 'caducidad', formato: fmt }], linea: 2, reloj: true }]
   const copia = {
     version: 1,
     plantillas: [{ name: 'N01_A', campos: campos('DD/MM/AA') }, { name: 'N02_B', campos: campos('DD/MM/AAAA') }],
@@ -199,5 +201,40 @@ describe('copia de seguridad (exportar / importar)', () => {
     expect(exportarCopia(db).plantillas).toEqual([])
     expect('error' in importarCopia(db, { version: 1, plantillas: [{ name: 'X.msg', campos: campos('DD') }] }, false)).toBe(true)
     expect('error' in importarCopia(db, { foo: 1 }, false)).toBe(true)
+  })
+})
+
+describe('disposición en la etiqueta (crear el mensaje en la máquina)', () => {
+  const LOTE = [{ tipo: 'texto', valor: 'L' }, { tipo: 'cocida' }, { tipo: 'texto', valor: ' ' }, { tipo: 'fresco' }, { tipo: 'texto', valor: ' ' }, { tipo: 'linea' }] as Campo['piezas']
+
+  it('una línea: el campo de después del reloj empieza tras el hueco (como N02)', () => {
+    const d = disponerCampos([
+      { fieldId: 1, piezas: LOTE, linea: 1, reloj: true },
+      { fieldId: 2, piezas: [{ tipo: 'texto', valor: 'CAD ' }, { tipo: 'caducidad', formato: 'DD/MM/AA' }], linea: 1 },
+    ])
+    expect(d.map((c) => [c.id, c.x, c.y, c.length, c.fontSize])).toEqual([[1, 0, 0, 16, 35], [2, 462, 0, 12, 35]])
+  })
+
+  it('tres líneas: letra más pequeña (como N06)', () => {
+    const d = disponerCampos([
+      { fieldId: 1, piezas: [{ tipo: 'caducidad', formato: 'DD/MM/AA' }], linea: 1 },
+      { fieldId: 2, piezas: LOTE, linea: 2, reloj: true },
+      { fieldId: 3, piezas: [{ tipo: 'texto', valor: 'It contains egg' }], linea: 3 },
+    ])
+    expect(d.map((c) => [c.x, c.y, c.fontSize])).toEqual([[0, 0, 23], [0, 24, 23], [0, 48, 23]])
+  })
+
+  it('vista previa por líneas con el hueco del reloj', () => {
+    const campos: Campo[] = [
+      { fieldId: 1, piezas: [{ tipo: 'texto', valor: 'L' }, { tipo: 'cocida' }, { tipo: 'turno' }], linea: 1, reloj: true },
+      { fieldId: 2, piezas: [{ tipo: 'texto', valor: 'CAD ' }, { tipo: 'caducidad', formato: 'DD/MM/AA' }], linea: 2 },
+    ]
+    expect(lineasEtiqueta(campos, valores)).toEqual(['L263641 HHmm', 'CAD 06/01/27'])
+  })
+
+  it('valida la línea y guarda el reloj', () => {
+    const r = validarPlantilla({ name: 'X', campos: [{ fieldId: 1, piezas: [{ tipo: 'hora' }], linea: 2, reloj: true }] })
+    expect('value' in r && r.value.campos[0]).toEqual({ fieldId: 1, piezas: [{ tipo: 'hora' }], linea: 2, reloj: true })
+    expect('error' in validarPlantilla({ name: 'X', campos: [{ fieldId: 1, piezas: [{ tipo: 'hora' }], linea: 4 }] })).toBe(true)
   })
 })

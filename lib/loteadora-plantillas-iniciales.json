@@ -16,7 +16,9 @@
           {
             "tipo": "turno"
           }
-        ]
+        ],
+        "linea": 1,
+        "reloj": true
       },
       {
         "fieldId": 2,
@@ -29,7 +31,9 @@
             "tipo": "caducidad",
             "formato": "DD/MM/AA"
           }
-        ]
+        ],
+        "linea": 1,
+        "reloj": false
       }
     ]
   },
@@ -61,7 +65,9 @@
           {
             "tipo": "linea"
           }
-        ]
+        ],
+        "linea": 1,
+        "reloj": true
       },
       {
         "fieldId": 2,
@@ -74,7 +80,9 @@
             "tipo": "caducidad",
             "formato": "DD/MM/AA"
           }
-        ]
+        ],
+        "linea": 1,
+        "reloj": false
       }
     ]
   },
@@ -106,7 +114,9 @@
           {
             "tipo": "linea"
           }
-        ]
+        ],
+        "linea": 1,
+        "reloj": true
       },
       {
         "fieldId": 2,
@@ -119,7 +129,9 @@
             "tipo": "caducidad",
             "formato": "DD/MM/AAAA"
           }
-        ]
+        ],
+        "linea": 2,
+        "reloj": false
       }
     ]
   },
@@ -133,7 +145,9 @@
             "tipo": "caducidad",
             "formato": "DD/MM/AA"
           }
-        ]
+        ],
+        "linea": 1,
+        "reloj": false
       },
       {
         "fieldId": 2,
@@ -160,7 +174,9 @@
           {
             "tipo": "linea"
           }
-        ]
+        ],
+        "linea": 2,
+        "reloj": true
       }
     ]
   },
@@ -200,7 +216,9 @@
           {
             "tipo": "linea"
           }
-        ]
+        ],
+        "linea": 1,
+        "reloj": true
       }
     ]
   },
@@ -214,7 +232,9 @@
             "tipo": "caducidad",
             "formato": "DD/MM/AA"
           }
-        ]
+        ],
+        "linea": 1,
+        "reloj": false
       },
       {
         "fieldId": 2,
@@ -241,7 +261,9 @@
           {
             "tipo": "linea"
           }
-        ]
+        ],
+        "linea": 2,
+        "reloj": true
       },
       {
         "fieldId": 3,
@@ -250,7 +272,9 @@
             "tipo": "texto",
             "valor": "It contains egg"
           }
-        ]
+        ],
+        "linea": 3,
+        "reloj": false
       }
     ]
   },
@@ -264,7 +288,9 @@
             "tipo": "caducidad",
             "formato": "DD/MM/AA"
           }
-        ]
+        ],
+        "linea": 1,
+        "reloj": false
       },
       {
         "fieldId": 2,
@@ -291,7 +317,9 @@
           {
             "tipo": "linea"
           }
-        ]
+        ],
+        "linea": 2,
+        "reloj": true
       },
       {
         "fieldId": 3,
@@ -300,7 +328,9 @@
             "tipo": "texto",
             "valor": "It contains egg and milk"
           }
-        ]
+        ],
+        "linea": 3,
+        "reloj": false
       }
     ]
   },
@@ -318,7 +348,9 @@
             "tipo": "caducidad",
             "formato": "DD/MM/AA"
           }
-        ]
+        ],
+        "linea": 1,
+        "reloj": false
       },
       {
         "fieldId": 2,
@@ -345,7 +377,9 @@
           {
             "tipo": "linea"
           }
-        ]
+        ],
+        "linea": 2,
+        "reloj": true
       }
     ]
   },
@@ -377,7 +411,9 @@
           {
             "tipo": "linea"
           }
-        ]
+        ],
+        "linea": 1,
+        "reloj": true
       },
       {
         "fieldId": 2,
@@ -390,7 +426,9 @@
             "tipo": "caducidad",
             "formato": "DD/MM/AA"
           }
-        ]
+        ],
+        "linea": 1,
+        "reloj": false
       }
     ]
   },
@@ -422,7 +460,9 @@
           {
             "tipo": "linea"
           }
-        ]
+        ],
+        "linea": 1,
+        "reloj": true
       },
       {
         "fieldId": 2,
@@ -435,7 +475,9 @@
             "tipo": "caducidad",
             "formato": "DD/MM/AA"
           }
-        ]
+        ],
+        "linea": 1,
+        "reloj": false
       },
       {
         "fieldId": 3,
@@ -445,7 +487,9 @@
             "valor": "K-000000",
             "nombre": "Certificado Kosher"
           }
-        ]
+        ],
+        "linea": 2,
+        "reloj": false
       }
     ]
   },
@@ -471,7 +515,9 @@
             "tipo": "caducidad",
             "formato": "DD/MM/AA"
           }
-        ]
+        ],
+        "linea": 1,
+        "reloj": false
       },
       {
         "fieldId": 2,
@@ -498,7 +544,9 @@
           {
             "tipo": "linea"
           }
-        ]
+        ],
+        "linea": 2,
+        "reloj": true
       }
     ]
   },
@@ -521,7 +569,9 @@
             "valor": "3,89",
             "nombre": "Precio"
           }
-        ]
+        ],
+        "linea": 1,
+        "reloj": false
       },
       {
         "fieldId": 2,
@@ -548,7 +598,9 @@
           {
             "tipo": "linea"
           }
-        ]
+        ],
+        "linea": 2,
+        "reloj": true
       }
     ]
   },
@@ -570,7 +622,9 @@
             "tipo": "texto",
             "valor": "0"
           }
-        ]
+        ],
+        "linea": 1,
+        "reloj": true
       },
       {
         "fieldId": 2,
@@ -583,7 +637,9 @@
             "tipo": "caducidad",
             "formato": "DD/MM/AA"
           }
-        ]
+        ],
+        "linea": 1,
+        "reloj": false
       }
     ]
   },
@@ -615,7 +671,9 @@
           {
             "tipo": "linea"
           }
-        ]
+        ],
+        "linea": 1,
+        "reloj": true
       },
       {
         "fieldId": 2,
@@ -624,7 +682,9 @@
             "tipo": "caducidad",
             "formato": "DD/MM/AA"
           }
-        ]
+        ],
+        "linea": 1,
+        "reloj": false
       }
     ]
   },
@@ -656,7 +716,9 @@
           {
             "tipo": "linea"
           }
-        ]
+        ],
+        "linea": 1,
+        "reloj": true
       },
       {
         "fieldId": 2,
@@ -669,7 +731,9 @@
             "tipo": "caducidad",
             "formato": "MM/DD/AA"
           }
-        ]
+        ],
+        "linea": 2,
+        "reloj": false
       }
     ]
   },
@@ -694,7 +758,9 @@
           {
             "tipo": "fresco"
           }
-        ]
+        ],
+        "linea": 1,
+        "reloj": false
       },
       {
         "fieldId": 2,
@@ -703,7 +769,9 @@
             "tipo": "caducidad",
             "formato": "DD/MM/AA"
           }
-        ]
+        ],
+        "linea": 2,
+        "reloj": false
       }
     ]
   },
@@ -735,7 +803,9 @@
           {
             "tipo": "linea"
           }
-        ]
+        ],
+        "linea": 1,
+        "reloj": true
       },
       {
         "fieldId": 2,
@@ -744,7 +814,9 @@
             "tipo": "caducidad",
             "formato": "DD/MM/AA"
           }
-        ]
+        ],
+        "linea": 2,
+        "reloj": false
       }
     ]
   }

@@ -14,9 +14,12 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
   if ('error' in parsed) {
     return NextResponse.json({ error: parsed.error }, { status: 400 });
   }
-  const { name, ip, port, slaveAddress, enabled, linea } = parsed.value;
+  const { name, ip, port, slaveAddress, enabled, linea, familias, zonaId } = parsed.value;
 
   const db = getDb();
+  if (zonaId !== null && !db.prepare('SELECT 1 FROM zonas WHERE id = ?').get(zonaId)) {
+    return NextResponse.json({ error: 'La zona no existe' }, { status: 400 });
+  }
 
   const existing = db.prepare('SELECT id FROM loteadoras WHERE name = ? AND id != ?').get(name, loteadoraId);
   if (existing) {
@@ -24,9 +27,9 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
   }
 
   const result = db.prepare(
-    `UPDATE loteadoras SET name = ?, ip = ?, port = ?, slave_address = ?, enabled = ?, linea = ?
+    `UPDATE loteadoras SET name = ?, ip = ?, port = ?, slave_address = ?, enabled = ?, linea = ?, familias = ?, zona_id = ?
      WHERE id = ?`
-  ).run(name, ip, port, slaveAddress, enabled, linea, loteadoraId);
+  ).run(name, ip, port, slaveAddress, enabled, linea, familias, zonaId, loteadoraId);
 
   if (result.changes === 0) {
     return NextResponse.json({ error: 'Loteadora no encontrada' }, { status: 404 });

@@ -17,7 +17,7 @@ import { Combobox, ComboboxContent, ComboboxEmpty, ComboboxInput, ComboboxItem, 
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/nova/ui/table";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/nova/ui/dialog";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/nova/ui/dropdown-menu";
-import { Buscador, CabeceraSeccion, ConfirmarDialog, ErrorForm, FilaVacia, TablaCard, type SeccionProps } from "./comun";
+import { BotonesCopia, Buscador, CabeceraSeccion, ConfirmarDialog, ErrorForm, FilaVacia, TablaCard, type SeccionProps } from "./comun";
 
 interface Asociacion {
   articulo_id: string;
@@ -127,6 +127,7 @@ export default function AdminArticulosPlantilla({ titulo, descripcion }: Seccion
   return (
     <>
       <CabeceraSeccion titulo={titulo} descripcion={descripcion}>
+        <BotonesCopia ruta="/api/admin/loteadora-articulos/copia" archivo="articulos-loteadora" onImportado={cargarAsociaciones} />
         <Button onClick={abrirAsociar}>
           <Link2 />
           Asociar artículo
