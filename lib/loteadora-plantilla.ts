@@ -40,13 +40,17 @@ export interface Campo {
   /** ID de datos del Field Module en la máquina (0-255) */
   fieldId: number;
   piezas: Pieza[];
+  /** Línea de la etiqueta (1-3) — solo para crear el mensaje en la máquina (1C) */
+  linea?: number;
+  /** Dejar detrás el hueco del reloj (HHmm), que se inserta a mano en la máquina */
+  reloj?: boolean;
 }
 
 export const INFO_PIEZA: Record<TipoPieza, { label: string; ayuda: string }> = {
   texto: { label: 'Texto', ayuda: 'Literal que se imprime tal cual ("L", "CAD ", un espacio...)' },
   fijo: { label: 'Dato fijo', ayuda: 'Valor constante de la plantilla (precio, nº de certificado). Editable por quien tenga el permiso' },
-  fresco: { label: 'Fecha fresco', ayuda: 'Lo que escribe el operario en "Fecha Fresco", tal cual' },
-  cocida: { label: 'Cocida', ayuda: 'Día juliano de cocida con su año' },
+  fresco: { label: 'Lote fresco', ayuda: 'Lo que escribe el operario en "Lote Fresco", tal cual' },
+  cocida: { label: 'Cocida', ayuda: 'Lo que escribe el operario en "Juliano Cocida" (día juliano), con su año: como AAJJJ, AJJJ, JJJ o como fecha' },
   caducidad: { label: 'Caducidad', ayuda: 'Cocida + días de caducidad' },
   turno: { label: 'Turno', ayuda: 'Turno elegido en /loteadora (1, 2 o 3)' },
   hora: { label: 'Hora', ayuda: 'Hora del envío, HHmm' },
@@ -207,10 +211,69 @@ export function validarPlantilla(body: any): { error: string } | { value: { name
       }
       piezas.push(pieza);
     }
-    campos.push({ fieldId, piezas });
+    const linea = c.linea === undefined || c.linea === null ? 1 : Number(c.linea);
+    if (![1, 2, 3].includes(linea)) return { error: `Campo ID ${fieldId}: la línea debe ser 1, 2 o 3` };
+    campos.push({ fieldId, piezas, linea, reloj: c.reloj === true });
   }
 
   return { value: { name, campos } };
+}
+
+// ─── Disposición en la etiqueta (para crear el mensaje en la máquina, 1C) ─────────
+// Automática, igual que se crearon los N01…N17: en cada línea los campos van de
+// izquierda a derecha en su orden, separados por un espacio, y detrás de los que
+// llevan `reloj` queda un hueco de 4 caracteres (+ espacio) para el reloj, que se
+// inserta a mano en la máquina (el 1C no tiene módulo de reloj). Medidas de
+// Prueba2.msg: Arial-MonoBold 35 → 21 puntos por carácter y 36 entre líneas; con
+// 3 líneas, tamaño 23 (14 y 24) para que quepa en la misma altura.
+
+export const FUENTE_MENSAJE = 'Arial-MonoBold';
+const ANCHO_RELOJ = 4;
+
+/** Nº máximo de caracteres que puede ocupar una pieza (dimensiona el campo en la máquina). */
+export function largoPieza(p: Pieza): number {
+  switch (p.tipo) {
+    case 'texto': return (p.valor ?? '').length;
+    case 'fijo': return Math.max((p.valor ?? '').length, 6); // margen: el valor se edita después
+    case 'fresco': return 6;
+    case 'turno': return 1;
+    case 'linea': return 2;
+    case 'hora': return 4;
+    case 'cocida': return ({ AAJJJ: 5, AJJJ: 4, JJJ: 3 } as Record<string, number>)[p.formato ?? 'AAJJJ'] ?? (p.formato ?? '').length;
+    case 'caducidad': return (p.formato ?? 'DD/MM/AAAA').length;
+  }
+}
+
+export interface CampoDispuesto {
+  id: number; x: number; y: number; fontSize: number; font: string; length: number;
+  /** Línea (1-3) y columna en caracteres, para la vista previa */
+  linea: number; columna: number; reloj: boolean;
+}
+
+export function disponerCampos(campos: Campo[]): CampoDispuesto[] {
+  const lineas = Math.max(1, ...campos.map((c) => c.linea ?? 1));
+  const [fontSize, cw, lh] = lineas >= 3 ? [23, 14, 24] : [35, 21, 36];
+  const columna = new Map<number, number>();
+  return campos.map((c) => {
+    const linea = c.linea ?? 1;
+    const col = columna.get(linea) ?? 0;
+    const length = Math.max(1, c.piezas.reduce((n, p) => n + largoPieza(p), 0));
+    columna.set(linea, col + length + 1 + (c.reloj ? ANCHO_RELOJ + 1 : 0));
+    return { id: c.fieldId, x: col * cw, y: (linea - 1) * lh, fontSize, font: FUENTE_MENSAJE, length, linea, columna: col, reloj: !!c.reloj };
+  });
+}
+
+/** Texto de cada línea de la etiqueta tal como quedaría (el reloj como "HHmm"). */
+export function lineasEtiqueta(campos: Campo[], v: ValoresEtiqueta): string[] {
+  const textos = componerCampos(campos, v);
+  const lineas: string[] = [];
+  disponerCampos(campos).forEach((d, i) => {
+    let l = lineas[d.linea - 1] ?? '';
+    l = l.padEnd(d.columna) + textos[i].texto.padEnd(d.length);
+    if (d.reloj) l += ' HHmm';
+    lineas[d.linea - 1] = l;
+  });
+  return Array.from(lineas, (l) => (l ?? '').trimEnd());
 }
 
 // ─── Persistencia (tabla loteadora_mensaje_segmentos) ────────────────────────────
@@ -248,7 +311,13 @@ export function leerCampos(db: Database.Database, mensajeIds?: number[]): Map<nu
     : db.prepare('SELECT * FROM loteadora_mensaje_segmentos').all()) as FilaSegmento[];
   const porMensaje = new Map<number, FilaSegmento[]>();
   for (const f of filas) porMensaje.set(f.mensaje_id, [...(porMensaje.get(f.mensaje_id) ?? []), f]);
-  return new Map([...porMensaje].map(([id, fs]) => [id, filasACampos(fs)]));
+  const disp = db.prepare('SELECT mensaje_id, field_id, linea, reloj FROM loteadora_mensaje_campos').all() as
+    { mensaje_id: number; field_id: number; linea: number; reloj: number }[];
+  const dispDe = new Map(disp.map((d) => [`${d.mensaje_id}|${d.field_id}`, d]));
+  return new Map([...porMensaje].map(([id, fs]) => [id, filasACampos(fs).map((c) => {
+    const d = dispDe.get(`${id}|${c.fieldId}`);
+    return { ...c, linea: d?.linea ?? 1, reloj: d?.reloj === 1 };
+  })]));
 }
 
 /** Sustituye todos los campos de una plantilla (llamar dentro de una transacción). */
@@ -261,6 +330,9 @@ export function guardarCampos(db: Database.Database, mensajeId: number, campos: 
   campos.forEach((c, ci) => c.piezas.forEach((p, pi) => {
     insertar.run(mensajeId, ci * 1000 + pi, c.fieldId, p.tipo, p.valor ?? null, p.nombre ?? null, p.formato ?? null);
   }));
+  db.prepare('DELETE FROM loteadora_mensaje_campos WHERE mensaje_id = ?').run(mensajeId);
+  const disp = db.prepare('INSERT INTO loteadora_mensaje_campos (mensaje_id, field_id, linea, reloj) VALUES (?, ?, ?, ?)');
+  for (const c of campos) disp.run(mensajeId, c.fieldId, c.linea ?? 1, c.reloj ? 1 : 0);
 }
 
 // ─── Copia de seguridad: exportar / importar (/admin → Plantillas) ───────────────

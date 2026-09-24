@@ -38,10 +38,13 @@ import { INFO_PIEZA, componerCampos, variablesUsadas, type Campo, type TipoVaria
 // Plantilla del artículo: nombre del mensaje en la máquina y sus campos con piezas
 // (lib/loteadora-plantilla.ts) — deciden qué pide el formulario y la vista previa.
 interface PlantillaArticulo { messageName: string; campos: Campo[] }
-interface Articulo { id: string; descripcion: string; diasCaducidad: number; plantilla: PlantillaArticulo | null }
-interface Loteadora { id: number; name: string; linea: string }
+interface Articulo { id: string; descripcion: string; diasCaducidad: number; familia: string; familiaDesc: string; plantilla: PlantillaArticulo | null }
+// familias: códigos F4101.IMSRP2 separados por comas que ofrece esta loteadora (vacío = todas)
+interface Loteadora { id: number; name: string; linea: string; familias: string; zona: string | null }
 type EstadoLoteadoraValor = "activa" | "en_error" | "standby" | "apagada";
-interface EstadoLoteadora { id: number; name: string; state: EstadoLoteadoraValor }
+// ultimoEnvio: lo último que mandó el panel a esa máquina (no lo que tenga si se cambió a mano)
+interface UltimoEnvio { plantilla: string; campos: { fieldId: number; texto: string }[]; usuario: string | null; enviadoAt: string }
+interface EstadoLoteadora { id: number; name: string; zona: string | null; state: EstadoLoteadoraValor; ultimoEnvio: UltimoEnvio | null }
 
 // Formulario de UN trabajo de impresión (artículo/fechas/turno/plantilla elegida).
 // Se guarda uno por loteadora (ver `formStates` en el componente) para que cambiar
@@ -50,7 +53,7 @@ interface LoteadoraFormState {
   selectedArticuloId: string | null;
   // Lote (antes "fabricación"): texto libre tal cual lo escribe el operario
   // (ej. "263221", a veces con el turno al final) — se envía sin tocar, no se
-  // calcula. Ver "Fecha Fresco" en la UI y docs/loteadora.md §5.
+  // calcula. Ver "Lote Fresco" en la UI y docs/loteadora.md §5.
   loteManual: string;
   // Cocida: solo el día juliano (1-366); el año se infiere (resolveCocidaYear).
   cocidaJulianDay: string;
@@ -91,6 +94,12 @@ function addDays(date: Date, days: number): Date {
 }
 function toISODate(date: Date): string {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+}
+// "2026-09-24 08:35:12" (UTC, CURRENT_TIMESTAMP de SQLite) → "10:35" hoy, "23/09 10:35" otro día
+function cuandoEnvio(utc: string): string {
+  const d = new Date(utc.replace(" ", "T") + "Z");
+  const hora = d.toLocaleTimeString("es-ES", { hour: "2-digit", minute: "2-digit" });
+  return d.toDateString() === new Date().toDateString() ? hora : `${d.toLocaleDateString("es-ES", { day: "2-digit", month: "2-digit" })} ${hora}`;
 }
 function toHHmm(date: Date): string {
   return `${String(date.getHours()).padStart(2, "0")}${String(date.getMinutes()).padStart(2, "0")}`;
@@ -424,6 +433,7 @@ function LoteadoraPanel() {
       } else {
         toast.success("Mensaje enviado correctamente");
       }
+      fetchEstadoLoteadoras(); // para ver ya el último envío en el estado
     } catch (err: any) {
       setSendError(err.message || "Error al enviar a la loteadora");
     } finally {
@@ -469,14 +479,18 @@ function LoteadoraPanel() {
   const canSend = compuestos.length > 0 && faltan.length === 0 && !!selectedLoteadora && !sending && !imprimiendo;
   const diasReadonly = !modoManual && jdeOnline && diasDesdeJde !== null;
   const canCargarMensaje = !!selectedLoteadora && !!plantilla && !cargandoMensaje && !imprimiendo;
-  const loteadoraItems = loteadoras.map((l) => ({ value: String(l.id), label: l.name }));
+  const loteadoraItems = loteadoras.map((l) => ({ value: String(l.id), label: l.zona ? `${l.name} · ${l.zona}` : l.name }));
 
-  const articuloIds = articulos.map((a) => a.id);
+  // Solo los artículos de las familias de la loteadora elegida (sin familias = todos)
+  const familiasLoteadora = (loteadoraSeleccionada?.familias ?? "").split(",").filter(Boolean);
+  const articuloIds = articulos
+    .filter((a) => familiasLoteadora.length === 0 || familiasLoteadora.includes(a.familia))
+    .map((a) => a.id);
   const articuloLabel = (id: string) => {
     const a = articulos.find((x) => x.id === id);
     return a ? `${a.id} — ${a.descripcion}` : id;
   };
-  const articuloPlaceholder = !selectedLoteadora ? "Elige primero la loteadora" : loadingArticulos ? "Cargando…" : articulos.length === 0 ? "Sin artículos disponibles" : "Buscar por código o descripción…";
+  const articuloPlaceholder = !selectedLoteadora ? "Elige primero la loteadora" : loadingArticulos ? "Cargando…" : articuloIds.length === 0 ? "Sin artículos disponibles para esta loteadora" : "Buscar por código o descripción…";
 
   return (
     <div data-nova-theme={effectiveTheme} ref={portalContainerRef} className="min-h-screen bg-sidebar text-foreground">
@@ -507,7 +521,7 @@ function LoteadoraPanel() {
                       </SelectTrigger>
                       <SelectContent align="start" alignItemWithTrigger={false}>
                         {loteadoras.map((l) => (
-                          <SelectItem key={l.id} value={String(l.id)}>{l.name}</SelectItem>
+                          <SelectItem key={l.id} value={String(l.id)}>{l.name}{l.zona && <span className="text-muted-foreground"> · {l.zona}</span>}</SelectItem>
                         ))}
                       </SelectContent>
                     </Select>
@@ -582,7 +596,7 @@ function LoteadoraPanel() {
                     </Alert>
                   )}
 
-                  {/* Fecha Fresco (lote) y Fecha Cocida lado a lado — ambas de introducción
+                  {/* Lote Fresco y Juliano Cocida lado a lado — ambas de introducción
                       manual: el operario escribe el contenido exacto del lote (tal cual se
                       envía) y solo el día juliano de la cocida (el año se infiere, ver
                       resolveCocidaYear). La caducidad se calcula desde cocida, no desde
@@ -590,7 +604,7 @@ function LoteadoraPanel() {
                   <div className="grid grid-cols-2 gap-3">
                     {necesita("fresco") && (
                     <div className="grid gap-1.5">
-                      <label className="text-xs font-semibold text-foreground">Fecha Fresco</label>
+                      <label className="text-xs font-semibold text-foreground">Lote Fresco</label>
                       <Input
                         type="text"
                         inputMode="numeric"
@@ -607,7 +621,7 @@ function LoteadoraPanel() {
                           no cambie de alto al aparecer/desaparecer y desplace el resto del
                           formulario — mismo patrón que los badges de "Días de caducidad". */}
                       <div className="flex items-center justify-between gap-2">
-                        <label className="text-xs font-semibold text-foreground">Fecha Cocida</label>
+                        <label className="text-xs font-semibold text-foreground">Juliano Cocida</label>
                         {cocidaAnioAnterior && (
                           <Badge variant="outline" className="gap-1 text-amber-600">
                             <CalendarIcon className="size-3" />
@@ -796,12 +810,33 @@ function LoteadoraPanel() {
                       const info = ESTADO_INFO[l.state];
                       const Icon = info.icon;
                       return (
-                        <div key={l.id} className="flex items-center justify-between gap-2 rounded-lg border border-border px-4 py-2.5">
-                          <span className="truncate text-sm font-medium text-foreground">{l.name}</span>
-                          <Badge className={`gap-1.5 whitespace-nowrap ${info.className}`}>
-                            <Icon className="size-3.5" />
-                            {info.label}
-                          </Badge>
+                        <div key={l.id} className="rounded-lg border border-border px-4 py-2.5">
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="truncate text-sm font-medium text-foreground">
+                              {l.name}
+                              {l.zona && <span className="ml-1.5 text-xs font-normal text-muted-foreground">{l.zona}</span>}
+                            </span>
+                            <Badge className={`gap-1.5 whitespace-nowrap ${info.className}`}>
+                              <Icon className="size-3.5" />
+                              {info.label}
+                            </Badge>
+                          </div>
+                          {l.ultimoEnvio ? (
+                            <div className="mt-2 border-t border-border pt-2">
+                              <p className="text-[11px] text-muted-foreground">
+                                Último envío · {cuandoEnvio(l.ultimoEnvio.enviadoAt)}
+                                {l.ultimoEnvio.usuario && <> · {l.ultimoEnvio.usuario}</>}
+                              </p>
+                              <p className="truncate font-mono text-xs text-muted-foreground">{l.ultimoEnvio.plantilla}</p>
+                              <div className="mt-1 grid gap-0.5">
+                                {l.ultimoEnvio.campos.map((c) => (
+                                  <span key={c.fieldId} className="truncate font-mono text-xs whitespace-pre text-foreground" title={`Campo ${c.fieldId}`}>{c.texto}</span>
+                                ))}
+                              </div>
+                            </div>
+                          ) : (
+                            <p className="mt-2 border-t border-border pt-2 text-[11px] text-muted-foreground">Sin envíos desde el panel</p>
+                          )}
                         </div>
                       );
                     })}

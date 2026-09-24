@@ -40,9 +40,11 @@ describe('loteadora — todas sus rutas exigen permiso de pantalla', () => {
   const rutasProtegidas = ['enviar', 'cargar-mensaje', 'limpiar-buffer', 'mensajes', 'articulos', 'estado', 'impresoras']
 
   for (const ruta of rutasProtegidas) {
-    it(`/api/loteadora/${ruta} exige requireScreenAccess('loteadora')`, () => {
+    // requireScreenAccess('loteadora') es un atajo de requireAccess({ screen: 'loteadora' });
+    // `enviar` usa la segunda porque necesita el usuario (último envío).
+    it(`/api/loteadora/${ruta} exige el permiso de pantalla 'loteadora'`, () => {
       const src = readFileSync(join(import.meta.dir, '..', 'app', 'api', 'loteadora', ruta, 'route.ts'), 'utf8')
-      expect(src).toContain("requireScreenAccess('loteadora')")
+      expect(src).toMatch(/requireScreenAccess\('loteadora'\)|requireAccess\(\{ screen: 'loteadora' \}\)/)
     })
   }
 })
