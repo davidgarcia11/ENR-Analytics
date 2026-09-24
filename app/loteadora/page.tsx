@@ -33,11 +33,12 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/nova/ui/dialog";
 import { Combobox, ComboboxContent, ComboboxEmpty, ComboboxInput, ComboboxItem, ComboboxList } from "@/components/nova/ui/combobox";
 import { Toaster } from "@/components/nova/ui/sonner";
-import { INFO_PIEZA, componerCampos, variablesUsadas, type Campo, type TipoVariable } from "@/lib/loteadora-plantilla";
+import { INFO_PIEZA, MAX_MANUAL, componerCampos, piezasManuales, variablesUsadas, type Campo, type TipoVariable } from "@/lib/loteadora-plantilla";
 
 // Plantilla del artículo: nombre del mensaje en la máquina y sus campos con piezas
 // (lib/loteadora-plantilla.ts) — deciden qué pide el formulario y la vista previa.
-interface PlantillaArticulo { messageName: string; campos: Campo[] }
+// ultimosManuales: último valor enviado de cada "dato a introducir" de la plantilla
+interface PlantillaArticulo { messageName: string; campos: Campo[]; ultimosManuales: Record<string, string> }
 interface Articulo { id: string; descripcion: string; diasCaducidad: number; familia: string; familiaDesc: string; plantilla: PlantillaArticulo | null }
 // familias: códigos F4101.IMSRP2 separados por comas que ofrece esta loteadora (vacío = todas)
 interface Loteadora { id: number; name: string; linea: string; familias: string; zona: string | null }
@@ -65,6 +66,8 @@ interface LoteadoraFormState {
   // ESTA loteadora: al volver a ella no se vuelve a preguntar (recargar el
   // mensaje podría borrar los datos ya enviados que esperan para imprimir).
   plantillaPreguntada: string | null;
+  // Datos a introducir de la plantilla (pieza 'manual'), por nombre
+  manuales: Record<string, string>;
 }
 
 // Colores fijos (enum cerrado de 4 estados) — mismo formato "bg-x/10 text-x" que el
@@ -122,6 +125,7 @@ function defaultFormState(): LoteadoraFormState {
     modoManual: false,
     turno: "",
     plantillaPreguntada: null,
+    manuales: {},
   };
 }
 
@@ -349,8 +353,19 @@ function LoteadoraPanel() {
       updateForm({ selectedArticuloId: null, plantillaPreguntada: null });
       return;
     }
+    // Otro artículo puede ser otra tirada (otra cocida, otro lote): se vacían Lote
+    // Fresco, Juliano Cocida y Turno para no enviar los del anterior. Los datos a
+    // introducir se proponen con el último valor enviado con esa plantilla (o su
+    // valor por defecto). Cambiar de loteadora no toca nada (cada una su formulario).
+    const manuales = Object.fromEntries(
+      piezasManuales(art.plantilla?.campos ?? []).map((m) => [m.nombre, art.plantilla?.ultimosManuales?.[m.nombre] ?? m.porDefecto]),
+    );
     updateForm({
       selectedArticuloId: art.id,
+      loteManual: "",
+      cocidaJulianDay: "",
+      turno: "",
+      manuales,
       ...(art.diasCaducidad > 0
         ? { diasDesdeJde: art.diasCaducidad, diasCad: String(art.diasCaducidad), modoManual: false }
         : { diasDesdeJde: null, diasCad: "", modoManual: true }),
@@ -420,6 +435,7 @@ function LoteadoraPanel() {
           caducidad: fechaCaducidad ? toISODate(fechaCaducidad) : null,
           horaEnvio: toHHmm(new Date()),
           turno,
+          manuales: currentForm.manuales,
         }),
       });
       const data = await res.json();
@@ -469,6 +485,7 @@ function LoteadoraPanel() {
         caducidad: fechaCaducidad ? toISODate(fechaCaducidad) : undefined,
         hora: toHHmm(ahora),
         turno: turno || undefined,
+        manuales: currentForm.manuales,
         linea: lineaLoteadora ?? undefined,
       })
     : [];
@@ -696,6 +713,20 @@ function LoteadoraPanel() {
                     </Select>
                   </div>
                   )}
+
+                  {/* Datos a introducir de la plantilla (p. ej. nº de certificado Kosher) */}
+                  {plantilla && piezasManuales(plantilla.campos).map((m) => (
+                    <div key={m.nombre} className="grid gap-1.5">
+                      <label className="text-xs font-semibold text-foreground">{m.nombre}</label>
+                      <Input
+                        value={currentForm.manuales[m.nombre] ?? ""}
+                        onChange={(e) => updateForm({ manuales: { ...currentForm.manuales, [m.nombre]: e.target.value } })}
+                        maxLength={MAX_MANUAL}
+                        placeholder={m.porDefecto || m.nombre}
+                        className="font-mono"
+                      />
+                    </div>
+                  ))}
 
                   {/* La plantilla la decide el artículo (no se puede elegir otra a mano);
                       el botón solo vuelve a cargar esa, p. ej. si estaba imprimiendo. */}

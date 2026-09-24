@@ -54,8 +54,13 @@ export async function GET() {
        JOIN loteadora_mensajes m ON m.id = am.mensaje_id`
     ).all() as { articulo_id: string; mensajeId: number; messageName: string }[]
     const campos = leerCampos(db)
+    // Último valor enviado de cada dato a introducir, por plantilla (lo propone /loteadora)
+    const ultimos = db.prepare('SELECT mensaje_id, nombre, valor FROM loteadora_manuales_ultimos').all() as
+      { mensaje_id: number; nombre: string; valor: string }[]
+    const ultimosDe = (mensajeId: number) =>
+      Object.fromEntries(ultimos.filter(u => u.mensaje_id === mensajeId).map(u => [u.nombre, u.valor]))
     const plantillaPorArticulo = new Map(asociaciones.map(a => [a.articulo_id, {
-      messageName: a.messageName, campos: campos.get(a.mensajeId) ?? [],
+      messageName: a.messageName, campos: campos.get(a.mensajeId) ?? [], ultimosManuales: ultimosDe(a.mensajeId),
     }]))
 
     const rowsConPlantilla = rows.map(r => ({ ...r, plantilla: plantillaPorArticulo.get(r.id) ?? null }))

@@ -100,6 +100,13 @@ En ambos casos el usuario puede forzar el modo manual con el enlace "Introducir 
 
 ## 5. Cálculo de lote, cocida y fecha de caducidad
 
+**Qué se conserva y qué se vacía** (sept. 2026):
+- **Al cambiar de artículo** se vacían Lote Fresco, Juliano Cocida y Turno: otro artículo puede ser otra tirada, con otra cocida u otro lote, y así no se envían los del anterior. Los días de caducidad se recargan de JDE.
+- **Al cambiar de loteadora** no se toca nada: cada loteadora conserva su formulario (§15).
+- **Datos a introducir** (pieza "Dato a introducir", §13): aparece un campo por cada uno, con el nombre de la pieza, debajo del Turno. Al elegir el artículo se rellena con el **último valor enviado con esa plantilla** o, si no hay, con su valor por defecto; el operario lo cambia si hace falta.
+  - El último valor se guarda al enviar en `loteadora_manuales_ultimos` (por plantilla y nombre) y llega con cada artículo en `plantilla.ultimosManuales`.
+  - El servidor lo exige: obligatorio, ASCII, como mucho 20 caracteres.
+
 Todo el cálculo es local en el cliente (`app/loteadora/page.tsx`), sin llamada a Oracle. **"Lote Fresco" (lote) y "Juliano Cocida" no son selectores de calendario** — el operario las introduce a mano porque en planta rellenan estos campos de memoria y no necesariamente con la fecha real (ver más abajo):
 
 ```typescript
@@ -302,6 +309,7 @@ Cada plantilla tiene **campos**, uno por Field Module del mensaje en la máquina
 | Turno | El turno elegido (1/2/3) | — |
 | Hora | Hora del envío, `HHmm` | — |
 | Línea | Línea de fabricación de la loteadora | — |
+| Dato a introducir | Lo escribe el operario en `/loteadora` al enviar; obligatorio (p. ej. el nº de certificado Kosher, que cambia a menudo) | Nombre (lo que ve el operario) + valor por defecto opcional. Hasta `MAX_MANUAL` (20) caracteres ASCII; en la máquina se reservan 20 |
 
 Ejemplos reales de clientes:
 
@@ -369,6 +377,8 @@ Un artículo solo puede tener una plantilla a la vez (`articulo_id` es clave pri
 - Los botones y el diálogo son un único componente, `BotonesCopia`, en `components/nova/admin/comun.tsx`.
 - Nunca borra nada que no esté en el archivo. Al terminar muestra cuántas plantillas y asociaciones se crearon, se sustituyeron o se dejaron sin tocar.
 - Los tests están en `__tests__/loteadora-plantilla.test.ts`, con una BD en memoria.
+
+**Certificado Kosher de `N10_KERETS`:** pasó de dato fijo a **dato a introducir** ("Nº certificado Kosher") con la migración `kosher-a-introducir`. Se aplica una sola vez y solo si seguía con el valor inventado `K-000000`; si ya tenía el real, no se toca. Deja de salir en Datos fijos. En la máquina, ese campo se creó con 8 caracteres (`K-000000`): si el certificado real es más largo, hay que alargar el campo en la máquina o volver a crear el mensaje desde el admin (reserva 20), y volver a meter el reloj.
 
 **Plantillas del "nuevo loteado" incluidas en el código:** las 17 plantillas `N01_…` a `N17_…` viven en `lib/loteadora-plantillas-iniciales.json`. Son las mismas que se crearon en la máquina con el comando `1C` (§9). `lib/sqlite.ts` las da de alta al arrancar, **una sola vez por BD**: queda la marca `plantillas-nuevo-loteado` en la tabla `migraciones`. Así llegan solas a producción con el despliegue, y si luego se borra o renombra una desde `/admin`, no reaparece en el siguiente arranque. Si ya existe una plantilla con el mismo nombre, no se toca. Lo que **no** viaja: las asociaciones a artículos, los valores cambiados en Datos fijos y las loteadoras, que son de cada BD. Para añadir más plantillas en otra versión, usa una clave de migración nueva, no la misma.
 

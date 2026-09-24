@@ -5,7 +5,7 @@
  */
 import { describe, it, expect } from 'bun:test'
 import {
-  componerCampos, disponerCampos, exportarCopia, lineasEtiqueta, filasACampos, formatearCaducidad, formatearCocida, importarCopia, validarPlantilla, variablesUsadas,
+  componerCampos, disponerCampos, exportarCopia, lineasEtiqueta, piezasManuales, filasACampos, formatearCaducidad, formatearCocida, importarCopia, validarPlantilla, variablesUsadas,
   type Campo, type ValoresEtiqueta,
 } from '@/lib/loteadora-plantilla'
 
@@ -236,5 +236,33 @@ describe('disposición en la etiqueta (crear el mensaje en la máquina)', () => 
     const r = validarPlantilla({ name: 'X', campos: [{ fieldId: 1, piezas: [{ tipo: 'hora' }], linea: 2, reloj: true }] })
     expect('value' in r && r.value.campos[0]).toEqual({ fieldId: 1, piezas: [{ tipo: 'hora' }], linea: 2, reloj: true })
     expect('error' in validarPlantilla({ name: 'X', campos: [{ fieldId: 1, piezas: [{ tipo: 'hora' }], linea: 4 }] })).toBe(true)
+  })
+})
+
+describe('dato a introducir (pieza manual)', () => {
+  const campos: Campo[] = [
+    { fieldId: 1, piezas: [{ tipo: 'texto', valor: 'L' }, { tipo: 'cocida' }] },
+    { fieldId: 3, piezas: [{ tipo: 'texto', valor: 'KSR ' }, { tipo: 'manual', nombre: 'Nº certificado Kosher', valor: '000' }] },
+  ]
+
+  it('se compone con lo que escribe el operario y falta si no lo escribe', () => {
+    expect(componerCampos(campos, { ...valores, manuales: { 'Nº certificado Kosher': 'K-4521' } })[1].texto).toBe('KSR K-4521')
+    const sin = componerCampos(campos, valores)[1]
+    expect(sin.faltan).toEqual(['manual'])
+  })
+
+  it('lista los datos a introducir con su valor por defecto', () => {
+    expect(piezasManuales(campos)).toEqual([{ nombre: 'Nº certificado Kosher', porDefecto: '000' }])
+  })
+
+  it('valida: necesita nombre; el valor por defecto es opcional, ASCII y corto', () => {
+    const ok = validarPlantilla({ name: 'N10_KERETS', campos: [{ fieldId: 3, piezas: [{ tipo: 'manual', nombre: 'Nº certificado Kosher' }] }] })
+    expect('value' in ok && ok.value.campos[0].piezas[0]).toEqual({ tipo: 'manual', nombre: 'Nº certificado Kosher' })
+    expect('error' in validarPlantilla({ name: 'X', campos: [{ fieldId: 3, piezas: [{ tipo: 'manual' }] }] })).toBe(true)
+    expect('error' in validarPlantilla({ name: 'X', campos: [{ fieldId: 3, piezas: [{ tipo: 'manual', nombre: 'Cert', valor: '3,89€' }] }] })).toBe(true)
+  })
+
+  it('reserva 20 caracteres en el campo de la máquina', () => {
+    expect(disponerCampos([{ fieldId: 3, piezas: [{ tipo: 'manual', nombre: 'Cert' }] }])[0].length).toBe(20)
   })
 })
