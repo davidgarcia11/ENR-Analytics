@@ -1,12 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getDb } from '@/lib/sqlite';
-import { requireScreenAccess } from '@/lib/permissions';
+import { requireAccess } from '@/lib/permissions';
+import { puedeVerLoteadora, zonasVisibles } from '@/lib/loteadora-zonas';
 import { loadPrintMessage, getPrinterStatus, listMessageNames } from '@/lib/loteadora-printer';
 
 interface LoteadoraRow {
   ip: string;
   port: number;
   slave_address: number;
+  zona_id: number | null;
 }
 
 // Carga una plantilla existente en la loteadora (comandos 1E + 01). Funciona
@@ -15,8 +17,8 @@ interface LoteadoraRow {
 // Imprimiendo (estado 'activa') se rechaza: cambiar de mensaje a mitad de
 // tirada mezclaría etiquetas de dos artículos (docs/loteadora.md §11).
 export async function POST(req: NextRequest) {
-  const denied = await requireScreenAccess('loteadora');
-  if (denied) return denied;
+  const acceso = await requireAccess({ screen: 'loteadora' });
+  if (!acceso.ok) return acceso.denied;
 
   const { loteadoraId, messageName } = await req.json();
   if (!loteadoraId || !messageName) {
@@ -25,11 +27,11 @@ export async function POST(req: NextRequest) {
 
   const db = getDb();
   const loteadora = db.prepare(
-    'SELECT ip, port, slave_address FROM loteadoras WHERE id = ? AND enabled = 1'
+    'SELECT ip, port, slave_address, zona_id FROM loteadoras WHERE id = ? AND enabled = 1'
   ).get(Number(loteadoraId)) as LoteadoraRow | undefined;
 
-  if (!loteadora) {
-    return NextResponse.json({ error: 'Loteadora no encontrada o deshabilitada' }, { status: 404 });
+  if (!loteadora || !puedeVerLoteadora(zonasVisibles(db, acceso.user), loteadora.zona_id)) {
+    return NextResponse.json({ error: 'Loteadora no encontrada, deshabilitada o sin acceso (zona)' }, { status: 404 });
   }
 
   const config = { ip: loteadora.ip, port: loteadora.port, slaveAddress: loteadora.slave_address };

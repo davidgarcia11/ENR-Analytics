@@ -1,7 +1,11 @@
 "use client";
 
 // Piezas compartidas por las secciones de /admin (components/nova/admin/*).
-import { Loader2, Search } from "lucide-react";
+import { useRef, useState } from "react";
+import { toast } from "sonner";
+import { Download, Loader2, Search, Upload } from "lucide-react";
+import { useApiFetch } from "@/components/SessionProvider";
+import { Checkbox } from "@/components/nova/ui/checkbox";
 import { Input } from "@/components/nova/ui/input";
 import { Button } from "@/components/nova/ui/button";
 import { TableCell, TableRow } from "@/components/nova/ui/table";
@@ -103,5 +107,120 @@ export function Buscador({ value, onChange, placeholder }: { value: string; onCh
       <Search className="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground" />
       <Input value={value} onChange={(e) => onChange(e.target.value)} placeholder={placeholder} className="h-8 pl-8" />
     </div>
+  );
+}
+
+/**
+ * Botones Exportar / Importar de la copia de la loteadora (JSON), con el diálogo
+ * de importación. `ruta` hace GET (exportar) y POST {copia, sustituir} (importar):
+ * /api/admin/loteadora-copia (plantillas + asociaciones, solo admin) o
+ * /api/admin/loteadora-articulos/copia (solo asociaciones). Reglas en
+ * importarCopia (lib/loteadora-plantilla.ts).
+ */
+export function BotonesCopia({ ruta, archivo, conPlantillas, onImportado }: {
+  ruta: string;
+  /** Prefijo del archivo descargado: `<archivo>-AAAA-MM-DD.json` */
+  archivo: string;
+  /** La copia lleva plantillas (si no, solo asociaciones de artículos) */
+  conPlantillas?: boolean;
+  onImportado: () => void;
+}) {
+  const apiFetch = useApiFetch();
+  const archivoRef = useRef<HTMLInputElement>(null);
+  const [importacion, setImportacion] = useState<{ copia: any; nombre: string } | null>(null);
+  const [sustituir, setSustituir] = useState(false);
+  const [importando, setImportando] = useState(false);
+
+  const exportar = async () => {
+    try {
+      const res = await apiFetch(ruta);
+      if (!res.ok) { toast.error("No se pudo exportar"); return; }
+      const url = URL.createObjectURL(new Blob([JSON.stringify(await res.json(), null, 2)], { type: "application/json" }));
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `${archivo}-${new Date().toISOString().slice(0, 10)}.json`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch { toast.error("Error de conexión"); }
+  };
+
+  const elegir = async (f: File | undefined) => {
+    if (archivoRef.current) archivoRef.current.value = ""; // permite volver a elegir el mismo
+    if (!f) return;
+    try {
+      const copia = JSON.parse(await f.text());
+      if (copia?.version !== 1 || !Array.isArray(copia.plantillas)) throw new Error();
+      setSustituir(false);
+      setImportacion({ copia, nombre: f.name });
+    } catch { toast.error("Ese archivo no es una copia de la loteadora"); }
+  };
+
+  const importar = async () => {
+    if (!importacion) return;
+    setImportando(true);
+    try {
+      const res = await apiFetch(ruta, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ copia: importacion.copia, sustituir }),
+      });
+      const data = await res.json();
+      if (!res.ok) { toast.error(data.error || "No se pudo importar"); return; }
+      const { plantillas: p, articulos: a } = data;
+      toast.success(
+        (conPlantillas ? `Plantillas: ${p.creadas} nuevas, ${p.sustituidas} sustituidas, ${p.omitidas} sin tocar. ` : "") +
+        `Artículos: ${a.creadas} nuevos, ${a.sustituidas} cambiados, ${a.omitidas} sin tocar.`,
+        { duration: 8000 },
+      );
+      setImportacion(null);
+      onImportado();
+    } catch { toast.error("Error de conexión"); } finally { setImportando(false); }
+  };
+
+  const nPlantillas = importacion?.copia.plantillas.length ?? 0;
+  const nArticulos = importacion?.copia.articulos?.length ?? 0;
+  return (
+    <>
+      <Button variant="outline" onClick={exportar} title={conPlantillas ? "Descarga las plantillas y las asociaciones de artículos en un archivo" : "Descarga las asociaciones de artículos en un archivo"}>
+        <Download />
+        Exportar
+      </Button>
+      <Button variant="outline" onClick={() => archivoRef.current?.click()} title="Da de alta lo que traiga un archivo exportado">
+        <Upload />
+        Importar
+      </Button>
+      <input ref={archivoRef} type="file" accept=".json,application/json" className="hidden" onChange={(e) => elegir(e.target.files?.[0])} />
+
+      <Dialog open={!!importacion} onOpenChange={(o) => !o && setImportacion(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>{conPlantillas ? "Importar plantillas" : "Importar asociaciones de artículos"}</DialogTitle>
+            <DialogDescription>
+              <span className="font-mono">{importacion?.nombre}</span> trae{" "}
+              {conPlantillas ? `${nPlantillas} plantillas y ${nArticulos}` : nArticulos} asociaciones de artículos.
+              {!conPlantillas && " Cada artículo debe apuntar a una plantilla que ya exista aquí (las plantillas del archivo, si las trae, no se importan)."}
+              {" "}Si algo del archivo no es válido, no se importa nada.
+            </DialogDescription>
+          </DialogHeader>
+          <label className="flex items-start gap-2 text-sm">
+            <Checkbox checked={sustituir} onCheckedChange={(v) => setSustituir(v === true)} className="mt-0.5" />
+            <span>
+              <span className="font-medium text-foreground">Sustituir las que ya existan</span>
+              <span className="block text-muted-foreground">
+                {conPlantillas ? "Plantillas con el mismo nombre y artículos asociados a otra plantilla." : "Artículos que ya estén asociados a otra plantilla."}
+                {" "}Sin marcar, solo se añade lo que falta.
+              </span>
+            </span>
+          </label>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setImportacion(null)}>Cancelar</Button>
+            <Button onClick={importar} disabled={importando}>
+              {importando && <Loader2 className="animate-spin" />}
+              Importar
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </>
   );
 }

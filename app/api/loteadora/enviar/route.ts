@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getDb } from '@/lib/sqlite';
-import { requireScreenAccess } from '@/lib/permissions';
+import { requireAccess } from '@/lib/permissions';
+import { puedeVerLoteadora, zonasVisibles } from '@/lib/loteadora-zonas';
 import { sendRemoteFields, getPrinterStatus, getPrinterStatusDetail } from '@/lib/loteadora-printer';
 import {
   ASCII_IMPRIMIBLE, INFO_PIEZA, componerCampos, leerCampos, variablesUsadas, type ValoresEtiqueta,
@@ -15,8 +16,8 @@ import {
 // los IDs de campo y la línea: nada de eso lo decide el cliente. Solo se exigen
 // los valores que la plantilla usa de verdad. Ver lib/loteadora-plantilla.ts.
 export async function POST(req: NextRequest) {
-  const denied = await requireScreenAccess('loteadora');
-  if (denied) return denied;
+  const acceso = await requireAccess({ screen: 'loteadora' });
+  if (!acceso.ok) return acceso.denied;
 
   const body = await req.json();
   const { loteadoraId, articuloId } = body;
@@ -27,10 +28,10 @@ export async function POST(req: NextRequest) {
   const db = getDb();
 
   const loteadora = db.prepare(
-    'SELECT ip, port, slave_address, linea FROM loteadoras WHERE id = ? AND enabled = 1'
-  ).get(Number(loteadoraId)) as { ip: string; port: number; slave_address: number; linea: string } | undefined;
-  if (!loteadora) {
-    return NextResponse.json({ error: 'Loteadora no encontrada o deshabilitada' }, { status: 404 });
+    'SELECT ip, port, slave_address, linea, zona_id FROM loteadoras WHERE id = ? AND enabled = 1'
+  ).get(Number(loteadoraId)) as { ip: string; port: number; slave_address: number; linea: string; zona_id: number | null } | undefined;
+  if (!loteadora || !puedeVerLoteadora(zonasVisibles(db, acceso.user), loteadora.zona_id)) {
+    return NextResponse.json({ error: 'Loteadora no encontrada, deshabilitada o sin acceso (zona)' }, { status: 404 });
   }
 
   const asociacion = db.prepare(
@@ -51,7 +52,7 @@ export async function POST(req: NextRequest) {
   if (usadas.has('fresco')) {
     const fresco = String(body.fresco ?? '').trim();
     if (!fresco || fresco.length > 30 || !ASCII_IMPRIMIBLE.test(fresco)) {
-      return NextResponse.json({ error: 'La fecha fresco es obligatoria (hasta 30 caracteres, sin tildes ni símbolos)' }, { status: 400 });
+      return NextResponse.json({ error: 'El lote fresco es obligatorio (hasta 30 caracteres, sin tildes ni símbolos)' }, { status: 400 });
     }
     valores.fresco = fresco;
   }
@@ -114,6 +115,23 @@ export async function POST(req: NextRequest) {
 
   try {
     const { warning } = await sendRemoteFields(config, compuestos.map((c) => ({ id: c.fieldId, text: c.texto })));
+
+    // Último envío de esta loteadora, para "Estado de las loteadoras". Nunca
+    // bloquea la respuesta: el envío ya se ha hecho.
+    try {
+      const plantilla = db.prepare('SELECT name FROM loteadora_mensajes WHERE id = ?').get(asociacion!.mensaje_id) as { name: string };
+      const u = acceso.user;
+      db.prepare(
+        `INSERT INTO loteadora_ultimo_envio (loteadora_id, plantilla, campos, usuario, enviado_at)
+         VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
+         ON CONFLICT(loteadora_id) DO UPDATE SET plantilla = excluded.plantilla, campos = excluded.campos,
+           usuario = excluded.usuario, enviado_at = excluded.enviado_at`
+      ).run(Number(loteadoraId), plantilla.name, JSON.stringify(compuestos.map((c) => ({ fieldId: c.fieldId, texto: c.texto }))),
+        u ? [u.name, u.surname].filter(Boolean).join(' ') || u.username : null);
+    } catch (e) {
+      console.error('No se pudo guardar el último envío de la loteadora:', e);
+    }
+
     return NextResponse.json({ ok: true, warning });
   } catch (err: any) {
     console.error('Envío a loteadora error:', err);

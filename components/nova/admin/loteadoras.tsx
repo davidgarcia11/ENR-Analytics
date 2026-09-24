@@ -12,6 +12,11 @@ import { Input } from "@/components/nova/ui/input";
 import { Label } from "@/components/nova/ui/label";
 import { Badge } from "@/components/nova/ui/badge";
 import { Switch } from "@/components/nova/ui/switch";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/nova/ui/select";
+import {
+  Combobox, ComboboxChip, ComboboxChips, ComboboxChipsInput, ComboboxContent, ComboboxEmpty, ComboboxItem, ComboboxList,
+  ComboboxValue, useComboboxAnchor,
+} from "@/components/nova/ui/combobox";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/nova/ui/table";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/nova/ui/dialog";
 import {
@@ -27,6 +32,10 @@ interface Loteadora {
   slave_address: number;
   enabled: number;
   linea: string;
+  /** Familias F4101.IMSRP2 que ofrece en /loteadora, separadas por comas ("" = todas) */
+  familias: string;
+  zona_id: number | null;
+  zona: string | null;
 }
 
 type EstadoVivo = "activa" | "en_error" | "standby" | "apagada";
@@ -46,9 +55,12 @@ interface Datos {
   slaveAddress: string;
   linea: string;
   enabled: boolean;
+  familias: string[];
+  zonaId: string | null;
 }
 
-const VACIO: Datos = { name: "", ip: "", port: "8010", slaveAddress: "0", linea: "", enabled: true };
+const VACIO: Datos = { name: "", ip: "", port: "8010", slaveAddress: "0", linea: "", enabled: true, familias: [], zonaId: null };
+const aLista = (csv: string) => csv.split(",").filter(Boolean);
 
 export default function AdminLoteadoras({ titulo, descripcion }: SeccionProps) {
   const apiFetch = useApiFetch();
@@ -62,6 +74,27 @@ export default function AdminLoteadoras({ titulo, descripcion }: SeccionProps) {
   const [borrando, setBorrando] = useState<Loteadora | null>(null);
   const [guardando, setGuardando] = useState(false);
   const [error, setError] = useState("");
+  // Familias con artículos de loteadora (código → nombre), sacadas de la misma
+  // lista que usa /loteadora: solo se ofrecen familias que tienen algo que imprimir.
+  const [familias, setFamilias] = useState<Map<string, string>>(new Map());
+  const anclaFamilias = useComboboxAnchor();
+  const nombreFamilia = (id: string) => (familias.get(id) ? `${id} — ${familias.get(id)}` : id);
+
+  // Zonas (/admin → Zonas): deciden quién ve cada loteadora
+  const [zonas, setZonas] = useState<{ id: number; nombre: string }[]>([]);
+  const cargarZonas = async () => {
+    const res = await apiFetch("/api/admin/zonas").catch(() => null);
+    if (res?.ok) setZonas(await res.json());
+  };
+
+  const cargarFamilias = async () => {
+    try {
+      const res = await apiFetch("/api/loteadora/articulos");
+      if (!res.ok) return;
+      const arts: { familia: string; familiaDesc: string }[] = await res.json();
+      setFamilias(new Map(arts.filter((a) => a.familia).map((a) => [a.familia, a.familiaDesc] as [string, string]).sort((a, b) => a[0].localeCompare(b[0]))));
+    } catch { /* sin JDE no se pueden elegir familias; lo ya guardado se conserva */ }
+  };
 
   const cargar = async () => {
     try {
@@ -82,6 +115,8 @@ export default function AdminLoteadoras({ titulo, descripcion }: SeccionProps) {
   useEffect(() => {
     cargar();
     cargarEstados();
+    cargarFamilias();
+    cargarZonas();
     const interval = setInterval(cargarEstados, 60000);
     return () => clearInterval(interval);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -91,7 +126,7 @@ export default function AdminLoteadoras({ titulo, descripcion }: SeccionProps) {
 
   const abrirAlta = () => { setDatos(VACIO); setError(""); setFormulario("nueva"); };
   const abrirEdicion = (l: Loteadora) => {
-    setDatos({ name: l.name, ip: l.ip, port: String(l.port), slaveAddress: String(l.slave_address), linea: l.linea, enabled: !!l.enabled });
+    setDatos({ name: l.name, ip: l.ip, port: String(l.port), slaveAddress: String(l.slave_address), linea: l.linea, enabled: !!l.enabled, familias: aLista(l.familias ?? ""), zonaId: l.zona_id ? String(l.zona_id) : null });
     setError("");
     setFormulario(l);
   };
@@ -107,7 +142,7 @@ export default function AdminLoteadoras({ titulo, descripcion }: SeccionProps) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           name: datos.name, ip: datos.ip, port: Number(datos.port), slaveAddress: Number(datos.slaveAddress),
-          linea: datos.linea, ...(esNueva ? {} : { enabled: datos.enabled }),
+          linea: datos.linea, familias: datos.familias, zonaId: datos.zonaId ? Number(datos.zonaId) : null, ...(esNueva ? {} : { enabled: datos.enabled }),
         }),
       });
       const data = await res.json();
@@ -151,26 +186,40 @@ export default function AdminLoteadoras({ titulo, descripcion }: SeccionProps) {
             <TableHeader>
               <TableRow>
                 <TableHead>Nombre</TableHead>
+                <TableHead>Zona</TableHead>
                 <TableHead>Conexión</TableHead>
                 <TableHead>Línea</TableHead>
+                <TableHead>Familias</TableHead>
                 <TableHead>Estado</TableHead>
                 <TableHead className="w-10"><span className="sr-only">Acciones</span></TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {cargando || loteadoras.length === 0 ? (
-                <FilaVacia colSpan={5} cargando={cargando} texto="No hay loteadoras configuradas" />
+                <FilaVacia colSpan={7} cargando={cargando} texto="No hay loteadoras configuradas" />
               ) : (
                 loteadoras.map((l) => {
                   const vivo = estados[l.id];
                   return (
                     <TableRow key={l.id}>
                       <TableCell className="font-medium text-foreground">{l.name}</TableCell>
+                      <TableCell>{l.zona ? <Badge variant="outline">{l.zona}</Badge> : <span className="text-xs text-muted-foreground">Sin zona</span>}</TableCell>
                       <TableCell>
                         <span className="font-mono text-xs text-muted-foreground">{l.ip}:{l.port}</span>
                         <span className="ml-2 text-xs text-muted-foreground">· slave {l.slave_address}</span>
                       </TableCell>
                       <TableCell className="text-muted-foreground">{l.linea || "—"}</TableCell>
+                      <TableCell>
+                        {aLista(l.familias ?? "").length === 0 ? (
+                          <span className="text-xs text-muted-foreground">Todas</span>
+                        ) : (
+                          <div className="flex max-w-64 flex-wrap gap-1">
+                            {aLista(l.familias).map((f) => (
+                              <Badge key={f} variant="outline" className="font-normal" title={nombreFamilia(f)}>{familias.get(f) || f}</Badge>
+                            ))}
+                          </div>
+                        )}
+                      </TableCell>
                       <TableCell>
                         <div className="flex flex-wrap gap-1.5">
                           {!l.enabled && <Badge variant="outline">Deshabilitada</Badge>}
@@ -233,6 +282,53 @@ export default function AdminLoteadoras({ titulo, descripcion }: SeccionProps) {
                 <Label htmlFor="l-slave">Slave Address</Label>
                 <Input id="l-slave" type="number" value={datos.slaveAddress} onChange={campo("slaveAddress")} />
               </div>
+            </div>
+            <div className="grid gap-2">
+              <Label>Zona</Label>
+              <Select
+                items={[{ value: "", label: "Sin zona" }, ...zonas.map((z) => ({ value: String(z.id), label: z.nombre }))]}
+                value={datos.zonaId ?? ""}
+                onValueChange={(v) => setDatos((d) => ({ ...d, zonaId: (v as string) || null }))}
+              >
+                <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="">Sin zona</SelectItem>
+                  {zonas.map((z) => <SelectItem key={z.id} value={String(z.id)}>{z.nombre}</SelectItem>)}
+                </SelectContent>
+              </Select>
+              <span className="text-xs text-muted-foreground">
+                Informativa y para decidir quién la ve (roles y usuarios de cada zona en /admin → Zonas). Sin zona, no la ven los usuarios restringidos a alguna zona.
+              </span>
+            </div>
+            <div className="grid gap-2">
+              <Label>Familias de artículos</Label>
+              <Combobox
+                multiple
+                items={[...familias.keys()]}
+                value={datos.familias}
+                onValueChange={(v) => setDatos((d) => ({ ...d, familias: v as string[] }))}
+                itemToStringLabel={nombreFamilia}
+              >
+                <ComboboxChips ref={anclaFamilias}>
+                  <ComboboxValue>
+                    {(valores: string[]) => (
+                      <>
+                        {valores.map((f) => <ComboboxChip key={f}>{familias.get(f) || f}</ComboboxChip>)}
+                        <ComboboxChipsInput placeholder={valores.length ? "" : "Todas (elige para limitar)"} />
+                      </>
+                    )}
+                  </ComboboxValue>
+                </ComboboxChips>
+                <ComboboxContent anchor={anclaFamilias}>
+                  <ComboboxEmpty>{familias.size ? "Sin resultados" : "No se han podido cargar las familias (¿JDE caído?)"}</ComboboxEmpty>
+                  <ComboboxList>
+                    {(f: string) => <ComboboxItem key={f} value={f}>{nombreFamilia(f)}</ComboboxItem>}
+                  </ComboboxList>
+                </ComboboxContent>
+              </Combobox>
+              <span className="text-xs text-muted-foreground">
+                En /loteadora, al elegir esta máquina solo se ofrecen artículos de estas familias. Sin ninguna, se ofrecen todos.
+              </span>
             </div>
             {editando && (
               <div className="flex items-center justify-between gap-4 rounded-lg border p-3">

@@ -1,19 +1,21 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getDb } from '@/lib/sqlite';
-import { requireScreenAccess } from '@/lib/permissions';
+import { requireAccess } from '@/lib/permissions';
+import { puedeVerLoteadora, zonasVisibles } from '@/lib/loteadora-zonas';
 import { clearRemoteFieldBuffer } from '@/lib/loteadora-printer';
 
 interface LoteadoraRow {
   ip: string;
   port: number;
   slave_address: number;
+  zona_id: number | null;
 }
 
 // Vacía la cola de campos remotos pendientes de una loteadora (comando 21).
 // No imprime nada — solo descarta envíos en cola que no se hayan consumido.
 export async function POST(req: NextRequest) {
-  const denied = await requireScreenAccess('loteadora');
-  if (denied) return denied;
+  const acceso = await requireAccess({ screen: 'loteadora' });
+  if (!acceso.ok) return acceso.denied;
 
   const { loteadoraId } = await req.json();
   if (!loteadoraId) {
@@ -22,11 +24,11 @@ export async function POST(req: NextRequest) {
 
   const db = getDb();
   const loteadora = db.prepare(
-    'SELECT ip, port, slave_address FROM loteadoras WHERE id = ? AND enabled = 1'
+    'SELECT ip, port, slave_address, zona_id FROM loteadoras WHERE id = ? AND enabled = 1'
   ).get(Number(loteadoraId)) as LoteadoraRow | undefined;
 
-  if (!loteadora) {
-    return NextResponse.json({ error: 'Loteadora no encontrada o deshabilitada' }, { status: 404 });
+  if (!loteadora || !puedeVerLoteadora(zonasVisibles(db, acceso.user), loteadora.zona_id)) {
+    return NextResponse.json({ error: 'Loteadora no encontrada, deshabilitada o sin acceso (zona)' }, { status: 404 });
   }
 
   try {

@@ -24,19 +24,26 @@ export async function GET() {
   try {
     conn = await getDbConnection()
     const result = await conn.execute(
-      `SELECT TRIM(IMLITM) AS id, TRIM(IMDSC1) AS descripcion, NVL(IMSLD, 0) AS diasCaducidad
-       FROM F4101
-       WHERE TRIM(IMSRP1) = '12'
-         AND TRIM(IMSRP6) = 'Y'
-         AND TRIM(IMSTKT) NOT IN ('O', 'U')
-         AND TRIM(IMLITM) IS NOT NULL
-       ORDER BY TRIM(IMDSC1)`
+      // Familia = IMSRP2, con su nombre de la UDC 41/S2 (igual que /api/categories):
+      // cada loteadora puede limitar las familias que ofrece (loteadoras.familias).
+      `SELECT TRIM(A.IMLITM) AS id, TRIM(A.IMDSC1) AS descripcion, NVL(A.IMSLD, 0) AS diasCaducidad,
+              TRIM(A.IMSRP2) AS familia, TRIM(F.DRDL01) AS familiaDesc
+       FROM F4101 A
+       LEFT JOIN prodctl.f0005 F
+         ON TRIM(F.DRKY) = TRIM(A.IMSRP2) AND TRIM(F.DRSY) = '41' AND TRIM(F.DRRT) = 'S2'
+       WHERE TRIM(A.IMSRP1) = '12'
+         AND TRIM(A.IMSRP6) = 'Y'
+         AND TRIM(A.IMSTKT) NOT IN ('O', 'U')
+         AND TRIM(A.IMLITM) IS NOT NULL
+       ORDER BY TRIM(A.IMDSC1)`
     )
     const rows = (result.rows as any[])
       .map(r => ({
         id: String(r.ID || '').trim(),
         descripcion: String(r.DESCRIPCION || '').trim(),
         diasCaducidad: Number(r.DIASCADUCIDAD ?? 0),
+        familia: String(r.FAMILIA || '').trim(),
+        familiaDesc: String(r.FAMILIADESC || '').trim(),
       }))
       .filter(r => r.id)
 

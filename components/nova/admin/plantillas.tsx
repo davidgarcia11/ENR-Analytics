@@ -5,9 +5,9 @@
 // es una secuencia de piezas (texto, dato fijo, fresco, cocida, caducidad, turno,
 // hora, línea) que se concatenan. Modelo, formatos y validación en
 // lib/loteadora-plantilla.ts; ver docs/loteadora.md §13.
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { toast } from "sonner";
-import { ArrowLeft, ArrowRight, Download, Loader2, MoreHorizontal, Pencil, Plus, Trash2, Upload, X } from "lucide-react";
+import { AlertTriangle, ArrowLeft, ArrowRight, Loader2, MoreHorizontal, Pencil, Plus, Printer, Trash2, X } from "lucide-react";
 import { useApiFetch } from "@/components/SessionProvider";
 import { Button } from "@/components/nova/ui/button";
 import { Input } from "@/components/nova/ui/input";
@@ -21,10 +21,10 @@ import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger,
 } from "@/components/nova/ui/dropdown-menu";
 import {
-  FORMATOS_CADUCIDAD, FORMATOS_COCIDA, INFO_PIEZA, TIPOS_PIEZA, componerCampos,
+  FORMATOS_CADUCIDAD, FORMATOS_COCIDA, INFO_PIEZA, TIPOS_PIEZA, componerCampos, lineasEtiqueta,
   type Campo, type Pieza, type TipoPieza, type ValoresEtiqueta,
 } from "@/lib/loteadora-plantilla";
-import { CabeceraSeccion, ConfirmarDialog, ErrorForm, FilaVacia, TablaCard, type SeccionProps } from "./comun";
+import { BotonesCopia, CabeceraSeccion, ConfirmarDialog, ErrorForm, FilaVacia, TablaCard, type SeccionProps } from "./comun";
 
 interface Mensaje {
   id: number;
@@ -36,6 +36,8 @@ interface Mensaje {
 interface CampoEditable {
   fieldId: string;
   piezas: Pieza[];
+  linea?: number;
+  reloj?: boolean;
 }
 
 // Valores de ejemplo para la vista previa: cocida hace unos días, caducidad a +30.
@@ -60,7 +62,10 @@ const nuevaPieza = (tipo: TipoPieza): Pieza =>
 const vacia = (): CampoEditable[] => [{ fieldId: "1", piezas: [nuevaPieza("texto"), nuevaPieza("cocida")] }];
 
 const aEditables = (campos: Campo[]): CampoEditable[] =>
-  campos.map((c) => ({ fieldId: String(c.fieldId), piezas: c.piezas.map((p) => ({ ...p })) }));
+  campos.map((c) => ({ fieldId: String(c.fieldId), piezas: c.piezas.map((p) => ({ ...p })), linea: c.linea ?? 1, reloj: !!c.reloj }));
+const aCampos = (campos: CampoEditable[]): Campo[] =>
+  campos.map((c) => ({ fieldId: Number(c.fieldId), piezas: c.piezas, linea: c.linea ?? 1, reloj: !!c.reloj }));
+const LINEA_ITEMS = [1, 2, 3].map((n) => ({ value: String(n), label: `Línea ${n}` }));
 
 const FORMATO_ITEMS_CAD = FORMATOS_CADUCIDAD.map((f) => ({ value: f, label: f }));
 const FORMATO_ITEMS_COC = FORMATOS_COCIDA.map((f) => ({ value: f, label: f }));
@@ -156,6 +161,16 @@ function EditorCampo({ campo, ejemplo, onChange, onQuitar, puedeQuitar }: {
           onChange={(e) => onChange({ ...campo, fieldId: e.target.value })}
           className="h-8 w-20 font-mono"
         />
+        <Select items={LINEA_ITEMS} value={String(campo.linea ?? 1)} onValueChange={(v) => onChange({ ...campo, linea: Number(v) })}>
+          <SelectTrigger size="sm" className="h-8 w-24 text-xs" aria-label="Línea de la etiqueta"><SelectValue /></SelectTrigger>
+          <SelectContent>
+            {LINEA_ITEMS.map((l) => <SelectItem key={l.value} value={l.value} className="text-xs">{l.label}</SelectItem>)}
+          </SelectContent>
+        </Select>
+        <label className="flex items-center gap-1.5 text-xs text-muted-foreground" title="Deja detrás de este campo el hueco del reloj (HHmm), que se pone a mano en la máquina">
+          <Checkbox checked={!!campo.reloj} onCheckedChange={(v) => onChange({ ...campo, reloj: v === true })} />
+          Reloj detrás
+        </label>
         <div className="ml-auto flex items-center gap-2">
           <span className="text-xs text-muted-foreground">Se imprime</span>
           <code className="rounded-md border bg-muted/40 px-2 py-1 font-mono text-sm whitespace-pre text-foreground">
@@ -218,55 +233,6 @@ export default function AdminPlantillas({ titulo, descripcion }: SeccionProps) {
   // configurada (el envío la manda tal cual, ver loteadoras.linea).
   const [ejemplo, setEjemplo] = useState<ValoresEtiqueta>(EJEMPLO);
 
-  // Copia de seguridad (plantillas + asociaciones de artículos): exportar a un
-  // JSON e importarlo (ver importarCopia en lib/loteadora-plantilla.ts).
-  const archivoRef = useRef<HTMLInputElement>(null);
-  const [importacion, setImportacion] = useState<{ copia: any; archivo: string } | null>(null);
-  const [sustituir, setSustituir] = useState(false);
-  const [importando, setImportando] = useState(false);
-
-  const exportar = async () => {
-    try {
-      const res = await apiFetch("/api/admin/loteadora-copia");
-      if (!res.ok) { toast.error("No se pudo exportar"); return; }
-      const url = URL.createObjectURL(new Blob([JSON.stringify(await res.json(), null, 2)], { type: "application/json" }));
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = `plantillas-loteadora-${new Date().toISOString().slice(0, 10)}.json`;
-      a.click();
-      URL.revokeObjectURL(url);
-    } catch { toast.error("Error de conexión"); }
-  };
-
-  const elegirArchivo = async (archivo: File | undefined) => {
-    if (archivoRef.current) archivoRef.current.value = ""; // permite volver a elegir el mismo
-    if (!archivo) return;
-    try {
-      const copia = JSON.parse(await archivo.text());
-      if (copia?.version !== 1 || !Array.isArray(copia.plantillas)) throw new Error();
-      setSustituir(false);
-      setImportacion({ copia, archivo: archivo.name });
-    } catch { toast.error("Ese archivo no es una copia de plantillas de la loteadora"); }
-  };
-
-  const importar = async () => {
-    if (!importacion) return;
-    setImportando(true);
-    try {
-      const res = await apiFetch("/api/admin/loteadora-copia", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ copia: importacion.copia, sustituir }),
-      });
-      const data = await res.json();
-      if (!res.ok) { toast.error(data.error || "No se pudo importar"); return; }
-      const { plantillas: p, articulos: a } = data;
-      toast.success(`Plantillas: ${p.creadas} nuevas, ${p.sustituidas} sustituidas, ${p.omitidas} sin tocar. Artículos: ${a.creadas} nuevos, ${a.sustituidas} cambiados, ${a.omitidas} sin tocar.`, { duration: 8000 });
-      setImportacion(null);
-      cargar();
-    } catch { toast.error("Error de conexión"); } finally { setImportando(false); }
-  };
-
   const cargar = async () => {
     try {
       const res = await apiFetch("/api/admin/loteadora-mensajes");
@@ -282,6 +248,42 @@ export default function AdminPlantillas({ titulo, descripcion }: SeccionProps) {
   };
 
   useEffect(() => { cargar(); cargarLinea(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, []);
+
+  // Crear en la loteadora (comando 1C, ver app/api/admin/loteadora-mensajes/[id]/crear-en-maquina)
+  const [enMaquina, setEnMaquina] = useState<Mensaje | null>(null);
+  const [loteadoras, setLoteadoras] = useState<{ id: number; name: string }[]>([]);
+  const [loteadoraId, setLoteadoraId] = useState<string | null>(null);
+  const [creandoEnMaquina, setCreandoEnMaquina] = useState(false);
+
+  const abrirCrearEnMaquina = async (m: Mensaje) => {
+    setEnMaquina(m);
+    if (loteadoras.length === 0) {
+      const res = await apiFetch("/api/admin/loteadoras").catch(() => null);
+      if (res?.ok) {
+        const lista = ((await res.json()) as { id: number; name: string; enabled: number }[]).filter((l) => l.enabled);
+        setLoteadoras(lista);
+        // Por defecto la de pruebas, si la hay
+        setLoteadoraId(String((lista.find((l) => /prueba/i.test(l.name)) ?? lista[0])?.id ?? "") || null);
+      }
+    }
+  };
+
+  const crearEnMaquina = async () => {
+    if (!enMaquina || !loteadoraId) return;
+    setCreandoEnMaquina(true);
+    try {
+      const res = await apiFetch(`/api/admin/loteadora-mensajes/${enMaquina.id}/crear-en-maquina`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ loteadoraId: Number(loteadoraId) }),
+      });
+      const data = await res.json();
+      if (!res.ok) { toast.error(data.error || "No se pudo crear en la loteadora"); return; }
+      const donde = loteadoras.find((l) => String(l.id) === loteadoraId)?.name;
+      toast.success(`${enMaquina.name} ${data.existia ? "sustituido" : "creado"} en ${donde}. Mete el reloj a mano en la máquina.`, { duration: 8000 });
+      setEnMaquina(null);
+    } catch { toast.error("Error de conexión"); } finally { setCreandoEnMaquina(false); }
+  };
 
   const cerrar = () => { setFormulario(null); setBorrando(null); setError(""); };
 
@@ -304,13 +306,15 @@ export default function AdminPlantillas({ titulo, descripcion }: SeccionProps) {
       const res = await apiFetch(esNueva ? "/api/admin/loteadora-mensajes" : `/api/admin/loteadora-mensajes/${formulario.id}`, {
         method: esNueva ? "POST" : "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name: nombre, campos: campos.map((c) => ({ fieldId: Number(c.fieldId), piezas: c.piezas })) }),
+        body: JSON.stringify({ name: nombre, campos: aCampos(campos) }),
       });
       const data = await res.json();
       if (!res.ok) { setError(data.error || "Error al guardar"); return; }
       toast.success(`Plantilla "${nombre}" ${esNueva ? "creada" : "actualizada"}`);
       cerrar();
       cargar();
+      // Plantilla nueva: se ofrece crearla ya en la máquina (el usuario confirma)
+      if (esNueva) abrirCrearEnMaquina({ id: data.id, name: data.name, campos: data.campos });
     } catch { setError("Error de conexión"); } finally { setGuardando(false); }
   };
 
@@ -332,15 +336,7 @@ export default function AdminPlantillas({ titulo, descripcion }: SeccionProps) {
   return (
     <>
       <CabeceraSeccion titulo={titulo} descripcion={descripcion}>
-        <Button variant="outline" onClick={exportar} title="Descarga las plantillas y las asociaciones de artículos en un archivo">
-          <Download />
-          Exportar
-        </Button>
-        <Button variant="outline" onClick={() => archivoRef.current?.click()} title="Da de alta las plantillas y asociaciones de un archivo exportado">
-          <Upload />
-          Importar
-        </Button>
-        <input ref={archivoRef} type="file" accept=".json,application/json" className="hidden" onChange={(e) => elegirArchivo(e.target.files?.[0])} />
+        <BotonesCopia ruta="/api/admin/loteadora-copia" archivo="plantillas-loteadora" conPlantillas onImportado={cargar} />
         <Button onClick={abrirAlta}>
           <Plus />
           Nueva plantilla
@@ -386,6 +382,7 @@ export default function AdminPlantillas({ titulo, descripcion }: SeccionProps) {
                       />
                       <DropdownMenuContent align="end" className="min-w-40">
                         <DropdownMenuItem onClick={() => abrirEdicion(m)}><Pencil />Editar</DropdownMenuItem>
+                        <DropdownMenuItem onClick={() => abrirCrearEnMaquina(m)}><Printer />Crear en la loteadora…</DropdownMenuItem>
                         <DropdownMenuSeparator />
                         <DropdownMenuItem variant="destructive" onClick={() => setBorrando(m)}><Trash2 />Eliminar</DropdownMenuItem>
                       </DropdownMenuContent>
@@ -426,10 +423,20 @@ export default function AdminPlantillas({ titulo, descripcion }: SeccionProps) {
                   onQuitar={() => setCampos(campos.filter((_, j) => j !== i))}
                 />
               ))}
-              <Button type="button" variant="outline" className="w-fit" onClick={() => setCampos([...campos, { fieldId: siguienteId(), piezas: [] }])}>
+              <Button type="button" variant="outline" className="w-fit" onClick={() => setCampos([...campos, { fieldId: siguienteId(), piezas: [], linea: 1 }])}>
                 <Plus />
                 Añadir campo
               </Button>
+            </div>
+
+            <div className="grid gap-1.5">
+              <Label>Así quedará en la etiqueta</Label>
+              <pre className="overflow-x-auto rounded-lg border bg-muted/40 px-3 py-2 font-mono text-sm text-foreground">
+                {lineasEtiqueta(aCampos(campos), ejemplo).join("\n") || "—"}
+              </pre>
+              <p className="text-xs text-muted-foreground">
+                Con valores de ejemplo. «HHmm» es el hueco del reloj, que se pone a mano en la máquina. Es la disposición con la que se crea el mensaje en la loteadora.
+              </p>
             </div>
 
             <ErrorForm error={error} />
@@ -444,29 +451,38 @@ export default function AdminPlantillas({ titulo, descripcion }: SeccionProps) {
         </DialogContent>
       </Dialog>
 
-      <Dialog open={!!importacion} onOpenChange={(o) => !o && setImportacion(null)}>
+      <Dialog open={!!enMaquina} onOpenChange={(o) => !o && setEnMaquina(null)}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Importar plantillas</DialogTitle>
+            <DialogTitle>Crear en la loteadora</DialogTitle>
             <DialogDescription>
-              <span className="font-mono">{importacion?.archivo}</span> trae {importacion?.copia.plantillas.length ?? 0} plantillas y{" "}
-              {importacion?.copia.articulos?.length ?? 0} asociaciones de artículos. Si algo del archivo no es válido, no se importa nada.
+              Se crea el mensaje <span className="font-mono text-foreground">{enMaquina?.name}</span> en la máquina con esta disposición:
             </DialogDescription>
           </DialogHeader>
-          <label className="flex items-start gap-2 text-sm">
-            <Checkbox checked={sustituir} onCheckedChange={(v) => setSustituir(v === true)} className="mt-0.5" />
+          <pre className="overflow-x-auto rounded-lg border bg-muted/40 px-3 py-2 font-mono text-sm text-foreground">
+            {enMaquina ? lineasEtiqueta(enMaquina.campos, ejemplo).join("\n") : ""}
+          </pre>
+          <div className="grid gap-1.5">
+            <Label>Loteadora</Label>
+            <Select items={loteadoras.map((l) => ({ value: String(l.id), label: l.name }))} value={loteadoraId} onValueChange={(v) => setLoteadoraId(v as string)}>
+              <SelectTrigger className="w-full"><SelectValue placeholder="Elige la loteadora" /></SelectTrigger>
+              <SelectContent>
+                {loteadoras.map((l) => <SelectItem key={l.id} value={String(l.id)}>{l.name}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          </div>
+          <p className="flex gap-2 rounded-lg border border-amber-500/20 bg-amber-400/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-400">
+            <AlertTriangle className="size-4 shrink-0" />
             <span>
-              <span className="font-medium text-foreground">Sustituir las que ya existan</span>
-              <span className="block text-muted-foreground">
-                Plantillas con el mismo nombre y artículos asociados a otra plantilla. Sin marcar, solo se añade lo que falta.
-              </span>
+              El reloj no se puede crear por red: mételo a mano en la máquina después. Si el mensaje ya existe en la loteadora, se
+              sustituye entero y <strong>se pierde el reloj</strong> que tuviera. Imprimiendo no se puede crear.
             </span>
-          </label>
+          </p>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setImportacion(null)}>Cancelar</Button>
-            <Button onClick={importar} disabled={importando}>
-              {importando && <Loader2 className="animate-spin" />}
-              Importar
+            <Button variant="outline" onClick={() => setEnMaquina(null)}>{enMaquina && !loteadoras.length ? "Cerrar" : "Ahora no"}</Button>
+            <Button onClick={crearEnMaquina} disabled={creandoEnMaquina || !loteadoraId}>
+              {creandoEnMaquina && <Loader2 className="animate-spin" />}
+              Crear en la loteadora
             </Button>
           </DialogFooter>
         </DialogContent>
