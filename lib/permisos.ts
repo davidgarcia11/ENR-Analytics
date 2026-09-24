@@ -29,6 +29,12 @@ export const PERMISOS = {
     grupo: 'Loteadora',
     seccionAdmin: 'articulos-plantilla',
   },
+  'admin.loteadora.datos-fijos': {
+    label: 'Cambiar los datos fijos de las plantillas (precios, nº de certificado...)',
+    corto: 'Datos fijos',
+    grupo: 'Loteadora',
+    seccionAdmin: 'datos-fijos',
+  },
 } as const satisfies Record<string, DefinicionPermiso>;
 
 export type Permiso = keyof typeof PERMISOS;
@@ -67,6 +73,7 @@ export const RUTAS_ADMIN_POR_PERMISO: { prefijo: string; metodos?: string[]; per
   { prefijo: '/api/admin/loteadora-articulos', permiso: 'admin.loteadora.articulos' },
   // Solo lectura: el desplegable de plantillas al asociar un artículo.
   { prefijo: '/api/admin/loteadora-mensajes', metodos: ['GET'], permiso: 'admin.loteadora.articulos' },
+  { prefijo: '/api/admin/loteadora-datos-fijos', permiso: 'admin.loteadora.datos-fijos' },
 ];
 
 export function permisoDeRutaAdmin(pathname: string, metodo: string): Permiso | null {

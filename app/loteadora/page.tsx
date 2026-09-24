@@ -30,10 +30,14 @@ import { Button } from "@/components/nova/ui/button";
 import { Badge } from "@/components/nova/ui/badge";
 import { Input } from "@/components/nova/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/nova/ui/select";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/nova/ui/dialog";
 import { Combobox, ComboboxContent, ComboboxEmpty, ComboboxInput, ComboboxItem, ComboboxList } from "@/components/nova/ui/combobox";
 import { Toaster } from "@/components/nova/ui/sonner";
+import { INFO_PIEZA, componerCampos, variablesUsadas, type Campo, type TipoVariable } from "@/lib/loteadora-plantilla";
 
-interface PlantillaArticulo { messageName: string; lotFieldId: number; cocidaFieldId: number; expiryFieldId: number; horaFieldId: number; turnoFieldId: number; lineaFieldId: number }
+// Plantilla del artículo: nombre del mensaje en la máquina y sus campos con piezas
+// (lib/loteadora-plantilla.ts) — deciden qué pide el formulario y la vista previa.
+interface PlantillaArticulo { messageName: string; campos: Campo[] }
 interface Articulo { id: string; descripcion: string; diasCaducidad: number; plantilla: PlantillaArticulo | null }
 interface Loteadora { id: number; name: string; linea: string }
 type EstadoLoteadoraValor = "activa" | "en_error" | "standby" | "apagada";
@@ -54,13 +58,16 @@ interface LoteadoraFormState {
   diasDesdeJde: number | null;
   modoManual: boolean;
   turno: string;
-  selectedMensaje: string;
+  // "artículo|plantilla" para el que ya se preguntó si cargar la plantilla en
+  // ESTA loteadora: al volver a ella no se vuelve a preguntar (recargar el
+  // mensaje podría borrar los datos ya enviados que esperan para imprimir).
+  plantillaPreguntada: string | null;
 }
 
 // Colores fijos (enum cerrado de 4 estados) — mismo formato "bg-x/10 text-x" que el
 // resto de indicadores de estado en Nova (ver components/nova/mrp-materials-table.tsx).
 const ESTADO_INFO: Record<EstadoLoteadoraValor, { label: string; className: string; icon: typeof CheckCircle2 }> = {
-  activa: { label: "Activa", className: "bg-emerald-400/10 text-emerald-600", icon: CheckCircle2 },
+  activa: { label: "Imprimiendo", className: "bg-emerald-400/10 text-emerald-600", icon: CheckCircle2 },
   en_error: { label: "En error", className: "bg-rose-400/10 text-rose-500", icon: XCircle },
   standby: { label: "Conectada (sin imprimir)", className: "bg-amber-400/10 text-amber-600", icon: AlertTriangle },
   apagada: { label: "Sin conexión", className: "bg-muted text-muted-foreground", icon: PowerOff },
@@ -82,8 +89,8 @@ function addDays(date: Date, days: number): Date {
   d.setDate(d.getDate() + days);
   return d;
 }
-function formatDateES(date: Date): string {
-  return date.toLocaleDateString("es-ES", { day: "2-digit", month: "2-digit", year: "numeric" });
+function toISODate(date: Date): string {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
 }
 function toHHmm(date: Date): string {
   return `${String(date.getHours()).padStart(2, "0")}${String(date.getMinutes()).padStart(2, "0")}`;
@@ -105,7 +112,7 @@ function defaultFormState(): LoteadoraFormState {
     diasDesdeJde: null,
     modoManual: false,
     turno: "",
-    selectedMensaje: "",
+    plantillaPreguntada: null,
   };
 }
 
@@ -146,17 +153,12 @@ function LoteadoraPanel() {
   const [loadingEstado, setLoadingEstado] = useState(false);
   const [limpiandoBuffer, setLimpiandoBuffer] = useState(false);
 
-  // Plantilla (mensaje) a cargar en la loteadora seleccionada — la lista de
-  // nombres disponibles en la máquina (mensajes) es dato en vivo, se refresca
-  // siempre; cuál está elegida (selectedMensaje) vive en formStates.
-  const [mensajes, setMensajes] = useState<string[]>([]);
-  const [loadingMensajes, setLoadingMensajes] = useState(false);
   const [cargandoMensaje, setCargandoMensaje] = useState(false);
 
   // Formulario activo: el de la loteadora seleccionada ahora mismo (o el
   // "borrador" sin loteadora todavía, clave "").
   const currentForm = formStates[selectedLoteadora] ?? defaultFormState();
-  const { loteManual, cocidaJulianDay, diasCad, diasDesdeJde, modoManual, turno, selectedMensaje } = currentForm;
+  const { loteManual, cocidaJulianDay, diasCad, diasDesdeJde, modoManual, turno } = currentForm;
   const selectedArticulo = articulos.find((a) => a.id === currentForm.selectedArticuloId) ?? null;
   const updateForm = (patch: Partial<LoteadoraFormState>) => {
     setFormStates((prev) => ({
@@ -177,7 +179,6 @@ function LoteadoraPanel() {
   const setDiasCad = (v: string) => updateForm({ diasCad: v });
   const setModoManual = (v: boolean) => updateForm({ modoManual: v });
   const setTurno = (v: string) => updateForm({ turno: v });
-  const setSelectedMensaje = (v: string) => updateForm({ selectedMensaje: v });
 
   // Hora de envío (HHmm): reloj en vivo, no editable — se manda tal cual esté
   // en el instante exacto de pulsar "Enviar".
@@ -186,6 +187,10 @@ function LoteadoraPanel() {
     const interval = setInterval(() => setAhora(new Date()), 1000);
     return () => clearInterval(interval);
   }, []);
+
+  // Confirmación antes de tocar la máquina (cargar la plantilla de un artículo o
+  // enviar datos): un solo diálogo, con la acción a ejecutar si se acepta.
+  const [confirmacion, setConfirmacion] = useState<{ titulo: string; detalle: React.ReactNode; boton: string; accion: () => void } | null>(null);
 
   // Envío
   const [sending, setSending] = useState(false);
@@ -210,27 +215,38 @@ function LoteadoraPanel() {
   }, []);
 
   useEffect(() => {
-    if (!selectedLoteadora) {
-      setMensajes([]);
-      return;
-    }
+    if (!selectedLoteadora) return;
     // Se refresca el estado en vivo justo aquí (no solo cada 60s) para que el
-    // aviso de "está imprimiendo" no vaya desacompasado del check real que
-    // hace fetchMensajes en este mismo instante (protocolo §3.5.15 vs §3.5.20).
+    // aviso de "está imprimiendo" corresponda a la loteadora recién elegida.
     fetchEstadoLoteadoras();
-    fetchMensajes(selectedLoteadora);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedLoteadora]);
 
   // Autocarga de plantilla: si el artículo elegido (para ESTA loteadora, ver
-  // formStates) tiene una plantilla asociada, se carga sola sin pedir
-  // confirmación. Dependencias por valor (id/messageName), no por el objeto
+  // formStates) tiene una plantilla asociada, se pide confirmación para
+  // cargarla. Dependencias por valor (id/messageName), no por el objeto
   // `selectedArticulo` entero — ese objeto cambia de referencia cada vez que
   // se refresca `articulos` (cada 60s) aunque el contenido sea el mismo, y
   // dispararía una recarga innecesaria en la loteadora cada minuto.
+  // Si la loteadora está imprimiendo no se carga (se avisa): se carga con
+  // "Volver a cargar" cuando la paren. El nombre lo comprueba el servidor.
   useEffect(() => {
     if (!selectedLoteadora || !selectedArticulo?.plantilla) return;
-    cargarMensaje(selectedArticulo.plantilla.messageName);
+    const nombre = selectedArticulo.plantilla.messageName;
+    // Solo al cambiar de artículo (o de su plantilla), no al volver a esta loteadora.
+    const clave = `${selectedArticulo.id}|${nombre}`;
+    if (currentForm.plantillaPreguntada === clave) return;
+    updateForm({ plantillaPreguntada: clave });
+    if (imprimiendo) {
+      toast.warning(`La loteadora está imprimiendo: no se ha cargado ${nombre}. Para la impresión y pulsa "Volver a cargar".`);
+      return;
+    }
+    setConfirmacion({
+      titulo: "Cambiar la plantilla de la loteadora",
+      detalle: <>Se cargará <span className="font-mono font-medium text-foreground">{nombre}</span> en <span className="font-medium text-foreground">{loteadoraSeleccionada?.name}</span> para el artículo <span className="font-medium text-foreground">{selectedArticulo.id} — {selectedArticulo.descripcion}</span>.</>,
+      boton: "Cargar plantilla",
+      accion: () => cargarMensaje(nombre),
+    });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedArticulo?.id, selectedArticulo?.plantilla?.messageName, selectedLoteadora]);
 
@@ -275,24 +291,10 @@ function LoteadoraPanel() {
     }
   };
 
-  const fetchMensajes = async (loteadoraId: string) => {
-    setLoadingMensajes(true);
-    try {
-      const res = await apiFetch(`/api/loteadora/mensajes?loteadoraId=${loteadoraId}`);
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Error al listar las plantillas de la loteadora");
-      setMensajes(data.messages);
-    } catch (err: any) {
-      setMensajes([]);
-      toast.error(err.message || "Error al listar las plantillas de la loteadora");
-    } finally {
-      setLoadingMensajes(false);
-    }
-  };
-
   const cargarMensaje = async (messageName: string) => {
-    if (!selectedLoteadora || !messageName || cargandoMensaje) return;
-    updateForm({ selectedMensaje: messageName });
+    // Sin bloquear si ya hay una carga en curso: la cola de lib/loteadora-printer
+    // las ejecuta en orden (antes la segunda se ignoraba en silencio).
+    if (!selectedLoteadora || !messageName) return;
     setCargandoMensaje(true);
     try {
       const res = await apiFetch("/api/loteadora/cargar-mensaje", {
@@ -302,7 +304,8 @@ function LoteadoraPanel() {
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Error al cargar la plantilla");
-      toast.success("Plantilla cargada correctamente");
+      if (data.warning) toast.warning(data.warning);
+      else toast.success("Plantilla cargada correctamente");
     } catch (err: any) {
       toast.error(err.message || "Error al cargar la plantilla");
     } finally {
@@ -310,7 +313,7 @@ function LoteadoraPanel() {
     }
   };
 
-  const handleCargarMensaje = () => cargarMensaje(selectedMensaje);
+  const handleCargarMensaje = () => selectedArticulo?.plantilla && cargarMensaje(selectedArticulo.plantilla.messageName);
 
   const handleLimpiarBuffer = async () => {
     if (!selectedLoteadora || limpiandoBuffer) return;
@@ -334,7 +337,7 @@ function LoteadoraPanel() {
   const handleArticuloChange = (id: string | null) => {
     const art = articulos.find((a) => a.id === id) ?? null;
     if (!art) {
-      updateForm({ selectedArticuloId: null });
+      updateForm({ selectedArticuloId: null, plantillaPreguntada: null });
       return;
     }
     updateForm({
@@ -365,8 +368,30 @@ function LoteadoraPanel() {
     setShowSendErrorDetail(false);
   };
 
+  const pedirConfirmacionEnvio = () => {
+    if (!canSend) return;
+    setConfirmacion({
+      titulo: "Enviar a la loteadora",
+      detalle: (
+        <>
+          Se enviará a <span className="font-medium text-foreground">{loteadoraSeleccionada?.name}</span>:
+          <span className="mt-2 grid gap-1">
+            {compuestos.map((c) => (
+              <span key={c.fieldId} className="flex gap-2 font-mono text-sm text-foreground">
+                <span className="w-16 shrink-0 text-muted-foreground">Campo {c.fieldId}</span>
+                <span className="whitespace-pre">{c.texto}</span>
+              </span>
+            ))}
+          </span>
+        </>
+      ),
+      boton: "Enviar",
+      accion: handleEnviar,
+    });
+  };
+
   const handleEnviar = async () => {
-    if (!canSend || !fechaCaducidad) return;
+    if (!canSend) return;
     setSending(true);
     setSendError(null);
     setSendErrorDetail(null);
@@ -378,9 +403,12 @@ function LoteadoraPanel() {
         body: JSON.stringify({
           loteadoraId: Number(selectedLoteadora),
           articuloId: selectedArticulo?.id,
-          lote,
-          fechaCocida: cocida,
-          fechaCaducidad: formatDateES(fechaCaducidad),
+          // Valores en crudo: el texto de cada campo lo compone el servidor con la
+          // plantilla del artículo (el mismo cálculo que la vista previa).
+          fresco: lote,
+          cocidaAnio: cocidaYear,
+          cocidaDia: cocidaValida ? cocidaDiaNum : null,
+          caducidad: fechaCaducidad ? toISODate(fechaCaducidad) : null,
           horaEnvio: toHHmm(new Date()),
           turno,
         }),
@@ -417,16 +445,38 @@ function LoteadoraPanel() {
       : null;
   const loteadoraSeleccionada = loteadoras.find((l) => String(l.id) === selectedLoteadora) ?? null;
   const lineaLoteadora = loteadoraSeleccionada?.linea || null;
-  const canSend = !!lote && !!cocida && !!fechaCaducidad && !!turno && !!lineaLoteadora && !!selectedArticulo?.plantilla && !!selectedLoteadora && !sending;
+
+  // Lo que pide el formulario depende de la plantilla del artículo: sin artículo (o
+  // sin plantilla) se enseña todo; con plantilla, solo lo que usan sus campos.
+  const plantilla = selectedArticulo?.plantilla ?? null;
+  const usadas = plantilla ? variablesUsadas(plantilla.campos) : null;
+  const necesita = (t: TipoVariable) => !usadas || usadas.has(t);
+  const compuestos = plantilla
+    ? componerCampos(plantilla.campos, {
+        fresco: lote ?? undefined,
+        cocidaAnio: cocidaYear ?? undefined,
+        cocidaDia: cocidaValida ? cocidaDiaNum : undefined,
+        caducidad: fechaCaducidad ? toISODate(fechaCaducidad) : undefined,
+        hora: toHHmm(ahora),
+        turno: turno || undefined,
+        linea: lineaLoteadora ?? undefined,
+      })
+    : [];
+  const faltan = [...new Set(compuestos.flatMap((c) => c.faltan))];
+  // Imprimiendo (P_Status 00 en el estado en vivo) no se deja cambiar nada; el
+  // servidor lo vuelve a comprobar en el momento (el estado aquí puede tener 60s).
+  const imprimiendo = estadoLoteadoras.find((e) => String(e.id) === selectedLoteadora)?.state === "activa";
+  const canSend = compuestos.length > 0 && faltan.length === 0 && !!selectedLoteadora && !sending && !imprimiendo;
   const diasReadonly = !modoManual && jdeOnline && diasDesdeJde !== null;
-  const canCargarMensaje = !!selectedLoteadora && !!selectedMensaje && !cargandoMensaje;
+  const canCargarMensaje = !!selectedLoteadora && !!plantilla && !cargandoMensaje && !imprimiendo;
+  const loteadoraItems = loteadoras.map((l) => ({ value: String(l.id), label: l.name }));
 
   const articuloIds = articulos.map((a) => a.id);
   const articuloLabel = (id: string) => {
     const a = articulos.find((x) => x.id === id);
     return a ? `${a.id} — ${a.descripcion}` : id;
   };
-  const articuloPlaceholder = loadingArticulos ? "Cargando…" : articulos.length === 0 ? "Sin artículos disponibles" : "Buscar por código o descripción…";
+  const articuloPlaceholder = !selectedLoteadora ? "Elige primero la loteadora" : loadingArticulos ? "Cargando…" : articulos.length === 0 ? "Sin artículos disponibles" : "Buscar por código o descripción…";
 
   return (
     <div data-nova-theme={effectiveTheme} ref={portalContainerRef} className="min-h-screen bg-sidebar text-foreground">
@@ -448,6 +498,58 @@ function LoteadoraPanel() {
                 <div className="space-y-3 lg:pr-6">
                   <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Datos del artículo</p>
 
+                  {/* Primero la loteadora: el artículo carga su plantilla en ella */}
+                  <div className="grid gap-1.5">
+                    <label className="text-xs font-semibold text-foreground">Loteadora</label>
+                    <Select items={loteadoraItems} value={selectedLoteadora || null} onValueChange={(v) => handleLoteadoraSelect(v as string)}>
+                      <SelectTrigger className="w-full">
+                        <SelectValue placeholder={loteadoras.length === 0 ? "Sin loteadoras configuradas" : "Seleccionar loteadora…"} />
+                      </SelectTrigger>
+                      <SelectContent align="start" alignItemWithTrigger={false}>
+                        {loteadoras.map((l) => (
+                          <SelectItem key={l.id} value={String(l.id)}>{l.name}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  {imprimiendo && (
+                    <Alert className="border-amber-500/20 bg-amber-400/10 py-2">
+                      <AlertTriangle className="text-amber-600" />
+                      <AlertDescription className="flex flex-wrap items-center gap-x-2 text-xs text-amber-700 dark:text-amber-400">
+                        La loteadora está imprimiendo: para la impresión en la máquina para cambiar la plantilla o enviar datos.
+                        <button type="button" onClick={fetchEstadoLoteadoras} className="underline hover:opacity-80">Comprobar de nuevo</button>
+                      </AlertDescription>
+                    </Alert>
+                  )}
+
+                  {selectedLoteadora && !lineaLoteadora && necesita("linea") && (
+                    <Alert className="border-amber-500/20 bg-amber-400/10 py-2">
+                      <AlertTriangle className="text-amber-600" />
+                      <AlertDescription className="text-xs text-amber-700 dark:text-amber-400">
+                        Esta loteadora no tiene línea de fabricación configurada — configúrala en /admin antes de poder enviar.
+                      </AlertDescription>
+                    </Alert>
+                  )}
+
+                  {selectedLoteadora && (
+                    <div className="grid gap-1.5">
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={handleLimpiarBuffer}
+                        disabled={limpiandoBuffer}
+                        className="w-fit whitespace-nowrap"
+                        title="Vacía la cola de campos remotos pendientes (equivale a pulsar Clear en Ajustes de comunicación > Buffer en la máquina). No imprime nada."
+                      >
+                        {limpiandoBuffer ? <Loader2 className="size-3.5 animate-spin" /> : <Eraser className="size-3.5" />}
+                        Limpiar buffer
+                      </Button>
+                    </div>
+                  )}
+
+
                   <div className="grid gap-1.5">
                     <label className="text-xs font-semibold text-foreground">
                       Artículo
@@ -459,7 +561,7 @@ function LoteadoraPanel() {
                       onValueChange={(v) => handleArticuloChange(v as string | null)}
                       itemToStringLabel={articuloLabel}
                     >
-                      <ComboboxInput placeholder={articuloPlaceholder} disabled={!jdeOnline || loadingArticulos} showClear />
+                      <ComboboxInput placeholder={articuloPlaceholder} disabled={!selectedLoteadora || !jdeOnline || loadingArticulos} showClear />
                       <ComboboxContent>
                         <ComboboxEmpty>Sin resultados</ComboboxEmpty>
                         <ComboboxList>
@@ -486,6 +588,7 @@ function LoteadoraPanel() {
                       resolveCocidaYear). La caducidad se calcula desde cocida, no desde
                       fabricación. */}
                   <div className="grid grid-cols-2 gap-3">
+                    {necesita("fresco") && (
                     <div className="grid gap-1.5">
                       <label className="text-xs font-semibold text-foreground">Fecha Fresco</label>
                       <Input
@@ -497,6 +600,8 @@ function LoteadoraPanel() {
                         maxLength={6}
                       />
                     </div>
+                    )}
+                    {(necesita("cocida") || necesita("caducidad")) && (
                     <div className="grid gap-1.5">
                       {/* El aviso va en línea con la etiqueta (no debajo del input) para que
                           no cambie de alto al aparecer/desaparecer y desplace el resto del
@@ -519,8 +624,10 @@ function LoteadoraPanel() {
                         maxLength={3}
                       />
                     </div>
+                    )}
                   </div>
 
+                  {necesita("caducidad") && (
                   <div className="grid gap-1.5">
                     <div className="flex items-center justify-between">
                       <label className="text-xs font-semibold text-foreground">Días de caducidad</label>
@@ -558,10 +665,12 @@ function LoteadoraPanel() {
                       </button>
                     )}
                   </div>
+                  )}
 
+                  {necesita("turno") && (
                   <div className="grid gap-1.5">
                     <label className="text-xs font-semibold text-foreground">Turno</label>
-                    <Select value={turno || undefined} onValueChange={(v) => setTurno(v as string)}>
+                    <Select value={turno || null} onValueChange={(v) => setTurno(v as string)}>
                       <SelectTrigger className="w-full">
                         <SelectValue placeholder="Seleccionar turno…" />
                       </SelectTrigger>
@@ -572,71 +681,22 @@ function LoteadoraPanel() {
                       </SelectContent>
                     </Select>
                   </div>
-
-                  <div className="grid gap-1.5">
-                    <label className="text-xs font-semibold text-foreground">Loteadora</label>
-                    <Select value={selectedLoteadora || undefined} onValueChange={(v) => handleLoteadoraSelect(v as string)}>
-                      <SelectTrigger className="w-full">
-                        <SelectValue placeholder={loteadoras.length === 0 ? "Sin loteadoras configuradas" : "Seleccionar loteadora…"} />
-                      </SelectTrigger>
-                      <SelectContent align="start" alignItemWithTrigger={false}>
-                        {loteadoras.map((l) => (
-                          <SelectItem key={l.id} value={String(l.id)}>{l.name}</SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-
-                  {selectedLoteadora && !lineaLoteadora && (
-                    <Alert className="border-amber-500/20 bg-amber-400/10 py-2">
-                      <AlertTriangle className="text-amber-600" />
-                      <AlertDescription className="text-xs text-amber-700 dark:text-amber-400">
-                        Esta loteadora no tiene línea de fabricación configurada — configúrala en /admin antes de poder enviar.
-                      </AlertDescription>
-                    </Alert>
                   )}
 
-                  {selectedLoteadora && (
-                    <div className="grid gap-1.5">
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="sm"
-                        onClick={handleLimpiarBuffer}
-                        disabled={limpiandoBuffer}
-                        className="w-fit whitespace-nowrap"
-                        title="Vacía la cola de campos remotos pendientes (equivale a pulsar Clear en Ajustes de comunicación > Buffer en la máquina). No imprime nada."
-                      >
-                        {limpiandoBuffer ? <Loader2 className="size-3.5 animate-spin" /> : <Eraser className="size-3.5" />}
-                        Limpiar buffer
-                      </Button>
-                    </div>
-                  )}
-
-                  {selectedLoteadora && (
-                    <div className="grid gap-1.5">
-                      <label className="text-xs font-semibold text-foreground">
-                        Plantilla
-                        {loadingMensajes && <Loader2 className="ml-1.5 inline size-3 animate-spin text-muted-foreground" />}
-                      </label>
-                      <div className="flex gap-2">
-                        <div className="flex-1">
-                          <Select value={selectedMensaje || undefined} onValueChange={(v) => setSelectedMensaje(v as string)}>
-                            <SelectTrigger className="w-full">
-                              <SelectValue placeholder={mensajes.length === 0 ? "Sin plantillas disponibles" : "Seleccionar plantilla…"} />
-                            </SelectTrigger>
-                            <SelectContent align="start" alignItemWithTrigger={false}>
-                              {mensajes.map((m) => (
-                                <SelectItem key={m} value={m}>{m}</SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
-                        </div>
-                        <Button type="button" variant="outline" size="sm" onClick={handleCargarMensaje} disabled={!canCargarMensaje} className="whitespace-nowrap">
-                          {cargandoMensaje ? <Loader2 className="size-3.5 animate-spin" /> : <Upload className="size-3.5" />}
-                          Cargar plantilla
-                        </Button>
+                  {/* La plantilla la decide el artículo (no se puede elegir otra a mano);
+                      el botón solo vuelve a cargar esa, p. ej. si estaba imprimiendo. */}
+                  {selectedLoteadora && plantilla && (
+                    <div className="flex items-center justify-between gap-2 rounded-lg border border-border px-3 py-2">
+                      <div className="min-w-0">
+                        <span className="block text-xs font-semibold text-foreground">
+                          Plantilla
+                        </span>
+                        <span className="block truncate font-mono text-sm text-muted-foreground">{plantilla.messageName}</span>
                       </div>
+                      <Button type="button" variant="outline" size="sm" onClick={handleCargarMensaje} disabled={!canCargarMensaje} className="whitespace-nowrap">
+                        {cargandoMensaje ? <Loader2 className="size-3.5 animate-spin" /> : <Upload className="size-3.5" />}
+                        Volver a cargar
+                      </Button>
                     </div>
                   )}
                 </div>
@@ -661,23 +721,35 @@ function LoteadoraPanel() {
                         <p className="text-sm text-muted-foreground">Ningún artículo seleccionado</p>
                       )}
                     </div>
-                    <div className="mt-4 grid grid-cols-2 gap-3">
-                      {[
-                        { label: "Lote", value: lote },
-                        { label: "Cocida", value: cocida },
-                        { label: "Caducidad", value: fechaCaducidad ? formatDateES(fechaCaducidad) : null },
-                        { label: "Hora", value: toHHmm(ahora) },
-                        { label: "Turno", value: turno || null },
-                        { label: "Línea", value: lineaLoteadora },
-                      ].map(({ label, value }) => (
-                        <div key={label} className="rounded-lg border border-border bg-background px-3 py-3 text-center">
-                          <span className="block text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">{label}</span>
-                          <span className={`block truncate font-mono text-xl font-bold ${value ? "text-foreground" : "text-muted-foreground/30"}`}>
-                            {value ?? "—"}
-                          </span>
+                    {plantilla ? (
+                      <>
+                        <p className="mt-3 text-center font-mono text-[11px] text-muted-foreground">{plantilla.messageName}</p>
+                        <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                          {compuestos.map((c, i) => {
+                            const campo = plantilla.campos[i];
+                            return (
+                              <div key={c.fieldId} className="rounded-lg border border-border bg-background px-3 py-3 text-center">
+                                <span className="block text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                                  Campo {c.fieldId}
+                                </span>
+                                <span className={`block break-all font-mono text-xl font-bold ${c.texto ? "text-foreground" : "text-muted-foreground/30"}`}>
+                                  {c.texto || "—"}
+                                </span>
+                                <span className={`mt-1 block text-[10px] ${c.faltan.length ? "text-amber-600" : "text-muted-foreground"}`}>
+                                  {c.faltan.length
+                                    ? `Falta: ${c.faltan.map((t) => INFO_PIEZA[t].label).join(", ")}`
+                                    : campo.piezas.map((p) => (p.tipo === "fijo" ? p.nombre : INFO_PIEZA[p.tipo].label)).join(" · ")}
+                                </span>
+                              </div>
+                            );
+                          })}
                         </div>
-                      ))}
-                    </div>
+                      </>
+                    ) : (
+                      <p className="mt-6 text-center text-sm text-muted-foreground">
+                        {selectedArticulo ? "Este artículo no tiene plantilla: asígnale una en /admin para ver la etiqueta." : "Elige un artículo para ver cómo saldrá la etiqueta."}
+                      </p>
+                    )}
                   </div>
 
                   <div className="flex-1" />
@@ -701,7 +773,7 @@ function LoteadoraPanel() {
                     </Alert>
                   )}
 
-                  <Button onClick={handleEnviar} disabled={!canSend} className="h-11 w-full text-sm font-semibold">
+                  <Button onClick={pedirConfirmacionEnvio} disabled={!canSend} className="h-11 w-full text-sm font-semibold">
                     {sending ? <><Loader2 className="size-4 animate-spin" />Enviando...</> : <><Send className="size-4" />Enviar a loteadora</>}
                   </Button>
                 </div>
@@ -739,6 +811,18 @@ function LoteadoraPanel() {
             </Card>
           </main>
         </div>
+        <Dialog open={!!confirmacion} onOpenChange={(o) => !o && setConfirmacion(null)}>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>{confirmacion?.titulo}</DialogTitle>
+              <DialogDescription render={<div />}>{confirmacion?.detalle}</DialogDescription>
+            </DialogHeader>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setConfirmacion(null)}>Cancelar</Button>
+              <Button onClick={() => { confirmacion?.accion(); setConfirmacion(null); }}>{confirmacion?.boton}</Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
         <Toaster />
       </NovaPortalProvider>
     </div>

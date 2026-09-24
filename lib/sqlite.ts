@@ -3,6 +3,8 @@ import path from 'path';
 import fs from 'fs';
 import { hashSync } from 'bcryptjs';
 import { PANELS } from './panels';
+import { guardarCampos, type Campo } from './loteadora-plantilla';
+import plantillasIniciales from './loteadora-plantillas-iniciales.json';
 
 const DB_PATH = path.join(process.cwd(), 'data', 'app.db');
 
@@ -105,18 +107,26 @@ export function getDb(): Database.Database {
     );
 
     -- Plantillas/mensajes configurados en las loteadoras (nombre global, debe
-    -- coincidir exacto con el mensaje creado en la máquina) y los IDs de los
-    -- tres Field Module que trae: lote, fecha de cocida y caducidad.
+    -- coincidir exacto con el mensaje creado en la máquina). Sus campos (Field
+    -- Module) y lo que se imprime en cada uno viven en loteadora_mensaje_segmentos.
     CREATE TABLE IF NOT EXISTS loteadora_mensajes (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       name TEXT NOT NULL UNIQUE,
-      lot_field_id INTEGER NOT NULL,
-      cocida_field_id INTEGER NOT NULL,
-      expiry_field_id INTEGER NOT NULL,
-      hora_field_id INTEGER NOT NULL,
-      turno_field_id INTEGER NOT NULL,
-      linea_field_id INTEGER NOT NULL,
       created_at TEXT DEFAULT (datetime('now'))
+    );
+
+    -- Piezas de cada campo de una plantilla (una fila por pieza, con el ID del
+    -- Field Module al que pertenece): el texto de un campo es la concatenación de
+    -- sus piezas por la columna orden. Modelo y formatos en lib/loteadora-plantilla.ts.
+    CREATE TABLE IF NOT EXISTS loteadora_mensaje_segmentos (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      mensaje_id INTEGER NOT NULL REFERENCES loteadora_mensajes(id) ON DELETE CASCADE,
+      orden INTEGER NOT NULL,
+      field_id INTEGER NOT NULL,
+      tipo TEXT NOT NULL,
+      valor TEXT,
+      nombre TEXT,
+      formato TEXT
     );
 
     -- Asociación artículo (F4101.IMLITM) -> plantilla. Global: el mismo
@@ -280,23 +290,61 @@ export function getDb(): Database.Database {
     _db.exec("ALTER TABLE loteadoras ADD COLUMN linea TEXT NOT NULL DEFAULT ''");
   }
 
-  // Migración: añadir columna hora_field_id a loteadora_mensajes si no existe
-  // (BDs creadas antes de que la plantilla incluyera la hora de envío).
+  // Migración: las plantillas tenían un ID de campo fijo por dato (columnas
+  // lot/cocida/expiry/hora/turno/linea_field_id). Pasan a campos con piezas
+  // (loteadora_mensaje_segmentos): cada columna se convierte en un campo con una
+  // sola pieza de ese tipo, sin literales, y la caducidad en DD/MM/AAAA (lo que se
+  // imprimía hasta ahora). Si dos columnas compartían ID (las que se añadieron
+  // después valían 0 por defecto) gana la primera. Antes de tocar nada se guarda
+  // una copia completa de la BD junto a app.db, por si hubiera que volver atrás.
   const mensajeColumns = _db.prepare("PRAGMA table_info(loteadora_mensajes)").all() as { name: string }[];
-  if (!mensajeColumns.some(c => c.name === 'hora_field_id')) {
-    _db.exec("ALTER TABLE loteadora_mensajes ADD COLUMN hora_field_id INTEGER NOT NULL DEFAULT 0");
+  const COLUMNAS_CAMPO = [
+    ['lot_field_id', 'fresco', null],
+    ['cocida_field_id', 'cocida', 'AAJJJ'],
+    ['expiry_field_id', 'caducidad', 'DD/MM/AAAA'],
+    ['hora_field_id', 'hora', null],
+    ['turno_field_id', 'turno', null],
+    ['linea_field_id', 'linea', null],
+  ] as const;
+  const columnasViejas = COLUMNAS_CAMPO.filter(([col]) => mensajeColumns.some(c => c.name === col));
+  if (columnasViejas.length > 0) {
+    const copia = `${DB_PATH}.pre-plantillas-campos-${new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-')}`;
+    _db.exec(`VACUUM INTO '${copia.replace(/'/g, "''")}'`);
+
+    _db.transaction(() => {
+      const mensajes = _db!.prepare(`SELECT id, ${columnasViejas.map(([col]) => col).join(', ')} FROM loteadora_mensajes`).all() as Record<string, number>[];
+      const insertar = _db!.prepare(
+        'INSERT INTO loteadora_mensaje_segmentos (mensaje_id, orden, field_id, tipo, formato) VALUES (?, ?, ?, ?, ?)'
+      );
+      for (const m of mensajes) {
+        const usados = new Set<number>();
+        columnasViejas.forEach(([col, tipo, formato], i) => {
+          const fieldId = m[col];
+          if (usados.has(fieldId)) return;
+          usados.add(fieldId);
+          insertar.run(m.id, i * 1000, fieldId, tipo, formato);
+        });
+      }
+      for (const [col] of columnasViejas) _db!.exec(`ALTER TABLE loteadora_mensajes DROP COLUMN ${col}`);
+    })();
   }
 
-  // Migración: añadir columna turno_field_id a loteadora_mensajes si no existe
-  // (BDs creadas antes de que la plantilla incluyera el turno).
-  if (!mensajeColumns.some(c => c.name === 'turno_field_id')) {
-    _db.exec("ALTER TABLE loteadora_mensajes ADD COLUMN turno_field_id INTEGER NOT NULL DEFAULT 0");
-  }
-
-  // Migración: añadir columna linea_field_id a loteadora_mensajes si no existe
-  // (BDs creadas antes de que la plantilla incluyera la línea de fabricación).
-  if (!mensajeColumns.some(c => c.name === 'linea_field_id')) {
-    _db.exec("ALTER TABLE loteadora_mensajes ADD COLUMN linea_field_id INTEGER NOT NULL DEFAULT 0");
+  // Carga de las plantillas del "nuevo loteado" (N01…N17, mensajes creados en la
+  // máquina con el comando 1C, ver docs/loteadora.md §9). Se hace UNA sola vez
+  // por BD (marca en `migraciones`): si luego se borra o renombra una plantilla
+  // desde /admin, no reaparece en el siguiente arranque. Si ya existe una con el
+  // mismo nombre, no se toca.
+  _db.exec('CREATE TABLE IF NOT EXISTS migraciones (clave TEXT PRIMARY KEY, aplicada_at TEXT DEFAULT CURRENT_TIMESTAMP)');
+  if (!_db.prepare("SELECT 1 FROM migraciones WHERE clave = 'plantillas-nuevo-loteado'").get()) {
+    _db.transaction(() => {
+      const existe = _db!.prepare('SELECT 1 FROM loteadora_mensajes WHERE name = ?');
+      const insertar = _db!.prepare('INSERT INTO loteadora_mensajes (name) VALUES (?)');
+      for (const p of plantillasIniciales as { name: string; campos: Campo[] }[]) {
+        if (existe.get(p.name)) continue;
+        guardarCampos(_db!, Number(insertar.run(p.name).lastInsertRowid), p.campos);
+      }
+      _db!.prepare("INSERT INTO migraciones (clave) VALUES ('plantillas-nuevo-loteado')").run();
+    })();
   }
 
   // Migración: el panel "Costes" cambió de key/URL — 'coste_a1' → 'costes' (y

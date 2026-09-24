@@ -9,7 +9,7 @@
 
 **El envío a la loteadora ya es real** (comando `1D` del protocolo TIJ por TCP, ver §6-9). La selección de artículo es directa (búsqueda por código o descripción, sin marca — ver §3).
 
-**Cada artículo tiene una plantilla (mensaje) asociada de forma global** (§13): al elegirlo en `/loteadora`, si tiene plantilla, se carga sola en la loteadora seleccionada, sin botón. Los IDs de campo (lote/cocida/caducidad) ya no son fijos por loteadora — viven en la plantilla, así que máquinas distintas pueden usar Field Module en IDs distintos para el mismo artículo/mensaje. Además de la fecha de fabricación (solo para el lote), hay una **fecha de cocida** independiente, de la que se calcula la caducidad (§5).
+**Cada artículo tiene una plantilla (mensaje) asociada de forma global** (§13): al elegirlo en `/loteadora`, si tiene plantilla, se carga en la loteadora seleccionada tras confirmarlo (§11). Cada plantilla define **sus campos y qué se imprime en cada uno** (§13): literales como la "L" o "CAD ", la cocida, la caducidad en el formato de cada cliente, datos fijos como un precio... En `/loteadora` solo se pide lo que usa la plantilla del artículo y la vista previa enseña el texto exacto de cada campo. Además de la fecha de fabricación (solo para el lote), hay una **fecha de cocida** independiente, de la que se calcula la caducidad (§5).
 
 Rama: `feature/loteadora`.
 
@@ -24,15 +24,19 @@ Rama: `feature/loteadora`.
 | Archivo | Descripción |
 |---|---|
 | `app/loteadora/page.tsx` | Página cliente: búsqueda de artículo, formulario (fabricación/cocida/caducidad), cálculo, autocarga de plantilla y vista previa |
-| `app/api/loteadora/articulos/route.ts` | GET — artículos utilizables en la loteadora desde `F4101` (sin marca), incluye días de caducidad y, si tiene, la plantilla asociada (`plantilla: {messageName, lotFieldId, cocidaFieldId, expiryFieldId, horaFieldId, turnoFieldId, lineaFieldId}`) |
+| `app/api/loteadora/articulos/route.ts` | GET — artículos utilizables en la loteadora desde `F4101` (sin marca), incluye días de caducidad y, si tiene, la plantilla asociada (`plantilla: {messageName, campos}`) |
+| `lib/loteadora-plantilla.ts` | Modelo de plantilla (campos y piezas), formatos de cocida/caducidad, composición del texto de cada campo, validación y lectura/escritura en SQLite — lo usan el envío, la vista previa y el constructor del admin (§13) |
+| `lib/loteadora-plantillas-iniciales.json` | Las 17 plantillas del "nuevo loteado" (`N01`–`N17`), dadas de alta una sola vez al arrancar (§13) |
+| `__tests__/loteadora-plantilla.test.ts` | Formatos, composición y validación con patrones reales de clientes |
 | `app/api/loteadora/impresoras/route.ts` | GET público — loteadoras habilitadas (`id`, `name`, `linea`) para el desplegable del panel — `linea` decide si se puede enviar (§6, §8) |
 | `app/api/loteadora/enviar/route.ts` | POST — envía lote/cocida/caducidad/hora/turno/línea a la loteadora seleccionada, resolviendo la plantilla del artículo y la línea de la loteadora en servidor (requiere permiso de pantalla, §16) |
 | `app/api/loteadora/estado/route.ts` | GET público — estado en vivo (`activa`/`en_error`/`standby`/`apagada`) de las loteadoras habilitadas |
 | `app/api/loteadora/mensajes/route.ts` | GET — lista las plantillas guardadas en una loteadora (requiere permiso de pantalla, §16) |
-| `app/api/loteadora/cargar-mensaje/route.ts` | POST — carga/aplica una plantilla en la loteadora (requiere permiso de pantalla §16, sin bloqueo por estado de impresión) |
+| `app/api/loteadora/cargar-mensaje/route.ts` | POST — carga/aplica una plantilla en la loteadora (requiere permiso de pantalla §16; rechaza con `409` si la loteadora está imprimiendo, §11) |
 | `app/api/admin/loteadoras/route.ts` y `[id]/route.ts` | CRUD de loteadoras (IP/puerto/slave) desde `/admin` (solo admin) |
 | `app/api/admin/loteadoras/estado/route.ts` | GET admin — estado en vivo de **todas** las loteadoras (habilitadas o no) |
-| `app/api/admin/loteadora-mensajes/route.ts` y `[id]/route.ts` | CRUD de plantillas (`loteadora_mensajes`: nombre + IDs de campo lote/cocida/caducidad) desde `/admin` → Plantillas |
+| `app/api/admin/loteadora-mensajes/route.ts` y `[id]/route.ts` | CRUD de plantillas (nombre + campos con piezas) desde `/admin` → Loteadora › Plantillas |
+| `app/api/admin/loteadora-datos-fijos/route.ts` y `[id]/route.ts` | Lista y cambia los datos fijos de las plantillas (precio, nº de certificado) desde `/admin` → Loteadora › Datos fijos |
 | `app/api/admin/loteadora-articulos/route.ts` y `[articuloId]/route.ts` | CRUD de asociaciones artículo→plantilla (`loteadora_articulo_mensajes`) desde `/admin` → Loteadora › Artículos. Abierto también a usuarios no admin con el permiso `admin.loteadora.articulos`, por su rol o como extra (DOCUMENTACION.md §5b) |
 | `lib/loteadora-printer.ts` | Construye las tramas del protocolo TIJ y las envía por TCP (`buildRemoteFieldFrame`, `sendRemoteFields`, `getPrinterStatus`, `listMessageNames`, `loadPrintMessage`) |
 | `components/nova/date-picker.tsx` | Selector de UNA fecha exacta (Popover + Calendar en modo `single`) — nuevo, no existía ningún panel Nova con selector de fecha única (solo rango, `date-range-picker.tsx`) |
@@ -112,30 +116,37 @@ function resolveCocidaYear(julianDay: number, today: Date): number {
 ```
 
 - **Lote ("Fecha Fresco")** = campo de texto libre (solo dígitos, máx. 6 caracteres), **se envía tal cual lo escribe el operario, sin transformar**. En planta no siempre meten una fecha con el formato `AAJJJ`: a veces escriben el lote completo (`263221`), a veces sin el turno al final (`26322`) — no hay cálculo posible ni deseable aquí, por eso ya no es un `DatePicker`.
-- **Cocida ("Fecha Cocida")** = el operario solo introduce el **día juliano** (numérico, 1-366, máx. 3 caracteres) — el año no lo escribe nadie, se infiere con `resolveCocidaYear()`. El valor final que se envía (formato `AAJJJ`, igual que antes) sale de `año_resuelto (2 dígitos) + día_juliano (3 dígitos, padding)`. Cuando se aplica el año anterior, la vista previa muestra un badge ámbar "Año anterior (AAJJJ)" junto al campo para que el operario lo pueda verificar antes de enviar.
+- **Cocida ("Fecha Cocida")** = el operario solo introduce el **día juliano** (numérico, 1-366, máx. 3 caracteres) — el año no lo escribe nadie, se infiere con `resolveCocidaYear()`. Cómo se imprime lo decide cada plantilla (§13): `AAJJJ`, `AJJJ` o `JJJ`, o como fecha (`DD/MM/AA`, `DD/MM/AAAA`, `MM/DD/AA`, `MM/DD/AAAA`), p. ej. `PROD: 21/09/26`. Cuando se aplica el año anterior, la vista previa muestra un badge ámbar "Año anterior (AAJJJ)" junto al campo para que el operario lo pueda verificar antes de enviar.
 - **Fecha de caducidad** = **fecha de cocida** (reconstruida con `fromJulianDay(año_resuelto, día_juliano)`) + días de caducidad (JDE o manual) — no se calcula desde el lote/fresco, que es texto libre sin fecha real detrás.
 - **Hora** (`HHmm`) = hora del reloj del cliente en el instante exacto de pulsar "Enviar" — **no** es un campo editable. La vista previa muestra un reloj en vivo (se recalcula cada segundo, `toHHmm(new Date())`) para que el operario vea qué hora se mandaría si pulsase ahora, pero el valor que de verdad viaja al servidor se recalcula de nuevo en `handleEnviar()` en el momento del click, no el que estaba pintado en pantalla un instante antes.
 - **Turno** = `1`, `2` o `3` — a diferencia de la hora, este sí lo elige el usuario a mano (desplegable, sin valor por defecto), porque no hay forma de deducirlo de la fecha/hora sin conocer los horarios reales de cada turno en cada planta.
 - **Línea de fabricación** = tampoco la elige el usuario en `/loteadora` — depende **solo de la loteadora seleccionada** (`loteadoras.linea`, asignada una vez en `/admin` → Loteadoras, ver §8). Al elegir una loteadora sin línea configurada, aparece un aviso ámbar bajo el selector y se bloquea el envío, igual que un artículo sin plantilla asociada.
 
-Los seis valores (lote, cocida, fecha de caducidad formateada, hora, turno y línea) se muestran en una vista previa tipo etiqueta antes de enviar.
+**Qué se pide depende de la plantilla del artículo** (`variablesUsadas()`): si la plantilla no usa el fresco, no aparece "Fecha Fresco"; si no usa turno, no se pide; la cocida aparece si se usa la cocida o la caducidad (que sale de ella). Sin artículo, o con un artículo sin plantilla, se enseña todo. La vista previa pinta una casilla **por cada campo de la máquina** con el texto exacto que se imprimirá (`componerCampos()`, la misma función que usa el servidor al enviar), y debajo las piezas que lo forman o, en ámbar, lo que falta por rellenar.
 
 ---
 
 ## 6. Envío a la loteadora
 
-El botón "Enviar a loteadora" llama a `POST /api/loteadora/enviar` con `{ loteadoraId, articuloId, lote, fechaCocida, fechaCaducidad, horaEnvio, turno }` — **ya no manda IDs de campo, ni la línea de fabricación** (esa se resuelve enteramente en servidor a partir de la loteadora elegida, nunca la decide el cliente). `horaEnvio` (`HHmm`) se calcula en el cliente justo en el momento del click (`toHHmm(new Date())`), no es el valor que estaba pintado en la vista previa un instante antes (§5). La ruta:
+El botón "Enviar a loteadora" llama a `POST /api/loteadora/enviar` con los **valores en crudo** — `{ loteadoraId, articuloId, fresco, cocidaAnio, cocidaDia, caducidad (YYYY-MM-DD), horaEnvio, turno }` — y es el **servidor** quien compone el texto de cada campo con la plantilla del artículo. El cliente no decide ni los IDs de campo, ni la línea, ni cómo se formatea nada. `horaEnvio` (`HHmm`) se calcula justo en el momento del click (§5). La ruta:
 
-1. Exige sesión (`verifySession()`) — es el único punto del panel que sí valida sesión en servidor, porque dispara una acción física real (imprime una etiqueta). El resto del panel sigue con el gap descrito en §1.
-2. Carga la fila de `loteadoras` (`id`, `enabled = 1`) desde SQLite (`ip`/`port`/`slave_address`/`linea` — ya no guarda IDs de campo, ver §8). Si `linea` está vacía, responde 404 pidiendo configurarla en `/admin` antes de enviar.
-3. Resuelve la plantilla del **artículo** en SQLite (`loteadora_articulo_mensajes` JOIN `loteadora_mensajes`, ver §13) para obtener `lotFieldId`/`cocidaFieldId`/`expiryFieldId`/`horaFieldId`/`turnoFieldId`/`lineaFieldId`. Si el artículo no tiene plantilla asociada, responde 404 con un mensaje claro pidiendo configurarla en `/admin` — nunca hay un ID de campo "por defecto".
-4. Valida que `turno` sea `'1'`, `'2'` o `'3'` (400 si no) — es el único de los valores que llega tal cual del cliente sin ser calculado ni resuelto en servidor, así que se valida igual que cualquier otro dato de usuario (ver CLAUDE.md, sección Seguridad).
-5. Llama a `sendRemoteFields()` (`lib/loteadora-printer.ts`) con **seis campos**: `lotFieldId` → lote, `cocidaFieldId` → fecha de cocida (`AAJJJ`), `expiryFieldId` → fecha de caducidad (formateada `dd/mm/aaaa`, `formatDateES`), `horaFieldId` → hora de envío (`HHmm`), `turnoFieldId` → turno (`1`/`2`/`3`), `lineaFieldId` → línea de fabricación (`loteadora.linea`, resuelta en el paso 2, no la manda el cliente).
-6. Si falla de verdad (timeout, conexión rechazada, NAK, o un `P_Status` que no sea de éxito), devuelve 502 con el mensaje de error y, si se pudo, el detalle en crudo (`detail`, ver §7 "ver más"), que `page.tsx` muestra inline (estado `sendError`/`sendErrorDetail`).
+1. Exige permiso de pantalla (`requireScreenAccess('loteadora')`, §16): dispara una acción física real.
+2. Carga la loteadora (`enabled = 1`): `ip`/`port`/`slave_address`/`linea`.
+3. Resuelve la plantilla del **artículo** (`loteadora_articulo_mensajes` → `loteadora_mensaje_segmentos`, §13). Sin plantilla, o con una plantilla sin campos, 404 pidiendo configurarla en `/admin` — nunca hay un campo "por defecto".
+4. **Valida solo lo que la plantilla usa**: fresco (texto ASCII, hasta 30), cocida (año 2000-2100 y día 1-366), caducidad (fecha ISO válida), hora (`HHmm` real), turno (`1`/`2`/`3`) y la línea de la loteadora (404 si la plantilla la usa y la loteadora no la tiene). Cada fallo, 400 con su motivo — antes de abrir ninguna conexión con la máquina.
+5. Compone el texto de cada campo (`componerCampos()`, piezas en orden) y comprueba que ninguno quede vacío, supere 255 caracteres o lleve caracteres no ASCII.
+6. Llama a `sendRemoteFields()` (`lib/loteadora-printer.ts`) con **un campo por cada Field Module de la plantilla**, en una sola trama `1D`.
+7. Si falla de verdad (timeout, conexión rechazada, NAK, o un `P_Status` que no sea de éxito), devuelve 502 con el mensaje de error y, si se pudo, el detalle en crudo (`detail`, ver §7 "ver más"), que `page.tsx` muestra inline (estado `sendError`/`sendErrorDetail`).
 
 **`P_Status` 42/43 no son fallos** — el manual documenta que `42` ("Remote buffer now full") ocurre precisamente porque *este* envío ha ocupado la última plaza libre del buffer de campos remotos (hasta 10 en cola); `43` ("still full") es ambiguo (según la configuración de la máquina, sustituye al más antiguo de la cola o descarta el nuevo envío). `sendRemoteFields()` trata ambos como **éxito con aviso** (`{ warning }`), no como error — `page.tsx` lo muestra en ámbar en vez de en rojo. Solo se lanza error de verdad para el resto de códigos (`01`, `12`, NAK...).
 
-`canSend` exige además: lote calculado, cocida calculada, fecha de caducidad calculada, turno seleccionado, la loteadora elegida **con línea configurada**, artículo seleccionado **con plantilla asociada**, loteadora seleccionada y que no haya un envío en curso. Si el artículo no tiene plantilla, se muestra un aviso ámbar bajo el selector de artículo; si la loteadora no tiene línea, el mismo tipo de aviso bajo el selector de loteadora — en ambos casos el botón queda deshabilitado.
+`canSend` exige: artículo **con plantilla**, loteadora seleccionada, que a ningún campo de la vista previa le falte nada (lo mismo que comprobará el servidor) que no haya un envío en curso y que la loteadora **no esté imprimiendo** (ver más abajo). Si el artículo no tiene plantilla, aviso ámbar bajo el selector de artículo; si la plantilla usa la línea y la loteadora no la tiene, el mismo aviso bajo el selector de loteadora.
+
+---
+
+**Confirmación antes de enviar:** el botón abre un diálogo con la loteadora y el texto exacto de cada campo. El envío solo se hace al pulsar "Enviar".
+
+**Imprimiendo no se envía.** Cambiar los datos a mitad de tirada dejaría parte del lote con unos datos y parte con otros, y eso rompe la trazabilidad. El servidor consulta el estado (`14`) antes del `1D` y, si es `activa`, responde `409` con "La loteadora está imprimiendo…". En el panel, el botón se desactiva con un aviso ámbar y un enlace "Comprobar de nuevo". Solo se bloquea con `00` ("imprimiendo sin avisos"): con `01` ("hay avisos", p. ej. poca tinta o sin cartucho) no se puede saber si está imprimiendo o parada, y bloquear ahí impediría trabajar.
 
 ---
 
@@ -163,7 +174,7 @@ Con el campo ya creado, el comando `1D` rellena su valor:
 1B 02 [SlaveAddr] 1D [N campos] { [FieldID] [LongitudTexto] [TextoASCII...] } 1B 03 [Checknum]
 ```
 
-**`P_Status` relevantes de la respuesta** (capítulo 4 del manual): `00`=OK, `12`="Print not started" — **la máquina exige tener la impresión iniciada en pantalla** para aceptar el comando (aparece en casi todos los comandos del protocolo, no solo en `1D`), `42`/`43`=buffer de campos remotos lleno, `01`=error genérico de impresora. Ver el mapeo completo en `lib/loteadora-printer.ts`.
+**`P_Status` relevantes de la respuesta** (capítulo 4 del manual): `00`=OK, `12`="Print not started". Es el **estado** de la impresora (parada), no un rechazo: probado en planta, el `1D` se guarda igual con la impresión parada. Se trata como aceptado con aviso ámbar, igual que `1E`/`1F` (§11). Aparece en casi todos los comandos del protocolo. `42`/`43`=buffer de campos remotos lleno, `01`=error genérico de impresora. Ver el mapeo completo en `lib/loteadora-printer.ts`.
 
 **Mensajes exportados de la máquina (`.msg`):** de los 21 archivos revisados originalmente, ninguno tenía campos remotos configurados (todos usaban texto fijo grabado en la plantilla). El mensaje `pruebaDavid.msg` se creó/editó específicamente con dos Field Module (ver §8) para poder probar el envío real. El formato de archivo `.msg` sigue sin documentación disponible y **no** es el mismo que el protocolo de red (usa coma flotante para coordenadas, frente a enteros de 2 bytes) — no hace falta entenderlo para el envío por red, que se construye desde cero en `lib/loteadora-printer.ts` sin leer el `.msg`.
 
@@ -185,7 +196,7 @@ Como puede haber varias impresoras físicas, la configuración de cada una vive 
 
 CRUD en `app/api/admin/loteadoras/route.ts` (GET/POST) y `[id]/route.ts` (PUT/DELETE), protegido por `middleware.ts` (`/api/admin/:path*`). Lectura pública (solo `id`/`name`, solo habilitadas) en `app/api/loteadora/impresoras/route.ts`, consumida por el desplegable "Loteadora" del panel.
 
-Ejemplo real configurado durante el desarrollo de esta función: IP `192.168.111.119:8010`, Slave Address `0` (los IDs de campo lote/cocida/caducidad/hora/turno/línea de la plantilla de prueba `pruebaDavid.msg` viven ahora en `loteadora_mensajes`, ver §13).
+Ejemplo real configurado durante el desarrollo de esta función: IP `192.168.111.119:8010`, Slave Address `0` (los campos de cada plantilla viven en `loteadora_mensaje_segmentos`, ver §13).
 
 ---
 
@@ -196,7 +207,14 @@ Ejemplo real configurado durante el desarrollo de esta función: IP `192.168.111
 - `sendRemoteFields(config, fields)`: usa `sendCommand` (timeout 5s) y traduce el `P_Status`/`C_Status` a un mensaje de error en español si no es `00`.
 - `getPrinterStatus(config)`: usa `sendCommand` con el comando `14` (Request Printer Status, sin datos) y timeout más corto (3s). **Nunca lanza** — cualquier fallo de conexión se traduce en `'apagada'`. Devuelve uno de `'activa'` (`P_Status=00`), `'standby'` (`P_Status=12`, conectada pero sin imprimir), `'en_error'` (`P_Status=01`, NAK, o cualquier otro código) o `'apagada'` (no se pudo conectar). No decodifica el bitmap de 32 bits de avisos específicos del capítulo 3 del manual — solo este estado agregado.
 - `listMessageNames(config)`: usa `sendCommand` con el comando `1F` (Request Message Names, sin datos). La respuesta es de longitud variable (hasta 255 nombres) y puede llegar troceada en varios paquetes TCP — por eso `sendCommand` acumula los `data` recibidos hasta detectar el cierre de trama (`ESC ETX` + checknum) en vez de resolver con el primer paquete. Verificado en `__tests__/loteadora-printer.test.ts` con un servidor TCP de prueba que trocea la respuesta a propósito.
-- `loadPrintMessage(config, messageName)`: encadena el comando `1E` (Load Print Message) y, si tiene éxito, el `01` (Update Print contents) para aplicarlo. Lanza un error claro si la plantilla no existe en la máquina (`P_Status=10`) o si falla cualquiera de los dos pasos.
+- `downloadMessage(config, messageName, fields)` / `buildDownloadMessageFrame()`: comando `1C` (Download Message Data, manual §3.5.17). **Crea o sobrescribe un mensaje en la máquina desde el PC**, con sus Field Modules: posición X/Y, fuente, tamaño, ID y longitud, fuente de datos "puerto serie", ASCII y alineado a la izquierda. La trama está verificada contra el ejemplo de Field Module del manual.
+  - **Probado en planta (sept. 2026):** con la impresión parada responde `12` y el mensaje aparece en la lista `1F`.
+  - Las posiciones van en la misma unidad que guarda el `.msg`: en `Arial-MonoBold` de tamaño 35, un carácter ocupa 21 puntos y las líneas van cada 36.
+  - **No hay módulo de reloj** en el `1C`, así que el reloj (`HHmm`) se inserta a mano en la máquina después de crear el mensaje.
+  - Los 17 mensajes del "nuevo loteado" (`N01_…` a `N17_…`) se crearon así en la Loteadora Pruebas, dejando hueco para el reloj. Después se exportan por USB al resto de máquinas.
+  - Aún no hay botón en `/admin`: se crearon con un script.
+- `loadPrintMessage(config, messageName)`: encadena el comando `1E` (Load Print Message) y, si tiene éxito, el `01` (Update Print contents) para aplicarlo. Lanza un error claro si la plantilla no existe en la máquina (`P_Status=10`) o si falla cualquiera de los dos pasos. Con la impresión parada (`12`) no falla: devuelve un `warning` (§11). Entre `1E` y `01` espera `LOAD_APPLY_DELAY_MS` (1 s). El ACK de `1E` solo confirma que el mensaje existe; si el `01` llegaba antes de que la máquina terminara de leerlo, aplicaba el mensaje anterior. Se vio en planta: la plantilla decía "cargada" pero no cambiaba, y había que cargarla dos veces. Si vuelve a pasar, sube esa constante.
+- **Cola por máquina:** `sendCommand` encola los comandos a una misma IP:puerto, porque el protocolo solo admite un cliente a la vez. El estado cada 60 s, el listado de plantillas y la carga ya no abren conexiones simultáneas. La cola vive en memoria del proceso, así que vale con un único servidor Next.
 
 ---
 
@@ -205,6 +223,7 @@ Ejemplo real configurado durante el desarrollo de esta función: IP `192.168.111
 Tanto `/loteadora` como la pestaña **Loteadoras** de `/admin` muestran el estado real de cada máquina, refrescado automáticamente cada 60 segundos mientras la página/pestaña está abierta (`setInterval`, limpiado al desmontar o al cambiar de pestaña):
 
 - `/loteadora`: sección "Estado de las loteadoras" (`GET /api/loteadora/estado`, solo habilitadas) + el propio badge "JDE conectado" se refresca en el mismo ciclo (reintenta `fetchArticulos()`, que hace de comprobación de vida de JDE ahora que ya no hay marcas).
+- Estados: **Imprimiendo** (`00`), **Conectada (sin imprimir)** (`12`), **En error** (`01` o NAK) y **Sin conexión**. En `/admin` el estado `12` se llama "Sin imprimir".
 - `/admin` → Loteadoras: badge adicional junto a "Habilitada/Deshabilitada" (`GET /api/admin/loteadoras/estado`, todas, se comprueba solo mientras esa pestaña está activa).
 
 Cada comprobación abre y cierra una conexión TCP breve por loteadora (el protocolo solo admite un cliente a la vez) — no se mantiene ninguna conexión persistente.
@@ -215,13 +234,27 @@ Al seleccionar una loteadora se fuerza además un refresco inmediato de `estadoL
 
 ## 11. Elegir y cargar la plantilla (mensaje) en remoto
 
-Al seleccionar una loteadora en `/loteadora` aparece un desplegable **"Plantilla"** con los mensajes guardados en esa máquina (`GET /api/loteadora/mensajes?loteadoraId=...`, comando `1F`), sin preseleccionar ninguno. El botón **"Cargar plantilla"** llama a `POST /api/loteadora/cargar-mensaje` (`{loteadoraId, messageName}`), que ejecuta `loadPrintMessage()` (`1E` + `01`) directamente, sin comprobar el estado de impresión antes. Este desplegable manual sigue existiendo como *fallback*: reintentar a mano, o cubrir un artículo sin plantilla asociada todavía.
+**Orden del formulario:** primero se elige la loteadora. El artículo queda desactivado ("Elige primero la loteadora") hasta que hay una, porque al elegirlo se carga su plantilla en ella.
 
-**Autocarga automática por artículo (§13):** si el artículo elegido tiene una plantilla asociada en `loteadora_articulo_mensajes`, en cuanto hay loteadora + artículo seleccionados se llama sola a `cargar-mensaje` con el `messageName` de esa plantilla (mismo código que el botón manual, extraído a la función `cargarMensaje()`) — sin pedir confirmación. El nombre de la plantilla debe coincidir **exactamente** con el mensaje creado a mano en la máquina.
+**Solo se pregunta al cambiar de artículo, no al cambiar de loteadora.** Cada loteadora guarda en su formulario (`plantillaPreguntada`, §15) para qué artículo y plantilla ya se preguntó. Al volver a una loteadora con el trabajo a medias o ya enviado, no se vuelve a pedir la carga. Recargar el mensaje podría borrar los datos ya enviados que esperan para imprimir. Si se borra el artículo y se vuelve a elegir, sí se pregunta.
+
+**La plantilla no se elige a mano** (cambio de sept. 2026): solo cambia al cambiar de artículo. Ya no hay desplegable de mensajes. Aparece el nombre de la plantilla del artículo con un botón **"Volver a cargar"**, que solo recarga esa misma, p. ej. si al elegir el artículo la máquina estaba imprimiendo o falló la carga. El panel ya no pide la lista de mensajes de la máquina. Es el servidor quien la pide (`1F`) justo antes de cargar, para comprobar que el nombre existe. Antes la comprobaba el panel, y si esa lista fallaba o aún no había llegado al cambiar de loteadora, la carga automática se saltaba en silencio. Si la máquina está imprimiendo al elegir el artículo, se avisa con un toast. El botón llama a `POST /api/loteadora/cargar-mensaje` (`{loteadoraId, messageName}`), que ejecuta `loadPrintMessage()` (`1E` + `01`). Si la loteadora está imprimiendo (`14` → `activa`), la rechaza con `409`, igual que el envío (§6). Un artículo sin plantilla asociada no se puede enviar: hay que asociársela en `/admin` → Loteadora › Artículos.
+
+**Autocarga automática por artículo (§13):** si el artículo elegido tiene una plantilla asociada en `loteadora_articulo_mensajes`, en cuanto hay loteadora + artículo seleccionados se llama sola a `cargar-mensaje` con el `messageName` de esa plantilla (mismo código que el botón manual, extraído a la función `cargarMensaje()`), **tras confirmarlo** en un diálogo que dice qué plantilla se carga, en qué loteadora y para qué artículo. Si la loteadora está imprimiendo no se pregunta ni se carga: la plantilla queda preseleccionada para el botón "Cargar plantilla" cuando la paren. El nombre de la plantilla debe coincidir **exactamente** con el mensaje creado a mano en la máquina.
 
 **`loteadoras` ya no guarda ningún nombre de plantilla** (columna `message_name` eliminada, migración `DROP COLUMN` en `lib/sqlite.ts`) — no tenía función real (el envío `1D` nunca la usaba) más allá de preseleccionar un valor por defecto, y con el selector en vivo ya no hacía falta.
 
 **Corrección importante (probado en planta):** la primera versión de esto bloqueaba la carga si la impresora estaba imprimiendo, pensando que cambiar de plantilla en caliente interrumpiría un trabajo real. Eso creaba una contradicción imposible de resolver: **tanto `1F` (listar) como `1E` (cargar) exigen la impresión iniciada** para funcionar (`P_Status=12` "impresión no iniciada" si no) — con el bloqueo puesto, para poder listar plantillas había que iniciar, pero para cargarlas había que pararla. Además, el manual documenta explícitamente que en el firmware **T1/T2** (la variante de 5 bytes que ya confirmamos que usa esta máquina, ver §9) **está permitido actualizar el contenido con la impresión iniciada** — es el comportamiento que el propio fabricante espera, no un riesgo a evitar. Se quitó el bloqueo por completo.
+
+**Cambiar de plantilla sin imprimir (septiembre 2026):** obligar a iniciar la impresión solo para cambiar de mensaje no tenía sentido, y sin cartucho iniciar da error. Según el manual (§4.2), `P_Status` es el **estado de la impresora**, no el resultado del comando. En `22`/`23`/`26`/`33` el manual lo dice explícitamente ("Succeeded but print not started"), y en `1E`/`1F` solo pone "Print not started". Por eso:
+- `listMessageNames()` acepta `12` si la respuesta trae nombres (más de 8 bytes). Si no los trae, sigue dando el error de "impresión no iniciada".
+- `loadPrintMessage()` acepta `12` en `1E` y en `01`. Con la impresión parada devuelve `{ warning }` en vez de fallar, y `/loteadora` lo muestra como toast ámbar para que el operario confirme en la pantalla de la máquina que el mensaje cargado es el correcto.
+
+**El nombre va sin `.msg` (probado en planta):** la máquina lista y carga los mensajes sin extensión (`17_Dimmdisi_45d`). Una plantilla llamada `Prueba2.msg` no cargaba nada. Con la impresión parada, además, la máquina no devuelve `10` ("no existe"): responde `12` igual que si existiera. Se vio en la respuesta del `01`, cuyo ancho de mensaje seguía siendo el del mensaje anterior. Para evitarlo:
+- `validarPlantilla()` rechaza nombres acabados en `.msg`.
+- `POST /api/loteadora/cargar-mensaje` comprueba el nombre contra la lista `1F` de la loteadora antes de cargar, y responde `404` si no está.
+
+**Pendiente de confirmar en la máquina real:** si con la impresión parada el mensaje cambia de verdad en pantalla. Si no cambia, el firmware exige la impresión iniciada y no hay forma de cambiarlo por red. El único comando relacionado es `11` (Start Print), que también falla sin cartucho.
 
 El comando `1D` (envío de lote/caducidad) sigue actuando igual que antes: sobre lo que esté cargado en ese momento, se haya cambiado de plantilla desde el dashboard o no.
 
@@ -241,19 +274,50 @@ Se descartó automatizar el disparo de impresión en sí (comando `13`, Trigger 
 
 Antes de esta función, cada loteadora tenía un único par de IDs de campo fijos, y la plantilla se elegía a mano cada vez. Con varias plantillas configuradas en la máquina (cada una con sus propios Field Module, no necesariamente en los mismos IDs), hacía falta que **el artículo determine automáticamente qué plantilla se carga**. La asociación es **global**: un artículo siempre apunta al mismo nombre de plantilla, sin importar en qué loteadora se imprima.
 
+### Campos y piezas (`lib/loteadora-plantilla.ts`)
+
+Cada plantilla tiene **campos**, uno por Field Module del mensaje en la máquina (su "ID de datos", §7). El texto que se envía a cada campo es la **concatenación de sus piezas**, en orden:
+
+| Pieza | Qué pone | Opciones |
+|---|---|---|
+| Texto | Un literal tal cual: `L`, `CAD `, `EXP: `, un espacio... | — |
+| Dato fijo | Un valor constante con nombre (precio, nº de certificado) | Nombre + valor; editable aparte (ver "Datos fijos") |
+| Fecha fresco | Lo que escribe el operario, tal cual | — |
+| Cocida | Día juliano de cocida con su año | `AAJJJ` (26150), `AJJJ` (6150), `JJJ` (150) |
+| Caducidad | Cocida + días de caducidad, más un **ajuste en días** opcional (`-1` = el día anterior; se guarda en `valor`) | `DD/MM/AA`, `DD/MM/AAAA`, `MM/DD/AA`, `MM/DD/AAAA`, `DD` (solo el día). Ejemplo: caducidad completa en un campo (`25/07/2026`) y el día anterior en otro (`DD`, ajuste `-1` → `24`) |
+| Turno | El turno elegido (1/2/3) | — |
+| Hora | Hora del envío, `HHmm` | — |
+| Línea | Línea de fabricación de la loteadora | — |
+
+Ejemplos reales de clientes:
+
+- **BENIS HORECA FRESCO** (turno pegado a la cocida): campo = `[Texto "L"] [Cocida AAJJJ] [Turno]` → `L261502`.
+- **Caducidad con literal**: `[Texto "CAD "] [Caducidad DD/MM/AA]` → `CAD 14/07/26`; Trader Joes: `[Texto "BB "] [Caducidad MM/DD/AA]`.
+- **Precio fijo** (Holanda): `[Caducidad DD/MM/AA] [Texto "  "] [Dato fijo "Precio" = "3,89 EUR"]`.
+
+Así, lo que antes se dibujaba a mano en el diseño de la máquina (la "L", "CAD "...) lo manda el sistema: en la máquina basta con un Field Module por campo.
+
+**Limitación: solo ASCII.** El comando `1D` se construye con el texto en ASCII (`buildRemoteFieldFrame`), así que un "€", una tilde o una "ñ" llegarían a la máquina como basura. Se valida al guardar la plantilla, al cambiar un dato fijo y al enviar, con un mensaje claro: para el precio, usar "EUR" o dejar el "€" como texto fijo en el propio diseño de la máquina. Si hiciera falta Unicode, habría que comprobar en el manual del protocolo si `1D` lo admite y cómo, antes de tocar el envío.
+
 ### Esquema (`lib/sqlite.ts`)
 
 ```sql
 CREATE TABLE loteadora_mensajes (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   name TEXT NOT NULL UNIQUE,           -- debe coincidir exacto con el nombre creado en la máquina
-  lot_field_id INTEGER NOT NULL,
-  cocida_field_id INTEGER NOT NULL,
-  expiry_field_id INTEGER NOT NULL,
-  hora_field_id INTEGER NOT NULL,
-  turno_field_id INTEGER NOT NULL,
-  linea_field_id INTEGER NOT NULL,
   created_at TEXT DEFAULT (datetime('now'))
+);
+
+-- Una fila por pieza, con el ID del Field Module al que pertenece
+CREATE TABLE loteadora_mensaje_segmentos (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  mensaje_id INTEGER NOT NULL REFERENCES loteadora_mensajes(id) ON DELETE CASCADE,
+  orden INTEGER NOT NULL,              -- campo × 1000 + pieza: ordena campos y piezas a la vez
+  field_id INTEGER NOT NULL,
+  tipo TEXT NOT NULL,                  -- texto | fijo | fresco | cocida | caducidad | turno | hora | linea
+  valor TEXT,                          -- texto / dato fijo
+  nombre TEXT,                         -- dato fijo
+  formato TEXT                         -- cocida / caducidad
 );
 
 CREATE TABLE loteadora_articulo_mensajes (
@@ -263,11 +327,19 @@ CREATE TABLE loteadora_articulo_mensajes (
 );
 ```
 
-Un artículo solo puede tener una plantilla a la vez (`articulo_id` es clave primaria) — asociar de nuevo sustituye la anterior. Borrar una plantilla borra en cascada sus asociaciones.
+Un artículo solo puede tener una plantilla a la vez (`articulo_id` es clave primaria) — asociar de nuevo sustituye la anterior. Borrar una plantilla borra en cascada sus campos y sus asociaciones.
 
-### Admin — pestaña "Plantillas"
+**Migración desde el modelo anterior** (6 columnas fijas `lot/cocida/expiry/hora/turno/linea_field_id` en `loteadora_mensajes`): al arrancar, cada columna se convierte en un campo con una sola pieza de ese tipo, sin literales, y la caducidad en `DD/MM/AAAA` (lo que se imprimía hasta entonces), así que las plantillas existentes siguen enviando exactamente lo mismo; si dos columnas compartían ID (las añadidas más tarde valían 0 por defecto) gana la primera. Después se eliminan las columnas. **Antes de tocar nada se guarda una copia completa de la BD** junto a `app.db` (`app.db.pre-plantillas-campos-<fecha>`, con `VACUUM INTO`): para volver atrás, restaurar ese fichero y desplegar la versión anterior.
 
-CRUD de `loteadora_mensajes` en `app/api/admin/loteadora-mensajes/route.ts` (GET/POST) y `[id]/route.ts` (PUT/DELETE). Valida: nombre no vacío y único, los seis IDs de campo (lote/cocida/caducidad/hora/turno/línea) enteros 0-255 y **distintos entre sí** (misma idea que la validación de `loteadoras`, extendida a 6 campos).
+**Plantillas del "nuevo loteado" incluidas en el código:** las 17 plantillas `N01_…` a `N17_…` viven en `lib/loteadora-plantillas-iniciales.json`. Son las mismas que se crearon en la máquina con el comando `1C` (§9). `lib/sqlite.ts` las da de alta al arrancar, **una sola vez por BD**: queda la marca `plantillas-nuevo-loteado` en la tabla `migraciones`. Así llegan solas a producción con el despliegue, y si luego se borra o renombra una desde `/admin`, no reaparece en el siguiente arranque. Si ya existe una plantilla con el mismo nombre, no se toca. Lo que **no** viaja: las asociaciones a artículos, los valores cambiados en Datos fijos y las loteadoras, que son de cada BD. Para añadir más plantillas en otra versión, usa una clave de migración nueva, no la misma.
+
+### Admin — Loteadora › Plantillas (constructor)
+
+`components/nova/admin/plantillas.tsx`. La tabla enseña, por plantilla, lo que se imprimiría en cada campo con valores de ejemplo, salvo la **Línea**, que es la real de la primera loteadora que la tenga configurada en `/admin` → Loteadoras. Se manda tal cual, sin prefijo. La plantilla es común a todas las loteadoras, así que en `/loteadora` la vista previa usa la línea de la loteadora elegida. El diálogo de alta/edición es un constructor: nombre del mensaje + lista de campos, cada uno con su ID y sus piezas (añadir con "+ Pieza", reordenar con las flechas, quitar con la ×); al lado de cada campo, **"Se imprime"** con el resultado en vivo y los espacios visibles como `·`. CRUD en `app/api/admin/loteadora-mensajes/route.ts` (GET/POST) y `[id]/route.ts` (PUT/DELETE), solo admin, que sustituyen los campos enteros en una transacción. `validarPlantilla()` exige: nombre ASCII no vacío y único, al menos un campo, IDs 0-255 **sin repetir**, al menos una pieza por campo, textos y datos fijos no vacíos y en ASCII, datos fijos con nombre y formatos válidos.
+
+### Admin — Loteadora › Datos fijos
+
+`components/nova/admin/datos-fijos.tsx`: todos los datos fijos de todas las plantillas en una tabla (plantilla, dato, campo, valor), editables uno a uno. Es la forma de que **personas concretas** cambien un precio o un nº de certificado sin poder tocar el resto de la plantilla: permiso `admin.loteadora.datos-fijos` (por rol o como extra, DOCUMENTACION.md §5b), que solo abre esta sección y las rutas `GET /api/admin/loteadora-datos-fijos` y `PATCH /api/admin/loteadora-datos-fijos/:id` (esta última solo modifica piezas tipo `fijo`, y valida ASCII). El cambio se aplica en el siguiente envío.
 
 ### Admin — Loteadora › Artículos
 
@@ -277,12 +349,12 @@ Esta sección (Loteadora › Artículos) la puede abrir también un usuario no a
 
 ### Cómo llega a `/loteadora`
 
-`GET /api/loteadora/articulos` hace, además de la consulta a Oracle, una consulta a SQLite (`loteadora_articulo_mensajes` JOIN `loteadora_mensajes`) y adjunta a cada artículo, si tiene mapeo, `{ messageName, lotFieldId, cocidaFieldId, expiryFieldId, horaFieldId, turnoFieldId, lineaFieldId }` — así `/loteadora` ya tiene todo lo necesario para autocargar la plantilla (§11) y resolver el envío sin otra llamada al elegir artículo.
+`GET /api/loteadora/articulos` hace, además de la consulta a Oracle, una consulta a SQLite y adjunta a cada artículo, si tiene plantilla, `{ messageName, campos }` — así `/loteadora` ya tiene todo lo necesario para autocargar la plantilla (§11), decidir qué pedir y pintar la vista previa real sin otra llamada al elegir artículo.
 
 ### Flujo de configuración (a cargo del usuario en la máquina)
 
-1. Crear el mensaje en la loteadora con sus Field Module (lote/cocida/caducidad) — igual que se hacía antes para una única plantilla, ver §7.
-2. Registrar esa misma plantilla en `/admin` → Plantillas, con el nombre **exacto** y los mismos IDs de campo.
+1. Crear el mensaje en la loteadora con un Field Module por campo (sin dibujar a mano los literales: la "L", "CAD "... los manda el sistema), ver §7. Dimensionar la longitud de cada Field Module al texto más largo que vaya a recibir.
+2. Registrar esa misma plantilla en `/admin` → Loteadora › Plantillas, con el nombre **exacto**, los mismos IDs de campo y las piezas de cada campo; comprobar en "Se imprime" que el resultado es el esperado.
 3. Asociar el artículo correspondiente en `/admin` → Loteadora › Artículos.
 
 Sin este último paso, `/loteadora` muestra un aviso ámbar en el selector de artículo y bloquea el envío (§6) — no hay plantilla "por defecto".
@@ -307,7 +379,7 @@ Ambos patrones quedan también anotados en `components/nova/README.md` para el s
 
 ### Dirección visual: "etiqueta/ticket"
 
-La vista previa de impresión (columna derecha) es el centro visual del panel, no el formulario: tarjeta con **borde sólido** (no discontinuo — se probó con `border-dashed` en el contorno exterior simulando la línea de corte de una etiqueta, pero no encajaba visualmente y se revirtió), artículo centrado arriba y, debajo, una **rejilla de 2 columnas** (`grid grid-cols-2 gap-3`) con los seis datos (lote/cocida/caducidad/hora/turno/línea) — cada uno en su propia casilla, también con borde sólido, y valor en `text-xl`.
+La vista previa de impresión (columna derecha) es el centro visual del panel, no el formulario: tarjeta con **borde sólido** (no discontinuo — se probó con `border-dashed` en el contorno exterior simulando la línea de corte de una etiqueta, pero no encajaba visualmente y se revirtió), artículo centrado arriba y, debajo, una **rejilla de 2 columnas** con **una casilla por campo de la plantilla** (texto exacto a imprimir, en `text-xl`, y debajo sus piezas o lo que falta) — con la Fase B dejó de ser una rejilla fija de seis datos, ver §5 y §13.
 
 Pasó por tres versiones: (1) lista vertical de bloques a `text-4xl`, uno por fila — crecía demasiado según se añadían hora/turno/línea; (2) grid de 3 columnas con casillas pequeñas (`text-base`) y borde discontinuo — muy compacta, pero al ensanchar el panel a `max-w-7xl` (ver más abajo) dejaba un hueco vacío enorme entre la tarjeta y el botón "Enviar" (la columna izquierda, con más campos, marca la altura del layout vía el `<div className="flex-1" />` que empuja el botón abajo); (3) la actual, grid de 2 columnas con casillas más grandes — ocupa más alto sin volver a la lista original, reduciendo ese hueco. El formulario (columna izquierda) se mantiene compacto a propósito — fabricación y cocida van lado a lado en vez de apiladas — para no competir visualmente con la vista previa. Columnas asimétricas (`lg:grid-cols-[1fr_1.2fr]`, más peso a la derecha).
 

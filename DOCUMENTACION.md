@@ -454,8 +454,9 @@ Las cookies con `secure: true` no funcionan sobre HTTP (solo HTTPS). Cuando el d
 - **Admin** (`role === 'admin'`): ve todas las secciones.
 - **Usuario con algún permiso de configuración que desbloquee una sección** — por su
   rol o como extra suyo (§5b): entra en `/admin` y solo ve esa(s) sección(es), con
-  "Configuración" en vez de "Administración" bajo el logo. Hoy el único que desbloquea
-  una sección es `admin.loteadora.articulos` → Loteadora › Artículos.
+  "Configuración" en vez de "Administración" bajo el logo. Hoy desbloquean sección
+  `admin.loteadora.articulos` → Loteadora › Artículos y `admin.loteadora.datos-fijos` →
+  Loteadora › Datos fijos.
 - Cualquier otro usuario → al login. La misma regla la aplican `proxy.ts` (antes de
   mandar el HTML) y `<RequireAccess allow={puedeEntrarEnAdmin}>` en la página.
 - Las secciones sin permiso asociado (todas salvo Artículos) y `/admin/logs` (que redirige a
@@ -475,7 +476,7 @@ Las cookies con `secure: true` no funcionan sobre HTTP (solo HTTPS). Cuando el d
   | Grupo | Secciones |
   |---|---|
   | Accesos | Usuarios, Roles y permisos |
-  | Loteadora | Máquinas, Plantillas, Artículos |
+  | Loteadora | Máquinas, Plantillas (constructor de campos), Artículos, Datos fijos |
   | Datos | Estados JDE, Muestras, Logs de consultas y Confirmaciones PDA (estas dos, solo admin; §7) |
 
 - **Cabecera fina** del área de contenido: botón del sidebar + ruta ("Accesos › Roles y
@@ -542,8 +543,12 @@ códigos sembrados (`Y`, `M`, `N`, `E`); "Guardar" (o Enter) solo se activa si c
 Persistencia en `jde_status_descriptions` con seed idempotente (`INSERT OR IGNORE`),
 así que las ediciones no se pierden en despliegues.
 
-#### Loteadora: Máquinas, Plantillas, Artículos
+#### Loteadora: Máquinas, Plantillas, Artículos, Datos fijos
 Configuración de `/loteadora` — ver [`docs/loteadora.md`](docs/loteadora.md) §8 y §13.
+Plantillas es un constructor: cada plantilla tiene campos (uno por Field Module de la
+máquina) y cada campo, piezas (texto, dato fijo, cocida, caducidad con su formato...),
+con vista previa en vivo de lo que se imprime. Datos fijos deja cambiar precios y nº de
+certificado de las plantillas a quien tenga su permiso, sin tocar el resto.
 Máquinas muestra además el estado en vivo de cada loteadora, comprobado cada minuto
 solo mientras la sección está abierta.
 
@@ -573,7 +578,8 @@ sincronización, último error) y botón "Sincronizar ahora" — ver
 | GET | `/api/admin/logs` | Logs de consultas con paginación, filtros y estadísticas (ver sección 7) |
 
 Todas son solo de admin salvo las abiertas a un permiso en `RUTAS_ADMIN_POR_PERMISO`
-(§5b) — hoy `/api/admin/loteadora-articulos` (todo) y `GET /api/admin/loteadora-mensajes`.
+(§5b) — hoy `/api/admin/loteadora-articulos` (todo), `GET /api/admin/loteadora-mensajes` y
+`/api/admin/loteadora-datos-fijos` (todo).
 
 ---
 
@@ -671,7 +677,9 @@ artículos de `/muestras` o asignar artículos a plantillas de loteadora.
   todos implícitamente (sin filas). Una clave que ya no esté en el catálogo se ignora.
 - **Permisos actuales**: `muestras.config` (antes columna `users.can_configure_muestras`,
   migrada automáticamente a `user_permissions` — quien lo tenía lo conserva — y
-  eliminada) y `admin.loteadora.articulos` (sección Loteadora › Artículos).
+  eliminada), `admin.loteadora.articulos` (sección Loteadora › Artículos) y
+  `admin.loteadora.datos-fijos` (sección Loteadora › Datos fijos: precios y nº de
+  certificado de las plantillas).
 - **Servidor, denegado por defecto**: `proxy.ts` sigue cortando `/admin*` y
   `/api/admin/*` a quien no sea admin, salvo: la página `/admin` exacta si algún
   permiso efectivo suyo tiene `seccionAdmin`, y las rutas de `RUTAS_ADMIN_POR_PERMISO`
