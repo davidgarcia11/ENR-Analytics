@@ -3,7 +3,7 @@ import { getDb } from '@/lib/sqlite';
 import { requireAccess } from '@/lib/permissions';
 
 export async function DELETE(_req: NextRequest, { params }: { params: Promise<{ articuloId: string }> }) {
-  const acceso = await requireAccess({ role: 'admin' });
+  const acceso = await requireAccess({ permiso: 'admin.loteadora.articulos' });
   if (!acceso.ok) return acceso.denied;
 
   const { articuloId } = await params;

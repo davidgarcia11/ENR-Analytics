@@ -6,9 +6,10 @@ import { useState, useEffect } from "react"
 import { User, LogOut, Settings, FileText, ChevronDown, BookmarkCheck } from "lucide-react"
 import { PANELS, type PanelKey } from "@/lib/panels"
 import { puedeAcceder, useSession } from "@/components/SessionProvider"
+import { puedeEntrarEnAdmin } from "@/lib/permisos"
 
 // Contrato de la prop, no estado: las páginas aún sin migrar pasan su propio tipo
-interface SessionUser { id: number; username: string; role: string; name: string; surname: string }
+interface SessionUser { id: number; username: string; role: string; name: string; surname: string; permisos?: string[] }
 
 interface NavbarProps {
   // Opcional: páginas que no son uno de los paneles listados en PANELS (ej. /admin/logs) no marcan ninguno como activo
@@ -97,25 +98,25 @@ export default function Navbar({ currentPanel, user, onLogout, onPresetsClick }:
             <User className="h-3.5 w-3.5" aria-hidden="true" />
             {displayName}
           </span>
+          {puedeEntrarEnAdmin({ role: user.role, permisos: user.permisos ?? [] }) && (
+            <button
+              type="button"
+              onClick={() => router.push('/admin')}
+              className="text-xs text-muted-foreground hover:text-foreground flex items-center gap-1"
+            >
+              <Settings className="h-3.5 w-3.5" aria-hidden="true" />
+              {user.role === 'admin' ? 'Admin' : 'Configuración'}
+            </button>
+          )}
           {user.role === 'admin' && (
-            <>
-              <button
-                type="button"
-                onClick={() => router.push('/admin')}
-                className="text-xs text-muted-foreground hover:text-foreground flex items-center gap-1"
-              >
-                <Settings className="h-3.5 w-3.5" aria-hidden="true" />
-                Admin
-              </button>
-              <button
-                type="button"
-                onClick={() => router.push('/admin/logs')}
-                className="text-xs text-muted-foreground hover:text-foreground flex items-center gap-1"
-              >
-                <FileText className="h-3.5 w-3.5" aria-hidden="true" />
-                Logs
-              </button>
-            </>
+            <button
+              type="button"
+              onClick={() => router.push('/admin/logs')}
+              className="text-xs text-muted-foreground hover:text-foreground flex items-center gap-1"
+            >
+              <FileText className="h-3.5 w-3.5" aria-hidden="true" />
+              Logs
+            </button>
           )}
           <button
             type="button"

@@ -17,6 +17,9 @@ const CMD_LOAD_PRINT_MESSAGE = 0x1e;
 const CMD_REQUEST_MESSAGE_NAMES = 0x1f;
 const CMD_REQUEST_PRINTER_STATUS = 0x14;
 const CMD_CLEAR_REMOTE_FIELD_BUFFER = 0x21;
+const CMD_DOWNLOAD_MESSAGE_DATA = 0x1c;
+// Espera entre cargar (1E) y aplicar (01) una plantilla: ver loadPrintMessage.
+export const LOAD_APPLY_DELAY_MS = 1000;
 
 export interface RemoteField {
   /** Field ID configurado en la máquina con "Insertar Campo" (0-255) */
@@ -57,6 +60,51 @@ export function buildRemoteFieldFrame(slaveAddress: number, fields: RemoteField[
   bytes.push(ESC, ETX);
   bytes.push(checknum(bytes));
 
+  return Buffer.from(bytes);
+}
+
+// Campo remoto (Field Module) de un mensaje creado por red — protocolo §3.5.17.3.
+export interface FieldModuleSpec {
+  id: number;
+  /** Posición en la unidad de la máquina (la misma que guarda el .msg) */
+  x: number;
+  y: number;
+  fontSize: number;
+  font: string;
+  /** Nº máximo de caracteres del campo (1-255) */
+  length: number;
+}
+
+// Construye la trama del comando 1C (Download Message Data) — protocolo §3.5.17.
+// Solo Field Modules, en ASCII y alineados a la izquierda, con fuente de datos
+// "puerto serie" (la que usa el 1D). Longitud de datos y X/Y/tamaño en big-endian,
+// como en todos los ejemplos del manual.
+// ponytail: sin Text/QR/logo — los literales van como piezas de texto de la plantilla.
+export function buildDownloadMessageFrame(slaveAddress: number, messageName: string, fields: FieldModuleSpec[]): Buffer {
+  const name = Buffer.from(messageName, 'ascii');
+  if (name.length < 1 || name.length > 255) throw new Error('El nombre del mensaje debe tener entre 1 y 255 caracteres');
+  if (fields.length < 1 || fields.length > 255) throw new Error('El mensaje necesita entre 1 y 255 campos');
+
+  const u16 = (n: number) => [(n >> 8) & 0xff, n & 0xff];
+  const data: number[] = [name.length, ...name, fields.length];
+  for (const f of fields) {
+    const font = Buffer.from(f.font, 'ascii');
+    if (f.length < 1 || f.length > 255) throw new Error(`Campo ${f.id}: la longitud debe estar entre 1 y 255`);
+    if (f.fontSize < 5 || f.fontSize > 1200) throw new Error(`Campo ${f.id}: el tamaño de letra debe estar entre 5 y 1200`);
+    if (f.x < 0 || f.x > 0x7fff || f.y < 0 || f.y > 0x7fff) throw new Error(`Campo ${f.id}: posición fuera de rango`);
+    data.push(
+      0x03, ...u16(f.x), ...u16(f.y),
+      0x00, // giro 0º
+      0x05, // espaciado 0 (valor por defecto)
+      ...u16(f.fontSize), font.length, ...font,
+      0x80, // puerto serie + ASCII + alineado a la izquierda
+      f.id & 0xff, f.length,
+    );
+  }
+
+  const bytes: number[] = [ESC, STX, slaveAddress & 0xff, CMD_DOWNLOAD_MESSAGE_DATA,
+    (data.length >> 16) & 0xff, (data.length >> 8) & 0xff, data.length & 0xff, ...data, ESC, ETX];
+  bytes.push(checknum(bytes));
   return Buffer.from(bytes);
 }
 
@@ -120,11 +168,28 @@ interface CommandResult {
 // muchos nombres de mensaje), así que se acumulan los `data` hasta detectar
 // el cierre de trama (ESC ETX + 1 byte de checknum) en vez de resolver con
 // el primer evento `data`.
+//
+// Los comandos a una misma máquina van en cola (el protocolo solo admite un
+// cliente a la vez): así el estado cada 60s, el listado de plantillas y la
+// carga de una plantilla no abren conexiones simultáneas.
+// ponytail: cola en memoria del proceso, basta con un único servidor Next.
+const colas = new Map<string, Promise<unknown>>();
+
 function sendCommand(config: LoteadoraConfig, frame: Buffer, timeoutMs: number): Promise<CommandResult> {
   if (!config.ip || !config.port) {
     return Promise.reject(new Error('Falta la IP o el puerto de la loteadora'));
   }
+  const clave = `${config.ip}:${config.port}`;
+  const actual = (colas.get(clave) ?? Promise.resolve())
+    .catch(() => {})
+    .then(() => sendCommandAhora(config, frame, timeoutMs));
+  colas.set(clave, actual);
+  const limpiar = () => { if (colas.get(clave) === actual) colas.delete(clave); };
+  actual.then(limpiar, limpiar);
+  return actual;
+}
 
+function sendCommandAhora(config: LoteadoraConfig, frame: Buffer, timeoutMs: number): Promise<CommandResult> {
   return new Promise((resolve, reject) => {
     const socket = new net.Socket();
     let settled = false;
@@ -172,6 +237,9 @@ const P_STATUS_ACCEPTED_WITH_WARNING: Record<number, string> = {
   // descarta el más antiguo de la cola, o se descarta este envío) — se avisa
   // en vez de darlo por fallido sin más, porque puede que sí se haya guardado.
   0x43: 'El buffer de campos remotos ya estaba lleno. Según la configuración de la impresora puede haber sustituido al envío más antiguo en cola, o haberse descartado — revisa la impresora si tienes dudas.',
+  // 12 = impresión parada: es el estado de la impresora, no un rechazo. Probado
+  // en planta: con la impresión parada el envío se guarda igualmente.
+  0x12: 'la impresión está parada; se imprimirá con estos datos al iniciarla.',
 };
 
 // Envía los campos remotos (lote/caducidad) a una loteadora por TCP (comando
@@ -265,12 +333,16 @@ export async function listMessageNames(config: LoteadoraConfig): Promise<string[
   if (result.kind === 'nak') {
     throw new Error(`Comando rechazado por la loteadora: ${describeStatus(C_STATUS_MESSAGES, result.status)}`);
   }
-  if (result.status !== 0x00) {
+  // Cabecera: ESC ACK Slave P_Status CmdID [NumFicheros] {[Len][Nombre]}... ESC ETX Checknum
+  const data = result.data;
+  // P_Status es el estado de la impresora, no del comando: con la impresión
+  // parada (12) se aceptan los nombres si la respuesta los trae (más de los
+  // 8 bytes de cabecera + cierre). Ver docs/loteadora.md §11.
+  const traeNombres = data.length > 8;
+  if (result.status !== 0x00 && !(result.status === 0x12 && traeNombres)) {
     throw new Error(`No se pudo listar las plantillas: ${describeStatus(P_STATUS_MESSAGES, result.status)}`);
   }
 
-  // Cabecera: ESC ACK Slave P_Status CmdID [NumFicheros] {[Len][Nombre]}... ESC ETX Checknum
-  const data = result.data;
   const names: string[] = [];
   let offset = 5;
   const numFiles = data[offset]; offset += 1;
@@ -282,19 +354,44 @@ export async function listMessageNames(config: LoteadoraConfig): Promise<string[
   return names;
 }
 
+// Crea (o sobrescribe) un mensaje en la impresora con sus campos (comando 1C).
+// La máquina lo guarda con ese nombre y lo deja en el área de edición.
+// 12 (impresión parada) es estado, no rechazo, igual que en 1E/1D.
+export async function downloadMessage(config: LoteadoraConfig, messageName: string, fields: FieldModuleSpec[]): Promise<void> {
+  const frame = buildDownloadMessageFrame(config.slaveAddress, messageName, fields);
+  const result = await sendCommand(config, frame, 10000);
+  console.log(`[loteadora ${config.ip}] crear ${JSON.stringify(messageName)} → 1C: ${Array.from(result.data).map((x) => x.toString(16).padStart(2, '0')).join(' ')}`);
+
+  if (result.kind === 'nak') {
+    throw new Error(`Comando rechazado por la loteadora: ${describeStatus(C_STATUS_MESSAGES, result.status)}`);
+  }
+  if (result.status === 0x15) throw new Error('La loteadora no pudo guardar el mensaje');
+  if (result.status !== 0x00 && result.status !== 0x12) {
+    throw new Error(`No se pudo crear el mensaje: ${describeStatus(P_STATUS_MESSAGES, result.status)}`);
+  }
+}
+
 // Carga una plantilla existente en la impresora y la aplica (comandos 1E + 01).
-// No comprueba si la impresora está imprimiendo — esa guarda vive en la ruta
-// API, que consulta getPrinterStatus() antes de llamar a esta función.
-export async function loadPrintMessage(config: LoteadoraConfig, messageName: string): Promise<void> {
+// No exige la impresión iniciada: el 12 ("print not started") es el estado de
+// la impresora, no un rechazo del comando (el manual lo dice así en 22/23/26/33:
+// "Succeeded but print not started"), así que se sigue y se devuelve un aviso
+// para que el operario lo confirme en la pantalla. Ver docs/loteadora.md §11.
+export async function loadPrintMessage(config: LoteadoraConfig, messageName: string): Promise<{ warning: string | null }> {
   const loadFrame = buildLoadMessageFrame(config.slaveAddress, messageName);
   const loadResult = await sendCommand(config, loadFrame, 5000);
 
   if (loadResult.kind === 'nak') {
     throw new Error(`Comando rechazado por la loteadora: ${describeStatus(C_STATUS_MESSAGES, loadResult.status)}`);
   }
-  if (loadResult.status !== 0x00) {
+  if (loadResult.status !== 0x00 && loadResult.status !== 0x12) {
     throw new Error(`No se pudo cargar la plantilla "${messageName}": ${describeStatus(P_STATUS_MESSAGES, loadResult.status)}`);
   }
+
+  // El ACK de 1E solo confirma que el mensaje existe ("00: Message name exist"),
+  // no que la máquina haya terminado de leerlo. Si el 01 llega antes, aplica el
+  // mensaje anterior: por eso a veces había que cargar dos veces.
+  // ponytail: espera fija; si sigue fallando, subir LOAD_APPLY_DELAY_MS.
+  await new Promise((r) => setTimeout(r, LOAD_APPLY_DELAY_MS));
 
   const updateFrame = buildNoDataFrame(config.slaveAddress, CMD_UPDATE_PRINT_CONTENTS);
   const updateResult = await sendCommand(config, updateFrame, 5000);
@@ -302,7 +399,18 @@ export async function loadPrintMessage(config: LoteadoraConfig, messageName: str
   if (updateResult.kind === 'nak') {
     throw new Error(`Comando rechazado por la loteadora al aplicar la plantilla: ${describeStatus(C_STATUS_MESSAGES, updateResult.status)}`);
   }
-  if (updateResult.status !== 0x00) {
+  if (updateResult.status !== 0x00 && updateResult.status !== 0x12) {
     throw new Error(`La plantilla se cargó pero no se pudo aplicar: ${describeStatus(P_STATUS_MESSAGES, updateResult.status)}`);
   }
+
+  // Traza de cada carga (respuestas en crudo) para diagnosticar en planta.
+  const hex = (b: Buffer) => Array.from(b).map((x) => x.toString(16).padStart(2, '0')).join(' ');
+  console.log(`[loteadora ${config.ip}] carga ${JSON.stringify(messageName)} → 1E: ${hex(loadResult.data)} | 01: ${hex(updateResult.data)}`);
+
+  const parada = loadResult.status === 0x12 || updateResult.status === 0x12;
+  return {
+    warning: parada
+      ? `Plantilla "${messageName}" enviada con la impresión parada: comprueba en la pantalla de la máquina que es la cargada antes de iniciar.`
+      : null,
+  };
 }

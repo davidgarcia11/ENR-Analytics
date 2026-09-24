@@ -9,7 +9,7 @@
  */
 import { describe, it, expect } from 'bun:test'
 import net from 'net'
-import { buildRemoteFieldFrame, listMessageNames } from '@/lib/loteadora-printer'
+import { buildRemoteFieldFrame, buildDownloadMessageFrame, listMessageNames, getPrinterStatus, loadPrintMessage, LOAD_APPLY_DELAY_MS } from '@/lib/loteadora-printer'
 
 describe('buildRemoteFieldFrame', () => {
   it('reproduce el ejemplo del manual (checknum B0)', () => {
@@ -84,6 +84,74 @@ describe('listMessageNames', () => {
     try {
       const result = await listMessageNames({ ip: '127.0.0.1', port, slaveAddress: 0 })
       expect(result).toEqual(nombres)
+    } finally {
+      server.close()
+    }
+  })
+
+  // Servidor que responde siempre con la misma trama.
+  const conRespuesta = async (respuesta: number[], fn: (port: number) => Promise<void>) => {
+    const server = net.createServer(socket => socket.once('data', () => socket.write(Buffer.from(respuesta))))
+    await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve))
+    try { await fn((server.address() as net.AddressInfo).port) } finally { server.close() }
+  }
+
+  it('con la impresión parada (P_Status 12) acepta los nombres si vienen en la respuesta', async () => {
+    const nombre = Buffer.from('new', 'ascii')
+    await conRespuesta([0x1b, 0x06, 0x00, 0x12, 0x1f, 1, nombre.length, ...nombre, 0x1b, 0x03, 0x00], async port => {
+      expect(await listMessageNames({ ip: '127.0.0.1', port, slaveAddress: 0 })).toEqual(['new'])
+    })
+  })
+
+  it('con la impresión parada y sin nombres en la respuesta lanza el error', async () => {
+    await conRespuesta([0x1b, 0x06, 0x00, 0x12, 0x1f, 0x1b, 0x03, 0x00], async port => {
+      await expect(listMessageNames({ ip: '127.0.0.1', port, slaveAddress: 0 })).rejects.toThrow('impresión iniciada')
+    })
+  })
+})
+
+describe('buildDownloadMessageFrame', () => {
+  it('codifica el Field Module como el ejemplo del manual (§3.5.17.3)', () => {
+    // Ejemplo del manual: x=176, y=40, tamaño 100, fuente "Abyssinica", puerto serie, ASCII, izquierda, ID 1, longitud 6
+    const frame = buildDownloadMessageFrame(0, 'P3', [{ id: 1, x: 176, y: 40, fontSize: 100, font: 'Abyssinica', length: 6 }])
+    const modulo = Buffer.from([0x03, 0x00, 0xb0, 0x00, 0x28, 0x00, 0x05, 0x00, 0x64, 0x0a,
+      ...Buffer.from('Abyssinica', 'ascii'), 0x80, 0x01, 0x06])
+    const datos = Buffer.from([0x02, ...Buffer.from('P3', 'ascii'), 0x01, ...modulo])
+
+    expect(frame.subarray(0, 4)).toEqual(Buffer.from([0x1b, 0x02, 0x00, 0x1c]))
+    expect(frame.subarray(4, 7)).toEqual(Buffer.from([0x00, 0x00, datos.length]))
+    expect(frame.subarray(7, 7 + datos.length)).toEqual(datos)
+    expect(frame.subarray(-3, -1)).toEqual(Buffer.from([0x1b, 0x03]))
+    expect(frame.reduce((acc, b) => (acc + b) & 0xff, 0)).toBe(0)
+  })
+})
+
+describe('loadPrintMessage', () => {
+  it('espera entre cargar (1E) y aplicar (01) y nunca abre dos conexiones a la vez', async () => {
+    const recibidos: { cmd: number; t: number }[] = []
+    let abiertas = 0
+    let maxAbiertas = 0
+    const server = net.createServer(socket => {
+      abiertas++; maxAbiertas = Math.max(maxAbiertas, abiertas)
+      socket.on('close', () => abiertas--)
+      socket.once('data', d => {
+        recibidos.push({ cmd: d[3], t: Date.now() })
+        // Responde un poco después para que un comando simultáneo se solapase
+        setTimeout(() => socket.end(Buffer.from([0x1b, 0x06, 0x00, 0x00, d[3], 0x1b, 0x03, 0x00])), 30)
+      })
+    })
+    await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve))
+    const config = { ip: '127.0.0.1', port: (server.address() as net.AddressInfo).port, slaveAddress: 0 }
+
+    try {
+      const [carga] = await Promise.all([loadPrintMessage(config, 'Prueba2'), getPrinterStatus(config)])
+      expect(carga.warning).toBeNull()
+      const orden = recibidos.map(r => r.cmd)
+      expect(orden.indexOf(0x1e)).toBeLessThan(orden.indexOf(0x01))
+      const t1e = recibidos.find(r => r.cmd === 0x1e)!.t
+      const t01 = recibidos.find(r => r.cmd === 0x01)!.t
+      expect(t01 - t1e).toBeGreaterThanOrEqual(LOAD_APPLY_DELAY_MS - 50)
+      expect(maxAbiertas).toBe(1)
     } finally {
       server.close()
     }

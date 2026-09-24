@@ -1,9 +1,9 @@
 // Configuración de /muestras: qué artículos aparecen en el panel. Lista GLOBAL
 // compartida (no por usuario — petición explícita: "no se le asigna a un usuario los
 // artículos, el admin y un usuario responsable pueden elegir los artículos... y
-// siempre se verán esos"), editable por admin y por cualquier usuario con
-// users.can_configure_muestras = 1 (permiso suelto, asignable a un usuario concreto
-// desde /admin — ver app/api/admin/users/[id]/muestras-config/route.ts).
+// siempre se verán esos"), editable por admin y por cualquier usuario con el permiso
+// 'muestras.config' (asignable a un usuario concreto desde /admin → Usuarios — ver
+// lib/permisos.ts y app/api/admin/users/[id]/permisos/route.ts).
 import { NextRequest, NextResponse } from 'next/server';
 import { getDbConnection } from '@/lib/db';
 import { getDb } from '@/lib/sqlite';

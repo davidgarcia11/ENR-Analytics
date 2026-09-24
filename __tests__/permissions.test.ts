@@ -44,13 +44,34 @@ function createTestDb() {
       id       INTEGER PRIMARY KEY,
       username TEXT NOT NULL UNIQUE,
       role     TEXT NOT NULL,
-      can_configure_muestras INTEGER NOT NULL DEFAULT 0,
       must_change_password   INTEGER NOT NULL DEFAULT 0
     );
+    CREATE TABLE user_permissions (
+      user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      permission TEXT NOT NULL,
+      PRIMARY KEY (user_id, permission)
+    );
+    CREATE TABLE role_permissions (
+      role_id    INTEGER NOT NULL,
+      permission TEXT NOT NULL,
+      PRIMARY KEY (role_id, permission)
+    );
 
-    INSERT INTO users VALUES (1, 'admin', 'admin',      0, 0);
-    INSERT INTO users VALUES (2, 'user1', 'user',       0, 0);
-    INSERT INTO users VALUES (3, 'sup1',  'supervisor', 1, 0);
+    INSERT INTO users VALUES (1, 'admin', 'admin',      0);
+    INSERT INTO users VALUES (2, 'user1', 'user',       0);
+    INSERT INTO users VALUES (3, 'sup1',  'supervisor', 0);
+
+    -- sup1 tiene el permiso de muestras y el de asignar artículos a plantillas;
+    -- una clave que ya no está en el catálogo se ignora.
+    INSERT INTO user_permissions VALUES (3, 'muestras.config');
+    INSERT INTO user_permissions VALUES (3, 'admin.loteadora.articulos');
+    INSERT INTO user_permissions VALUES (2, 'permiso.que.ya.no.existe');
+
+    -- calidad1 no tiene extras: su permiso le viene del rol 'calidad'
+    INSERT INTO users VALUES (4, 'calidad1', 'calidad', 0);
+    INSERT INTO roles VALUES (4, 'calidad', 'Calidad');
+    INSERT INTO role_permissions VALUES (4, 'admin.loteadora.articulos');
+    INSERT INTO user_permissions VALUES (4, 'muestras.config');
 
     INSERT INTO roles VALUES (1, 'admin',      'Administrador');
     INSERT INTO roles VALUES (2, 'user',       'Usuario');
@@ -74,13 +95,14 @@ let _mockSession: { id: number; username: string; role: string; name: string; su
 mock.module('@/lib/sqlite', () => ({ getDb: () => testDb }))
 mock.module('@/lib/auth',   () => ({ verifySession: async () => _mockSession }))
 
-const { requireAccess, requireScreenAccess, requireAdmin, getAllScreensConfig } = await import('@/lib/permissions')
+const { requireAccess, requireScreenAccess, requireAdmin, getAllScreensConfig, permisosDeUsuario, permisosDeRol, puedeVerPaginaAdmin, puedeUsarApiAdmin } = await import('@/lib/permissions')
 
 // ── Helpers ───────────────────────────────────────────────────────────────
 const sinSesion  = () => { _mockSession = null }
 const comoAdmin  = () => { _mockSession = { id: 1, username: 'admin',  role: 'admin',      name: '', surname: '' } }
 const comoUser   = () => { _mockSession = { id: 2, username: 'user1',  role: 'user',       name: '', surname: '' } }
 const comoSuperv = () => { _mockSession = { id: 3, username: 'sup1',   role: 'supervisor', name: '', surname: '' } }
+const comoCalidad = () => { _mockSession = { id: 4, username: 'calidad1', role: 'calidad', name: '', surname: '' } }
 
 // ─────────────────────────────────────────────────────────────────────────
 describe('requireScreenAccess — pantallas públicas', () => {
@@ -251,27 +273,78 @@ describe('requireAccess — regla `role`', () => {
   })
 })
 
-describe('requireAccess — regla `flag`', () => {
+describe('requireAccess — regla `permiso`', () => {
   it('sin sesión → 401', async () => {
     sinSesion()
-    const r = await requireAccess({ flag: 'can_configure_muestras' })
+    const r = await requireAccess({ permiso: 'muestras.config' })
     expect(!r.ok && r.denied.status).toBe(401)
   })
 
-  it('usuario con el flag a 0 → 403', async () => {
+  it('usuario sin el permiso → 403', async () => {
     comoUser()
-    const r = await requireAccess({ flag: 'can_configure_muestras' })
+    const r = await requireAccess({ permiso: 'muestras.config' })
     expect(!r.ok && r.denied.status).toBe(403)
   })
 
-  it('usuario con el flag a 1 → ok', async () => {
+  it('usuario con el permiso → ok', async () => {
     comoSuperv()
-    expect((await requireAccess({ flag: 'can_configure_muestras' })).ok).toBe(true)
+    expect((await requireAccess({ permiso: 'muestras.config' })).ok).toBe(true)
   })
 
-  it('admin pasa aunque tenga el flag a 0', async () => {
+  it('admin pasa sin tener fila en user_permissions', async () => {
     comoAdmin()
-    expect((await requireAccess({ flag: 'can_configure_muestras' })).ok).toBe(true)
+    expect((await requireAccess({ permiso: 'muestras.config' })).ok).toBe(true)
+  })
+})
+
+describe('permisosDeUsuario', () => {
+  it('devuelve solo claves del catálogo', () => {
+    expect(permisosDeUsuario(3, 'supervisor').sort()).toEqual(['admin.loteadora.articulos', 'muestras.config'])
+    expect(permisosDeUsuario(2, 'user')).toEqual([])
+  })
+})
+
+describe('permisos concedidos a un rol', () => {
+  it('el usuario hereda los de su rol y suma sus extras', () => {
+    expect(permisosDeRol('calidad')).toEqual(['admin.loteadora.articulos'])
+    expect(permisosDeUsuario(4, 'calidad').sort()).toEqual(['admin.loteadora.articulos', 'muestras.config'])
+  })
+
+  it('requireAccess pasa por el permiso del rol', async () => {
+    comoCalidad()
+    expect((await requireAccess({ permiso: 'admin.loteadora.articulos' })).ok).toBe(true)
+  })
+
+  it('el proxy le abre /admin y las rutas de su permiso, nada más', () => {
+    expect(puedeVerPaginaAdmin(4, 'calidad')).toBe(true)
+    expect(puedeUsarApiAdmin('/api/admin/loteadora-articulos', 'POST', 4, 'calidad')).toBe(true)
+    expect(puedeUsarApiAdmin('/api/admin/users', 'GET', 4, 'calidad')).toBe(false)
+  })
+})
+
+describe('/admin para usuarios sin rol admin (proxy)', () => {
+  it('página /admin: entra si algún permiso desbloquea una sección', () => {
+    expect(puedeVerPaginaAdmin(3, 'supervisor')).toBe(true)
+    expect(puedeVerPaginaAdmin(2, 'user')).toBe(false)
+    expect(puedeVerPaginaAdmin(1, 'admin')).toBe(true)
+  })
+
+  it('API: solo las rutas mapeadas a un permiso que tenga', () => {
+    expect(puedeUsarApiAdmin('/api/admin/loteadora-articulos', 'POST', 3, 'supervisor')).toBe(true)
+    expect(puedeUsarApiAdmin('/api/admin/loteadora-articulos/1210100221', 'DELETE', 3, 'supervisor')).toBe(true)
+    expect(puedeUsarApiAdmin('/api/admin/loteadora-mensajes', 'GET', 3, 'supervisor')).toBe(true)
+  })
+
+  it('API: denegado por defecto todo lo demás', () => {
+    // mismo prefijo pero método no abierto
+    expect(puedeUsarApiAdmin('/api/admin/loteadora-mensajes', 'POST', 3, 'supervisor')).toBe(false)
+    expect(puedeUsarApiAdmin('/api/admin/loteadora-mensajes/5', 'PUT', 3, 'supervisor')).toBe(false)
+    // ruta no mapeada
+    expect(puedeUsarApiAdmin('/api/admin/users', 'GET', 3, 'supervisor')).toBe(false)
+    // prefijo parecido que no es la misma ruta
+    expect(puedeUsarApiAdmin('/api/admin/loteadora-articulos-x', 'GET', 3, 'supervisor')).toBe(false)
+    // usuario sin el permiso
+    expect(puedeUsarApiAdmin('/api/admin/loteadora-articulos', 'GET', 2, 'user')).toBe(false)
   })
 })
 

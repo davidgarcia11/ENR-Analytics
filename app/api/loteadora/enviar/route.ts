@@ -1,31 +1,27 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getDb } from '@/lib/sqlite';
 import { requireScreenAccess } from '@/lib/permissions';
-import { sendRemoteFields, getPrinterStatusDetail } from '@/lib/loteadora-printer';
+import { sendRemoteFields, getPrinterStatus, getPrinterStatusDetail } from '@/lib/loteadora-printer';
+import {
+  ASCII_IMPRIMIBLE, INFO_PIEZA, componerCampos, leerCampos, variablesUsadas, type ValoresEtiqueta,
+} from '@/lib/loteadora-plantilla';
 
-// Envía lote, fecha de cocida y fecha de caducidad a una loteadora física por
-// TCP (comando 1D del protocolo TIJ). A diferencia de marcas/articulos, este
-// endpoint sí exige sesión: dispara una acción física real (imprime una etiqueta).
+// Envía una etiqueta a una loteadora física por TCP (comando 1D del protocolo TIJ).
+// Exige permiso de pantalla: dispara una acción física real.
 //
-// Los IDs de campo (lote/cocida/caducidad) NO los manda el cliente: se
-// resuelven aquí a partir de la plantilla asociada al artículo
-// (loteadora_articulo_mensajes), igual que el resto de valores que llegan del
-// cliente a una API route (ver CLAUDE.md, sección Seguridad).
+// El cliente manda los VALORES en crudo (fresco, cocida año+día, caducidad ISO,
+// hora, turno); el texto de cada campo lo compone el servidor con la plantilla del
+// artículo (loteadora_articulo_mensajes → loteadora_mensaje_segmentos), igual que
+// los IDs de campo y la línea: nada de eso lo decide el cliente. Solo se exigen
+// los valores que la plantilla usa de verdad. Ver lib/loteadora-plantilla.ts.
 export async function POST(req: NextRequest) {
   const denied = await requireScreenAccess('loteadora');
   if (denied) return denied;
 
-  const { loteadoraId, articuloId, lote, fechaCocida, fechaCaducidad, horaEnvio, turno } = await req.json();
-
-  if (!loteadoraId || !articuloId || !lote || !fechaCocida || !fechaCaducidad || !horaEnvio || !turno) {
-    return NextResponse.json(
-      { error: 'Faltan datos: loteadoraId, articuloId, lote, fechaCocida, fechaCaducidad, horaEnvio y turno son obligatorios' },
-      { status: 400 }
-    );
-  }
-
-  if (!['1', '2', '3'].includes(String(turno))) {
-    return NextResponse.json({ error: 'El turno debe ser 1, 2 o 3' }, { status: 400 });
+  const body = await req.json();
+  const { loteadoraId, articuloId } = body;
+  if (!loteadoraId || !articuloId) {
+    return NextResponse.json({ error: 'Faltan datos: loteadoraId y articuloId son obligatorios' }, { status: 400 });
   }
 
   const db = getDb();
@@ -33,45 +29,91 @@ export async function POST(req: NextRequest) {
   const loteadora = db.prepare(
     'SELECT ip, port, slave_address, linea FROM loteadoras WHERE id = ? AND enabled = 1'
   ).get(Number(loteadoraId)) as { ip: string; port: number; slave_address: number; linea: string } | undefined;
-
   if (!loteadora) {
     return NextResponse.json({ error: 'Loteadora no encontrada o deshabilitada' }, { status: 404 });
   }
 
-  // La línea de fabricación NO la manda el cliente: depende solo de la
-  // loteadora elegida, así que se resuelve aquí igual que los IDs de campo.
-  if (!loteadora.linea) {
+  const asociacion = db.prepare(
+    'SELECT mensaje_id FROM loteadora_articulo_mensajes WHERE articulo_id = ?'
+  ).get(String(articuloId)) as { mensaje_id: number } | undefined;
+  const campos = asociacion ? leerCampos(db, [asociacion.mensaje_id]).get(asociacion.mensaje_id) ?? [] : [];
+  if (campos.length === 0) {
     return NextResponse.json(
-      { error: 'Esta loteadora no tiene línea de fabricación configurada. Configúrala en /admin antes de enviar.' },
+      { error: 'Este artículo no tiene una plantilla asociada (o la plantilla no tiene campos). Configúrala en /admin antes de enviar.' },
       { status: 404 }
     );
   }
 
-  const mensaje = db.prepare(
-    `SELECT m.lot_field_id AS lotFieldId, m.cocida_field_id AS cocidaFieldId, m.expiry_field_id AS expiryFieldId, m.hora_field_id AS horaFieldId, m.turno_field_id AS turnoFieldId, m.linea_field_id AS lineaFieldId
-     FROM loteadora_articulo_mensajes am
-     JOIN loteadora_mensajes m ON m.id = am.mensaje_id
-     WHERE am.articulo_id = ?`
-  ).get(String(articuloId)) as { lotFieldId: number; cocidaFieldId: number; expiryFieldId: number; horaFieldId: number; turnoFieldId: number; lineaFieldId: number } | undefined;
+  // Validar solo lo que la plantilla usa.
+  const usadas = variablesUsadas(campos);
+  const valores: ValoresEtiqueta = {};
 
-  if (!mensaje) {
-    return NextResponse.json(
-      { error: 'Este artículo no tiene una plantilla asociada. Configúrala en /admin antes de enviar.' },
-      { status: 404 }
-    );
+  if (usadas.has('fresco')) {
+    const fresco = String(body.fresco ?? '').trim();
+    if (!fresco || fresco.length > 30 || !ASCII_IMPRIMIBLE.test(fresco)) {
+      return NextResponse.json({ error: 'La fecha fresco es obligatoria (hasta 30 caracteres, sin tildes ni símbolos)' }, { status: 400 });
+    }
+    valores.fresco = fresco;
+  }
+  if (usadas.has('cocida')) {
+    const anio = Number(body.cocidaAnio);
+    const dia = Number(body.cocidaDia);
+    if (!Number.isInteger(anio) || anio < 2000 || anio > 2100 || !Number.isInteger(dia) || dia < 1 || dia > 366) {
+      return NextResponse.json({ error: 'La cocida debe ser un día juliano entre 1 y 366 con su año' }, { status: 400 });
+    }
+    valores.cocidaAnio = anio;
+    valores.cocidaDia = dia;
+  }
+  if (usadas.has('caducidad')) {
+    const iso = String(body.caducidad ?? '');
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(iso) || isNaN(new Date(iso).getTime())) {
+      return NextResponse.json({ error: 'Falta la fecha de caducidad (revisa la cocida y los días de caducidad)' }, { status: 400 });
+    }
+    valores.caducidad = iso;
+  }
+  if (usadas.has('hora')) {
+    const hora = String(body.horaEnvio ?? '');
+    if (!/^([01]\d|2[0-3])[0-5]\d$/.test(hora)) {
+      return NextResponse.json({ error: 'La hora de envío debe tener formato HHmm' }, { status: 400 });
+    }
+    valores.hora = hora;
+  }
+  if (usadas.has('turno')) {
+    if (!['1', '2', '3'].includes(String(body.turno))) {
+      return NextResponse.json({ error: 'El turno debe ser 1, 2 o 3' }, { status: 400 });
+    }
+    valores.turno = String(body.turno);
+  }
+  if (usadas.has('linea')) {
+    if (!loteadora.linea) {
+      return NextResponse.json(
+        { error: 'Esta loteadora no tiene línea de fabricación configurada. Configúrala en /admin antes de enviar.' },
+        { status: 404 }
+      );
+    }
+    valores.linea = loteadora.linea;
+  }
+
+  const compuestos = componerCampos(campos, valores);
+  const faltan = [...new Set(compuestos.flatMap((c) => c.faltan))];
+  if (faltan.length > 0) {
+    return NextResponse.json({ error: `Faltan datos para la plantilla: ${faltan.map((t) => INFO_PIEZA[t].label).join(', ')}` }, { status: 400 });
+  }
+  const invalido = compuestos.find((c) => c.texto.length < 1 || c.texto.length > 255 || !ASCII_IMPRIMIBLE.test(c.texto));
+  if (invalido) {
+    return NextResponse.json({ error: `El campo ID ${invalido.fieldId} queda vacío, supera 255 caracteres o tiene caracteres no ASCII` }, { status: 400 });
   }
 
   const config = { ip: loteadora.ip, port: loteadora.port, slaveAddress: loteadora.slave_address };
 
+  // Imprimiendo no se cambian los datos: parte de la tirada saldría con un lote
+  // y parte con otro (trazabilidad). Ver docs/loteadora.md §6.
+  if (await getPrinterStatus(config) === 'activa') {
+    return NextResponse.json({ error: 'La loteadora está imprimiendo. Para la impresión en la máquina antes de enviar datos nuevos.' }, { status: 409 });
+  }
+
   try {
-    const { warning } = await sendRemoteFields(config, [
-      { id: mensaje.lotFieldId, text: String(lote) },
-      { id: mensaje.cocidaFieldId, text: String(fechaCocida) },
-      { id: mensaje.expiryFieldId, text: String(fechaCaducidad) },
-      { id: mensaje.horaFieldId, text: String(horaEnvio) },
-      { id: mensaje.turnoFieldId, text: String(turno) },
-      { id: mensaje.lineaFieldId, text: loteadora.linea },
-    ]);
+    const { warning } = await sendRemoteFields(config, compuestos.map((c) => ({ id: c.fieldId, text: c.texto })));
     return NextResponse.json({ ok: true, warning });
   } catch (err: any) {
     console.error('Envío a loteadora error:', err);

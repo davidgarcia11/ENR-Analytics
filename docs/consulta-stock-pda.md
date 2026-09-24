@@ -41,7 +41,7 @@ administrador puede restringirlo a roles específicos desde `/admin` → pestañ
 | `app/api/consulta-stock-pda/route.ts` | API Route servidor — consulta a Reflex (SQL Server), agrupado por lote y validación FEFO/calidad |
 | `app/api/consulta-stock-pda/confirmaciones/route.ts` | API Route servidor — registra la aceptación del pop-up (§8.2) en SQLite |
 | `app/api/admin/scan-confirmations/route.ts` | API Route servidor — lista/filtra las confirmaciones registradas (§8.2), solo admin |
-| `app/admin/logs/page.tsx` | Pestaña "Confirmaciones PDA" (además de la ya existente "Consultas") — ver §8.2 |
+| `components/nova/admin/confirmaciones-pda.tsx` | Sección `/admin` → Datos › Confirmaciones PDA (antes, pestaña de `/admin/logs`) — ver §8.2 |
 | `lib/reflex.ts` | Conexión a SQL Server (Reflex), análoga a `lib/db.ts` para Oracle |
 | `lib/gs1.ts` | Parser de códigos de barras GS1-128 (separa EAN/lote/cantidad/SSCC/fechas) |
 | `lib/plants.ts` | Fuente única de plantas y de las sub-plantas de Funes (§7.5) |
@@ -593,8 +593,7 @@ Objetivo: trazabilidad. Si un producto se mete erróneamente en línea, se puede
 por `sscc` o `articulo` y saber exactamente qué usuario escaneó ese palet, qué aviso vio (el texto
 literal, no solo el estado) y a qué hora lo aceptó.
 
-**Dónde verlo:** `/admin/logs` → pestaña **"Confirmaciones PDA"** (junto a la pestaña "Consultas"
-existente). Lista paginada con filtros por usuario, resultado (correcto/aviso/no encontrado/sin
+**Dónde verlo:** `/admin` → Datos › **Confirmaciones PDA** (antes, una pestaña de `/admin/logs`). Lista paginada con filtros por usuario, resultado (correcto/aviso/no encontrado/sin
 fecha), SSCC y rango de fechas — `GET /api/admin/scan-confirmations` (solo admin). Cada fila
 muestra fecha, usuario, SSCC completo, artículo y el resultado aceptado con sus mensajes exactos.
 

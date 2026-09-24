@@ -38,7 +38,7 @@ app/                          # Rutas Next.js (App Router)
   mrp/                        # Panel explosión de compras (previsión × lista de materiales) — sistema Nova
   muestras/                   # App control de muestras pendientes/enviadas/completadas — sistema Nova
   admin/page.tsx              # Panel de administración de usuarios
-  admin/logs/page.tsx         # Logs de consultas (solo admin)
+  admin/logs/page.tsx         # Redirige a /admin?seccion=logs (los logs son una sección de /admin)
   login/page.tsx              # Login
   cambiar-contrasena/         # Cambio forzado de contraseña
   api/                        # API Routes (servidor)
@@ -176,7 +176,7 @@ Solo cuando se pida explícitamente usar Nova (no es el sistema por defecto toda
 
 ### Añadir nuevo panel/fuente de logs
 1. Añadir INSERT en la ruta API con `source: 'nombre_panel'`
-2. Añadir etiqueta en `SOURCE_LABELS` en `admin/logs/page.tsx`
+2. Añadir etiqueta en `SOURCE_LABELS` en `components/nova/admin/logs-consultas.tsx`
 
 ### Añadir integración con una nueva fuente de datos externa (ej. otra BD SQL Server)
 1. `lib/nombre.ts` → función de conexión análoga a `lib/db.ts`/`lib/reflex.ts`: credenciales desde `.env.local`, error claro si falta alguna, `try/finally` en quien la usa
