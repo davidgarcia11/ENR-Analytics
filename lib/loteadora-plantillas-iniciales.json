@@ -483,9 +483,8 @@
         "fieldId": 3,
         "piezas": [
           {
-            "tipo": "fijo",
-            "valor": "K-000000",
-            "nombre": "Certificado Kosher"
+            "tipo": "manual",
+            "nombre": "Nº certificado Kosher"
           }
         ],
         "linea": 2,

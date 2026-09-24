@@ -201,6 +201,15 @@ export function getDb(): Database.Database {
       enviado_at TEXT DEFAULT CURRENT_TIMESTAMP
     );
 
+    -- Último valor enviado de cada "dato a introducir" (pieza 'manual') por
+    -- plantilla: /loteadora lo propone al elegir un artículo con esa plantilla.
+    CREATE TABLE IF NOT EXISTS loteadora_manuales_ultimos (
+      mensaje_id INTEGER NOT NULL REFERENCES loteadora_mensajes(id) ON DELETE CASCADE,
+      nombre TEXT NOT NULL,
+      valor TEXT NOT NULL,
+      PRIMARY KEY (mensaje_id, nombre)
+    );
+
     -- Asociación artículo (F4101.IMLITM) -> plantilla. Global: el mismo
     -- artículo usa siempre el mismo mensaje, sea cual sea la loteadora.
     CREATE TABLE IF NOT EXISTS loteadora_articulo_mensajes (
@@ -443,6 +452,20 @@ export function getDb(): Database.Database {
         for (const c of p.campos) insertar.run(m.id, c.fieldId, c.linea ?? 1, c.reloj ? 1 : 0);
       }
       _db!.prepare("INSERT INTO migraciones (clave) VALUES ('disposicion-nuevo-loteado')").run();
+    })();
+  }
+
+  // N10_KERETS: el certificado Kosher pasa de dato fijo a dato a introducir (cambia
+  // a menudo). Una sola vez, y solo si sigue con el valor inventado K-000000: si
+  // ya se puso el real, se deja como está (se cambia a mano en el constructor).
+  if (!_db.prepare("SELECT 1 FROM migraciones WHERE clave = 'kosher-a-introducir'").get()) {
+    _db.transaction(() => {
+      _db!.prepare(
+        `UPDATE loteadora_mensaje_segmentos SET tipo = 'manual', valor = NULL, nombre = 'Nº certificado Kosher'
+         WHERE tipo = 'fijo' AND nombre = 'Certificado Kosher' AND valor = 'K-000000'
+           AND mensaje_id IN (SELECT id FROM loteadora_mensajes WHERE name = 'N10_KERETS')`
+      ).run();
+      _db!.prepare("INSERT INTO migraciones (clave) VALUES ('kosher-a-introducir')").run();
     })();
   }
 
