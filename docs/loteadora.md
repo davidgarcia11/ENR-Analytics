@@ -37,6 +37,7 @@ Rama: `feature/loteadora`.
 | `app/api/admin/loteadoras/estado/route.ts` | GET admin — estado en vivo de **todas** las loteadoras (habilitadas o no) |
 | `app/api/admin/loteadora-mensajes/route.ts` y `[id]/route.ts` | CRUD de plantillas (nombre + campos con piezas) desde `/admin` → Loteadora › Plantillas |
 | `app/api/admin/loteadora-datos-fijos/route.ts` y `[id]/route.ts` | Lista y cambia los datos fijos de las plantillas (precio, nº de certificado) desde `/admin` → Loteadora › Datos fijos |
+| `app/api/admin/loteadora-copia/route.ts` | GET exporta / POST importa en JSON las plantillas y las asociaciones de artículos (botones Exportar/Importar de Plantillas, solo admin, §13) |
 | `app/api/admin/loteadora-articulos/route.ts` y `[articuloId]/route.ts` | CRUD de asociaciones artículo→plantilla (`loteadora_articulo_mensajes`) desde `/admin` → Loteadora › Artículos. Abierto también a usuarios no admin con el permiso `admin.loteadora.articulos`, por su rol o como extra (DOCUMENTACION.md §5b) |
 | `lib/loteadora-printer.ts` | Construye las tramas del protocolo TIJ y las envía por TCP (`buildRemoteFieldFrame`, `sendRemoteFields`, `getPrinterStatus`, `listMessageNames`, `loadPrintMessage`) |
 | `components/nova/date-picker.tsx` | Selector de UNA fecha exacta (Popover + Calendar en modo `single`) — nuevo, no existía ningún panel Nova con selector de fecha única (solo rango, `date-range-picker.tsx`) |
@@ -330,6 +331,13 @@ CREATE TABLE loteadora_articulo_mensajes (
 Un artículo solo puede tener una plantilla a la vez (`articulo_id` es clave primaria) — asociar de nuevo sustituye la anterior. Borrar una plantilla borra en cascada sus campos y sus asociaciones.
 
 **Migración desde el modelo anterior** (6 columnas fijas `lot/cocida/expiry/hora/turno/linea_field_id` en `loteadora_mensajes`): al arrancar, cada columna se convierte en un campo con una sola pieza de ese tipo, sin literales, y la caducidad en `DD/MM/AAAA` (lo que se imprimía hasta entonces), así que las plantillas existentes siguen enviando exactamente lo mismo; si dos columnas compartían ID (las añadidas más tarde valían 0 por defecto) gana la primera. Después se eliminan las columnas. **Antes de tocar nada se guarda una copia completa de la BD** junto a `app.db` (`app.db.pre-plantillas-campos-<fecha>`, con `VACUUM INTO`): para volver atrás, restaurar ese fichero y desplegar la versión anterior.
+
+**Copia de seguridad: Exportar / Importar** (botones de `/admin` → Plantillas, solo admin; `exportarCopia` / `importarCopia` en `lib/loteadora-plantilla.ts`, ruta `/api/admin/loteadora-copia`):
+- **Exportar** descarga `plantillas-loteadora-<fecha>.json` con todas las plantillas y las asociaciones artículo → plantilla. Las asociaciones van **por nombre de plantilla**, porque los IDs internos cambian entre BD.
+- **Importar** sube ese archivo y **valida todo antes de escribir**: plantillas con `validarPlantilla`, sin nombres repetidos, y artículos de 10 dígitos cuya plantilla esté en el archivo o en la BD. Si algo falla, no se importa nada.
+- Sin marcar **"Sustituir las que ya existan"**, solo añade lo que falta: plantillas con un nombre nuevo y artículos sin asociar. Marcada, sustituye los campos de las plantillas con el mismo nombre y reasocia los artículos que apuntaban a otra. Sirve para restaurar una copia.
+- Nunca borra nada que no esté en el archivo. Al terminar muestra cuántas plantillas y asociaciones se crearon, se sustituyeron o se dejaron sin tocar.
+- Los tests están en `__tests__/loteadora-plantilla.test.ts`, con una BD en memoria.
 
 **Plantillas del "nuevo loteado" incluidas en el código:** las 17 plantillas `N01_…` a `N17_…` viven en `lib/loteadora-plantillas-iniciales.json`. Son las mismas que se crearon en la máquina con el comando `1C` (§9). `lib/sqlite.ts` las da de alta al arrancar, **una sola vez por BD**: queda la marca `plantillas-nuevo-loteado` en la tabla `migraciones`. Así llegan solas a producción con el despliegue, y si luego se borra o renombra una desde `/admin`, no reaparece en el siguiente arranque. Si ya existe una plantilla con el mismo nombre, no se toca. Lo que **no** viaja: las asociaciones a artículos, los valores cambiados en Datos fijos y las loteadoras, que son de cada BD. Para añadir más plantillas en otra versión, usa una clave de migración nueva, no la misma.
 

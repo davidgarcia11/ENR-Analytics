@@ -5,7 +5,7 @@
  */
 import { describe, it, expect } from 'bun:test'
 import {
-  componerCampos, filasACampos, formatearCaducidad, formatearCocida, validarPlantilla, variablesUsadas,
+  componerCampos, exportarCopia, filasACampos, formatearCaducidad, formatearCocida, importarCopia, validarPlantilla, variablesUsadas,
   type Campo, type ValoresEtiqueta,
 } from '@/lib/loteadora-plantilla'
 
@@ -141,5 +141,63 @@ describe('filasACampos', () => {
       { fieldId: 2, piezas: [{ tipo: 'texto', valor: 'L' }, { tipo: 'cocida', formato: 'AAJJJ' }] },
       { fieldId: 7, piezas: [{ tipo: 'hora' }] },
     ])
+  })
+})
+
+describe('copia de seguridad (exportar / importar)', () => {
+  // bun:sqlite tiene la misma API que better-sqlite3 para lo que se usa aquí
+  const { Database } = require('bun:sqlite')
+  const nuevaBd = () => {
+    const db = new Database(':memory:')
+    db.exec(`
+      CREATE TABLE loteadora_mensajes (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL UNIQUE);
+      CREATE TABLE loteadora_mensaje_segmentos (id INTEGER PRIMARY KEY AUTOINCREMENT, mensaje_id INTEGER NOT NULL,
+        orden INTEGER NOT NULL, field_id INTEGER NOT NULL, tipo TEXT NOT NULL, valor TEXT, nombre TEXT, formato TEXT);
+      CREATE TABLE loteadora_articulo_mensajes (articulo_id TEXT PRIMARY KEY, mensaje_id INTEGER NOT NULL);
+    `)
+    return db
+  }
+  const campos = (fmt: string) => [{ fieldId: 1, piezas: [{ tipo: 'texto', valor: 'CAD ' }, { tipo: 'caducidad', formato: fmt }] }]
+  const copia = {
+    version: 1,
+    plantillas: [{ name: 'N01_A', campos: campos('DD/MM/AA') }, { name: 'N02_B', campos: campos('DD/MM/AAAA') }],
+    articulos: [{ articuloId: '1210500019', plantilla: 'N01_A' }],
+  }
+
+  it('exporta lo importado (ida y vuelta) y la segunda vez no duplica nada', () => {
+    const db = nuevaBd()
+    const r1 = importarCopia(db, copia, false)
+    expect('value' in r1 && r1.value.plantillas.creadas).toBe(2)
+    expect('value' in r1 && r1.value.articulos.creadas).toBe(1)
+    const exportada = exportarCopia(db)
+    expect(exportada.plantillas.map((p) => p.name)).toEqual(['N01_A', 'N02_B'])
+    expect(exportada.plantillas[0].campos).toEqual(copia.plantillas[0].campos as Campo[])
+    expect(exportada.articulos).toEqual(copia.articulos)
+
+    const r2 = importarCopia(db, exportada, false)
+    expect('value' in r2 && r2.value.plantillas).toEqual({ creadas: 0, sustituidas: 0, omitidas: 2 })
+  })
+
+  it('sin "sustituir" no pisa lo existente; con "sustituir" sí', () => {
+    const db = nuevaBd()
+    importarCopia(db, copia, false)
+    const cambiada = { ...copia, plantillas: [{ name: 'N01_A', campos: campos('MM/DD/AA') }], articulos: [{ articuloId: '1210500019', plantilla: 'N02_B' }] }
+    importarCopia(db, cambiada, false)
+    expect(exportarCopia(db).plantillas[0].campos[0].piezas[1].formato).toBe('DD/MM/AA')
+    expect(exportarCopia(db).articulos[0].plantilla).toBe('N01_A')
+
+    const r = importarCopia(db, cambiada, true)
+    expect('value' in r && r.value.plantillas.sustituidas).toBe(1)
+    expect(exportarCopia(db).plantillas[0].campos[0].piezas[1].formato).toBe('MM/DD/AA')
+    expect(exportarCopia(db).articulos[0].plantilla).toBe('N02_B')
+  })
+
+  it('si algo está mal no importa nada', () => {
+    const db = nuevaBd()
+    const mala = { ...copia, articulos: [{ articuloId: '123', plantilla: 'N01_A' }] }
+    expect('error' in importarCopia(db, mala, false)).toBe(true)
+    expect(exportarCopia(db).plantillas).toEqual([])
+    expect('error' in importarCopia(db, { version: 1, plantillas: [{ name: 'X.msg', campos: campos('DD') }] }, false)).toBe(true)
+    expect('error' in importarCopia(db, { foo: 1 }, false)).toBe(true)
   })
 })

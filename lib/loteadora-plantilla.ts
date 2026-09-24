@@ -262,3 +262,90 @@ export function guardarCampos(db: Database.Database, mensajeId: number, campos: 
     insertar.run(mensajeId, ci * 1000 + pi, c.fieldId, p.tipo, p.valor ?? null, p.nombre ?? null, p.formato ?? null);
   }));
 }
+
+// ─── Copia de seguridad: exportar / importar (/admin → Plantillas) ───────────────
+// Plantillas + asociaciones artículo → plantilla en un JSON. Las asociaciones van
+// por NOMBRE de plantilla: los IDs internos cambian de una BD a otra.
+
+export interface CopiaLoteadora {
+  version: 1;
+  exportadaAt: string;
+  plantillas: { name: string; campos: Campo[] }[];
+  articulos: { articuloId: string; plantilla: string }[];
+}
+
+export function exportarCopia(db: Database.Database): CopiaLoteadora {
+  const mensajes = db.prepare('SELECT id, name FROM loteadora_mensajes ORDER BY name').all() as { id: number; name: string }[];
+  const campos = leerCampos(db);
+  const articulos = db.prepare(
+    `SELECT am.articulo_id AS articuloId, m.name AS plantilla
+     FROM loteadora_articulo_mensajes am JOIN loteadora_mensajes m ON m.id = am.mensaje_id
+     ORDER BY am.articulo_id`
+  ).all() as { articuloId: string; plantilla: string }[];
+  return {
+    version: 1,
+    exportadaAt: new Date().toISOString(),
+    plantillas: mensajes.map((m) => ({ name: m.name, campos: campos.get(m.id) ?? [] })),
+    articulos,
+  };
+}
+
+interface Recuento { creadas: number; sustituidas: number; omitidas: number }
+export interface ResultadoImportacion { plantillas: Recuento; articulos: Recuento }
+
+/**
+ * Importa una copia. Valida TODO antes de escribir (si algo está mal no se toca
+ * nada). Sin `sustituir`, lo que ya existe (plantilla con el mismo nombre, o
+ * artículo ya asociado a otra plantilla) se deja como está.
+ */
+export function importarCopia(db: Database.Database, copia: any, sustituir: boolean): { error: string } | { value: ResultadoImportacion } {
+  if (!copia || copia.version !== 1 || !Array.isArray(copia.plantillas)) {
+    return { error: 'El archivo no es una copia de plantillas de la loteadora' };
+  }
+  const plantillas: { name: string; campos: Campo[] }[] = [];
+  const nombres = new Set<string>();
+  for (const p of copia.plantillas) {
+    const v = validarPlantilla(p);
+    if ('error' in v) return { error: `Plantilla "${p?.name ?? '?'}": ${v.error}` };
+    if (nombres.has(v.value.name)) return { error: `La plantilla "${v.value.name}" está repetida en el archivo` };
+    nombres.add(v.value.name);
+    plantillas.push(v.value);
+  }
+
+  const idDe = db.prepare('SELECT id FROM loteadora_mensajes WHERE name = ?');
+  const articulos: { articuloId: string; plantilla: string }[] = [];
+  for (const a of Array.isArray(copia.articulos) ? copia.articulos : []) {
+    const articuloId = String(a?.articuloId ?? '').trim();
+    const plantilla = String(a?.plantilla ?? '');
+    if (!/^\d{10}$/.test(articuloId)) return { error: `Artículo "${articuloId}": debe tener exactamente 10 dígitos` };
+    if (!nombres.has(plantilla) && !idDe.get(plantilla)) return { error: `Artículo ${articuloId}: la plantilla "${plantilla}" no está en el archivo ni en esta instalación` };
+    articulos.push({ articuloId, plantilla });
+  }
+
+  const r: ResultadoImportacion = {
+    plantillas: { creadas: 0, sustituidas: 0, omitidas: 0 },
+    articulos: { creadas: 0, sustituidas: 0, omitidas: 0 },
+  };
+  db.transaction(() => {
+    const insertar = db.prepare('INSERT INTO loteadora_mensajes (name) VALUES (?)');
+    for (const p of plantillas) {
+      const existente = idDe.get(p.name) as { id: number } | undefined;
+      if (!existente) { guardarCampos(db, Number(insertar.run(p.name).lastInsertRowid), p.campos); r.plantillas.creadas++; }
+      else if (sustituir) { guardarCampos(db, existente.id, p.campos); r.plantillas.sustituidas++; }
+      else r.plantillas.omitidas++;
+    }
+    const actual = db.prepare('SELECT mensaje_id FROM loteadora_articulo_mensajes WHERE articulo_id = ?');
+    const asociar = db.prepare(
+      `INSERT INTO loteadora_articulo_mensajes (articulo_id, mensaje_id) VALUES (?, ?)
+       ON CONFLICT(articulo_id) DO UPDATE SET mensaje_id = excluded.mensaje_id`
+    );
+    for (const a of articulos) {
+      const mensajeId = (idDe.get(a.plantilla) as { id: number }).id;
+      const ya = actual.get(a.articuloId) as { mensaje_id: number } | undefined;
+      if (!ya) { asociar.run(a.articuloId, mensajeId); r.articulos.creadas++; }
+      else if (ya.mensaje_id !== mensajeId && sustituir) { asociar.run(a.articuloId, mensajeId); r.articulos.sustituidas++; }
+      else r.articulos.omitidas++;
+    }
+  })();
+  return { value: r };
+}
