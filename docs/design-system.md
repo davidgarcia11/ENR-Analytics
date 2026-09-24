@@ -238,7 +238,7 @@ Sigue este orden; cada paso da por hecho que el anterior está hecho.
 5. **KPIs** (si aplica): `<KpiCard>` en un grid `sm:grid-cols-2 md:grid-cols-N`.
 6. **Tabla**: `Table`/`TableHeader`/`TableBody`/`TableRow`/`TableHead`/`TableCell` dentro de `<Card accent>`. Estados de `loading` → `Spinner`, sin resultados → `EmptyState`, ambos en una `TableRow className="hover:bg-transparent"` con `colSpan` al nº de columnas.
 7. **Acciones destructivas o de escritura**: `toast()` para feedback, `ConfirmDialog` para confirmaciones — nunca `alert()`/`confirm()`.
-8. **Logs de consultas** (si el panel consulta datos de Oracle): añade el `INSERT` en tu API route con `source: 'mi_panel'` y la etiqueta en `SOURCE_LABELS` de `app/admin/logs/page.tsx` — ver `DOCUMENTACION.md` sección 7.
+8. **Logs de consultas** (si el panel consulta datos de Oracle): añade el `INSERT` en tu API route con `source: 'mi_panel'` y la etiqueta en `SOURCE_LABELS` de `components/nova/admin/logs-consultas.tsx` — ver `DOCUMENTACION.md` sección 7.
 9. **Colores**: repasa que no haya ni un hex ni un `style={{ color/backgroundColor/borderTop }}` en tu diff. Si Grep encuentra `#` seguido de 3 o 6 dígitos hex en tu archivo (fuera de `globals.css` o de props de recharts), es un bug.
 10. **Responsive**: prueba la página en viewport tablet (≈768px) — es el uso real en planta. Los grids deben tener al menos un breakpoint `sm:`/`md:` antes de llegar a la columna final.
 11. **Verificación**: `bun run build` y `bun test` deben pasar antes de dar el panel por terminado.

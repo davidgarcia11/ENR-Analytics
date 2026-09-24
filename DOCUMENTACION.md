@@ -99,7 +99,7 @@ dashboard/
     ├── admin/
     │   ├── page.tsx              ← Ruta "/admin" → panel de administración de usuarios
     │   └── logs/
-    │       └── page.tsx          ← Ruta "/admin/logs" → logs de consultas (solo admin)
+    │       └── page.tsx          ← Ruta "/admin/logs" → redirige a /admin?seccion=logs (solo admin)
     ├── cambiar-contrasena/
     │   └── page.tsx              ← Ruta "/cambiar-contrasena" → cambio forzado de contraseña
     ├── produccion/
@@ -196,7 +196,7 @@ rutas de panel no se genera desde `PANELS`; se resuelve en código.
 | Caso | Qué hace |
 |---|---|
 | Ruta de `SIN_SESION` | Pasa sin mirar nada |
-| `/api/admin/*` sin cookie o sin rol admin | 401 / 403 |
+| `/api/admin/*` sin cookie, o sin rol admin y sin un permiso suelto que abra esa ruta (§5b) | 401 / 403 |
 | Token caducado o manipulado | 401 **y borra la cookie** |
 | Resto sin cookie | Pasa: `requireAccess` decide (y comprueba cosas que aquí no tocan, como la contraseña pendiente) |
 | Token válido al que le quedan < 6 días | Pasa y renueva la cookie (7 días más) |
@@ -208,7 +208,8 @@ rutas de panel no se genera desde `PANELS`; se resuelve en código.
 | `/login`, `/cambiar-contrasena`, `/` | Pasan siempre (filtrarlas sería un bucle contra sí mismas) |
 | Ruta que no es panel ni API | Pasa |
 | Panel de `PANELS` | `accesoPantalla(key, role)` — la misma función que usa `requireAccess({screen})` |
-| `/admin`, `/admin/logs` | Exigen rol admin |
+| `/admin` | Rol admin, o algún permiso suelto que desbloquee una sección (`puedeVerPaginaAdmin`, §5b) |
+| `/admin/logs` (y cualquier otra `/admin/*`) | Exigen rol admin |
 | Cualquier negativa | **302 a `/login?next=<ruta>`**, no un JSON |
 
 Esto es lo que quita el parpadeo del panel antes de rebotar al login: la decisión
@@ -450,56 +451,136 @@ Las cookies con `secure: true` no funcionan sobre HTTP (solo HTTPS). Cuando el d
 ## 5. Panel de Administración (`/admin`)
 
 ### Acceso
-Solo usuarios con `role === 'admin'`. Si no eres admin, te redirige a `/produccion`.
+- **Admin** (`role === 'admin'`): ve todas las secciones.
+- **Usuario con algún permiso de configuración que desbloquee una sección** — por su
+  rol o como extra suyo (§5b): entra en `/admin` y solo ve esa(s) sección(es), con
+  "Configuración" en vez de "Administración" bajo el logo. Hoy desbloquean sección
+  `admin.loteadora.articulos` → Loteadora › Artículos y `admin.loteadora.datos-fijos` →
+  Loteadora › Datos fijos.
+- Cualquier otro usuario → al login. La misma regla la aplican `proxy.ts` (antes de
+  mandar el HTML) y `<RequireAccess allow={puedeEntrarEnAdmin}>` en la página.
+- Las secciones sin permiso asociado (todas salvo Artículos) y `/admin/logs` (que redirige a
+  la sección de logs) siguen siendo **solo admin**.
+- La sección activa va en la URL (`/admin?seccion=logs`): recargar no te devuelve a la
+  primera y se puede enlazar directamente a una sección.
 
-### Pestañas
+### Estructura (sistema Nova, patrón de los dashboards de ShadcnSpace)
 
-El panel tiene cuatro pestañas: **Usuarios**, **Roles**, **Pantallas** y **Estados JDE**.
+- **Sidebar real** (`components/nova/ui/sidebar.tsx`, `Sidebar variant="inset"`,
+  colapsable a iconos; en móvil, panel deslizante). Arriba el logo (un icono cuadrado
+  cuando está colapsado); después las secciones agrupadas en `GRUPOS_ADMIN`
+  (`app/admin/page.tsx`); abajo **"Ir a paneles"**, un desplegable con los Dashboards y
+  Apps que ese usuario puede ver (misma fuente y filtro que el nav de la cabecera del
+  resto de paneles Nova, `topbar-02/data.ts`). No hay un segundo sidebar.
 
-#### Pestaña Usuarios
-1. **Crear usuario:** Formulario con campos Nombre, Apellido, Usuario (login), Contraseña, Rol (dropdown dinámico desde BD), Planta por defecto (dropdown desde `lib/plants.ts` — "Todas" + las 4 plantas), checkbox "Forzar cambio de contraseña"
-2. **Listar usuarios:** Tabla con ID, Nombre completo, Usuario, Rol (badge), Planta, Fecha creación
-3. **Editar usuario:** Botón lápiz azul → fila editable (nombre, apellido, usuario, rol, planta por defecto). Valida unicidad del username (409 inline)
-4. **Resetear contraseña:** Botón llave ámbar → input inline → nueva contraseña + fuerza cambio en próximo login
-5. **Eliminar usuario:** Con confirmación. No permite auto-eliminación.
+  | Grupo | Secciones |
+  |---|---|
+  | Accesos | Usuarios, Roles y permisos |
+  | Loteadora | Máquinas, Plantillas (constructor de campos), Artículos, Datos fijos |
+  | Datos | Estados JDE, Muestras, Logs de consultas y Confirmaciones PDA (estas dos, solo admin; §7) |
 
-#### Pestaña Roles
-1. **Listar roles:** Tabla con ID, Nombre interno, Label, Acciones
-2. **Crear rol:** Formulario con Nombre (se normaliza a minúsculas+guiones bajos, sin caracteres especiales) + Label visible
-3. **Eliminar rol:** Botón deshabilitado para `admin`. Al borrar un rol, los usuarios que lo tenían asignado pasan automáticamente a `user`
+- **Cabecera fina** del área de contenido: botón del sidebar + ruta ("Accesos › Roles y
+  permisos") a la izquierda; tema, avisos y perfil a la derecha (los mismos componentes
+  de `topbar-02`). La barra con logo + nav de los demás paneles **no** se usa aquí: su
+  ancho propio no cuadraba con el del contenido.
+- **Contenido a todo el ancho.** Cada sección pinta su propia cabecera con
+  `CabeceraSeccion` (título y descripción a la izquierda, acción principal a la
+  derecha, en la misma línea) y su tabla dentro de `TablaCard` (borde redondeado, barra
+  con buscador/nota a la izquierda y un contador o leyenda a la derecha) — sin un
+  segundo título que repita el de la página.
+- **Una sección = un componente** en `components/nova/admin/` (`usuarios.tsx`,
+  `roles-permisos.tsx`, `loteadoras.tsx`, `plantillas.tsx`, `articulos-plantilla.tsx`,
+  `estados-jde.tsx`, `muestras-sync.tsx`) que recibe `titulo`/`descripcion` del sidebar
+  y carga sus datos al montarse (se monta con `key` = sección). Piezas compartidas en
+  `components/nova/admin/comun.tsx`: `CabeceraSeccion`, `TablaCard`, `Buscador`,
+  `ConfirmarDialog`, `FilaVacia`, `ErrorForm`.
+- **Dentro de cada tabla**: menú "⋯" de acciones por fila; alta, edición y borrado en
+  diálogos (nunca filas que se convierten en formulario); avisos con toasts de `sonner`.
 
-#### Pestaña Pantallas
-Para cada pantalla del dashboard:
-- Radio **Pública** / **Restringida** (`is_public`)
-- Si restringida: checkboxes de roles con acceso
-- Botón **Guardar** por pantalla → `PUT /api/admin/screens/:key`
-- La pantalla `admin` no es editable (siempre solo accesible para `admin`)
+**Para añadir una sección**: componente en `components/nova/admin/` (con
+`CabeceraSeccion` + `TablaCard`), entrada en `GRUPOS_ADMIN` y, si debe poder abrirla
+alguien que no es admin, un permiso en `lib/permisos.ts` con `seccionAdmin` = la `key`
+de la sección, más sus rutas en `RUTAS_ADMIN_POR_PERMISO` (§5b).
 
-#### Pestaña Estados JDE
-Edición de las descripciones de los códigos `F47011.SYEDSP` que se muestran en `/comparativa-seres` (badge tooltip, columna "Descripción" y export Excel).
+### Secciones
 
-- Tabla con los 4 códigos sembrados (`Y`, `M`, `N`, `E`) — no se pueden añadir ni borrar nuevos códigos desde aquí, solo editar el texto.
-- Input por fila con la descripción + botón **Guardar** que se habilita solo si el texto ha cambiado respecto al guardado.
-- Persistencia en SQLite (tabla `jde_status_descriptions`). El seed inicial es idempotente (`INSERT OR IGNORE`), por lo que las ediciones manuales **no se sobreescriben** en futuros despliegues.
-- Cuando el admin guarda un cambio, el panel `/comparativa-seres` lo verá la próxima vez que se cargue (hace `fetch('/api/jde-statuses')` al montar).
+#### Usuarios
+- **Tabla**: avatar con iniciales, nombre y usuario, rol, planta por defecto,
+  "Configura" (permisos efectivos como badges: con borde los que vienen del rol,
+  rellenos los extras de esa persona; "Todos" para admin) y fecha de alta. Buscador.
+- **Clic en la fila → panel lateral "Accesos"**: qué paneles ve (se deriva de la matriz
+  de roles) y qué puede configurar. Lo que le da su rol sale marcado y bloqueado ("Por
+  su rol"); los extras se activan/desactivan aquí mismo, al momento. Es el sitio para
+  responder "¿qué puede hacer esta persona?" sin cruzar secciones.
+- **Nuevo usuario** (diálogo): nombre, apellido, usuario, contraseña, rol, planta por
+  defecto y switch "Forzar cambio de contraseña".
+- **Menú por fila**: Ver accesos, Editar (409 si el usuario ya existe), Resetear
+  contraseña (fuerza cambio en el próximo inicio) y Eliminar (con confirmación; no
+  permite auto-eliminación).
+
+#### Roles y permisos
+Sustituye a las antiguas pestañas **Roles** y **Pantallas**: una sola matriz.
+
+- **Filas**: "Ver paneles" (cada panel de `lib/panels.ts` registrado en `screens`) y
+  "Configurar" (cada permiso del catálogo `lib/permisos.ts`).
+- **Columnas**: **Público** (solo paneles: lo ve cualquiera, incluso sin sesión; sus
+  casillas de rol pasan a una marca gris) y una por rol, con su número de usuarios. El
+  administrador aparece con candado: lo tiene todo y no es editable.
+- **Cada casilla se guarda al marcarla** (actualización optimista; si el servidor falla,
+  se deshace y avisa): paneles → `PUT /api/admin/screens/:key`; configuración →
+  `PATCH /api/admin/roles/:id/permisos`.
+- **Nuevo rol** (diálogo): nombre visible; el nombre interno se sugiere solo
+  (minúsculas y guion bajo) y se puede cambiar. **Eliminar rol** desde el "⋯" de su
+  columna (no para `admin`); avisa de cuántos usuarios pasarán a `user` y borra sus
+  permisos en cascada.
+- Los permisos individuales de una persona (excepciones) no están aquí sino en sus
+  accesos (Usuarios).
+
+#### Estados JDE
+Descripciones de los códigos `F47011.SYEDSP` que se muestran en `/comparativa-seres`
+(tooltip del estado, columna "Descripción" y Excel). Solo se edita el texto de los 4
+códigos sembrados (`Y`, `M`, `N`, `E`); "Guardar" (o Enter) solo se activa si cambió.
+Persistencia en `jde_status_descriptions` con seed idempotente (`INSERT OR IGNORE`),
+así que las ediciones no se pierden en despliegues.
+
+#### Loteadora: Máquinas, Plantillas, Artículos, Datos fijos
+Configuración de `/loteadora` — ver [`docs/loteadora.md`](docs/loteadora.md) §8 y §13.
+Plantillas es un constructor: cada plantilla tiene campos (uno por Field Module de la
+máquina) y cada campo, piezas (texto, dato fijo, cocida, caducidad con su formato...),
+con vista previa en vivo de lo que se imprime. Datos fijos deja cambiar precios y nº de
+certificado de las plantillas a quien tenga su permiso, sin tocar el resto.
+Máquinas muestra además el estado en vivo de cada loteadora, comprobado cada minuto
+solo mientras la sección está abierta.
+
+#### Muestras
+Estado de la caché de `/muestras` (artículos configurados, lotes en caché, última
+sincronización, último error) y botón "Sincronizar ahora" — ver
+[`docs/muestras.md`](docs/muestras.md).
 
 ### APIs de administración
 
 | Método | Ruta | Descripción |
 |---|---|---|
-| GET | `/api/admin/users` | Lista todos los usuarios |
+| GET | `/api/admin/users` | Lista usuarios, cada uno con sus `permisos` **extra** (los del rol vienen en `/api/admin/roles`) |
 | POST | `/api/admin/users` | Crea usuario. Rol validado contra tabla `roles`. 409 si username duplicado |
 | PUT | `/api/admin/users/:id` | Edita datos (nombre, apellido, username, rol, planta por defecto). 409 si username duplicado |
 | PATCH | `/api/admin/users/:id` | Resetea contraseña (fuerza cambio en próximo login) |
 | DELETE | `/api/admin/users/:id` | Elimina usuario (no permite auto-eliminación) |
-| GET | `/api/admin/roles` | Lista todos los roles |
+| PATCH | `/api/admin/users/:id/permisos` | `{ permiso, enabled }` — activa/desactiva un permiso **extra** de ese usuario (400 si la clave no existe) |
+| GET | `/api/admin/roles` | Lista roles, cada uno con los `permisos` de configuración de ese rol |
 | POST | `/api/admin/roles` | Crea rol (`name` + `label`). Nombre normalizado automáticamente |
-| DELETE | `/api/admin/roles/:id` | Elimina rol. Bloqueado para `admin`. Reasigna usuarios afectados a `user` |
+| DELETE | `/api/admin/roles/:id` | Elimina rol (y sus permisos, en cascada). Bloqueado para `admin`. Reasigna usuarios afectados a `user` |
+| PATCH | `/api/admin/roles/:id/permisos` | `{ permiso, enabled }` — activa/desactiva un permiso de configuración para ese rol (400 para `admin` o clave desconocida) |
 | PUT | `/api/admin/screens/:key` | Actualiza `is_public` y `allowed_roles[]` de una pantalla. Bloqueado para `admin` |
 | GET | `/api/admin/jde-statuses` | Lista las descripciones de los códigos SYEDSP (con `updated_at`) |
 | PUT | `/api/admin/jde-statuses/:code` | Actualiza la descripción de un código existente. No permite crear ni borrar |
 | GET | `/api/jde-statuses` | Lista pública (con sesión) consumida por `/comparativa-seres` |
 | GET | `/api/admin/logs` | Logs de consultas con paginación, filtros y estadísticas (ver sección 7) |
+| GET / POST | `/api/admin/loteadora-copia` | Exporta / importa en JSON las plantillas de la loteadora y sus asociaciones de artículos (botones de `/admin` → Plantillas, ver `docs/loteadora.md` §13) |
+
+Todas son solo de admin salvo las abiertas a un permiso en `RUTAS_ADMIN_POR_PERMISO`
+(§5b) — hoy `/api/admin/loteadora-articulos` (todo), `GET /api/admin/loteadora-mensajes` y
+`/api/admin/loteadora-datos-fijos` (todo).
 
 ---
 
@@ -522,7 +603,7 @@ El rol `admin` siempre tiene acceso a todo, hardcoded en la lógica (no solo en 
 **Un único sitio decide si algo se permite.** Antes había tres mecanismos sueltos
 haciendo lo mismo con matices distintos: `requireScreenAccess` (permisos por
 pantalla), un `verifySession()` + comprobar rol copiado en cada ruta de `/admin`, y
-`requireMuestrasConfigAccess` (flag por usuario). Ahora los tres delegan en
+`requireMuestrasConfigAccess` (permiso por usuario). Ahora los tres delegan en
 `requireAccess`, que es donde se toma la decisión y se construyen los cuerpos de
 error — los otros siguen existiendo solo como nombres cómodos.
 
@@ -537,6 +618,9 @@ usuario borrado). `lib/auth.ts` sigue exportando `verifySession()`, pero fuera d
 | `requireScreenAccess(screenKey)` | Envoltorio: `requireAccess({ screen })` → `NextResponse` 401/403 o `null` |
 | `requireAdmin()` | Envoltorio: `requireAccess({ role: 'admin' })` → `NextResponse` 401/403 o `null` |
 | `getAllScreensConfig()` | Devuelve `Record<string, ScreenConfig>` con `{ is_public, allowed_roles[] }` para cada pantalla |
+| `permisosDeUsuario(userId)` | Permisos efectivos: los de su rol + sus extras (solo claves que siguen en el catálogo) |
+| `permisosDeRol(roleName)` | Permisos de configuración concedidos a un rol |
+| `puedeVerPaginaAdmin(userId, role)` / `puedeUsarApiAdmin(path, método, userId, role)` | Las dos reglas de `/admin` que usa `proxy.ts` (ver "Permisos sueltos por usuario") |
 
 Reglas que acepta `requireAccess` (se pueden combinar; todas deben pasar):
 
@@ -544,7 +628,7 @@ Reglas que acepta `requireAccess` (se pueden combinar; todas deben pasar):
 |---|---|
 | `screen` | La fila de `screens`: sin registrar → pasa; `is_public` → pasa **sin sesión**; si no, exige sesión y que el rol esté en `screen_permissions` (admin siempre pasa) |
 | `role` | Exige sesión (401 si no) y que el rol coincida (403 si no) |
-| `flag` | Exige sesión y una columna booleana de `users` (hoy solo `can_configure_muestras`); admin siempre pasa |
+| `permiso` | Exige sesión y un permiso del catálogo (`lib/permisos.ts`) concedido a su **rol** (`role_permissions`) o a **él** (`user_permissions`); admin siempre pasa |
 | `sesion` | Exige sesión y nada más — rutas "de usuario" como los presets |
 
 Y dos comprobaciones que se aplican **siempre** que haya sesión, sin pedirlas:
@@ -575,6 +659,42 @@ Dos detalles que importan:
   `/api/auth/{me,change-password,logout}` no pasan por `requireAccess`, que es
   justo lo que hace falta para poder cambiarla.
 
+### Permisos de configuración (`lib/permisos.ts` + `role_permissions` + `user_permissions`)
+
+Además de qué **paneles** ve cada rol (`screens` / `screen_permissions`, arriba), hay
+permisos para **configuraciones concretas** que no son de admin — ej. elegir los
+artículos de `/muestras` o asignar artículos a plantillas de loteadora.
+
+- **Catálogo en código** (`lib/permisos.ts`, sin dependencias de servidor para poder
+  usarlo en cliente): cada permiso tiene `label`, `corto` (badge), `grupo` y,
+  opcionalmente, `seccionAdmin` (la sección de `/admin` que desbloquea). Añadir uno
+  nuevo es una entrada más: la matriz de roles, los accesos de cada usuario, el
+  sidebar de `/admin` y el proxy leen de ahí. No hace falta migración.
+- **Se conceden por rol** (`role_permissions`, desde `/admin` → Roles y permisos) —
+  lo normal: un rol "Calidad" con "artículos de muestras" y a cada persona solo se le
+  asigna el rol — **y, como excepción, a una persona** (`user_permissions`, desde sus
+  accesos en `/admin` → Usuarios). Lo que puede hacer un usuario = lo de su rol + sus
+  extras (`permisosDeUsuario`). Ambas tablas con `ON DELETE CASCADE`. El admin los tiene
+  todos implícitamente (sin filas). Una clave que ya no esté en el catálogo se ignora.
+- **Permisos actuales**: `muestras.config` (antes columna `users.can_configure_muestras`,
+  migrada automáticamente a `user_permissions` — quien lo tenía lo conserva — y
+  eliminada), `admin.loteadora.articulos` (sección Loteadora › Artículos) y
+  `admin.loteadora.datos-fijos` (sección Loteadora › Datos fijos: precios y nº de
+  certificado de las plantillas).
+- **Servidor, denegado por defecto**: `proxy.ts` sigue cortando `/admin*` y
+  `/api/admin/*` a quien no sea admin, salvo: la página `/admin` exacta si algún
+  permiso efectivo suyo tiene `seccionAdmin`, y las rutas de `RUTAS_ADMIN_POR_PERMISO`
+  (prefijo + métodos) si tiene ese permiso. Cualquier ruta que no esté en esa lista
+  sigue siendo solo de admin, y cada ruta abierta vuelve a comprobarlo con
+  `requireAccess({ permiso })`. Tests en `__tests__/permissions.test.ts` (incluido el
+  caso de un permiso que llega solo por el rol).
+- **Cliente**: `/api/auth/me` devuelve `permisos: string[]` (los efectivos); para
+  decidir, usar siempre `tienePermiso(user, clave)` (cuenta al admin), nunca
+  `user.permisos.includes()` a secas.
+- Ojo: el rol que cuenta es el de la sesión (JWT), igual que para los paneles. Si se
+  cambia el rol de alguien, lo nuevo de su rol le aplica cuando vuelva a iniciar sesión
+  (sus extras, en cambio, al momento).
+
 ### Sesión en cliente: `components/SessionProvider.tsx`
 
 Montado una vez en `app/layout.tsx`, envuelve toda la app. Sustituye al
@@ -587,7 +707,7 @@ permisos (los dos navbars y las páginas).
 | `SessionProvider` | Mantiene `user` + `screens`. **No redirige por su cuenta.** |
 | `useSession()` | `{ user, screens, loading, refresh, logout, onSessionExpired }` |
 | `useApiFetch()` | `fetch` que ante un 401 echa al login en vez de dejar que el panel muestre "No autenticado" como un error cualquiera |
-| `RequireAccess` | Envuelve el contenido de una página: no pinta nada hasta saber si se puede entrar. `screen="caducados"` para un panel, `role="admin"` para `/admin` y `/admin/logs`, sin props para "basta con tener sesión" |
+| `RequireAccess` | Envuelve el contenido de una página: no pinta nada hasta saber si se puede entrar. `screen="caducados"` para un panel, `role="admin"` para `/admin/logs`, `allow={fn}` para una regla propia (`/admin` usa `allow={puedeEntrarEnAdmin}`), sin props para "basta con tener sesión" |
 | `puedeAcceder(cfg, user)` | La regla de acceso, la misma que `requireAccess({screen})` en servidor |
 
 **Qué arregla, en concreto:**
@@ -636,7 +756,7 @@ Excepciones, todas con su motivo:
 | `/login` | Es el único sitio que puede hablar con `/api/auth/me` por su cuenta: corre justo cuando no hay sesión que compartir |
 | `/cambiar-contrasena` | Puerta al revés: solo se entra **si** hay que cambiar la contraseña, y `RequireAccess` manda justo ahí |
 | `/` (portada) | No es un panel: con sesión desvía al primer panel permitido, sin sesión hace de escaparate |
-| `/admin`, `/admin/logs` | Se gobiernan por rol, no por `screens` → `RequireAccess role="admin"` |
+| `/admin`, `/admin/logs` | No se gobiernan por `screens`: `/admin` por rol o permisos sueltos → `RequireAccess allow={puedeEntrarEnAdmin}`; `/admin/logs` solo admin → `RequireAccess role="admin"` |
 
 `__tests__/permissions.test.ts` tiene una guarda anti-regresión: falla si una
 página vuelve a llamar a `/api/auth/me` o se monta sin `<RequireAccess>`.
@@ -894,42 +1014,52 @@ Protegido con `verifySession()` + `role === 'admin'`.
 }
 ```
 
-### Página de logs — `/admin/logs`
+### Dónde se ven: `/admin` → Datos › Logs de consultas
 
-**Archivo:** `app/admin/logs/page.tsx`
-
-Solo accesible para admins. Se accede desde:
-- Botón "Logs" en el panel de administración (`/admin`)
-- Botón "Logs" en la barra de sesión del dashboard (`/produccion`, solo admins)
+**Archivo:** `components/nova/admin/logs-consultas.tsx` (sección de `/admin`, solo admin —
+ver §5). La antigua página `/admin/logs` se mantiene como **redirección** a
+`/admin?seccion=logs`, para que no se rompan los enlaces que ya apuntaban ahí (menú de
+perfil, barra del sistema viejo).
 
 **Componentes visuales:**
 
-1. **4 tarjetas de estadísticas:** Consultas totales, Tiempo medio, Tiempo máximo, Resultados medio
-2. **Gráfico de líneas (recharts):** Toggle con botón "Ver gráfico"/"Ocultar gráfico". Muestra consultas y tiempo medio por día con dos ejes Y (consultas izquierda, tiempo derecha). Selector de rango: 7 / 14 / 30 / 90 días.
-3. **Ranking de usuarios:** Tarjeta con top 5 usuarios autenticados por nº de consultas + contador de consultas anónimas (Invitado)
-4. **Filtros:** Usuario (dropdown), Panel/fuente (dropdown), Fecha desde, Fecha hasta, botones Filtrar/Limpiar
-5. **Tabla de logs:** Fecha/Hora, Usuario, Panel (badge con color), Filtros (resumen), Resultados, Tiempo. Las filas con tiempo > 3 segundos se resaltan en rojo.
-6. **Exportación Excel:** Botón "Exportar Excel" descarga todos los logs filtrados actuales
-7. **Paginación:** Anterior/Siguiente con indicador de página
+1. **4 KPIs** (bloque `statistics-04`): Consultas, Tiempo medio (con el mínimo debajo),
+   Tiempo máximo (en rojo si supera 3 s) y Resultados de media.
+2. **Actividad** (gráfico de área de Nova, `ChartContainer`, en los grises del tema): consultas y tiempo medio por
+   día con dos ejes Y (consultas a la izquierda, segundos a la derecha). Selector de rango
+   7 / 14 / 30 / 90 días en la cabecera de la tarjeta. Siempre visible (antes iba detrás de
+   un botón "Ver gráfico").
+3. **Usuarios más activos**: top de usuarios autenticados por nº de consultas, con barra
+   proporcional, más el contador de consultas anónimas (sin sesión).
+4. **Tabla de logs** con la barra de filtros encima: Panel, Usuario, Desde, Hasta y
+   botones Filtrar / Limpiar (los filtros solo se aplican al pulsar "Filtrar"). Columnas:
+   Fecha, Usuario, Panel (badge; los logins con icono), Filtros (resumen), Resultados y
+   Tiempo (en rojo si > 3 s). Contador de registros y paginación Anterior/Siguiente.
+5. **"Exportar página"**: descarga a Excel los registros de la página visible (igual que el
+   antiguo botón "Excel").
 
 **Detalles de implementación:**
-- `SLOW_QUERY_MS = 3000` — umbral para resaltado de consultas lentas (rojo)
-- Los logins se resaltan con fondo azul claro y icono LogIn
-- La columna "Panel" muestra badges con colores según el source (`SOURCE_LABELS`)
-- `summarizeFilters()` convierte el JSON de filtros en un resumen legible (ej: "Aguilar · 01/03 - 02/03 · 3 filtros"). También maneja filtros específicos de caducados (type, location).
-- Las estadísticas, gráfico y ranking excluyen entradas de login (solo consultas reales)
+- `SLOW_QUERY_MS = 3000` — umbral de consulta lenta.
+- `SOURCE_LABELS` (en el mismo archivo) traduce cada `source` al nombre del panel.
+- `summarizeFilters()` convierte el JSON de filtros en un resumen legible (ej: "Aguilar ·
+  01/03 - 02/03 · 3 filtros"). También maneja filtros específicos de caducados (type,
+  location) y las sincronizaciones de `/muestras`.
+- Las estadísticas, gráfico y ranking excluyen entradas de login (solo consultas reales).
 
-### Pestaña "Confirmaciones PDA" (`/admin/logs`)
+### Confirmaciones PDA: `/admin` → Datos › Confirmaciones PDA
 
-Segunda pestaña de la misma página (`<Tabs>`, junto a "Consultas"), con su propio estado y su
-propia API — no reutiliza `query_logs`. Lista el registro de aceptación del pop-up obligatorio de
-`/consulta-stock-pda` (ver `docs/consulta-stock-pda.md` §8.2): quién aceptó qué aviso, con qué SSCC
-y cuándo — trazabilidad si un producto se mete erróneamente en línea.
+Sección propia (antes, segunda pestaña de `/admin/logs`), con su propia API — no reutiliza
+`query_logs`. Lista el registro de aceptación del pop-up obligatorio de
+`/consulta-stock-pda` (ver `docs/consulta-stock-pda.md` §8.2): quién aceptó qué aviso, con qué
+SSCC y cuándo — trazabilidad si un producto se mete erróneamente en línea.
 
-- **Archivo:** mismo `app/admin/logs/page.tsx`, tabla `stock_scan_confirmations`.
-- **API:** `GET /api/admin/scan-confirmations` (`app/api/admin/scan-confirmations/route.ts`) — paginada, filtros por usuario, resultado (correcto/aviso/no_encontrado/sin_fecha/otra_subplanta), SSCC (parcial) y rango de fechas. Solo admin.
-- **Tabla:** Fecha/Hora, Usuario, SSCC completo, Artículo, Resultado aceptado (badge de color + los mensajes exactos que vio el operario).
-- No comparte filtros, paginación ni contador de página con la pestaña "Consultas" — son datasets independientes.
+- **Archivo:** `components/nova/admin/confirmaciones-pda.tsx`, tabla `stock_scan_confirmations`.
+- **API:** `GET /api/admin/scan-confirmations` (`app/api/admin/scan-confirmations/route.ts`) —
+  paginada, filtros por usuario, resultado (correcto/aviso/no_encontrado/sin_fecha/
+  otra_subplanta), SSCC (parcial) y rango de fechas. Solo admin.
+- **Tabla:** Fecha, Usuario, SSCC completo, Artículo, Resultado aceptado (badge de color + los
+  mensajes exactos que vio el operario). Filtros en la barra de la tabla (el SSCC también se
+  aplica con Enter).
 
 ### Persistencia
 
@@ -939,8 +1069,8 @@ Los logs se almacenan en `data/app.db` (SQLite), igual que usuarios y presets. N
 
 Al crear un nuevo panel (ej: ventas), basta con:
 1. Añadir el INSERT en la ruta API del nuevo panel con `source: 'ventas'`
-2. Añadir la etiqueta en `SOURCE_LABELS` en `admin/logs/page.tsx`
-3. Los logs aparecerán automáticamente en la página de logs con su badge identificativo
+2. Añadir la etiqueta en `SOURCE_LABELS` en `components/nova/admin/logs-consultas.tsx`
+3. Los logs aparecerán automáticamente en `/admin` → Datos › Logs de consultas con su badge identificativo
 
 ---
 
@@ -1131,7 +1261,6 @@ Wrapper fino sobre `<input type="date">` nativo del navegador. Devuelve y recibe
 **Usado en:**
 - `components/FilterPanel.tsx` — fechas inicio/fin del dashboard de producción
 - `app/preparacion-pedidos/page.tsx` — fechas carga y entrega del panel de pedidos
-- `app/admin/logs/page.tsx` — filtros de fecha en los logs de consultas
 
 ### `components/ui/popover.tsx`
 

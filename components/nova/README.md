@@ -289,6 +289,24 @@ de intentar un script inline propio.
     `app/loteadora/page.tsx`). Sin problema de portal: `Alert` no usa
     `*Primitive.Portal`, así que no necesita `useNovaPortalContainer()`.
 
+- **`Sidebar` y `Label` instalados** (`bunx --bun shadcn@latest add sidebar` / `label`,
+  rediseño de `/admin`): mismo bug de registro que `Combobox`/`Alert` — `import { cn }
+  from "cn"` y el paquete npm `cn` añadido a `package.json`; se corrigió el import y se
+  quitó el paquete (`bun remove cn`). El CLI pregunta si sobreescribir los primitivos
+  que el sidebar arrastra (`button`, `sheet`, `tooltip`...) y sin terminal interactiva se
+  queda colgado: lanzarlo como `yes n | bunx --bun shadcn@latest add sidebar` para que
+  conteste "no" y **no pise los parches de portal** ya hechos. Trae el hook
+  `hooks/nova/use-mobile.ts` (alias `hooks` de `components.json`).
+  - **`tooltip.tsx` no tenía el parche de portal** (nadie lo había usado de verdad hasta
+    el sidebar colapsado, que lo usa en cada icono): añadido `container={useNovaPortalContainer()}`.
+  - El sidebar guarda su estado abierto/colapsado en una cookie (`sidebar_state`) — es
+    del propio componente de shadcn y cumple la regla de no usar `localStorage`.
+- **`Select` de Base UI con clave distinta del texto** (ej. `admin` → "Administrador"):
+  pasar `items={[{ value, label }]}` al `<Select>` raíz; sin eso, `<SelectValue>` muestra
+  la clave. Base UI no distingue `""` de "sin valor", así que una opción "Todas" que viaja
+  como `""` a la API necesita un valor propio en el desplegable (ver
+  `components/nova/admin/usuarios.tsx`, `TODAS`).
+
 ## Cómo construir el siguiente panel Nova
 
 Checklist basada en lo que realmente se usó/decidió construyendo `/compras` (detalle
@@ -341,3 +359,14 @@ desde cero las mismas decisiones de diseño:
    `c:\Users\dgarcia\Projects\Shadcn Space Admin Dashboard - Next.js`) en vez de adivinar
    estructura por CSS suelto — varias decisiones de este panel (caja redondeada, borde de
    nav) solo se confirmaron leyendo el código fuente real del proyecto, no a ojo.
+9. **Panel con varias secciones de configuración** (no un dashboard): shell con
+   `Sidebar variant="inset"` real (logo arriba, secciones agrupadas, "Ir a paneles"
+   abajo) + `SidebarInset` con una cabecera fina propia (trigger + breadcrumb + tema/
+   avisos/perfil de `topbar-02`) — **no** la barra completa de `topbar-02`, cuyo ancho
+   centrado no cuadra con un contenido a todo el ancho. Un componente por sección con
+   `CabeceraSeccion` + `TablaCard` (`components/nova/admin/comun.tsx`) — ver
+   `app/admin/page.tsx` y DOCUMENTACION.md §5. Dentro de cada sección, patrón de gestión de ShadcnSpace:
+   tarjeta con `CardAction` para la acción principal, tabla con menú "⋯"
+   (`DropdownMenuTrigger render={<Button variant="ghost" size="icon-sm" />}`), y
+   alta/edición/borrado en `Dialog` (confirmación con `ConfirmarDialog` de
+   `components/nova/admin/comun.tsx`), nunca filas que se convierten en formulario.

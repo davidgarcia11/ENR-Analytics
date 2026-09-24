@@ -22,17 +22,18 @@ app/muestras/page.tsx                       # Página (client component, Nova)
 app/api/muestras/route.ts                   # GET (listado, lee la caché local) + PATCH (estado/observación, individual o masivo)
 app/api/muestras/config/route.ts            # GET/POST/DELETE — lista global de artículos visibles; POST dispara runFullSync()
 app/api/admin/muestras-sync/route.ts        # GET (estado) + POST (botón "Sincronizar ahora" manual, admin)
-app/api/admin/users/[id]/muestras-config/route.ts  # Activa/desactiva can_configure_muestras de un usuario
+app/api/admin/users/[id]/permisos/route.ts  # Activa/desactiva un permiso suelto (aquí 'muestras.config') de un usuario
 lib/muestras.ts                             # runFullSync, ensureSyncScheduler, allowlist, permiso de configuración
 components/nova/muestras-table.tsx          # Tabla: búsqueda/filtro local, selección múltiple, paginación
 components/nova/muestras-article-config.tsx # Sheet de configuración de artículos visibles
 components/nova/date-range-picker.tsx       # Selector de fechas (día a día, estilo /produccion)
 components/shadcn-space/pagination/pagination-02.tsx  # Pagination 02 - Premium Ribbon (ShadcnSpace), parametrizado
 lib/panels.ts                               # Entrada 'muestras' (fuente única de paneles)
-lib/sqlite.ts                               # Tablas sample_tracking, sample_article_filter, sample_candidates, sample_sync_state; users.can_configure_muestras
+lib/sqlite.ts                               # Tablas sample_tracking, sample_article_filter, sample_candidates, sample_sync_state; user_permissions
+lib/permisos.ts                             # Catálogo de permisos sueltos (incluye 'muestras.config')
 components/shadcn-space/blocks/topbar-02/data.ts  # 'muestras' en el grupo Apps del nav
-app/admin/page.tsx                          # Columna "Responsable Muestras" en Usuarios + pestaña "Muestras" (sincronización manual)
-app/admin/logs/page.tsx                     # Fuentes 'muestras'/'muestras-sync' en SOURCE_LABELS + resumen de filtros de sincronización
+components/nova/admin/muestras-sync.tsx     # /admin → Muestras → Sincronización (estado de la caché + sincronización manual)
+components/nova/admin/logs-consultas.tsx  # Fuentes 'muestras'/'muestras-sync' en SOURCE_LABELS + resumen de filtros de sincronización
 ```
 
 ## 3. Origen de datos JDE y caché local
@@ -241,7 +242,7 @@ filtrar por artículo es justo la consulta inviable).
   §4bis) — no dispara sincronización, no hay nada nuevo que traer.
 
 Gate propio (`requireMuestrasConfigAccess` en `lib/muestras.ts`, no `requireScreenAccess`):
-`admin`, o cualquier usuario con `users.can_configure_muestras = 1`.
+`admin`, o cualquier usuario con el permiso suelto `muestras.config`  (`user_permissions`) o que lo tenga por su rol (`role_permissions`).
 
 ### `GET/POST /api/admin/muestras-sync` — sincronización manual (admin)
 
@@ -314,7 +315,7 @@ artículos configurada, tarda segundos).
   completo para no dejar la pantalla desincronizada de la BD.
 - **Configuración de artículos visibles** (`components/nova/muestras-article-config.tsx`,
   botón "Artículos visibles" junto al filtro de fechas): solo se monta si
-  `sessionUser.role === 'admin' || sessionUser.canConfigureMuestras` — comprobación de
+  `tienePermiso(sessionUser, 'muestras.config')` (lib/permisos.ts, cuenta al admin) — comprobación de
   UI únicamente, el servidor vuelve a comprobarlo en `/api/muestras/config`. `Sheet`
   lateral con buscador (debounce 300ms) sobre `F4101` y la lista actual como `Badge`s
   con botón de quitar.
@@ -326,14 +327,18 @@ lógica de roles especial en código: el rol dedicado se crea y asigna desde `/a
 (pestaña Roles/Pantallas), junto con `admin` (acceso siempre garantizado por
 `canAccessPanel`).
 
-### 8.1 Quién puede configurar qué artículos se ven (`can_configure_muestras`)
+### 8.1 Quién puede configurar qué artículos se ven (permiso `muestras.config`)
 
 Decisión explícita del usuario: la lista de artículos visibles (§6, `sample_article_filter`)
 **no es por usuario individual** — es una única lista compartida por todo el mundo que
 usa `/muestras`. Lo que sí es por usuario individual es el **permiso para editar esa
-lista**: columna `users.can_configure_muestras` (0/1), activable por `admin` desde
-`/admin` (pestaña Usuarios, columna "Responsable Muestras") para cualquier usuario
-concreto — no ligado a un rol, para poder dárselo a una sola persona sin tener que crear
+lista**: permiso suelto `muestras.config` (tabla `user_permissions`, catálogo en
+`lib/permisos.ts` — ver DOCUMENTACION.md §5b), que el admin concede a un rol entero
+(`/admin` → Roles y permisos) o, como excepción, a un usuario concreto (sus accesos en
+`/admin` → Usuarios). Hasta la rama
+`feature/admin-sidebar-permisos` era la columna `users.can_configure_muestras`; se
+migró automáticamente (quien lo tenía lo conserva) y la columna se eliminó. Sigue siendo
+por usuario concreto — no ligado a un rol, para poder dárselo a una sola persona sin tener que crear
 un rol nuevo solo para eso (petición explícita: *"¿y si quiero que un usuario concreto
 tenga eso?"*).
 
@@ -342,7 +347,7 @@ cualquier pantalla, `canAccessPanel`), pero a diferencia del resto de restriccio
 del proyecto, **aquí no hay bypass de admin al consultar el listado**: si hay una
 lista configurada, se aplica también a admin — petición explícita del usuario ("no
 puede ser que el admin vea todos los artículos, querrá ver los que se hayan
-configurado para que salgan"). Cualquiera con `can_configure_muestras = 1` (admin o
+configurado para que salgan"). Cualquiera con el permiso `muestras.config` (admin o
 no) sigue viendo `/muestras` restringido a la lista que él mismo configura — si
 necesita ver algo fuera de esa lista, lo añade él mismo.
 
@@ -352,12 +357,13 @@ necesita ver algo fuera de esa lista, lo añade él mismo.
    propio archivo).
 2. `components/shadcn-space/blocks/topbar-02/data.ts` → `muestras` en `APP_KEYS`.
 3. `lib/sqlite.ts` → tablas `sample_tracking`, `sample_article_filter`,
-   `sample_candidates`, `sample_sync_state`, columna `users.can_configure_muestras`
+   `sample_candidates`, `sample_sync_state` (el permiso de configuración vive en
+   `user_permissions`, ver §8.1)
    (se siembra automáticamente `screens` desde `PANELS`, pública por defecto,
    restringible desde `/admin`).
 4. `app/api/muestras/route.ts` → `requireScreenAccess('muestras')`, logging en
    `query_logs` con `source: 'muestras'`.
-5. `app/admin/logs/page.tsx` → etiquetas `'muestras'` → `'Muestras'` y `'muestras-sync'`
+5. `app/admin/logs/page.tsx` (hoy `components/nova/admin/logs-consultas.tsx`) → etiquetas `'muestras'` → `'Muestras'` y `'muestras-sync'`
    → `'Muestras (sincronización)'` en `SOURCE_LABELS`, más un caso especial en
    `summarizeFilters` para mostrar el disparador/artículos/error de cada sincronización.
 

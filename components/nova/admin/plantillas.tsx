@@ -1,0 +1,485 @@
+"use client";
+
+// /admin → Loteadora › Plantillas: constructor de plantillas. Una plantilla (mensaje
+// de la máquina) tiene campos —uno por Field Module, con su ID de datos— y cada campo
+// es una secuencia de piezas (texto, dato fijo, fresco, cocida, caducidad, turno,
+// hora, línea) que se concatenan. Modelo, formatos y validación en
+// lib/loteadora-plantilla.ts; ver docs/loteadora.md §13.
+import { useEffect, useRef, useState } from "react";
+import { toast } from "sonner";
+import { ArrowLeft, ArrowRight, Download, Loader2, MoreHorizontal, Pencil, Plus, Trash2, Upload, X } from "lucide-react";
+import { useApiFetch } from "@/components/SessionProvider";
+import { Button } from "@/components/nova/ui/button";
+import { Input } from "@/components/nova/ui/input";
+import { Label } from "@/components/nova/ui/label";
+import { Badge } from "@/components/nova/ui/badge";
+import { Checkbox } from "@/components/nova/ui/checkbox";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/nova/ui/select";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/nova/ui/table";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/nova/ui/dialog";
+import {
+  DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger,
+} from "@/components/nova/ui/dropdown-menu";
+import {
+  FORMATOS_CADUCIDAD, FORMATOS_COCIDA, INFO_PIEZA, TIPOS_PIEZA, componerCampos,
+  type Campo, type Pieza, type TipoPieza, type ValoresEtiqueta,
+} from "@/lib/loteadora-plantilla";
+import { CabeceraSeccion, ConfirmarDialog, ErrorForm, FilaVacia, TablaCard, type SeccionProps } from "./comun";
+
+interface Mensaje {
+  id: number;
+  name: string;
+  campos: Campo[];
+}
+
+// En el formulario el ID se edita como texto (puede estar a medio escribir)
+interface CampoEditable {
+  fieldId: string;
+  piezas: Pieza[];
+}
+
+// Valores de ejemplo para la vista previa: cocida hace unos días, caducidad a +30.
+function valoresEjemplo(): ValoresEtiqueta {
+  const hoy = new Date();
+  const cocida = new Date(hoy.getFullYear(), hoy.getMonth(), hoy.getDate() - 3);
+  const dia = Math.floor((cocida.getTime() - new Date(cocida.getFullYear(), 0, 0).getTime()) / 86400000);
+  const cad = new Date(cocida.getFullYear(), cocida.getMonth(), cocida.getDate() + 30);
+  const iso = `${cad.getFullYear()}-${String(cad.getMonth() + 1).padStart(2, "0")}-${String(cad.getDate()).padStart(2, "0")}`;
+  return { fresco: "263221", cocidaAnio: cocida.getFullYear(), cocidaDia: dia, caducidad: iso, hora: "0930", turno: "1", linea: "1" };
+}
+const EJEMPLO = valoresEjemplo();
+
+const nuevaPieza = (tipo: TipoPieza): Pieza =>
+  tipo === "texto" ? { tipo, valor: "" }
+    : tipo === "fijo" ? { tipo, nombre: "", valor: "" }
+      : tipo === "cocida" ? { tipo, formato: "AAJJJ" }
+        : tipo === "caducidad" ? { tipo, formato: "DD/MM/AA" }
+          : { tipo };
+
+// Plantilla nueva: arranca con un campo con la cocida (lo más habitual)
+const vacia = (): CampoEditable[] => [{ fieldId: "1", piezas: [nuevaPieza("texto"), nuevaPieza("cocida")] }];
+
+const aEditables = (campos: Campo[]): CampoEditable[] =>
+  campos.map((c) => ({ fieldId: String(c.fieldId), piezas: c.piezas.map((p) => ({ ...p })) }));
+
+const FORMATO_ITEMS_CAD = FORMATOS_CADUCIDAD.map((f) => ({ value: f, label: f }));
+const FORMATO_ITEMS_COC = FORMATOS_COCIDA.map((f) => ({ value: f, label: f }));
+
+// Texto con los espacios visibles: en una etiqueta un espacio de más o de menos importa
+const conEspacios = (t: string) => t.replace(/ /g, "·");
+
+function EditorPieza({ pieza, onChange, onQuitar, onMover, primera, ultima }: {
+  pieza: Pieza;
+  onChange: (p: Pieza) => void;
+  onQuitar: () => void;
+  onMover: (dir: -1 | 1) => void;
+  primera: boolean;
+  ultima: boolean;
+}) {
+  const esVariable = pieza.tipo !== "texto" && pieza.tipo !== "fijo";
+  return (
+    <div className={`flex items-center gap-1 rounded-lg border p-1 ${esVariable ? "bg-muted/60" : "bg-background"}`}>
+      <Button type="button" variant="ghost" size="icon-xs" disabled={primera} onClick={() => onMover(-1)} aria-label="Mover a la izquierda">
+        <ArrowLeft />
+      </Button>
+      {pieza.tipo === "texto" && (
+        <Input
+          value={pieza.valor ?? ""}
+          onChange={(e) => onChange({ ...pieza, valor: e.target.value })}
+          placeholder="texto"
+          className="h-7 w-24 font-mono text-xs"
+          aria-label="Texto fijo"
+        />
+      )}
+      {pieza.tipo === "fijo" && (
+        <>
+          <Input value={pieza.nombre ?? ""} onChange={(e) => onChange({ ...pieza, nombre: e.target.value })} placeholder="Nombre (Precio)" className="h-7 w-28 text-xs" aria-label="Nombre del dato fijo" />
+          <Input value={pieza.valor ?? ""} onChange={(e) => onChange({ ...pieza, valor: e.target.value })} placeholder="Valor" className="h-7 w-24 font-mono text-xs" aria-label="Valor del dato fijo" />
+        </>
+      )}
+      {esVariable && <span className="px-1 text-xs font-medium text-foreground">{INFO_PIEZA[pieza.tipo].label}</span>}
+      {(pieza.tipo === "cocida" || pieza.tipo === "caducidad") && (
+        <Select
+          items={pieza.tipo === "cocida" ? FORMATO_ITEMS_COC : FORMATO_ITEMS_CAD}
+          value={pieza.formato}
+          onValueChange={(v) => onChange({ ...pieza, formato: v as string })}
+        >
+          <SelectTrigger size="sm" className="h-7 w-32 font-mono text-xs"><SelectValue /></SelectTrigger>
+          <SelectContent>
+            {(pieza.tipo === "cocida" ? FORMATO_ITEMS_COC : FORMATO_ITEMS_CAD).map((f) => (
+              <SelectItem key={f.value} value={f.value} className="font-mono text-xs">{f.label}</SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      )}
+      {pieza.tipo === "caducidad" && (
+        <Input
+          type="number"
+          value={pieza.valor ?? ""}
+          onChange={(e) => onChange({ ...pieza, valor: e.target.value })}
+          placeholder="±días"
+          title="Ajuste en días sobre la caducidad: -1 = el día anterior"
+          className="h-7 w-16 font-mono text-xs"
+          aria-label="Ajuste en días de la caducidad"
+        />
+      )}
+      <Button type="button" variant="ghost" size="icon-xs" disabled={ultima} onClick={() => onMover(1)} aria-label="Mover a la derecha">
+        <ArrowRight />
+      </Button>
+      <Button type="button" variant="ghost" size="icon-xs" onClick={onQuitar} aria-label="Quitar pieza">
+        <X />
+      </Button>
+    </div>
+  );
+}
+
+function EditorCampo({ campo, ejemplo, onChange, onQuitar, puedeQuitar }: {
+  campo: CampoEditable;
+  ejemplo: ValoresEtiqueta;
+  onChange: (c: CampoEditable) => void;
+  onQuitar: () => void;
+  puedeQuitar: boolean;
+}) {
+  const setPiezas = (piezas: Pieza[]) => onChange({ ...campo, piezas });
+  const vista = componerCampos([{ fieldId: 0, piezas: campo.piezas }], ejemplo)[0].texto;
+
+  return (
+    <div className="space-y-3 rounded-xl border p-3">
+      <div className="flex items-center gap-2">
+        <Label htmlFor={`campo-${campo.fieldId}`} className="text-xs text-muted-foreground">ID del campo</Label>
+        <Input
+          id={`campo-${campo.fieldId}`}
+          type="number"
+          min={0}
+          max={255}
+          value={campo.fieldId}
+          onChange={(e) => onChange({ ...campo, fieldId: e.target.value })}
+          className="h-8 w-20 font-mono"
+        />
+        <div className="ml-auto flex items-center gap-2">
+          <span className="text-xs text-muted-foreground">Se imprime</span>
+          <code className="rounded-md border bg-muted/40 px-2 py-1 font-mono text-sm whitespace-pre text-foreground">
+            {vista ? conEspacios(vista) : "—"}
+          </code>
+          {puedeQuitar && (
+            <Button type="button" variant="ghost" size="icon-sm" onClick={onQuitar} aria-label="Quitar campo">
+              <Trash2 />
+            </Button>
+          )}
+        </div>
+      </div>
+      <div className="flex flex-wrap items-center gap-2">
+        {campo.piezas.map((p, i) => (
+          <EditorPieza
+            key={i}
+            pieza={p}
+            primera={i === 0}
+            ultima={i === campo.piezas.length - 1}
+            onChange={(np) => setPiezas(campo.piezas.map((x, j) => (j === i ? np : x)))}
+            onQuitar={() => setPiezas(campo.piezas.filter((_, j) => j !== i))}
+            onMover={(dir) => {
+              const arr = [...campo.piezas];
+              [arr[i], arr[i + dir]] = [arr[i + dir], arr[i]];
+              setPiezas(arr);
+            }}
+          />
+        ))}
+        <DropdownMenu>
+          <DropdownMenuTrigger render={<Button type="button" variant="outline" size="sm"><Plus />Pieza</Button>} />
+          <DropdownMenuContent align="start" className="w-72">
+            {TIPOS_PIEZA.map((t, i) => (
+              <div key={t}>
+                {i === 2 && <DropdownMenuSeparator />}
+                <DropdownMenuItem onClick={() => setPiezas([...campo.piezas, nuevaPieza(t)])} className="flex-col items-start gap-0">
+                  <span className="font-medium">{INFO_PIEZA[t].label}</span>
+                  <span className="text-xs text-muted-foreground">{INFO_PIEZA[t].ayuda}</span>
+                </DropdownMenuItem>
+              </div>
+            ))}
+          </DropdownMenuContent>
+        </DropdownMenu>
+      </div>
+    </div>
+  );
+}
+
+export default function AdminPlantillas({ titulo, descripcion }: SeccionProps) {
+  const apiFetch = useApiFetch();
+  const [mensajes, setMensajes] = useState<Mensaje[]>([]);
+  const [cargando, setCargando] = useState(true);
+
+  const [formulario, setFormulario] = useState<"nueva" | Mensaje | null>(null);
+  const [nombre, setNombre] = useState("");
+  const [campos, setCampos] = useState<CampoEditable[]>(vacia);
+  const [borrando, setBorrando] = useState<Mensaje | null>(null);
+  const [guardando, setGuardando] = useState(false);
+  const [error, setError] = useState("");
+  // La vista previa usa la línea real de la primera loteadora que la tenga
+  // configurada (el envío la manda tal cual, ver loteadoras.linea).
+  const [ejemplo, setEjemplo] = useState<ValoresEtiqueta>(EJEMPLO);
+
+  // Copia de seguridad (plantillas + asociaciones de artículos): exportar a un
+  // JSON e importarlo (ver importarCopia en lib/loteadora-plantilla.ts).
+  const archivoRef = useRef<HTMLInputElement>(null);
+  const [importacion, setImportacion] = useState<{ copia: any; archivo: string } | null>(null);
+  const [sustituir, setSustituir] = useState(false);
+  const [importando, setImportando] = useState(false);
+
+  const exportar = async () => {
+    try {
+      const res = await apiFetch("/api/admin/loteadora-copia");
+      if (!res.ok) { toast.error("No se pudo exportar"); return; }
+      const url = URL.createObjectURL(new Blob([JSON.stringify(await res.json(), null, 2)], { type: "application/json" }));
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `plantillas-loteadora-${new Date().toISOString().slice(0, 10)}.json`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch { toast.error("Error de conexión"); }
+  };
+
+  const elegirArchivo = async (archivo: File | undefined) => {
+    if (archivoRef.current) archivoRef.current.value = ""; // permite volver a elegir el mismo
+    if (!archivo) return;
+    try {
+      const copia = JSON.parse(await archivo.text());
+      if (copia?.version !== 1 || !Array.isArray(copia.plantillas)) throw new Error();
+      setSustituir(false);
+      setImportacion({ copia, archivo: archivo.name });
+    } catch { toast.error("Ese archivo no es una copia de plantillas de la loteadora"); }
+  };
+
+  const importar = async () => {
+    if (!importacion) return;
+    setImportando(true);
+    try {
+      const res = await apiFetch("/api/admin/loteadora-copia", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ copia: importacion.copia, sustituir }),
+      });
+      const data = await res.json();
+      if (!res.ok) { toast.error(data.error || "No se pudo importar"); return; }
+      const { plantillas: p, articulos: a } = data;
+      toast.success(`Plantillas: ${p.creadas} nuevas, ${p.sustituidas} sustituidas, ${p.omitidas} sin tocar. Artículos: ${a.creadas} nuevos, ${a.sustituidas} cambiados, ${a.omitidas} sin tocar.`, { duration: 8000 });
+      setImportacion(null);
+      cargar();
+    } catch { toast.error("Error de conexión"); } finally { setImportando(false); }
+  };
+
+  const cargar = async () => {
+    try {
+      const res = await apiFetch("/api/admin/loteadora-mensajes");
+      if (res.ok) setMensajes(await res.json());
+    } finally { setCargando(false); }
+  };
+
+  const cargarLinea = async () => {
+    const res = await apiFetch("/api/admin/loteadoras").catch(() => null);
+    if (!res?.ok) return;
+    const linea = ((await res.json()) as { linea: string | null }[]).find((l) => l.linea)?.linea;
+    if (linea) setEjemplo({ ...EJEMPLO, linea });
+  };
+
+  useEffect(() => { cargar(); cargarLinea(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, []);
+
+  const cerrar = () => { setFormulario(null); setBorrando(null); setError(""); };
+
+  const abrirAlta = () => { setNombre(""); setCampos(vacia()); setError(""); setFormulario("nueva"); };
+  const abrirEdicion = (m: Mensaje) => { setNombre(m.name); setCampos(aEditables(m.campos)); setError(""); setFormulario(m); };
+
+  const siguienteId = () => {
+    const usados = new Set(campos.map((c) => Number(c.fieldId)));
+    let id = 1;
+    while (usados.has(id)) id++;
+    return String(id);
+  };
+
+  const guardar = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!formulario) return;
+    const esNueva = formulario === "nueva";
+    setError(""); setGuardando(true);
+    try {
+      const res = await apiFetch(esNueva ? "/api/admin/loteadora-mensajes" : `/api/admin/loteadora-mensajes/${formulario.id}`, {
+        method: esNueva ? "POST" : "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: nombre, campos: campos.map((c) => ({ fieldId: Number(c.fieldId), piezas: c.piezas })) }),
+      });
+      const data = await res.json();
+      if (!res.ok) { setError(data.error || "Error al guardar"); return; }
+      toast.success(`Plantilla "${nombre}" ${esNueva ? "creada" : "actualizada"}`);
+      cerrar();
+      cargar();
+    } catch { setError("Error de conexión"); } finally { setGuardando(false); }
+  };
+
+  const borrar = async () => {
+    if (!borrando) return;
+    setGuardando(true);
+    try {
+      const res = await apiFetch(`/api/admin/loteadora-mensajes/${borrando.id}`, { method: "DELETE" });
+      const data = await res.json();
+      if (!res.ok) { toast.error(data.error || "Error al eliminar"); return; }
+      toast.success(`Plantilla "${borrando.name}" eliminada`);
+      cerrar();
+      cargar();
+    } catch { toast.error("Error al eliminar"); } finally { setGuardando(false); }
+  };
+
+  const editando = formulario && formulario !== "nueva";
+
+  return (
+    <>
+      <CabeceraSeccion titulo={titulo} descripcion={descripcion}>
+        <Button variant="outline" onClick={exportar} title="Descarga las plantillas y las asociaciones de artículos en un archivo">
+          <Download />
+          Exportar
+        </Button>
+        <Button variant="outline" onClick={() => archivoRef.current?.click()} title="Da de alta las plantillas y asociaciones de un archivo exportado">
+          <Upload />
+          Importar
+        </Button>
+        <input ref={archivoRef} type="file" accept=".json,application/json" className="hidden" onChange={(e) => elegirArchivo(e.target.files?.[0])} />
+        <Button onClick={abrirAlta}>
+          <Plus />
+          Nueva plantilla
+        </Button>
+      </CabeceraSeccion>
+      <TablaCard
+        toolbar={<span className="text-sm text-muted-foreground">Vista previa con valores de ejemplo. El nombre debe coincidir exactamente con el mensaje creado en la máquina.</span>}
+        extra={cargando ? null : `${mensajes.length} plantilla${mensajes.length === 1 ? "" : "s"}`}
+      >
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>Plantilla</TableHead>
+              <TableHead>Qué se imprime en cada campo</TableHead>
+              <TableHead className="w-10"><span className="sr-only">Acciones</span></TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {cargando || mensajes.length === 0 ? (
+              <FilaVacia colSpan={3} cargando={cargando} texto="No hay plantillas configuradas" />
+            ) : (
+              mensajes.map((m) => (
+                <TableRow key={m.id}>
+                  <TableCell className="align-top font-mono text-sm font-medium text-foreground">{m.name}</TableCell>
+                  <TableCell>
+                    <div className="flex flex-wrap gap-1.5">
+                      {componerCampos(m.campos, ejemplo).map((c) => (
+                        <Badge key={c.fieldId} variant="outline" className="gap-1.5 font-normal">
+                          <span className="text-muted-foreground">ID {c.fieldId}</span>
+                          <span className="font-mono whitespace-pre text-foreground">{conEspacios(c.texto) || "—"}</span>
+                        </Badge>
+                      ))}
+                    </div>
+                  </TableCell>
+                  <TableCell className="align-top">
+                    <DropdownMenu>
+                      <DropdownMenuTrigger
+                        render={
+                          <Button variant="ghost" size="icon-sm" aria-label={`Acciones de ${m.name}`}>
+                            <MoreHorizontal />
+                          </Button>
+                        }
+                      />
+                      <DropdownMenuContent align="end" className="min-w-40">
+                        <DropdownMenuItem onClick={() => abrirEdicion(m)}><Pencil />Editar</DropdownMenuItem>
+                        <DropdownMenuSeparator />
+                        <DropdownMenuItem variant="destructive" onClick={() => setBorrando(m)}><Trash2 />Eliminar</DropdownMenuItem>
+                      </DropdownMenuContent>
+                    </DropdownMenu>
+                  </TableCell>
+                </TableRow>
+              ))
+            )}
+          </TableBody>
+        </Table>
+      </TablaCard>
+
+      <Dialog open={!!formulario} onOpenChange={(o) => !o && cerrar()}>
+        <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-3xl">
+          <form onSubmit={guardar} className="grid gap-5">
+            <DialogHeader>
+              <DialogTitle>{editando ? "Editar plantilla" : "Nueva plantilla"}</DialogTitle>
+              <DialogDescription>
+                Un campo por cada Field Module del mensaje en la máquina, con su &quot;ID de datos&quot;. Lo que se imprime en cada
+                campo es la unión de sus piezas, en orden: pon como <strong>Texto</strong> lo que antes se dibujaba a mano (la
+                &quot;L&quot;, &quot;CAD &quot;, espacios...). Los espacios se ven como «·».
+              </DialogDescription>
+            </DialogHeader>
+            <div className="grid gap-2">
+              <Label htmlFor="m-nombre">Nombre del mensaje</Label>
+              <Input id="m-nombre" value={nombre} onChange={(e) => setNombre(e.target.value)} placeholder="N01_BF_FRESCO_VAR (sin .msg)" className="font-mono" autoFocus />
+            </div>
+
+            <div className="grid gap-3">
+              <Label>Campos</Label>
+              {campos.map((c, i) => (
+                <EditorCampo
+                  ejemplo={ejemplo}
+                  key={i}
+                  campo={c}
+                  puedeQuitar={campos.length > 1}
+                  onChange={(nc) => setCampos(campos.map((x, j) => (j === i ? nc : x)))}
+                  onQuitar={() => setCampos(campos.filter((_, j) => j !== i))}
+                />
+              ))}
+              <Button type="button" variant="outline" className="w-fit" onClick={() => setCampos([...campos, { fieldId: siguienteId(), piezas: [] }])}>
+                <Plus />
+                Añadir campo
+              </Button>
+            </div>
+
+            <ErrorForm error={error} />
+            <DialogFooter>
+              <Button type="button" variant="outline" onClick={cerrar}>Cancelar</Button>
+              <Button type="submit" disabled={guardando || !nombre}>
+                {guardando && <Loader2 className="animate-spin" />}
+                {editando ? "Guardar cambios" : "Crear plantilla"}
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={!!importacion} onOpenChange={(o) => !o && setImportacion(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Importar plantillas</DialogTitle>
+            <DialogDescription>
+              <span className="font-mono">{importacion?.archivo}</span> trae {importacion?.copia.plantillas.length ?? 0} plantillas y{" "}
+              {importacion?.copia.articulos?.length ?? 0} asociaciones de artículos. Si algo del archivo no es válido, no se importa nada.
+            </DialogDescription>
+          </DialogHeader>
+          <label className="flex items-start gap-2 text-sm">
+            <Checkbox checked={sustituir} onCheckedChange={(v) => setSustituir(v === true)} className="mt-0.5" />
+            <span>
+              <span className="font-medium text-foreground">Sustituir las que ya existan</span>
+              <span className="block text-muted-foreground">
+                Plantillas con el mismo nombre y artículos asociados a otra plantilla. Sin marcar, solo se añade lo que falta.
+              </span>
+            </span>
+          </label>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setImportacion(null)}>Cancelar</Button>
+            <Button onClick={importar} disabled={importando}>
+              {importando && <Loader2 className="animate-spin" />}
+              Importar
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <ConfirmarDialog
+        open={!!borrando}
+        onOpenChange={(o) => !o && cerrar()}
+        title="Eliminar plantilla"
+        description={<>Se eliminará la plantilla <strong>{borrando?.name}</strong> y las asociaciones de artículos que la usen. Esta acción no se puede deshacer.</>}
+        onConfirm={borrar}
+        pending={guardando}
+      />
+    </>
+  );
+}

@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { jwtVerify, SignJWT } from 'jose';
 import { PANELS } from '@/lib/panels';
-import { accesoPantalla } from '@/lib/permissions';
+import { accesoPantalla, puedeUsarApiAdmin, puedeVerPaginaAdmin } from '@/lib/permissions';
 
 // Este archivo se llamaba middleware.ts. Next 16 lo dio por obsoleto en favor de
 // `proxy.ts`, y el cambio no es solo de nombre: el proxy corre SIEMPRE en
@@ -111,10 +111,20 @@ export default async function proxy(req: NextRequest) {
 
   const role = (payload.role as string) ?? null;
 
+  // /admin sigue siendo de admin por defecto. Solo se abre a un usuario sin ese rol
+  // la página /admin (si algún permiso suyo desbloquea una sección) y las rutas de
+  // /api/admin mapeadas a un permiso en lib/permisos.ts — ninguna más (/admin/logs
+  // incluida). Cada ruta vuelve a comprobar el permiso con requireAccess.
   if (exigeAdmin && role !== 'admin') {
-    return esPaginaFiltrada
-      ? alLogin(req, pathname)
-      : NextResponse.json({ error: 'No autorizado' }, { status: 403 });
+    const userId = Number(payload.sub);
+    const permitido = !!role && (esApi
+      ? puedeUsarApiAdmin(pathname, req.method, userId, role)
+      : pathname === '/admin' && puedeVerPaginaAdmin(userId, role));
+    if (!permitido) {
+      return esPaginaFiltrada
+        ? alLogin(req, pathname)
+        : NextResponse.json({ error: 'No autorizado' }, { status: 403 });
+    }
   }
 
   // Filtrado de páginas: misma regla que requireAccess({screen}) en la API,
