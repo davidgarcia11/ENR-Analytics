@@ -21,7 +21,7 @@ import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger,
 } from "@/components/nova/ui/dropdown-menu";
 import {
-  FORMATOS_CADUCIDAD, FORMATOS_COCIDA, INFO_PIEZA, TIPOS_PIEZA, componerCampos, lineasEtiqueta,
+  FORMATOS_CADUCIDAD, FORMATOS_COCIDA, INFO_PIEZA, MAX_MANUAL, TIPOS_PIEZA, componerCampos, lineasEtiqueta, piezasManuales,
   type Campo, type Pieza, type TipoPieza, type ValoresEtiqueta,
 } from "@/lib/loteadora-plantilla";
 import { BotonesCopia, CabeceraSeccion, ConfirmarDialog, ErrorForm, FilaVacia, TablaCard, type SeccionProps } from "./comun";
@@ -50,10 +50,15 @@ function valoresEjemplo(): ValoresEtiqueta {
   return { fresco: "263221", cocidaAnio: cocida.getFullYear(), cocidaDia: dia, caducidad: iso, hora: "0930", turno: "1", linea: "1" };
 }
 const EJEMPLO = valoresEjemplo();
+// Los datos a introducir no tienen valor de ejemplo fijo: el suyo por defecto o <nombre>
+const conManuales = (v: ValoresEtiqueta, campos: Campo[]): ValoresEtiqueta => ({
+  ...v,
+  manuales: Object.fromEntries(piezasManuales(campos).map((m) => [m.nombre, m.porDefecto || `<${m.nombre}>`])),
+});
 
 const nuevaPieza = (tipo: TipoPieza): Pieza =>
   tipo === "texto" ? { tipo, valor: "" }
-    : tipo === "fijo" ? { tipo, nombre: "", valor: "" }
+    : tipo === "fijo" || tipo === "manual" ? { tipo, nombre: "", valor: "" }
       : tipo === "cocida" ? { tipo, formato: "AAJJJ" }
         : tipo === "caducidad" ? { tipo, formato: "DD/MM/AA" }
           : { tipo };
@@ -103,6 +108,12 @@ function EditorPieza({ pieza, onChange, onQuitar, onMover, primera, ultima }: {
         </>
       )}
       {esVariable && <span className="px-1 text-xs font-medium text-foreground">{INFO_PIEZA[pieza.tipo].label}</span>}
+      {pieza.tipo === "manual" && (
+        <>
+          <Input value={pieza.nombre ?? ""} onChange={(e) => onChange({ ...pieza, nombre: e.target.value })} placeholder="Lo que verá el operario" className="h-7 w-44 text-xs" aria-label="Nombre del dato a introducir" />
+          <Input value={pieza.valor ?? ""} onChange={(e) => onChange({ ...pieza, valor: e.target.value })} placeholder="Por defecto (opcional)" maxLength={MAX_MANUAL} className="h-7 w-36 font-mono text-xs" aria-label="Valor por defecto" />
+        </>
+      )}
       {(pieza.tipo === "cocida" || pieza.tipo === "caducidad") && (
         <Select
           items={pieza.tipo === "cocida" ? FORMATO_ITEMS_COC : FORMATO_ITEMS_CAD}
@@ -146,7 +157,7 @@ function EditorCampo({ campo, ejemplo, onChange, onQuitar, puedeQuitar }: {
   puedeQuitar: boolean;
 }) {
   const setPiezas = (piezas: Pieza[]) => onChange({ ...campo, piezas });
-  const vista = componerCampos([{ fieldId: 0, piezas: campo.piezas }], ejemplo)[0].texto;
+  const vista = componerCampos([{ fieldId: 0, piezas: campo.piezas }], conManuales(ejemplo, [{ fieldId: 0, piezas: campo.piezas }]))[0].texto;
 
   return (
     <div className="space-y-3 rounded-xl border p-3">
@@ -363,7 +374,7 @@ export default function AdminPlantillas({ titulo, descripcion }: SeccionProps) {
                   <TableCell className="align-top font-mono text-sm font-medium text-foreground">{m.name}</TableCell>
                   <TableCell>
                     <div className="flex flex-wrap gap-1.5">
-                      {componerCampos(m.campos, ejemplo).map((c) => (
+                      {componerCampos(m.campos, conManuales(ejemplo, m.campos)).map((c) => (
                         <Badge key={c.fieldId} variant="outline" className="gap-1.5 font-normal">
                           <span className="text-muted-foreground">ID {c.fieldId}</span>
                           <span className="font-mono whitespace-pre text-foreground">{conEspacios(c.texto) || "—"}</span>
@@ -432,7 +443,7 @@ export default function AdminPlantillas({ titulo, descripcion }: SeccionProps) {
             <div className="grid gap-1.5">
               <Label>Así quedará en la etiqueta</Label>
               <pre className="overflow-x-auto rounded-lg border bg-muted/40 px-3 py-2 font-mono text-sm text-foreground">
-                {lineasEtiqueta(aCampos(campos), ejemplo).join("\n") || "—"}
+                {lineasEtiqueta(aCampos(campos), conManuales(ejemplo, aCampos(campos))).join("\n") || "—"}
               </pre>
               <p className="text-xs text-muted-foreground">
                 Con valores de ejemplo. «HHmm» es el hueco del reloj, que se pone a mano en la máquina. Es la disposición con la que se crea el mensaje en la loteadora.
@@ -460,7 +471,7 @@ export default function AdminPlantillas({ titulo, descripcion }: SeccionProps) {
             </DialogDescription>
           </DialogHeader>
           <pre className="overflow-x-auto rounded-lg border bg-muted/40 px-3 py-2 font-mono text-sm text-foreground">
-            {enMaquina ? lineasEtiqueta(enMaquina.campos, ejemplo).join("\n") : ""}
+            {enMaquina ? lineasEtiqueta(enMaquina.campos, conManuales(ejemplo, enMaquina.campos)).join("\n") : ""}
           </pre>
           <div className="grid gap-1.5">
             <Label>Loteadora</Label>

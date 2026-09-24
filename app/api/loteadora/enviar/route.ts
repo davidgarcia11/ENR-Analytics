@@ -4,7 +4,7 @@ import { requireAccess } from '@/lib/permissions';
 import { puedeVerLoteadora, zonasVisibles } from '@/lib/loteadora-zonas';
 import { sendRemoteFields, getPrinterStatus, getPrinterStatusDetail } from '@/lib/loteadora-printer';
 import {
-  ASCII_IMPRIMIBLE, INFO_PIEZA, componerCampos, leerCampos, variablesUsadas, type ValoresEtiqueta,
+  ASCII_IMPRIMIBLE, INFO_PIEZA, MAX_MANUAL, componerCampos, leerCampos, piezasManuales, variablesUsadas, type ValoresEtiqueta,
 } from '@/lib/loteadora-plantilla';
 
 // Envía una etiqueta a una loteadora física por TCP (comando 1D del protocolo TIJ).
@@ -95,6 +95,19 @@ export async function POST(req: NextRequest) {
     valores.linea = loteadora.linea;
   }
 
+  // Datos a introducir (pieza 'manual'): obligatorios, por nombre de la pieza
+  const manuales = piezasManuales(campos);
+  if (manuales.length > 0) {
+    valores.manuales = {};
+    for (const { nombre } of manuales) {
+      const v = String(body.manuales?.[nombre] ?? '').trim();
+      if (!v || v.length > MAX_MANUAL || !ASCII_IMPRIMIBLE.test(v)) {
+        return NextResponse.json({ error: `"${nombre}" es obligatorio (hasta ${MAX_MANUAL} caracteres, sin tildes ni símbolos como €)` }, { status: 400 });
+      }
+      valores.manuales[nombre] = v;
+    }
+  }
+
   const compuestos = componerCampos(campos, valores);
   const faltan = [...new Set(compuestos.flatMap((c) => c.faltan))];
   if (faltan.length > 0) {
@@ -128,6 +141,12 @@ export async function POST(req: NextRequest) {
            usuario = excluded.usuario, enviado_at = excluded.enviado_at`
       ).run(Number(loteadoraId), plantilla.name, JSON.stringify(compuestos.map((c) => ({ fieldId: c.fieldId, texto: c.texto }))),
         u ? [u.name, u.surname].filter(Boolean).join(' ') || u.username : null);
+      // Último valor de cada dato a introducir: /loteadora lo propone la próxima vez
+      const guardarManual = db.prepare(
+        `INSERT INTO loteadora_manuales_ultimos (mensaje_id, nombre, valor) VALUES (?, ?, ?)
+         ON CONFLICT(mensaje_id, nombre) DO UPDATE SET valor = excluded.valor`
+      );
+      for (const [nombre, valor] of Object.entries(valores.manuales ?? {})) guardarManual.run(asociacion!.mensaje_id, nombre, valor);
     } catch (e) {
       console.error('No se pudo guardar el último envío de la loteadora:', e);
     }

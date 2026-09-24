@@ -16,7 +16,7 @@
 // plantillas de /admin. Las funciones de BD reciben la conexión por parámetro.
 import type Database from 'better-sqlite3';
 
-export const TIPOS_PIEZA = ['texto', 'fijo', 'fresco', 'cocida', 'caducidad', 'turno', 'hora', 'linea'] as const;
+export const TIPOS_PIEZA = ['texto', 'fijo', 'fresco', 'cocida', 'caducidad', 'turno', 'hora', 'linea', 'manual'] as const;
 export type TipoPieza = (typeof TIPOS_PIEZA)[number];
 export type TipoVariable = Exclude<TipoPieza, 'texto' | 'fijo'>;
 
@@ -30,7 +30,9 @@ export interface Pieza {
   /** 'texto': el literal; 'fijo': el valor (precio, nº de certificado...);
    *  'caducidad': ajuste en días sobre la caducidad ("-1" = el día anterior) */
   valor?: string;
-  /** 'fijo': nombre del dato, para editarlo sin tocar la plantilla ("Precio") */
+  /** 'fijo': nombre del dato, para editarlo sin tocar la plantilla ("Precio");
+   *  'manual': lo que ve el operario en /loteadora ("Nº certificado Kosher").
+   *  En 'manual', `valor` es el valor por defecto (opcional). */
   nombre?: string;
   /** 'caducidad' → FORMATOS_CADUCIDAD; 'cocida' → FORMATOS_COCIDA */
   formato?: string;
@@ -55,7 +57,12 @@ export const INFO_PIEZA: Record<TipoPieza, { label: string; ayuda: string }> = {
   turno: { label: 'Turno', ayuda: 'Turno elegido en /loteadora (1, 2 o 3)' },
   hora: { label: 'Hora', ayuda: 'Hora del envío, HHmm' },
   linea: { label: 'Línea', ayuda: 'Línea de fabricación de la loteadora' },
+  manual: { label: 'Dato a introducir', ayuda: 'Lo escribe el operario en /loteadora al enviar (p. ej. un nº de certificado que cambia). Obligatorio' },
 };
+
+// Máximo de caracteres de un dato a introducir: es lo que se reserva para él en
+// el campo de la máquina al crear el mensaje (largoPieza).
+export const MAX_MANUAL = 20;
 
 /** Valores de una impresión concreta (los calcula /loteadora; la línea la pone el servidor). */
 export interface ValoresEtiqueta {
@@ -68,6 +75,8 @@ export interface ValoresEtiqueta {
   hora?: string;
   turno?: string;
   linea?: string;
+  /** Datos a introducir, por nombre de la pieza ("Nº certificado Kosher" → "KSR-123") */
+  manuales?: Record<string, string>;
 }
 
 // El comando 1D envía el texto en ASCII (lib/loteadora-printer.ts): un carácter
@@ -119,7 +128,18 @@ export function textoPieza(p: Pieza, v: ValoresEtiqueta): string | null {
       return v.hora ? v.hora : null;
     case 'linea':
       return v.linea ? v.linea : null;
+    case 'manual':
+      return v.manuales?.[p.nombre ?? ''] || null;
   }
+}
+
+/** Datos a introducir de una plantilla (uno por nombre), con su valor por defecto. */
+export function piezasManuales(campos: Campo[]): { nombre: string; porDefecto: string }[] {
+  const vistos = new Map<string, string>();
+  for (const c of campos) for (const p of c.piezas) {
+    if (p.tipo === 'manual' && p.nombre && !vistos.has(p.nombre)) vistos.set(p.nombre, p.valor ?? '');
+  }
+  return [...vistos].map(([nombre, porDefecto]) => ({ nombre, porDefecto }));
 }
 
 /** Variables (no literales) que usa una plantilla: decide qué pide /loteadora. */
@@ -196,6 +216,17 @@ export function validarPlantilla(body: any): { error: string } | { value: { name
         if (!nombre) return { error: `Campo ID ${fieldId}: el dato fijo necesita un nombre (p. ej. "Precio")` };
         pieza.nombre = nombre;
       }
+      if (tipo === 'manual') {
+        const nombre = String(p.nombre ?? '').trim();
+        if (!nombre) return { error: `Campo ID ${fieldId}: el dato a introducir necesita un nombre (lo que verá el operario, p. ej. "Nº certificado Kosher")` };
+        if (nombre.length > 40) return { error: `Campo ID ${fieldId}: el nombre del dato a introducir no puede pasar de 40 caracteres` };
+        pieza.nombre = nombre;
+        const porDefecto = String(p.valor ?? '').trim();
+        if (porDefecto.length > MAX_MANUAL || !ASCII_IMPRIMIBLE.test(porDefecto)) {
+          return { error: `Campo ID ${fieldId}: el valor por defecto de "${nombre}" debe tener como mucho ${MAX_MANUAL} caracteres ASCII` };
+        }
+        if (porDefecto) pieza.valor = porDefecto;
+      }
       if (tipo === 'caducidad') {
         const formato = p.formato ?? 'DD/MM/AAAA';
         if (!(FORMATOS_CADUCIDAD as readonly string[]).includes(formato)) return { error: `Campo ID ${fieldId}: formato de caducidad no válido` };
@@ -241,6 +272,7 @@ export function largoPieza(p: Pieza): number {
     case 'hora': return 4;
     case 'cocida': return ({ AAJJJ: 5, AJJJ: 4, JJJ: 3 } as Record<string, number>)[p.formato ?? 'AAJJJ'] ?? (p.formato ?? '').length;
     case 'caducidad': return (p.formato ?? 'DD/MM/AAAA').length;
+    case 'manual': return MAX_MANUAL;
   }
 }
 
