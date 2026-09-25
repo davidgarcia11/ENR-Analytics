@@ -46,6 +46,8 @@ export interface Campo {
   linea?: number;
   /** Dejar detrás el hueco del reloj (HHmm), que se inserta a mano en la máquina */
   reloj?: boolean;
+  /** Espaciado entre caracteres de este campo (uno de ESPACIADOS); sin él, el del mensaje */
+  espaciado?: number;
 }
 
 export const INFO_PIEZA: Record<TipoPieza, { label: string; ayuda: string }> = {
@@ -244,7 +246,11 @@ export function validarPlantilla(body: any): { error: string } | { value: { name
     }
     const linea = c.linea === undefined || c.linea === null ? 1 : Number(c.linea);
     if (![1, 2, 3].includes(linea)) return { error: `Campo ID ${fieldId}: la línea debe ser 1, 2 o 3` };
-    campos.push({ fieldId, piezas, linea, reloj: c.reloj === true });
+    const espaciado = c.espaciado === undefined || c.espaciado === null || c.espaciado === '' ? undefined : Number(c.espaciado);
+    if (espaciado !== undefined && !(ESPACIADOS as readonly number[]).includes(espaciado)) {
+      return { error: `Campo ID ${fieldId}: el espaciado debe ser uno de: ${ESPACIADOS.join(', ')}` };
+    }
+    campos.push({ fieldId, piezas, linea, reloj: c.reloj === true, ...(espaciado !== undefined ? { espaciado } : {}) });
   }
 
   return { value: { name, campos } };
@@ -254,12 +260,55 @@ export function validarPlantilla(body: any): { error: string } | { value: { name
 // Automática, igual que se crearon los N01…N17: en cada línea los campos van de
 // izquierda a derecha en su orden, separados por un espacio, y detrás de los que
 // llevan `reloj` queda un hueco de 4 caracteres (+ espacio) para el reloj, que se
-// inserta a mano en la máquina (el 1C no tiene módulo de reloj). Medidas de
-// Prueba2.msg: Arial-MonoBold 35 → 21 puntos por carácter y 36 entre líneas; con
-// 3 líneas, tamaño 23 (14 y 24) para que quepa en la misma altura.
+// inserta a mano en la máquina (el 1C no tiene módulo de reloj).
+//
+// Las MEDIDAS (fuente, tamaño, espaciado, ancho por carácter y separación entre
+// líneas) se eligen al crear el mensaje en cada máquina y se recuerdan por mensaje
+// y máquina (loteadora_medidas_mensaje). Por defecto Arial, con las proporciones
+// medidas en Prueba2.msg: tamaño 35 → 21 puntos por carácter y 36 entre líneas; con
+// 3 líneas, tamaño 23 (14 y 24) para que quepa en la misma altura. Arial no es de
+// ancho fijo: el ancho por carácter es una media (los números sí miden todos igual).
 
-export const FUENTE_MENSAJE = 'Arial-MonoBold';
+export const FUENTE_MENSAJE = 'Arial';
 const ANCHO_RELOJ = 4;
+
+// Espaciado entre caracteres que admite la máquina (protocolo §3.5.17.3): el byte
+// "Space" es el índice en esta lista (05 = 0, el valor por defecto).
+export const ESPACIADOS = [30, 20, 10, 5, 2, 0, -2, -5, -10, -20, -30] as const;
+
+export interface MedidasMensaje {
+  fuente: string;
+  tamano: number;
+  /** Uno de ESPACIADOS */
+  espaciado: number;
+  /** Puntos que ocupa cada carácter (para colocar los campos) */
+  ancho: number;
+  /** Puntos entre una línea y la siguiente */
+  interlineado: number;
+}
+
+/** Ancho y separación entre líneas que corresponden a un tamaño y espaciado. */
+export function medidasDeTamano(tamano: number, espaciado = 0, fuente = FUENTE_MENSAJE): MedidasMensaje {
+  return { fuente, tamano, espaciado, ancho: Math.max(1, Math.round(tamano * 0.6) + espaciado), interlineado: tamano + 1 };
+}
+
+export const numeroLineas = (campos: Campo[]) => Math.max(1, ...campos.map((c) => c.linea ?? 1));
+
+/** Medidas por defecto de un mensaje según su nº de líneas. */
+export function medidasPorDefecto(campos: Campo[]): MedidasMensaje {
+  return numeroLineas(campos) >= 3 ? medidasDeTamano(23) : medidasDeTamano(35);
+}
+
+export function validarMedidas(m: any): { error: string } | { value: MedidasMensaje } {
+  const fuente = String(m?.fuente ?? '').trim();
+  const [tamano, espaciado, ancho, interlineado] = ['tamano', 'espaciado', 'ancho', 'interlineado'].map((k) => Number(m?.[k]));
+  if (!fuente || fuente.length > 40 || !ASCII_IMPRIMIBLE.test(fuente)) return { error: 'La fuente debe ser un nombre ASCII de hasta 40 caracteres, igual que en la máquina' };
+  if (!Number.isInteger(tamano) || tamano < 5 || tamano > 1200) return { error: 'El tamaño de letra debe estar entre 5 y 1200' };
+  if (!(ESPACIADOS as readonly number[]).includes(espaciado)) return { error: `El espaciado debe ser uno de: ${ESPACIADOS.join(', ')}` };
+  if (!Number.isInteger(ancho) || ancho < 1 || ancho > 1000) return { error: 'El ancho por carácter debe ser un entero entre 1 y 1000' };
+  if (!Number.isInteger(interlineado) || interlineado < 1 || interlineado > 2000) return { error: 'La separación entre líneas debe ser un entero entre 1 y 2000' };
+  return { value: { fuente, tamano, espaciado, ancho, interlineado } };
+}
 
 /** Nº máximo de caracteres que puede ocupar una pieza (dimensiona el campo en la máquina). */
 export function largoPieza(p: Pieza): number {
@@ -278,20 +327,31 @@ export function largoPieza(p: Pieza): number {
 
 export interface CampoDispuesto {
   id: number; x: number; y: number; fontSize: number; font: string; length: number;
+  /** Byte "Space" del Field Module: índice en ESPACIADOS */
+  space: number;
   /** Línea (1-3) y columna en caracteres, para la vista previa */
   linea: number; columna: number; reloj: boolean;
 }
 
-export function disponerCampos(campos: Campo[]): CampoDispuesto[] {
-  const lineas = Math.max(1, ...campos.map((c) => c.linea ?? 1));
-  const [fontSize, cw, lh] = lineas >= 3 ? [23, 14, 24] : [35, 21, 36];
-  const columna = new Map<number, number>();
+export function disponerCampos(campos: Campo[], medidas: MedidasMensaje = medidasPorDefecto(campos)): CampoDispuesto[] {
+  const { fuente, tamano: fontSize, interlineado: lh } = medidas;
+  // Ancho de un carácter sin espaciado; cada campo le suma el suyo (o el del mensaje).
+  // Los huecos (espacio entre campos y hueco del reloj) van con el ancho base.
+  const base = Math.max(1, medidas.ancho - medidas.espaciado);
+  const columna = new Map<number, number>(); // en caracteres (vista previa)
+  const posicion = new Map<number, number>(); // en puntos (máquina)
   return campos.map((c) => {
     const linea = c.linea ?? 1;
     const col = columna.get(linea) ?? 0;
+    const x = posicion.get(linea) ?? 0;
+    const espaciado = c.espaciado ?? medidas.espaciado;
+    const cw = Math.max(1, base + espaciado);
     const length = Math.max(1, c.piezas.reduce((n, p) => n + largoPieza(p), 0));
-    columna.set(linea, col + length + 1 + (c.reloj ? ANCHO_RELOJ + 1 : 0));
-    return { id: c.fieldId, x: col * cw, y: (linea - 1) * lh, fontSize, font: FUENTE_MENSAJE, length, linea, columna: col, reloj: !!c.reloj };
+    const hueco = 1 + (c.reloj ? ANCHO_RELOJ + 1 : 0);
+    columna.set(linea, col + length + hueco);
+    posicion.set(linea, x + length * cw + hueco * base);
+    const space = Math.max(0, (ESPACIADOS as readonly number[]).indexOf(espaciado));
+    return { id: c.fieldId, x, y: (linea - 1) * lh, fontSize, font: fuente, space, length, linea, columna: col, reloj: !!c.reloj };
   });
 }
 
@@ -343,12 +403,12 @@ export function leerCampos(db: Database.Database, mensajeIds?: number[]): Map<nu
     : db.prepare('SELECT * FROM loteadora_mensaje_segmentos').all()) as FilaSegmento[];
   const porMensaje = new Map<number, FilaSegmento[]>();
   for (const f of filas) porMensaje.set(f.mensaje_id, [...(porMensaje.get(f.mensaje_id) ?? []), f]);
-  const disp = db.prepare('SELECT mensaje_id, field_id, linea, reloj FROM loteadora_mensaje_campos').all() as
-    { mensaje_id: number; field_id: number; linea: number; reloj: number }[];
+  const disp = db.prepare('SELECT mensaje_id, field_id, linea, reloj, espaciado FROM loteadora_mensaje_campos').all() as
+    { mensaje_id: number; field_id: number; linea: number; reloj: number; espaciado: number | null }[];
   const dispDe = new Map(disp.map((d) => [`${d.mensaje_id}|${d.field_id}`, d]));
   return new Map([...porMensaje].map(([id, fs]) => [id, filasACampos(fs).map((c) => {
     const d = dispDe.get(`${id}|${c.fieldId}`);
-    return { ...c, linea: d?.linea ?? 1, reloj: d?.reloj === 1 };
+    return { ...c, linea: d?.linea ?? 1, reloj: d?.reloj === 1, ...(d?.espaciado != null ? { espaciado: d.espaciado } : {}) };
   })]));
 }
 
@@ -363,8 +423,8 @@ export function guardarCampos(db: Database.Database, mensajeId: number, campos: 
     insertar.run(mensajeId, ci * 1000 + pi, c.fieldId, p.tipo, p.valor ?? null, p.nombre ?? null, p.formato ?? null);
   }));
   db.prepare('DELETE FROM loteadora_mensaje_campos WHERE mensaje_id = ?').run(mensajeId);
-  const disp = db.prepare('INSERT INTO loteadora_mensaje_campos (mensaje_id, field_id, linea, reloj) VALUES (?, ?, ?, ?)');
-  for (const c of campos) disp.run(mensajeId, c.fieldId, c.linea ?? 1, c.reloj ? 1 : 0);
+  const disp = db.prepare('INSERT INTO loteadora_mensaje_campos (mensaje_id, field_id, linea, reloj, espaciado) VALUES (?, ?, ?, ?, ?)');
+  for (const c of campos) disp.run(mensajeId, c.fieldId, c.linea ?? 1, c.reloj ? 1 : 0, c.espaciado ?? null);
 }
 
 // ─── Copia de seguridad: exportar / importar (/admin → Plantillas) ───────────────

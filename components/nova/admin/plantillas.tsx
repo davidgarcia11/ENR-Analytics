@@ -21,7 +21,8 @@ import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger,
 } from "@/components/nova/ui/dropdown-menu";
 import {
-  FORMATOS_CADUCIDAD, FORMATOS_COCIDA, INFO_PIEZA, MAX_MANUAL, TIPOS_PIEZA, componerCampos, lineasEtiqueta, piezasManuales,
+  ESPACIADOS, FORMATOS_CADUCIDAD, FORMATOS_COCIDA, INFO_PIEZA, MAX_MANUAL, TIPOS_PIEZA, componerCampos, lineasEtiqueta,
+  medidasDeTamano, piezasManuales, type MedidasMensaje,
   type Campo, type Pieza, type TipoPieza, type ValoresEtiqueta,
 } from "@/lib/loteadora-plantilla";
 import { BotonesCopia, CabeceraSeccion, ConfirmarDialog, ErrorForm, FilaVacia, TablaCard, type SeccionProps } from "./comun";
@@ -38,6 +39,8 @@ interface CampoEditable {
   piezas: Pieza[];
   linea?: number;
   reloj?: boolean;
+  /** Espaciado propio del campo; sin él, el del mensaje */
+  espaciado?: number;
 }
 
 // Valores de ejemplo para la vista previa: cocida hace unos días, caducidad a +30.
@@ -67,10 +70,13 @@ const nuevaPieza = (tipo: TipoPieza): Pieza =>
 const vacia = (): CampoEditable[] => [{ fieldId: "1", piezas: [nuevaPieza("texto"), nuevaPieza("cocida")] }];
 
 const aEditables = (campos: Campo[]): CampoEditable[] =>
-  campos.map((c) => ({ fieldId: String(c.fieldId), piezas: c.piezas.map((p) => ({ ...p })), linea: c.linea ?? 1, reloj: !!c.reloj }));
+  campos.map((c) => ({ fieldId: String(c.fieldId), piezas: c.piezas.map((p) => ({ ...p })), linea: c.linea ?? 1, reloj: !!c.reloj, espaciado: c.espaciado }));
 const aCampos = (campos: CampoEditable[]): Campo[] =>
-  campos.map((c) => ({ fieldId: Number(c.fieldId), piezas: c.piezas, linea: c.linea ?? 1, reloj: !!c.reloj }));
+  campos.map((c) => ({ fieldId: Number(c.fieldId), piezas: c.piezas, linea: c.linea ?? 1, reloj: !!c.reloj, ...(c.espaciado !== undefined ? { espaciado: c.espaciado } : {}) }));
 const LINEA_ITEMS = [1, 2, 3].map((n) => ({ value: String(n), label: `Línea ${n}` }));
+const signo = (v: number) => (v > 0 ? `+${v}` : String(v));
+// "" = el espaciado del mensaje (se elige al crearlo en la máquina)
+const ESPACIADO_CAMPO_ITEMS = [{ value: "", label: "Espaciado del mensaje" }, ...ESPACIADOS.map((v) => ({ value: String(v), label: `Espaciado ${signo(v)}` }))];
 
 const FORMATO_ITEMS_CAD = FORMATOS_CADUCIDAD.map((f) => ({ value: f, label: f }));
 const FORMATO_ITEMS_COC = FORMATOS_COCIDA.map((f) => ({ value: f, label: f }));
@@ -178,6 +184,16 @@ function EditorCampo({ campo, ejemplo, onChange, onQuitar, puedeQuitar }: {
             {LINEA_ITEMS.map((l) => <SelectItem key={l.value} value={l.value} className="text-xs">{l.label}</SelectItem>)}
           </SelectContent>
         </Select>
+        <Select
+          items={ESPACIADO_CAMPO_ITEMS}
+          value={campo.espaciado === undefined ? "" : String(campo.espaciado)}
+          onValueChange={(v) => onChange({ ...campo, espaciado: v === "" || v === null ? undefined : Number(v) })}
+        >
+          <SelectTrigger size="sm" className="h-8 w-44 text-xs" aria-label="Espaciado entre caracteres del campo"><SelectValue /></SelectTrigger>
+          <SelectContent>
+            {ESPACIADO_CAMPO_ITEMS.map((e) => <SelectItem key={e.value} value={e.value} className="text-xs">{e.label}</SelectItem>)}
+          </SelectContent>
+        </Select>
         <label className="flex items-center gap-1.5 text-xs text-muted-foreground" title="Deja detrás de este campo el hueco del reloj (HHmm), que se pone a mano en la máquina">
           <Checkbox checked={!!campo.reloj} onCheckedChange={(v) => onChange({ ...campo, reloj: v === true })} />
           Reloj detrás
@@ -265,6 +281,28 @@ export default function AdminPlantillas({ titulo, descripcion }: SeccionProps) {
   const [loteadoras, setLoteadoras] = useState<{ id: number; name: string }[]>([]);
   const [loteadoraId, setLoteadoraId] = useState<string | null>(null);
   const [creandoEnMaquina, setCreandoEnMaquina] = useState(false);
+  // Medidas del mensaje en esa máquina: se proponen las guardadas (o las últimas de
+  // esa máquina, o las de por defecto) y se guardan al crear.
+  const [medidas, setMedidas] = useState<MedidasMensaje | null>(null);
+  const [origenMedidas, setOrigenMedidas] = useState<"guardadas" | "maquina" | "defecto" | null>(null);
+  useEffect(() => {
+    if (!enMaquina || !loteadoraId) { setMedidas(null); return; }
+    let vigente = true;
+    apiFetch(`/api/admin/loteadora-mensajes/${enMaquina.id}/crear-en-maquina?loteadoraId=${loteadoraId}`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => { if (vigente && d) { setMedidas(d.medidas); setOrigenMedidas(d.origen); } })
+      .catch(() => {});
+    return () => { vigente = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [enMaquina?.id, loteadoraId]);
+  // Al cambiar tamaño o espaciado se recalculan ancho y separación (se pueden retocar después)
+  const cambiarMedidas = (cambio: Partial<MedidasMensaje>) => setMedidas((m) => {
+    if (!m) return m;
+    const nuevo = { ...m, ...cambio };
+    return "tamano" in cambio || "espaciado" in cambio
+      ? { ...nuevo, ...medidasDeTamano(nuevo.tamano, nuevo.espaciado, nuevo.fuente), fuente: nuevo.fuente }
+      : nuevo;
+  });
 
   const abrirCrearEnMaquina = async (m: Mensaje) => {
     setEnMaquina(m);
@@ -280,13 +318,13 @@ export default function AdminPlantillas({ titulo, descripcion }: SeccionProps) {
   };
 
   const crearEnMaquina = async () => {
-    if (!enMaquina || !loteadoraId) return;
+    if (!enMaquina || !loteadoraId || !medidas) return;
     setCreandoEnMaquina(true);
     try {
       const res = await apiFetch(`/api/admin/loteadora-mensajes/${enMaquina.id}/crear-en-maquina`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ loteadoraId: Number(loteadoraId) }),
+        body: JSON.stringify({ loteadoraId: Number(loteadoraId), medidas }),
       });
       const data = await res.json();
       if (!res.ok) { toast.error(data.error || "No se pudo crear en la loteadora"); return; }
@@ -482,6 +520,52 @@ export default function AdminPlantillas({ titulo, descripcion }: SeccionProps) {
               </SelectContent>
             </Select>
           </div>
+          {medidas && (
+            <div className="grid gap-3 rounded-lg border p-3">
+              <p className="text-xs text-muted-foreground">
+                {origenMedidas === "guardadas" ? "Medidas con las que se creó este mensaje en esta máquina."
+                  : origenMedidas === "maquina" ? "Medidas de lo último creado en esta máquina (mismo nº de líneas)."
+                  : "Medidas por defecto."}{" "}
+                Se guardan para la próxima vez.
+              </p>
+              <div className="grid gap-3 sm:grid-cols-3">
+                <div className="grid gap-1.5">
+                  <Label htmlFor="m-fuente">Fuente</Label>
+                  <Input id="m-fuente" list="m-fuentes" value={medidas.fuente} onChange={(e) => cambiarMedidas({ fuente: e.target.value })} className="font-mono" />
+                  <datalist id="m-fuentes"><option value="Arial" /><option value="Arial-MonoBold" /></datalist>
+                </div>
+                <div className="grid gap-1.5">
+                  <Label htmlFor="m-tamano">Tamaño</Label>
+                  <Input id="m-tamano" type="number" min={5} max={1200} value={medidas.tamano} onChange={(e) => cambiarMedidas({ tamano: Number(e.target.value) })} />
+                </div>
+                <div className="grid gap-1.5">
+                  <Label title="Lo usan los campos que no tienen espaciado propio en la plantilla">Espaciado por defecto</Label>
+                  <Select items={ESPACIADOS.map((v) => ({ value: String(v), label: v > 0 ? `+${v}` : String(v) }))} value={String(medidas.espaciado)} onValueChange={(v) => cambiarMedidas({ espaciado: Number(v) })}>
+                    <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      {ESPACIADOS.map((v) => <SelectItem key={v} value={String(v)}>{v > 0 ? `+${v}` : v}</SelectItem>)}
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+              <details className="text-sm">
+                <summary className="cursor-pointer text-xs text-muted-foreground">Avanzado: ancho por carácter y separación entre líneas</summary>
+                <div className="mt-2 grid gap-3 sm:grid-cols-2">
+                  <div className="grid gap-1.5">
+                    <Label htmlFor="m-ancho">Ancho por carácter (puntos)</Label>
+                    <Input id="m-ancho" type="number" min={1} value={medidas.ancho} onChange={(e) => cambiarMedidas({ ancho: Number(e.target.value) })} />
+                  </div>
+                  <div className="grid gap-1.5">
+                    <Label htmlFor="m-interlineado">Separación entre líneas (puntos)</Label>
+                    <Input id="m-interlineado" type="number" min={1} value={medidas.interlineado} onChange={(e) => cambiarMedidas({ interlineado: Number(e.target.value) })} />
+                  </div>
+                </div>
+                <p className="mt-2 text-xs text-muted-foreground">
+                  Se calculan solos con el tamaño y el espaciado. Súbelos si los campos se montan; bájalos si quedan huecos. Arial no es de ancho fijo: es una media.
+                </p>
+              </details>
+            </div>
+          )}
           <p className="flex gap-2 rounded-lg border border-amber-500/20 bg-amber-400/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-400">
             <AlertTriangle className="size-4 shrink-0" />
             <span>
@@ -491,7 +575,7 @@ export default function AdminPlantillas({ titulo, descripcion }: SeccionProps) {
           </p>
           <DialogFooter>
             <Button variant="outline" onClick={() => setEnMaquina(null)}>{enMaquina && !loteadoras.length ? "Cerrar" : "Ahora no"}</Button>
-            <Button onClick={crearEnMaquina} disabled={creandoEnMaquina || !loteadoraId}>
+            <Button onClick={crearEnMaquina} disabled={creandoEnMaquina || !loteadoraId || !medidas}>
               {creandoEnMaquina && <Loader2 className="animate-spin" />}
               Crear en la loteadora
             </Button>
