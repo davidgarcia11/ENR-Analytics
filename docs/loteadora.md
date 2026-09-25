@@ -225,7 +225,7 @@ Ejemplo real configurado durante el desarrollo de esta función: IP `192.168.111
 - `listMessageNames(config)`: usa `sendCommand` con el comando `1F` (Request Message Names, sin datos). La respuesta es de longitud variable (hasta 255 nombres) y puede llegar troceada en varios paquetes TCP — por eso `sendCommand` acumula los `data` recibidos hasta detectar el cierre de trama (`ESC ETX` + checknum) en vez de resolver con el primer paquete. Verificado en `__tests__/loteadora-printer.test.ts` con un servidor TCP de prueba que trocea la respuesta a propósito.
 - `downloadMessage(config, messageName, fields)` / `buildDownloadMessageFrame()`: comando `1C` (Download Message Data, manual §3.5.17). **Crea o sobrescribe un mensaje en la máquina desde el PC**, con sus Field Modules: posición X/Y, fuente, tamaño, ID y longitud, fuente de datos "puerto serie", ASCII y alineado a la izquierda. La trama está verificada contra el ejemplo de Field Module del manual.
   - **Probado en planta (sept. 2026):** con la impresión parada responde `12` y el mensaje aparece en la lista `1F`.
-  - Las posiciones van en la misma unidad que guarda el `.msg`: en `Arial-MonoBold` de tamaño 35, un carácter ocupa 21 puntos y las líneas van cada 36.
+  - Las posiciones van en la misma unidad que guarda el `.msg`: en `Arial-MonoBold` de tamaño 35, un carácter ocupa 21 puntos y las líneas van cada 36. Desde admin, la fuente y las medidas se eligen al crear (§13).
   - **No hay módulo de reloj** en el `1C`, así que el reloj (`HHmm`) se inserta a mano en la máquina después de crear el mensaje.
   - Los 17 mensajes del "nuevo loteado" (`N01_…` a `N17_…`) se crearon así en la Loteadora Pruebas, dejando hueco para el reloj. Después se exportan por USB al resto de máquinas.
   - Se crearon con un script. Desde entonces se hace con **"Crear en la loteadora…"** en `/admin` → Plantillas (§13).
@@ -359,7 +359,15 @@ Un artículo solo puede tener una plantilla a la vez (`articulo_id` es clave pri
   - En cada línea, los campos van de izquierda a derecha en su orden, separados por un espacio.
   - Tras los que llevan reloj queda un hueco de 4 caracteres más un espacio.
   - La longitud de cada campo sale de sus piezas (`largoPieza()`: Fresco 6, línea 2, fechas según su formato, datos fijos al menos 6…).
-  - Letra `Arial-MonoBold` de tamaño 35 con una o dos líneas, y 23 con tres.
+  - **Medidas, elegidas al crear** (sept. 2026): fuente, tamaño, espaciado entre caracteres y, en "Avanzado", ancho por carácter y separación entre líneas.
+    - Por defecto **Arial**, de tamaño 35 con una o dos líneas y 23 con tres.
+    - El ancho y la separación se recalculan al cambiar el tamaño o el espaciado: ancho = tamaño × 0,6 + espaciado, y separación = tamaño + 1.
+    - El espaciado va en el byte `Space` del Field Module: `ESPACIADOS`, de +30 a −30.
+    - **Espaciado por campo:** en el constructor, cada campo puede tener el suyo (`loteadora_mensaje_campos.espaciado`; vacío = el del mensaje). La fuente y el tamaño son siempre los del mensaje. Al colocar los campos, cada uno ocupa `(ancho base + su espaciado) × nº de caracteres`, siendo el ancho base el del mensaje sin su espaciado; los huecos (espacio entre campos y hueco del reloj) van con el ancho base.
+    - **No hay forma de modificar solo una parte de un mensaje en la máquina, ni de leerlo.** Actualizar es volver a crearlo desde el panel: se sustituye entero y hay que volver a meter el reloj.
+    - Arial no es de ancho fijo, así que el ancho por carácter es una media. Los números miden todos igual; los textos largos en letra pueden quedar algo desplazados, y se corrige con el ancho.
+    - **Se recuerdan por mensaje y máquina** en `loteadora_medidas_mensaje`. Al abrir el diálogo (`GET …/crear-en-maquina?loteadoraId=`) se proponen, por orden: las guardadas de ese mensaje en esa máquina, las últimas usadas en esa máquina con un mensaje del mismo nº de líneas, o las de por defecto.
+    - Se cambió de Arial-MonoBold a Arial porque no todas las máquinas tienen Arial-MonoBold: sin la fuente, la máquina pone otra y los campos se pisan. La fuente tiene que llamarse exactamente como en la máquina.
 - El constructor enseña **"Así quedará en la etiqueta"**, línea a línea, con `HHmm` en el hueco del reloj. Es la misma disposición con la que se crea en la máquina.
 - La ruta `POST /api/admin/loteadora-mensajes/:id/crear-en-maquina` (`{loteadoraId}`):
   - no crea si la máquina está imprimiendo;

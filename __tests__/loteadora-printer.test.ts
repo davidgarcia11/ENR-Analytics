@@ -124,6 +124,13 @@ describe('buildDownloadMessageFrame', () => {
     expect(frame.subarray(-3, -1)).toEqual(Buffer.from([0x1b, 0x03]))
     expect(frame.reduce((acc, b) => (acc + b) & 0xff, 0)).toBe(0)
   })
+
+  it('manda el espaciado elegido en el byte Space', () => {
+    const frame = buildDownloadMessageFrame(0, 'P3', [{ id: 1, x: 0, y: 0, fontSize: 30, font: 'Arial', length: 6, space: 0x06 }])
+    // Tras 03 X(2) Y(2) Rotación(1) va el Space
+    expect(frame[7 + 3 + 1 + 5 + 1]).toBe(0x06)
+    expect(() => buildDownloadMessageFrame(0, 'P3', [{ id: 1, x: 0, y: 0, fontSize: 30, font: 'Arial', length: 6, space: 11 }])).toThrow()
+  })
 })
 
 describe('loadPrintMessage', () => {

@@ -5,7 +5,7 @@
  */
 import { describe, it, expect } from 'bun:test'
 import {
-  componerCampos, disponerCampos, exportarCopia, lineasEtiqueta, piezasManuales, filasACampos, formatearCaducidad, formatearCocida, importarCopia, validarPlantilla, variablesUsadas,
+  componerCampos, disponerCampos, exportarCopia, lineasEtiqueta, medidasDeTamano, medidasPorDefecto, piezasManuales, validarMedidas, filasACampos, formatearCaducidad, formatearCocida, importarCopia, validarPlantilla, variablesUsadas,
   type Campo, type ValoresEtiqueta,
 } from '@/lib/loteadora-plantilla'
 
@@ -155,7 +155,7 @@ describe('copia de seguridad (exportar / importar)', () => {
         orden INTEGER NOT NULL, field_id INTEGER NOT NULL, tipo TEXT NOT NULL, valor TEXT, nombre TEXT, formato TEXT);
       CREATE TABLE loteadora_articulo_mensajes (articulo_id TEXT PRIMARY KEY, mensaje_id INTEGER NOT NULL);
       CREATE TABLE loteadora_mensaje_campos (mensaje_id INTEGER NOT NULL, field_id INTEGER NOT NULL,
-        linea INTEGER NOT NULL DEFAULT 1, reloj INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (mensaje_id, field_id));
+        linea INTEGER NOT NULL DEFAULT 1, reloj INTEGER NOT NULL DEFAULT 0, espaciado INTEGER, PRIMARY KEY (mensaje_id, field_id));
     `)
     return db
   }
@@ -264,5 +264,46 @@ describe('dato a introducir (pieza manual)', () => {
 
   it('reserva 20 caracteres en el campo de la máquina', () => {
     expect(disponerCampos([{ fieldId: 3, piezas: [{ tipo: 'manual', nombre: 'Cert' }] }])[0].length).toBe(20)
+  })
+})
+
+describe('medidas del mensaje (fuente, tamaño, espaciado)', () => {
+  const campos: Campo[] = [
+    { fieldId: 1, piezas: [{ tipo: 'texto', valor: 'L' }, { tipo: 'cocida' }], linea: 1, reloj: true },
+    { fieldId: 2, piezas: [{ tipo: 'caducidad', formato: 'DD/MM/AA' }], linea: 2 },
+  ]
+
+  it('por defecto Arial con las proporciones de siempre', () => {
+    expect(medidasPorDefecto(campos)).toEqual({ fuente: 'Arial', tamano: 35, espaciado: 0, ancho: 21, interlineado: 36 })
+  })
+
+  it('coloca los campos con las medidas elegidas y manda su fuente, tamaño y espaciado', () => {
+    const m = medidasDeTamano(30, -2) // ancho = 18 - 2 = 16, interlineado 31
+    expect(m).toEqual({ fuente: 'Arial', tamano: 30, espaciado: -2, ancho: 16, interlineado: 31 })
+    const d = disponerCampos([...campos, { fieldId: 3, piezas: [{ tipo: 'texto', valor: 'X' }], linea: 1 }], m)
+    // campo 1: 6 caracteres de 16 puntos; luego espacio + hueco del reloj (1 + 5 caracteres de 18, el ancho base)
+    expect(d.map((c) => [c.id, c.x, c.y, c.fontSize, c.font, c.space])).toEqual([
+      [1, 0, 0, 30, 'Arial', 6], [2, 0, 31, 30, 'Arial', 6], [3, 6 * 16 + 6 * 18, 0, 30, 'Arial', 6],
+    ])
+  })
+
+  it('cada campo puede tener su espaciado; el resto usa el del mensaje', () => {
+    const m = medidasDeTamano(35) // base 21, espaciado 0
+    const d = disponerCampos([
+      { fieldId: 1, piezas: [{ tipo: 'texto', valor: 'ABCD' }], linea: 1, espaciado: 10 },
+      { fieldId: 2, piezas: [{ tipo: 'texto', valor: 'XY' }], linea: 1 },
+    ], m)
+    // campo 1 a 31 puntos por carácter (21 + 10) y byte Space 0x02; campo 2 detrás, con el del mensaje (0x05)
+    expect(d.map((c) => [c.id, c.x, c.space])).toEqual([[1, 0, 2], [2, 4 * 31 + 21, 5]])
+    const r = validarPlantilla({ name: 'X', campos: [{ fieldId: 1, piezas: [{ tipo: 'hora' }], espaciado: 10 }] })
+    expect('value' in r && r.value.campos[0].espaciado).toBe(10)
+    expect('error' in validarPlantilla({ name: 'X', campos: [{ fieldId: 1, piezas: [{ tipo: 'hora' }], espaciado: 7 }] })).toBe(true)
+  })
+
+  it('valida las medidas', () => {
+    expect('value' in validarMedidas({ fuente: 'Arial', tamano: 30, espaciado: -2, ancho: 16, interlineado: 31 })).toBe(true)
+    expect('error' in validarMedidas({ fuente: 'Arial', tamano: 30, espaciado: 3, ancho: 16, interlineado: 31 })).toBe(true)
+    expect('error' in validarMedidas({ fuente: '', tamano: 30, espaciado: 0, ancho: 16, interlineado: 31 })).toBe(true)
+    expect('error' in validarMedidas({ fuente: 'Arial', tamano: 2, espaciado: 0, ancho: 16, interlineado: 31 })).toBe(true)
   })
 })
