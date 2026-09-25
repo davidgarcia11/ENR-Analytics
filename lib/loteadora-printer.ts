@@ -73,6 +73,8 @@ export interface FieldModuleSpec {
   font: string;
   /** Nº máximo de caracteres del campo (1-255) */
   length: number;
+  /** Byte "Space" (espaciado entre caracteres): 0x00 = +30 … 0x05 = 0 … 0x0A = -30. Por defecto 0x05 */
+  space?: number;
 }
 
 // Construye la trama del comando 1C (Download Message Data) — protocolo §3.5.17.
@@ -92,10 +94,11 @@ export function buildDownloadMessageFrame(slaveAddress: number, messageName: str
     if (f.length < 1 || f.length > 255) throw new Error(`Campo ${f.id}: la longitud debe estar entre 1 y 255`);
     if (f.fontSize < 5 || f.fontSize > 1200) throw new Error(`Campo ${f.id}: el tamaño de letra debe estar entre 5 y 1200`);
     if (f.x < 0 || f.x > 0x7fff || f.y < 0 || f.y > 0x7fff) throw new Error(`Campo ${f.id}: posición fuera de rango`);
+    if (f.space !== undefined && (!Number.isInteger(f.space) || f.space < 0 || f.space > 0x0a)) throw new Error(`Campo ${f.id}: espaciado no válido`);
     data.push(
       0x03, ...u16(f.x), ...u16(f.y),
       0x00, // giro 0º
-      0x05, // espaciado 0 (valor por defecto)
+      f.space ?? 0x05, // espaciado (0x05 = 0, el valor por defecto)
       ...u16(f.fontSize), font.length, ...font,
       0x80, // puerto serie + ASCII + alineado a la izquierda
       f.id & 0xff, f.length,

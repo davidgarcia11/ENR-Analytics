@@ -187,6 +187,7 @@ export function getDb(): Database.Database {
       field_id INTEGER NOT NULL,
       linea INTEGER NOT NULL DEFAULT 1,
       reloj INTEGER NOT NULL DEFAULT 0,
+      espaciado INTEGER,             -- NULL = el espaciado del mensaje
       PRIMARY KEY (mensaje_id, field_id)
     );
 
@@ -208,6 +209,23 @@ export function getDb(): Database.Database {
       nombre TEXT NOT NULL,
       valor TEXT NOT NULL,
       PRIMARY KEY (mensaje_id, nombre)
+    );
+
+    -- Medidas con las que se creó cada mensaje en cada máquina (fuente, tamaño,
+    -- espaciado, ancho por carácter, separación entre líneas): se proponen al
+    -- volver a crearlo. tres_lineas: para proponer, a un mensaje que aún no se ha
+    -- creado en esa máquina, lo último usado allí con el mismo nº de líneas.
+    CREATE TABLE IF NOT EXISTS loteadora_medidas_mensaje (
+      mensaje_id INTEGER NOT NULL REFERENCES loteadora_mensajes(id) ON DELETE CASCADE,
+      loteadora_id INTEGER NOT NULL REFERENCES loteadoras(id) ON DELETE CASCADE,
+      tres_lineas INTEGER NOT NULL DEFAULT 0,
+      fuente TEXT NOT NULL,
+      tamano INTEGER NOT NULL,
+      espaciado INTEGER NOT NULL,
+      ancho INTEGER NOT NULL,
+      interlineado INTEGER NOT NULL,
+      updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+      PRIMARY KEY (mensaje_id, loteadora_id)
     );
 
     -- Asociación artículo (F4101.IMLITM) -> plantilla. Global: el mismo
@@ -374,6 +392,11 @@ export function getDb(): Database.Database {
   // separadas por comas. Vacío = todas.
   if (!loteadoraColumns.some(c => c.name === 'familias')) {
     _db.exec("ALTER TABLE loteadoras ADD COLUMN familias TEXT NOT NULL DEFAULT ''");
+  }
+  // Espaciado propio de cada campo (tabla creada en v1.11.0 sin esta columna)
+  const camposColumns = _db.prepare("PRAGMA table_info(loteadora_mensaje_campos)").all() as { name: string }[];
+  if (!camposColumns.some(c => c.name === 'espaciado')) {
+    _db.exec('ALTER TABLE loteadora_mensaje_campos ADD COLUMN espaciado INTEGER');
   }
   // Zona de la loteadora (informativa y para decidir quién la ve). Al borrar la
   // zona, la loteadora se queda sin zona.
