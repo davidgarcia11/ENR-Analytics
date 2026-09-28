@@ -36,7 +36,7 @@ export function parseLoteadoraInput(body: any) {
 }
 
 export async function GET() {
-  const acceso = await requireAccess({ role: 'admin' });
+  const acceso = await requireAccess({ permiso: ['admin.loteadora.maquinas', 'admin.loteadora.plantillas'] });
   if (!acceso.ok) return acceso.denied;
 
   const db = getDb();
@@ -48,7 +48,7 @@ export async function GET() {
 }
 
 export async function POST(req: NextRequest) {
-  const acceso = await requireAccess({ role: 'admin' });
+  const acceso = await requireAccess({ permiso: 'admin.loteadora.maquinas' });
   if (!acceso.ok) return acceso.denied;
 
   const body = await req.json();

@@ -464,8 +464,10 @@ Las cookies con `secure: true` no funcionan sobre HTTP (solo HTTPS). Cuando el d
 - **Usuario con algún permiso de configuración que desbloquee una sección** — por su
   rol o como extra suyo (§5b): entra en `/admin` y solo ve esa(s) sección(es), con
   "Configuración" en vez de "Administración" bajo el logo. Hoy desbloquean sección
-  `admin.loteadora.articulos` → Loteadora › Artículos y `admin.loteadora.datos-fijos` →
-  Loteadora › Datos fijos.
+  `admin.loteadora.articulos` → Loteadora › Artículos, `admin.loteadora.datos-fijos` →
+  Loteadora › Datos fijos, `admin.loteadora.maquinas` → Loteadora › Máquinas y
+  `admin.loteadora.plantillas` → Loteadora › Plantillas (estos dos, crear y editar:
+  Eliminar y Exportar/Importar solo los ve el admin).
 - Cualquier otro usuario → al login. La misma regla la aplican `proxy.ts` (antes de
   mandar el HTML) y `<RequireAccess allow={puedeEntrarEnAdmin}>` en la página.
 - Las secciones sin permiso asociado (todas salvo Artículos) y `/admin/logs` (que redirige a
@@ -590,8 +592,10 @@ sincronización, último error) y botón "Sincronizar ahora" — ver
 | GET / POST | `/api/admin/loteadora-copia` | Exporta / importa en JSON las plantillas de la loteadora y sus asociaciones de artículos (botones de `/admin` → Plantillas, ver `docs/loteadora.md` §13) |
 
 Todas son solo de admin salvo las abiertas a un permiso en `RUTAS_ADMIN_POR_PERMISO`
-(§5b) — hoy `/api/admin/loteadora-articulos` (todo), `GET /api/admin/loteadora-mensajes` y
-`/api/admin/loteadora-datos-fijos` (todo).
+(§5b) — hoy `/api/admin/loteadora-articulos` (todo), `/api/admin/loteadora-datos-fijos` (todo),
+`/api/admin/loteadora-mensajes` (GET, POST y PUT, incluido `crear-en-maquina`),
+`/api/admin/loteadoras` (GET, POST y PUT, incluido `estado`) y `GET /api/admin/zonas`.
+Los DELETE, la gestión de zonas y `/api/admin/loteadora-copia` siguen siendo solo de admin.
 
 ---
 
@@ -691,7 +695,10 @@ artículos de `/muestras` o asignar artículos a plantillas de loteadora.
   migrada automáticamente a `user_permissions` — quien lo tenía lo conserva — y
   eliminada), `admin.loteadora.articulos` (sección Loteadora › Artículos) y
   `admin.loteadora.datos-fijos` (sección Loteadora › Datos fijos: precios y nº de
-  certificado de las plantillas).
+  certificado de las plantillas), `admin.loteadora.maquinas` (sección Máquinas: crear y
+  editar loteadoras, ve todas sin filtro de zona) y `admin.loteadora.plantillas` (sección
+  Plantillas: crear y editar, y "Crear en la loteadora…"). Una regla puede abrirse a
+  varios permisos (`permiso: [...]`, basta con uno), igual que `requireAccess({ permiso: [...] })`.
 - **Servidor, denegado por defecto**: `proxy.ts` sigue cortando `/admin*` y
   `/api/admin/*` a quien no sea admin, salvo: la página `/admin` exacta si algún
   permiso efectivo suyo tiene `seccionAdmin`, y las rutas de `RUTAS_ADMIN_POR_PERMISO`
