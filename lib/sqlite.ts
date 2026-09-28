@@ -179,9 +179,10 @@ export function getDb(): Database.Database {
       formato TEXT
     );
 
-    -- Dónde va cada campo en la etiqueta (línea 1-3 y si lleva detrás el hueco
-    -- del reloj): solo sirve para crear el mensaje en la máquina (comando 1C),
-    -- ver disponerCampos() en lib/loteadora-plantilla.ts.
+    -- Dónde va cada campo en la etiqueta (línea 1-3 y espaciado): solo sirve para
+    -- crear el mensaje en la máquina, ver disponerMensaje() en lib/loteadora-plantilla.ts.
+    -- reloj es del antiguo "reloj detrás" (hueco para un reloj puesto a mano): ya no
+    -- se usa, ahora el reloj es una pieza del campo (migración 'reloj-pieza').
     CREATE TABLE IF NOT EXISTS loteadora_mensaje_campos (
       mensaje_id INTEGER NOT NULL REFERENCES loteadora_mensajes(id) ON DELETE CASCADE,
       field_id INTEGER NOT NULL,
@@ -469,12 +470,45 @@ export function getDb(): Database.Database {
       const idDe = _db!.prepare('SELECT id FROM loteadora_mensajes WHERE name = ?');
       const tiene = _db!.prepare('SELECT 1 FROM loteadora_mensaje_campos WHERE mensaje_id = ?');
       const insertar = _db!.prepare('INSERT OR IGNORE INTO loteadora_mensaje_campos (mensaje_id, field_id, linea, reloj) VALUES (?, ?, ?, ?)');
-      for (const p of plantillasIniciales as { name: string; campos: Campo[] }[]) {
+      for (const p of plantillasIniciales as { name: string; campos: (Campo & { reloj?: boolean })[] }[]) {
         const m = idDe.get(p.name) as { id: number } | undefined;
         if (!m || tiene.get(m.id)) continue;
         for (const c of p.campos) insertar.run(m.id, c.fieldId, c.linea ?? 1, c.reloj ? 1 : 0);
       }
       _db!.prepare("INSERT INTO migraciones (clave) VALUES ('disposicion-nuevo-loteado')").run();
+    })();
+  }
+
+  // "Reloj detrás" (hueco para un reloj puesto a mano) pasa a ser un reloj de verdad,
+  // ahora que el panel crea el mensaje con reloj: al final del campo, un texto " " y
+  // una pieza reloj HHmm (la misma etiqueta que antes). Una sola vez.
+  if (!_db.prepare("SELECT 1 FROM migraciones WHERE clave = 'reloj-pieza'").get()) {
+    _db.transaction(() => {
+      const conReloj = _db!.prepare('SELECT mensaje_id, field_id FROM loteadora_mensaje_campos WHERE reloj = 1').all() as
+        { mensaje_id: number; field_id: number }[];
+      const ultimo = _db!.prepare('SELECT MAX(orden) AS orden FROM loteadora_mensaje_segmentos WHERE mensaje_id = ? AND field_id = ?');
+      const insertar = _db!.prepare('INSERT INTO loteadora_mensaje_segmentos (mensaje_id, orden, field_id, tipo, valor, formato) VALUES (?, ?, ?, ?, ?, ?)');
+      for (const c of conReloj) {
+        const { orden } = ultimo.get(c.mensaje_id, c.field_id) as { orden: number | null };
+        if (orden === null) continue;
+        insertar.run(c.mensaje_id, orden + 1, c.field_id, 'texto', ' ', null);
+        insertar.run(c.mensaje_id, orden + 2, c.field_id, 'reloj', null, 'HHmm');
+      }
+      _db!.prepare('UPDATE loteadora_mensaje_campos SET reloj = 0').run();
+      _db!.prepare("INSERT INTO migraciones (clave) VALUES ('reloj-pieza')").run();
+    })();
+  }
+
+  // Arial: el ancho por carácter por defecto pasa de tamaño × 0,6 a tamaño × 33/35 (medido
+  // en la máquina con el .msg). Una vez, y solo a las medidas guardadas con el valor por
+  // defecto antiguo: las ajustadas a mano se dejan.
+  if (!_db.prepare("SELECT 1 FROM migraciones WHERE clave = 'ancho-arial-33'").get()) {
+    _db.transaction(() => {
+      _db!.prepare(
+        `UPDATE loteadora_medidas_mensaje SET ancho = MAX(1, CAST(ROUND(tamano * 33.0 / 35) AS INTEGER) + espaciado)
+         WHERE fuente = 'Arial' AND ancho = MAX(1, CAST(ROUND(tamano * 0.6) AS INTEGER) + espaciado)`
+      ).run();
+      _db!.prepare("INSERT INTO migraciones (clave) VALUES ('ancho-arial-33')").run();
     })();
   }
 
