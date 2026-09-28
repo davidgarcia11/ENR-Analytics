@@ -5,7 +5,7 @@
  */
 import { describe, it, expect } from 'bun:test'
 import {
-  componerCampos, disponerCampos, exportarCopia, lineasEtiqueta, medidasDeTamano, medidasPorDefecto, piezasManuales, validarMedidas, filasACampos, formatearCaducidad, formatearCocida, importarCopia, validarPlantilla, variablesUsadas,
+  componerCampos, disponerMensaje, exportarCopia, lineasEtiqueta, medidasDeTamano, medidasPorDefecto, piezasManuales, validarMedidas, filasACampos, formatearCaducidad, formatearCocida, importarCopia, validarPlantilla, variablesUsadas,
   type Campo, type ValoresEtiqueta,
 } from '@/lib/loteadora-plantilla'
 
@@ -173,7 +173,9 @@ describe('copia de seguridad (exportar / importar)', () => {
     expect('value' in r1 && r1.value.articulos.creadas).toBe(1)
     const exportada = exportarCopia(db)
     expect(exportada.plantillas.map((p) => p.name)).toEqual(['N01_A', 'N02_B'])
-    expect(exportada.plantillas[0].campos).toEqual(copia.plantillas[0].campos as Campo[])
+    // Copia antigua: "reloj: true" en el campo pasa a ser un espacio y una pieza reloj al final
+    const { reloj, ...campo } = copia.plantillas[0].campos[0]
+    expect(exportada.plantillas[0].campos).toEqual([{ ...campo, piezas: [...campo.piezas, { tipo: 'texto', valor: ' ' }, { tipo: 'reloj', formato: 'HHmm' }] }] as Campo[])
     expect(exportada.articulos).toEqual(copia.articulos)
 
     const r2 = importarCopia(db, exportada, false)
@@ -207,35 +209,60 @@ describe('copia de seguridad (exportar / importar)', () => {
 describe('disposición en la etiqueta (crear el mensaje en la máquina)', () => {
   const LOTE = [{ tipo: 'texto', valor: 'L' }, { tipo: 'cocida' }, { tipo: 'texto', valor: ' ' }, { tipo: 'fresco' }, { tipo: 'texto', valor: ' ' }, { tipo: 'linea' }] as Campo['piezas']
 
-  it('una línea: el campo de después del reloj empieza tras el hueco (como N02)', () => {
-    const d = disponerCampos([
-      { fieldId: 1, piezas: LOTE, linea: 1, reloj: true },
+  it('una línea: el campo de después del reloj empieza tras él (como N02)', () => {
+    const d = disponerMensaje([
+      { fieldId: 1, piezas: [...LOTE, { tipo: 'texto', valor: ' ' }, { tipo: 'reloj', formato: 'HHmm' }], linea: 1 },
       { fieldId: 2, piezas: [{ tipo: 'texto', valor: 'CAD ' }, { tipo: 'caducidad', formato: 'DD/MM/AA' }], linea: 1 },
     ])
-    expect(d.map((c) => [c.id, c.x, c.y, c.length, c.fontSize])).toEqual([[1, 0, 0, 16, 35], [2, 462, 0, 12, 35]])
+    // campo 1: 16 caracteres + el espacio; el reloj detrás; el campo 2, tras un espacio (33 puntos cada uno)
+    expect(d.campos.map((c) => [c.id, c.x, c.y, c.length, c.fontSize])).toEqual([[1, 0, 0, 17, 35], [2, 22 * 33, 0, 12, 35]])
+    expect(d.relojes.map((r) => [r.x, r.y, r.length, r.formato])).toEqual([[17 * 33, 0, 4, 'HHmm']])
+    // la caja de cada elemento es justo lo que ocupa
+    expect([d.campos[0].ancho, d.relojes[0].ancho]).toEqual([17 * 33, 4 * 33])
   })
 
   it('tres líneas: letra más pequeña (como N06)', () => {
-    const d = disponerCampos([
+    const d = disponerMensaje([
       { fieldId: 1, piezas: [{ tipo: 'caducidad', formato: 'DD/MM/AA' }], linea: 1 },
-      { fieldId: 2, piezas: LOTE, linea: 2, reloj: true },
+      { fieldId: 2, piezas: [...LOTE, { tipo: 'reloj', formato: 'HHmm' }], linea: 2 },
       { fieldId: 3, piezas: [{ tipo: 'texto', valor: 'It contains egg' }], linea: 3 },
     ])
-    expect(d.map((c) => [c.x, c.y, c.fontSize])).toEqual([[0, 0, 23], [0, 24, 23], [0, 48, 23]])
+    expect(d.campos.map((c) => [c.x, c.y, c.fontSize])).toEqual([[0, 0, 23], [0, 24, 23], [0, 48, 23]])
+    expect(d.relojes[0].y).toBe(24)
   })
 
-  it('vista previa por líneas con el hueco del reloj', () => {
+  it('reloj al principio del campo, con dos puntos y con el espaciado del campo', () => {
+    const campos: Campo[] = [{ fieldId: 1, piezas: [{ tipo: 'reloj', formato: 'HH:mm' }, { tipo: 'texto', valor: ' ABC' }], linea: 1, espaciado: -10 }]
+    const d = disponerMensaje(campos)
+    // 33 - 10 = 23 puntos por carácter
+    expect(d.relojes.map((r) => [r.x, r.length, r.espaciado])).toEqual([[0, 5, -10]])
+    expect(d.campos.map((c) => [c.x, c.length, c.espaciado])).toEqual([[5 * 23, 4, -10]])
+    expect(lineasEtiqueta(campos, valores)).toEqual(['HH:mm ABC'])
+  })
+
+  it('vista previa por líneas con el reloj; al enviar el reloj no va', () => {
     const campos: Campo[] = [
-      { fieldId: 1, piezas: [{ tipo: 'texto', valor: 'L' }, { tipo: 'cocida' }, { tipo: 'turno' }], linea: 1, reloj: true },
+      { fieldId: 1, piezas: [{ tipo: 'texto', valor: 'L' }, { tipo: 'cocida' }, { tipo: 'turno' }, { tipo: 'texto', valor: ' ' }, { tipo: 'reloj', formato: 'HHmm' }], linea: 1 },
       { fieldId: 2, piezas: [{ tipo: 'texto', valor: 'CAD ' }, { tipo: 'caducidad', formato: 'DD/MM/AA' }], linea: 2 },
     ]
     expect(lineasEtiqueta(campos, valores)).toEqual(['L263641 HHmm', 'CAD 06/01/27'])
+    expect(componerCampos(campos, valores)[0]).toEqual({ fieldId: 1, texto: 'L263641 ', faltan: [] })
+    expect(componerCampos(campos, { ...valores, conReloj: true })[0].texto).toBe('L263641 HHmm')
+    expect(variablesUsadas(campos).has('reloj' as never)).toBe(false)
   })
 
-  it('valida la línea y guarda el reloj', () => {
-    const r = validarPlantilla({ name: 'X', campos: [{ fieldId: 1, piezas: [{ tipo: 'hora' }], linea: 2, reloj: true }] })
-    expect('value' in r && r.value.campos[0]).toEqual({ fieldId: 1, piezas: [{ tipo: 'hora' }], linea: 2, reloj: true })
+  it('valida la línea y el reloj', () => {
+    const r = validarPlantilla({ name: 'X', campos: [{ fieldId: 1, piezas: [{ tipo: 'hora' }, { tipo: 'reloj', formato: 'HH:mm' }], linea: 2 }] })
+    expect('value' in r && r.value.campos[0]).toEqual({ fieldId: 1, piezas: [{ tipo: 'hora' }, { tipo: 'reloj', formato: 'HH:mm' }], linea: 2 })
+    // "reloj: true" (clientes y copias antiguas) = espacio y reloj HHmm al final
+    const antigua = validarPlantilla({ name: 'X', campos: [{ fieldId: 1, piezas: [{ tipo: 'hora' }], reloj: true }] })
+    expect('value' in antigua && antigua.value.campos[0].piezas).toEqual([{ tipo: 'hora' }, { tipo: 'texto', valor: ' ' }, { tipo: 'reloj', formato: 'HHmm' }])
+    const campo = (piezas: unknown[]) => validarPlantilla({ name: 'X', campos: [{ fieldId: 1, piezas }] })
     expect('error' in validarPlantilla({ name: 'X', campos: [{ fieldId: 1, piezas: [{ tipo: 'hora' }], linea: 4 }] })).toBe(true)
+    expect('error' in campo([{ tipo: 'hora' }, { tipo: 'reloj', formato: 'HH' }])).toBe(true) // formato
+    expect('error' in campo([{ tipo: 'hora' }, { tipo: 'reloj', formato: 'HHmm' }, { tipo: 'turno' }])).toBe(true) // en medio
+    expect('error' in campo([{ tipo: 'reloj', formato: 'HHmm' }, { tipo: 'hora' }, { tipo: 'reloj', formato: 'HHmm' }])).toBe(true) // dos
+    expect('error' in campo([{ tipo: 'reloj', formato: 'HHmm' }])).toBe(true) // solo el reloj
   })
 })
 
@@ -263,38 +290,40 @@ describe('dato a introducir (pieza manual)', () => {
   })
 
   it('reserva 20 caracteres en el campo de la máquina', () => {
-    expect(disponerCampos([{ fieldId: 3, piezas: [{ tipo: 'manual', nombre: 'Cert' }] }])[0].length).toBe(20)
+    expect(disponerMensaje([{ fieldId: 3, piezas: [{ tipo: 'manual', nombre: 'Cert' }] }]).campos[0].length).toBe(20)
   })
 })
 
 describe('medidas del mensaje (fuente, tamaño, espaciado)', () => {
   const campos: Campo[] = [
-    { fieldId: 1, piezas: [{ tipo: 'texto', valor: 'L' }, { tipo: 'cocida' }], linea: 1, reloj: true },
+    { fieldId: 1, piezas: [{ tipo: 'texto', valor: 'L' }, { tipo: 'cocida' }], linea: 1 },
     { fieldId: 2, piezas: [{ tipo: 'caducidad', formato: 'DD/MM/AA' }], linea: 2 },
   ]
 
   it('por defecto Arial con las proporciones de siempre', () => {
-    expect(medidasPorDefecto(campos)).toEqual({ fuente: 'Arial', tamano: 35, espaciado: 0, ancho: 21, interlineado: 36 })
+    expect(medidasPorDefecto(campos)).toEqual({ fuente: 'Arial', tamano: 35, espaciado: 0, ancho: 33, interlineado: 36 })
   })
 
   it('coloca los campos con las medidas elegidas y manda su fuente, tamaño y espaciado', () => {
-    const m = medidasDeTamano(30, -2) // ancho = 18 - 2 = 16, interlineado 31
-    expect(m).toEqual({ fuente: 'Arial', tamano: 30, espaciado: -2, ancho: 16, interlineado: 31 })
-    const d = disponerCampos([...campos, { fieldId: 3, piezas: [{ tipo: 'texto', valor: 'X' }], linea: 1 }], m)
-    // campo 1: 6 caracteres de 16 puntos; luego espacio + hueco del reloj (1 + 5 caracteres de 18, el ancho base)
-    expect(d.map((c) => [c.id, c.x, c.y, c.fontSize, c.font, c.space])).toEqual([
-      [1, 0, 0, 30, 'Arial', 6], [2, 0, 31, 30, 'Arial', 6], [3, 6 * 16 + 6 * 18, 0, 30, 'Arial', 6],
+    const m = medidasDeTamano(30, -2) // ancho = 28 - 2 = 26, interlineado 31
+    expect(m).toEqual({ fuente: 'Arial', tamano: 30, espaciado: -2, ancho: 26, interlineado: 31 })
+    const conReloj = [{ ...campos[0], piezas: [...campos[0].piezas, { tipo: 'reloj', formato: 'HHmm' }] }, campos[1]]
+    const d = disponerMensaje([...conReloj, { fieldId: 3, piezas: [{ tipo: 'texto', valor: 'X' }], linea: 1 }], m)
+    // campo 1: 6 caracteres de 26 puntos; reloj pegado: 4 de 26; espacio (28, el ancho base)
+    expect(d.campos.map((c) => [c.id, c.x, c.y, c.fontSize, c.font, c.espaciado])).toEqual([
+      [1, 0, 0, 30, 'Arial', -2], [2, 0, 31, 30, 'Arial', -2], [3, 6 * 26 + 4 * 26 + 28, 0, 30, 'Arial', -2],
     ])
+    expect(d.relojes[0].x).toBe(6 * 26)
   })
 
   it('cada campo puede tener su espaciado; el resto usa el del mensaje', () => {
-    const m = medidasDeTamano(35) // base 21, espaciado 0
-    const d = disponerCampos([
+    const m = medidasDeTamano(35) // base 33, espaciado 0
+    const d = disponerMensaje([
       { fieldId: 1, piezas: [{ tipo: 'texto', valor: 'ABCD' }], linea: 1, espaciado: 10 },
       { fieldId: 2, piezas: [{ tipo: 'texto', valor: 'XY' }], linea: 1 },
     ], m)
-    // campo 1 a 31 puntos por carácter (21 + 10) y byte Space 0x02; campo 2 detrás, con el del mensaje (0x05)
-    expect(d.map((c) => [c.id, c.x, c.space])).toEqual([[1, 0, 2], [2, 4 * 31 + 21, 5]])
+    // campo 1 a 43 puntos por carácter (33 + 10); campo 2 detrás, con el del mensaje (0)
+    expect(d.campos.map((c) => [c.id, c.x, c.espaciado])).toEqual([[1, 0, 10], [2, 4 * 43 + 33, 0]])
     const r = validarPlantilla({ name: 'X', campos: [{ fieldId: 1, piezas: [{ tipo: 'hora' }], espaciado: 10 }] })
     expect('value' in r && r.value.campos[0].espaciado).toBe(10)
     expect('error' in validarPlantilla({ name: 'X', campos: [{ fieldId: 1, piezas: [{ tipo: 'hora' }], espaciado: 7 }] })).toBe(true)

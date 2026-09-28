@@ -17,7 +17,7 @@ const CMD_LOAD_PRINT_MESSAGE = 0x1e;
 const CMD_REQUEST_MESSAGE_NAMES = 0x1f;
 const CMD_REQUEST_PRINTER_STATUS = 0x14;
 const CMD_CLEAR_REMOTE_FIELD_BUFFER = 0x21;
-const CMD_DOWNLOAD_MESSAGE_DATA = 0x1c;
+const CMD_SEND_FILE = 0x50;
 // Espera entre cargar (1E) y aplicar (01) una plantilla: ver loadPrintMessage.
 export const LOAD_APPLY_DELAY_MS = 1000;
 
@@ -63,52 +63,17 @@ export function buildRemoteFieldFrame(slaveAddress: number, fields: RemoteField[
   return Buffer.from(bytes);
 }
 
-// Campo remoto (Field Module) de un mensaje creado por red — protocolo §3.5.17.3.
-export interface FieldModuleSpec {
-  id: number;
-  /** Posición en la unidad de la máquina (la misma que guarda el .msg) */
-  x: number;
-  y: number;
-  fontSize: number;
-  font: string;
-  /** Nº máximo de caracteres del campo (1-255) */
-  length: number;
-  /** Byte "Space" (espaciado entre caracteres): 0x00 = +30 … 0x05 = 0 … 0x0A = -30. Por defecto 0x05 */
-  space?: number;
-}
-
-// Construye la trama del comando 1C (Download Message Data) — protocolo §3.5.17.
-// Solo Field Modules, en ASCII y alineados a la izquierda, con fuente de datos
-// "puerto serie" (la que usa el 1D). Longitud de datos y X/Y/tamaño en big-endian,
-// como en todos los ejemplos del manual.
-// ponytail: sin Text/QR/logo — los literales van como piezas de texto de la plantilla.
-export function buildDownloadMessageFrame(slaveAddress: number, messageName: string, fields: FieldModuleSpec[]): Buffer {
-  const name = Buffer.from(messageName, 'ascii');
-  if (name.length < 1 || name.length > 255) throw new Error('El nombre del mensaje debe tener entre 1 y 255 caracteres');
-  if (fields.length < 1 || fields.length > 255) throw new Error('El mensaje necesita entre 1 y 255 campos');
-
-  const u16 = (n: number) => [(n >> 8) & 0xff, n & 0xff];
-  const data: number[] = [name.length, ...name, fields.length];
-  for (const f of fields) {
-    const font = Buffer.from(f.font, 'ascii');
-    if (f.length < 1 || f.length > 255) throw new Error(`Campo ${f.id}: la longitud debe estar entre 1 y 255`);
-    if (f.fontSize < 5 || f.fontSize > 1200) throw new Error(`Campo ${f.id}: el tamaño de letra debe estar entre 5 y 1200`);
-    if (f.x < 0 || f.x > 0x7fff || f.y < 0 || f.y > 0x7fff) throw new Error(`Campo ${f.id}: posición fuera de rango`);
-    if (f.space !== undefined && (!Number.isInteger(f.space) || f.space < 0 || f.space > 0x0a)) throw new Error(`Campo ${f.id}: espaciado no válido`);
-    data.push(
-      0x03, ...u16(f.x), ...u16(f.y),
-      0x00, // giro 0º
-      f.space ?? 0x05, // espaciado (0x05 = 0, el valor por defecto)
-      ...u16(f.fontSize), font.length, ...font,
-      0x80, // puerto serie + ASCII + alineado a la izquierda
-      f.id & 0xff, f.length,
-    );
-  }
-
-  const bytes: number[] = [ESC, STX, slaveAddress & 0xff, CMD_DOWNLOAD_MESSAGE_DATA,
-    (data.length >> 16) & 0xff, (data.length >> 8) & 0xff, data.length & 0xff, ...data, ESC, ETX];
-  bytes.push(checknum(bytes));
-  return Buffer.from(bytes);
+// Construye la trama del comando 50 (Send File) — protocolo §3.5.48, en una sola
+// pieza (OPERATION 03). Esta trama no lleva ESC ETX ni checknum al final, y la
+// longitud cuenta todo lo que va detrás de ella.
+// ponytail: una sola pieza (hasta 10240 bytes); un .msg de plantilla ronda 2-4 KB.
+export const MAX_PIEZA_ARCHIVO = 10240;
+export function buildSendFileFrame(slaveAddress: number, fileName: string, file: Buffer): Buffer {
+  const name = Buffer.from(fileName, 'ascii');
+  if (name.length < 1 || name.length > 255) throw new Error('El nombre del archivo debe tener entre 1 y 255 caracteres');
+  if (file.length < 1 || file.length > MAX_PIEZA_ARCHIVO) throw new Error(`El archivo ocupa ${file.length} bytes y el máximo en un envío es ${MAX_PIEZA_ARCHIVO}`);
+  const data = Buffer.concat([Buffer.from([0x03, name.length]), name, file]);
+  return Buffer.concat([Buffer.from([ESC, STX, slaveAddress & 0xff, CMD_SEND_FILE, (data.length >> 8) & 0xff, data.length & 0xff]), data]);
 }
 
 // Construye la trama de un comando sin datos (14 Request Printer Status,
@@ -357,18 +322,18 @@ export async function listMessageNames(config: LoteadoraConfig): Promise<string[
   return names;
 }
 
-// Crea (o sobrescribe) un mensaje en la impresora con sus campos (comando 1C).
-// La máquina lo guarda con ese nombre y lo deja en el área de edición.
-// 12 (impresión parada) es estado, no rechazo, igual que en 1E/1D.
-export async function downloadMessage(config: LoteadoraConfig, messageName: string, fields: FieldModuleSpec[]): Promise<void> {
-  const frame = buildDownloadMessageFrame(config.slaveAddress, messageName, fields);
+// Crea (o sobrescribe) un mensaje en la impresora enviándole su archivo .msg
+// (comando 50; el archivo lo genera lib/loteadora-msg.ts). P_Status 01 = archivo
+// demasiado grande o extensión no admitida; 12 (impresión parada) es estado, no rechazo.
+export async function sendMessageFile(config: LoteadoraConfig, messageName: string, file: Buffer): Promise<void> {
+  const frame = buildSendFileFrame(config.slaveAddress, `${messageName}.msg`, file);
   const result = await sendCommand(config, frame, 10000);
-  console.log(`[loteadora ${config.ip}] crear ${JSON.stringify(messageName)} → 1C: ${Array.from(result.data).map((x) => x.toString(16).padStart(2, '0')).join(' ')}`);
+  console.log(`[loteadora ${config.ip}] crear ${JSON.stringify(messageName)} → 50: ${Array.from(result.data).map((x) => x.toString(16).padStart(2, '0')).join(' ')}`);
 
   if (result.kind === 'nak') {
     throw new Error(`Comando rechazado por la loteadora: ${describeStatus(C_STATUS_MESSAGES, result.status)}`);
   }
-  if (result.status === 0x15) throw new Error('La loteadora no pudo guardar el mensaje');
+  if (result.status === 0x01) throw new Error('La loteadora no aceptó el archivo del mensaje (demasiado grande o formato no admitido)');
   if (result.status !== 0x00 && result.status !== 0x12) {
     throw new Error(`No se pudo crear el mensaje: ${describeStatus(P_STATUS_MESSAGES, result.status)}`);
   }
