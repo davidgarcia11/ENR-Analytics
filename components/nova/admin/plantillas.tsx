@@ -8,7 +8,7 @@
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { AlertTriangle, ArrowLeft, ArrowRight, Loader2, MoreHorizontal, Pencil, Plus, Printer, Trash2, X } from "lucide-react";
-import { useApiFetch } from "@/components/SessionProvider";
+import { useApiFetch, useSession } from "@/components/SessionProvider";
 import { Button } from "@/components/nova/ui/button";
 import { Input } from "@/components/nova/ui/input";
 import { Label } from "@/components/nova/ui/label";
@@ -247,6 +247,8 @@ function EditorCampo({ campo, ejemplo, onChange, onQuitar, puedeQuitar }: {
 
 export default function AdminPlantillas({ titulo, descripcion }: SeccionProps) {
   const apiFetch = useApiFetch();
+  // Con el permiso de la sección se crea y edita; eliminar (y la copia) solo el admin.
+  const esAdmin = useSession().user?.role === "admin";
   const [mensajes, setMensajes] = useState<Mensaje[]>([]);
   const [cargando, setCargando] = useState(true);
 
@@ -385,7 +387,7 @@ export default function AdminPlantillas({ titulo, descripcion }: SeccionProps) {
   return (
     <>
       <CabeceraSeccion titulo={titulo} descripcion={descripcion}>
-        <BotonesCopia ruta="/api/admin/loteadora-copia" archivo="plantillas-loteadora" conPlantillas onImportado={cargar} />
+        {esAdmin && <BotonesCopia ruta="/api/admin/loteadora-copia" archivo="plantillas-loteadora" conPlantillas onImportado={cargar} />}
         <Button onClick={abrirAlta}>
           <Plus />
           Nueva plantilla
@@ -432,8 +434,12 @@ export default function AdminPlantillas({ titulo, descripcion }: SeccionProps) {
                       <DropdownMenuContent align="end" className="min-w-40">
                         <DropdownMenuItem onClick={() => abrirEdicion(m)}><Pencil />Editar</DropdownMenuItem>
                         <DropdownMenuItem onClick={() => abrirCrearEnMaquina(m)}><Printer />Crear en la loteadora…</DropdownMenuItem>
-                        <DropdownMenuSeparator />
-                        <DropdownMenuItem variant="destructive" onClick={() => setBorrando(m)}><Trash2 />Eliminar</DropdownMenuItem>
+                        {esAdmin && (
+                          <>
+                            <DropdownMenuSeparator />
+                            <DropdownMenuItem variant="destructive" onClick={() => setBorrando(m)}><Trash2 />Eliminar</DropdownMenuItem>
+                          </>
+                        )}
                       </DropdownMenuContent>
                     </DropdownMenu>
                   </TableCell>

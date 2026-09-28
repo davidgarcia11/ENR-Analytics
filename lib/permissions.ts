@@ -30,8 +30,10 @@ export function permisosDeRol(roleName: string): Permiso[] {
   return rows.map((r) => r.permission).filter(esPermiso);
 }
 
-function usuarioTienePermiso(userId: number, role: string, permiso: Permiso): boolean {
+/** Con una lista, basta con tener uno de ellos. */
+function usuarioTienePermiso(userId: number, role: string, permiso: Permiso | Permiso[]): boolean {
   if (role === 'admin') return true;
+  if (Array.isArray(permiso)) return permiso.some((p) => usuarioTienePermiso(userId, role, p));
   const db = getDb();
   return !!db.prepare(`
     SELECT 1 FROM user_permissions WHERE user_id = ? AND permission = ?
@@ -118,8 +120,8 @@ export interface AccessRule {
   screen?: string;
   /** Exige un rol concreto (hoy solo 'admin') */
   role?: string;
-  /** Exige un permiso del catálogo (lib/permisos.ts), concedido al usuario o a su rol; admin siempre pasa */
-  permiso?: Permiso;
+  /** Exige un permiso del catálogo (lib/permisos.ts), concedido al usuario o a su rol; admin siempre pasa. Con una lista, basta con uno */
+  permiso?: Permiso | Permiso[];
   /** Exige sesión y nada más — rutas "de usuario" como los presets */
   sesion?: true;
 }

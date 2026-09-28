@@ -13,7 +13,7 @@ interface LoteadoraRow {
 // Estado en vivo (admin) de TODAS las loteadoras, habilitadas o no, para la
 // pestaña Loteadoras de /admin.
 export async function GET() {
-  const acceso = await requireAccess({ role: 'admin' });
+  const acceso = await requireAccess({ permiso: 'admin.loteadora.maquinas' });
   if (!acceso.ok) return acceso.denied;
 
   const db = getDb();

@@ -73,6 +73,11 @@ function createTestDb() {
     INSERT INTO role_permissions VALUES (4, 'admin.loteadora.articulos');
     INSERT INTO user_permissions VALUES (4, 'muestras.config');
 
+    -- tecnico1: crea y edita máquinas y plantillas (sin eliminar)
+    INSERT INTO users VALUES (5, 'tecnico1', 'tecnico', 0);
+    INSERT INTO user_permissions VALUES (5, 'admin.loteadora.maquinas');
+    INSERT INTO user_permissions VALUES (5, 'admin.loteadora.plantillas');
+
     INSERT INTO roles VALUES (1, 'admin',      'Administrador');
     INSERT INTO roles VALUES (2, 'user',       'Usuario');
     INSERT INTO roles VALUES (3, 'supervisor', 'Supervisor');
@@ -345,6 +350,35 @@ describe('/admin para usuarios sin rol admin (proxy)', () => {
     expect(puedeUsarApiAdmin('/api/admin/loteadora-articulos-x', 'GET', 3, 'supervisor')).toBe(false)
     // usuario sin el permiso
     expect(puedeUsarApiAdmin('/api/admin/loteadora-articulos', 'GET', 2, 'user')).toBe(false)
+  })
+})
+
+describe('permisos de máquinas y plantillas (crear y editar, no eliminar)', () => {
+  it('abre la lectura, el alta y la edición', () => {
+    for (const [ruta, metodo] of [
+      ['/api/admin/loteadoras', 'GET'], ['/api/admin/loteadoras', 'POST'], ['/api/admin/loteadoras/3', 'PUT'],
+      ['/api/admin/loteadoras/estado', 'GET'], ['/api/admin/zonas', 'GET'],
+      ['/api/admin/loteadora-mensajes', 'GET'], ['/api/admin/loteadora-mensajes', 'POST'], ['/api/admin/loteadora-mensajes/5', 'PUT'],
+      ['/api/admin/loteadora-mensajes/5/crear-en-maquina', 'GET'], ['/api/admin/loteadora-mensajes/5/crear-en-maquina', 'POST'],
+    ]) expect(puedeUsarApiAdmin(ruta, metodo, 5, 'tecnico')).toBe(true)
+  })
+
+  it('eliminar, zonas y la copia completa siguen siendo del admin', () => {
+    for (const [ruta, metodo] of [
+      ['/api/admin/loteadoras/3', 'DELETE'], ['/api/admin/loteadora-mensajes/5', 'DELETE'],
+      ['/api/admin/zonas', 'POST'], ['/api/admin/zonas/1', 'PUT'], ['/api/admin/loteadora-copia', 'GET'], ['/api/admin/loteadora-copia', 'POST'],
+    ]) expect(puedeUsarApiAdmin(ruta, metodo, 5, 'tecnico')).toBe(false)
+  })
+
+  it('el de artículos sigue leyendo plantillas, pero no ve las máquinas', () => {
+    expect(puedeUsarApiAdmin('/api/admin/loteadora-mensajes', 'GET', 3, 'supervisor')).toBe(true)
+    expect(puedeUsarApiAdmin('/api/admin/loteadoras', 'GET', 3, 'supervisor')).toBe(false)
+  })
+
+  it('requireAccess con varios permisos pasa con uno solo', async () => {
+    comoSuperv()
+    expect((await requireAccess({ permiso: ['admin.loteadora.maquinas', 'admin.loteadora.articulos'] })).ok).toBe(true)
+    expect((await requireAccess({ permiso: ['admin.loteadora.maquinas', 'admin.loteadora.plantillas'] })).ok).toBe(false)
   })
 })
 
