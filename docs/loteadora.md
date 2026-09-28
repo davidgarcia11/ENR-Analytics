@@ -161,7 +161,7 @@ El botón "Enviar a loteadora" llama a `POST /api/loteadora/enviar` con los **va
 
 **Confirmación antes de enviar:** el botón abre un diálogo con la loteadora y el texto exacto de cada campo. El envío solo se hace al pulsar "Enviar".
 
-**Imprimiendo no se envía.** Cambiar los datos a mitad de tirada dejaría parte del lote con unos datos y parte con otros, y eso rompe la trazabilidad. El servidor consulta el estado (`14`) antes del `1D` y, si es `activa`, responde `409` con "La loteadora está imprimiendo…". En el panel, el botón se desactiva con un aviso ámbar y un enlace "Comprobar de nuevo". Solo se bloquea con `00` ("imprimiendo sin avisos"): con `01` ("hay avisos", p. ej. poca tinta o sin cartucho) no se puede saber si está imprimiendo o parada, y bloquear ahí impediría trabajar.
+**Imprimiendo no se envía.** Cambiar los datos a mitad de tirada dejaría parte del lote con unos datos y parte con otros, y eso rompe la trazabilidad. El servidor consulta el estado (`14`) antes del `1D` y, si es `activa`, responde `409` con "La loteadora está imprimiendo…". En el panel, el botón se desactiva con un aviso ámbar y un enlace "Comprobar de nuevo", y también se bloquea el selector de **artículo**: cambiar de artículo cargaría otra plantilla y vaciaría el formulario a mitad de tirada. Solo se bloquea con `00` ("imprimiendo sin avisos"): con `01` ("hay avisos", p. ej. poca tinta o sin cartucho) no se puede saber si está imprimiendo o parada, y bloquear ahí impediría trabajar.
 
 ---
 
@@ -238,7 +238,7 @@ Ejemplo real configurado durante el desarrollo de esta función: IP `192.168.111
 
 Tanto `/loteadora` como la pestaña **Loteadoras** de `/admin` muestran el estado real de cada máquina, refrescado automáticamente cada 60 segundos mientras la página/pestaña está abierta (`setInterval`, limpiado al desmontar o al cambiar de pestaña):
 
-- `/loteadora`: sección "Estado de las loteadoras" (`GET /api/loteadora/estado`, solo habilitadas) + el propio badge "JDE conectado" se refresca en el mismo ciclo (reintenta `fetchArticulos()`, que hace de comprobación de vida de JDE ahora que ya no hay marcas).
+- `/loteadora`: sección "Estado de las loteadoras" (`GET /api/loteadora/estado`, solo habilitadas) + el propio badge "JDE conectado" se refresca en el mismo ciclo (reintenta `fetchArticulos()`, que hace de comprobación de vida de JDE ahora que ya no hay marcas). Para no esperar los 60 s (p. ej. tras parar la impresión en la máquina), hay un botón de refrescar (icono ↻) junto al selector de loteadora y en la cabecera de "Estado de las loteadoras".
 - Estados: **Imprimiendo** (`00`), **Conectada (sin imprimir)** (`12`), **En error** (`01` o NAK) y **Sin conexión**. En `/admin` el estado `12` se llama "Sin imprimir".
 - `/admin` → Loteadoras: badge adicional junto a "Habilitada/Deshabilitada" (`GET /api/admin/loteadoras/estado`, todas, se comprueba solo mientras esa pestaña está activa).
 
