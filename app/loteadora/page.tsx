@@ -19,6 +19,7 @@ import {
   PowerOff,
   Upload,
   Eraser,
+  RefreshCw,
 } from "lucide-react";
 import Header from "@/components/shadcn-space/blocks/topbar-02/header";
 import { RequireAccess, useApiFetch, useSession } from "@/components/SessionProvider";
@@ -490,7 +491,8 @@ function LoteadoraPanel() {
       })
     : [];
   const faltan = [...new Set(compuestos.flatMap((c) => c.faltan))];
-  // Imprimiendo (P_Status 00 en el estado en vivo) no se deja cambiar nada; el
+  // Imprimiendo (P_Status 00 en el estado en vivo) no se deja cambiar nada, ni de
+  // artículo (se bloquea el desplegable); el
   // servidor lo vuelve a comprobar en el momento (el estado aquí puede tener 60s).
   const imprimiendo = estadoLoteadoras.find((e) => String(e.id) === selectedLoteadora)?.state === "activa";
   const canSend = compuestos.length > 0 && faltan.length === 0 && !!selectedLoteadora && !sending && !imprimiendo;
@@ -531,7 +533,14 @@ function LoteadoraPanel() {
 
                   {/* Primero la loteadora: el artículo carga su plantilla en ella */}
                   <div className="grid gap-1.5">
-                    <label className="text-xs font-semibold text-foreground">Loteadora</label>
+                    <div className="flex items-center justify-between">
+                      <label className="text-xs font-semibold text-foreground">Loteadora</label>
+                      {selectedLoteadora && (
+                        <Button type="button" variant="ghost" size="icon-xs" onClick={fetchEstadoLoteadoras} disabled={loadingEstado} title="Refrescar el estado de la máquina">
+                          <RefreshCw className={loadingEstado ? "size-3.5 animate-spin" : "size-3.5"} />
+                        </Button>
+                      )}
+                    </div>
                     <Select items={loteadoraItems} value={selectedLoteadora || null} onValueChange={(v) => handleLoteadoraSelect(v as string)}>
                       <SelectTrigger className="w-full">
                         <SelectValue placeholder={loteadoras.length === 0 ? "Sin loteadoras configuradas" : "Seleccionar loteadora…"} />
@@ -548,7 +557,7 @@ function LoteadoraPanel() {
                     <Alert className="border-amber-500/20 bg-amber-400/10 py-2">
                       <AlertTriangle className="text-amber-600" />
                       <AlertDescription className="flex flex-wrap items-center gap-x-2 text-xs text-amber-700 dark:text-amber-400">
-                        La loteadora está imprimiendo: para la impresión en la máquina para cambiar la plantilla o enviar datos.
+                        La loteadora está imprimiendo: para la impresión en la máquina para cambiar de artículo o enviar datos.
                         <button type="button" onClick={fetchEstadoLoteadoras} className="underline hover:opacity-80">Comprobar de nuevo</button>
                       </AlertDescription>
                     </Alert>
@@ -592,7 +601,7 @@ function LoteadoraPanel() {
                       onValueChange={(v) => handleArticuloChange(v as string | null)}
                       itemToStringLabel={articuloLabel}
                     >
-                      <ComboboxInput placeholder={articuloPlaceholder} disabled={!selectedLoteadora || !jdeOnline || loadingArticulos} showClear />
+                      <ComboboxInput placeholder={articuloPlaceholder} disabled={!selectedLoteadora || !jdeOnline || loadingArticulos || imprimiendo} showClear />
                       <ComboboxContent>
                         <ComboboxEmpty>Sin resultados</ComboboxEmpty>
                         <ComboboxList>
@@ -830,7 +839,9 @@ function LoteadoraPanel() {
               <CardHeader className="flex flex-wrap items-center gap-2 border-b pb-4">
                 <Printer className="size-4 text-primary" />
                 <CardTitle>Estado de las loteadoras</CardTitle>
-                {loadingEstado && <Loader2 className="size-3.5 animate-spin text-muted-foreground" />}
+                <Button type="button" variant="ghost" size="icon-xs" onClick={fetchEstadoLoteadoras} disabled={loadingEstado} title="Refrescar el estado de las máquinas">
+                  <RefreshCw className={loadingEstado ? "size-3.5 animate-spin" : "size-3.5"} />
+                </Button>
               </CardHeader>
               <CardContent className="pt-4">
                 {estadoLoteadoras.length === 0 ? (
