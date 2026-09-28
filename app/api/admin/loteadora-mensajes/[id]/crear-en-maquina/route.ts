@@ -3,15 +3,16 @@ import type Database from 'better-sqlite3';
 import { getDb } from '@/lib/sqlite';
 import { requireAccess } from '@/lib/permissions';
 import {
-  disponerCampos, leerCampos, medidasPorDefecto, numeroLineas, validarMedidas, type Campo, type MedidasMensaje,
+  disponerMensaje, leerCampos, medidasPorDefecto, numeroLineas, validarMedidas, type Campo, type MedidasMensaje,
 } from '@/lib/loteadora-plantilla';
-import { downloadMessage, getPrinterStatus, listMessageNames } from '@/lib/loteadora-printer';
+import { generarMsg } from '@/lib/loteadora-msg';
+import { getPrinterStatus, listMessageNames, sendMessageFile } from '@/lib/loteadora-printer';
 
-// Crea (o sustituye) en una loteadora el mensaje de una plantilla, con sus campos
-// colocados por disponerCampos() (comando 1C) y las medidas elegidas (fuente,
-// tamaño, espaciado...), que se recuerdan por mensaje y máquina. Solo admin. El
-// reloj no existe en el 1C: se inserta a mano en la máquina, y si el mensaje ya
-// existía se pierde el que tuviera (el panel lo avisa antes). Ver docs/loteadora.md §9 y §13.
+// Crea (o sustituye) en una loteadora el mensaje de una plantilla: genera su .msg
+// (lib/loteadora-msg.ts) con los campos (y sus relojes) colocados por disponerMensaje()
+// y las medidas elegidas (fuente, tamaño, espaciado...), que se recuerdan por
+// mensaje y máquina, y lo envía con el comando 50. Admin o permiso de plantillas.
+// Ver docs/loteadora.md §9 y §13.
 
 interface FilaMedidas extends MedidasMensaje { tres_lineas: number }
 const COLUMNAS = 'fuente, tamano, espaciado, ancho, interlineado';
@@ -80,7 +81,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
 
   try {
     const antes = await listMessageNames(config).catch(() => null);
-    await downloadMessage(config, mensaje.name, disponerCampos(campos, medidas));
+    await sendMessageFile(config, mensaje.name, generarMsg(mensaje.name, disponerMensaje(campos, medidas)));
     const despues = await listMessageNames(config).catch(() => null);
     if (despues && !despues.includes(mensaje.name)) {
       return NextResponse.json({ error: 'La loteadora aceptó el mensaje pero no aparece en su lista. Revísalo en la máquina.' }, { status: 502 });

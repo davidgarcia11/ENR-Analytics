@@ -16,9 +16,10 @@
 // plantillas de /admin. Las funciones de BD reciben la conexión por parámetro.
 import type Database from 'better-sqlite3';
 
-export const TIPOS_PIEZA = ['texto', 'fijo', 'fresco', 'cocida', 'caducidad', 'turno', 'hora', 'linea', 'manual'] as const;
+export const TIPOS_PIEZA = ['texto', 'fijo', 'fresco', 'cocida', 'caducidad', 'turno', 'hora', 'linea', 'manual', 'reloj'] as const;
 export type TipoPieza = (typeof TIPOS_PIEZA)[number];
-export type TipoVariable = Exclude<TipoPieza, 'texto' | 'fijo'>;
+// 'reloj' no es un dato de /loteadora: lo rellena la máquina (ver FORMATOS_RELOJ)
+export type TipoVariable = Exclude<TipoPieza, 'texto' | 'fijo' | 'reloj'>;
 
 // 'DD' = solo el día (p. ej. el día anterior a la caducidad en otro campo: "24").
 export const FORMATOS_CADUCIDAD = ['DD/MM/AA', 'DD/MM/AAAA', 'MM/DD/AA', 'MM/DD/AAAA', 'DD'] as const;
@@ -34,7 +35,7 @@ export interface Pieza {
    *  'manual': lo que ve el operario en /loteadora ("Nº certificado Kosher").
    *  En 'manual', `valor` es el valor por defecto (opcional). */
   nombre?: string;
-  /** 'caducidad' → FORMATOS_CADUCIDAD; 'cocida' → FORMATOS_COCIDA */
+  /** 'caducidad' → FORMATOS_CADUCIDAD; 'cocida' → FORMATOS_COCIDA; 'reloj' → FORMATOS_RELOJ */
   formato?: string;
 }
 
@@ -42,13 +43,20 @@ export interface Campo {
   /** ID de datos del Field Module en la máquina (0-255) */
   fieldId: number;
   piezas: Pieza[];
-  /** Línea de la etiqueta (1-3) — solo para crear el mensaje en la máquina (1C) */
+  /** Línea de la etiqueta (1-3) — solo para crear el mensaje en la máquina */
   linea?: number;
-  /** Dejar detrás el hueco del reloj (HHmm), que se inserta a mano en la máquina */
-  reloj?: boolean;
   /** Espaciado entre caracteres de este campo (uno de ESPACIADOS); sin él, el del mensaje */
   espaciado?: number;
 }
+
+// Pieza 'reloj': hora real de la máquina en cada impresión. No se envía por el 1D
+// (el campo de la máquina es un texto y el reloj otro módulo aparte): al crear el
+// mensaje (lib/loteadora-msg.ts) va como un reloj pegado al campo, por eso solo
+// puede ser la primera o la última pieza.
+export const FORMATOS_RELOJ = ['HHmm', 'HH:mm'] as const;
+export type FormatoReloj = (typeof FORMATOS_RELOJ)[number];
+
+export interface Plantilla { name: string; campos: Campo[] }
 
 export const INFO_PIEZA: Record<TipoPieza, { label: string; ayuda: string }> = {
   texto: { label: 'Texto', ayuda: 'Literal que se imprime tal cual ("L", "CAD ", un espacio...)' },
@@ -57,9 +65,10 @@ export const INFO_PIEZA: Record<TipoPieza, { label: string; ayuda: string }> = {
   cocida: { label: 'Cocida', ayuda: 'Lo que escribe el operario en "Juliano Cocida" (día juliano), con su año: como AAJJJ, AJJJ, JJJ o como fecha' },
   caducidad: { label: 'Caducidad', ayuda: 'Cocida + días de caducidad' },
   turno: { label: 'Turno', ayuda: 'Turno elegido en /loteadora (1, 2 o 3)' },
-  hora: { label: 'Hora', ayuda: 'Hora del envío, HHmm' },
+  hora: { label: 'Hora del envío', ayuda: 'Hora a la que se pulsa Enviar, HHmm (fija en todas las impresiones)' },
   linea: { label: 'Línea', ayuda: 'Línea de fabricación de la loteadora' },
   manual: { label: 'Dato a introducir', ayuda: 'Lo escribe el operario en /loteadora al enviar (p. ej. un nº de certificado que cambia). Obligatorio' },
+  reloj: { label: 'Reloj', ayuda: 'Hora real de la máquina en cada impresión (HHmm o HH:mm). Solo al principio o al final del campo' },
 };
 
 // Máximo de caracteres de un dato a introducir: es lo que se reserva para él en
@@ -79,6 +88,8 @@ export interface ValoresEtiqueta {
   linea?: string;
   /** Datos a introducir, por nombre de la pieza ("Nº certificado Kosher" → "KSR-123") */
   manuales?: Record<string, string>;
+  /** Solo vista previa: pinta el reloj con su formato. Al enviar no va (lo pone la máquina) */
+  conReloj?: boolean;
 }
 
 // El comando 1D envía el texto en ASCII (lib/loteadora-printer.ts): un carácter
@@ -132,6 +143,8 @@ export function textoPieza(p: Pieza, v: ValoresEtiqueta): string | null {
       return v.linea ? v.linea : null;
     case 'manual':
       return v.manuales?.[p.nombre ?? ''] || null;
+    case 'reloj':
+      return v.conReloj ? p.formato ?? 'HHmm' : '';
   }
 }
 
@@ -148,7 +161,7 @@ export function piezasManuales(campos: Campo[]): { nombre: string; porDefecto: s
 export function variablesUsadas(campos: Campo[]): Set<TipoVariable> {
   const usadas = new Set<TipoVariable>();
   for (const c of campos) for (const p of c.piezas) {
-    if (p.tipo !== 'texto' && p.tipo !== 'fijo') usadas.add(p.tipo);
+    if (p.tipo !== 'texto' && p.tipo !== 'fijo' && p.tipo !== 'reloj') usadas.add(p.tipo);
   }
   return usadas;
 }
@@ -176,7 +189,7 @@ export function componerCampos(campos: Campo[], v: ValoresEtiqueta): CampoCompue
 
 // ─── Validación (servidor: alta/edición de plantillas) ───────────────────────────
 
-export function validarPlantilla(body: any): { error: string } | { value: { name: string; campos: Campo[] } } {
+export function validarPlantilla(body: any): { error: string } | { value: Plantilla } {
   const name = String(body?.name ?? '').trim();
   if (!name) return { error: 'El nombre es obligatorio' };
   if (!ASCII_IMPRIMIBLE.test(name)) return { error: 'El nombre solo puede tener caracteres ASCII (sin tildes ni símbolos especiales), igual que en la máquina' };
@@ -242,35 +255,46 @@ export function validarPlantilla(body: any): { error: string } | { value: { name
         if (!(FORMATOS_COCIDA as readonly string[]).includes(formato)) return { error: `Campo ID ${fieldId}: formato de cocida no válido` };
         pieza.formato = formato;
       }
+      if (tipo === 'reloj') {
+        const formato = p.formato ?? 'HHmm';
+        if (!(FORMATOS_RELOJ as readonly string[]).includes(formato)) return { error: `Campo ID ${fieldId}: el reloj debe ser ${FORMATOS_RELOJ.join(' o ')}` };
+        pieza.formato = formato;
+      }
       piezas.push(pieza);
     }
+    // Copias y clientes antiguos: "reloj: true" = hueco de un espacio y reloj HHmm detrás
+    if (c.reloj === true && !piezas.some((p) => p.tipo === 'reloj')) piezas.push({ tipo: 'texto', valor: ' ' }, { tipo: 'reloj', formato: 'HHmm' });
+    const relojes = piezas.filter((p) => p.tipo === 'reloj').length;
+    if (relojes > 1) return { error: `Campo ID ${fieldId}: solo puede llevar un reloj` };
+    if (relojes && piezas[0].tipo !== 'reloj' && piezas[piezas.length - 1].tipo !== 'reloj') {
+      return { error: `Campo ID ${fieldId}: el reloj tiene que ser la primera o la última pieza (lo que vaya detrás, en otro campo)` };
+    }
+    if (relojes && piezas.length === 1) return { error: `Campo ID ${fieldId}: además del reloj necesita otra pieza (p. ej. un texto)` };
     const linea = c.linea === undefined || c.linea === null ? 1 : Number(c.linea);
     if (![1, 2, 3].includes(linea)) return { error: `Campo ID ${fieldId}: la línea debe ser 1, 2 o 3` };
     const espaciado = c.espaciado === undefined || c.espaciado === null || c.espaciado === '' ? undefined : Number(c.espaciado);
     if (espaciado !== undefined && !(ESPACIADOS as readonly number[]).includes(espaciado)) {
       return { error: `Campo ID ${fieldId}: el espaciado debe ser uno de: ${ESPACIADOS.join(', ')}` };
     }
-    campos.push({ fieldId, piezas, linea, reloj: c.reloj === true, ...(espaciado !== undefined ? { espaciado } : {}) });
+    campos.push({ fieldId, piezas, linea, ...(espaciado !== undefined ? { espaciado } : {}) });
   }
 
   return { value: { name, campos } };
 }
 
-// ─── Disposición en la etiqueta (para crear el mensaje en la máquina, 1C) ─────────
+// ─── Disposición en la etiqueta (para crear el mensaje en la máquina) ────────────
 // Automática, igual que se crearon los N01…N17: en cada línea los campos van de
-// izquierda a derecha en su orden, separados por un espacio, y detrás de los que
-// llevan `reloj` queda un hueco de 4 caracteres (+ espacio) para el reloj, que se
-// inserta a mano en la máquina (el 1C no tiene módulo de reloj).
+// izquierda a derecha en su orden, separados por un espacio. Un campo con reloj
+// ocupa el campo más el reloj pegado (delante o detrás, según su pieza).
 //
 // Las MEDIDAS (fuente, tamaño, espaciado, ancho por carácter y separación entre
 // líneas) se eligen al crear el mensaje en cada máquina y se recuerdan por mensaje
-// y máquina (loteadora_medidas_mensaje). Por defecto Arial, con las proporciones
-// medidas en Prueba2.msg: tamaño 35 → 21 puntos por carácter y 36 entre líneas; con
-// 3 líneas, tamaño 23 (14 y 24) para que quepa en la misma altura. Arial no es de
-// ancho fijo: el ancho por carácter es una media (los números sí miden todos igual).
+// y máquina (loteadora_medidas_mensaje). Por defecto Arial: tamaño 35 → 33 puntos por
+// carácter (la caja que guarda la máquina en sus .msg; con 21, lo que valía para
+// Arial-MonoBold, los campos y el reloj se montaban) y 36 entre líneas; con 3 líneas,
+// tamaño 23 (22 y 24) para que quepa en la misma altura.
 
 export const FUENTE_MENSAJE = 'Arial';
-const ANCHO_RELOJ = 4;
 
 // Espaciado entre caracteres que admite la máquina (protocolo §3.5.17.3): el byte
 // "Space" es el índice en esta lista (05 = 0, el valor por defecto).
@@ -289,7 +313,7 @@ export interface MedidasMensaje {
 
 /** Ancho y separación entre líneas que corresponden a un tamaño y espaciado. */
 export function medidasDeTamano(tamano: number, espaciado = 0, fuente = FUENTE_MENSAJE): MedidasMensaje {
-  return { fuente, tamano, espaciado, ancho: Math.max(1, Math.round(tamano * 0.6) + espaciado), interlineado: tamano + 1 };
+  return { fuente, tamano, espaciado, ancho: Math.max(1, Math.round((tamano * 33) / 35) + espaciado), interlineado: tamano + 1 };
 }
 
 export const numeroLineas = (campos: Campo[]) => Math.max(1, ...campos.map((c) => c.linea ?? 1));
@@ -322,49 +346,71 @@ export function largoPieza(p: Pieza): number {
     case 'cocida': return ({ AAJJJ: 5, AJJJ: 4, JJJ: 3 } as Record<string, number>)[p.formato ?? 'AAJJJ'] ?? (p.formato ?? '').length;
     case 'caducidad': return (p.formato ?? 'DD/MM/AAAA').length;
     case 'manual': return MAX_MANUAL;
+    case 'reloj': return 0; // va en su propio módulo, no ocupa sitio en el campo
   }
 }
 
+// `ancho`: puntos que ocupa (length × ancho por carácter con su espaciado). La
+// máquina coloca y dibuja cada elemento dentro de esa caja (lib/loteadora-msg.ts).
 export interface CampoDispuesto {
-  id: number; x: number; y: number; fontSize: number; font: string; length: number;
-  /** Byte "Space" del Field Module: índice en ESPACIADOS */
-  space: number;
+  id: number; x: number; y: number; fontSize: number; font: string; length: number; ancho: number;
+  /** Espaciado entre caracteres (uno de ESPACIADOS) */
+  espaciado: number;
   /** Línea (1-3) y columna en caracteres, para la vista previa */
-  linea: number; columna: number; reloj: boolean;
+  linea: number; columna: number;
 }
 
-export function disponerCampos(campos: Campo[], medidas: MedidasMensaje = medidasPorDefecto(campos)): CampoDispuesto[] {
-  const { fuente, tamano: fontSize, interlineado: lh } = medidas;
+export interface RelojDispuesto {
+  x: number; y: number; fontSize: number; font: string; length: number; ancho: number; espaciado: number;
+  formato: FormatoReloj; linea: number; columna: number;
+}
+
+export interface MensajeDispuesto { campos: CampoDispuesto[]; relojes: RelojDispuesto[] }
+
+export function disponerMensaje(campos: Campo[], medidas: MedidasMensaje = medidasPorDefecto(campos)): MensajeDispuesto {
+  const { fuente: font, tamano: fontSize, interlineado: lh } = medidas;
   // Ancho de un carácter sin espaciado; cada campo le suma el suyo (o el del mensaje).
-  // Los huecos (espacio entre campos y hueco del reloj) van con el ancho base.
+  // El espacio entre campos va con el ancho base.
   const base = Math.max(1, medidas.ancho - medidas.espaciado);
   const columna = new Map<number, number>(); // en caracteres (vista previa)
   const posicion = new Map<number, number>(); // en puntos (máquina)
-  return campos.map((c) => {
+  const d: MensajeDispuesto = { campos: [], relojes: [] };
+  for (const c of campos) {
     const linea = c.linea ?? 1;
-    const col = columna.get(linea) ?? 0;
-    const x = posicion.get(linea) ?? 0;
     const espaciado = c.espaciado ?? medidas.espaciado;
     const cw = Math.max(1, base + espaciado);
+    const y = (linea - 1) * lh;
+    let col = columna.get(linea) ?? 0;
+    let x = posicion.get(linea) ?? 0;
+    const reloj = c.piezas.find((p) => p.tipo === 'reloj');
+    const formato = (reloj?.formato ?? 'HHmm') as FormatoReloj;
+    const ponReloj = () => {
+      d.relojes.push({ x, y, fontSize, font, length: formato.length, ancho: formato.length * cw, espaciado, formato, linea, columna: col });
+      col += formato.length;
+      x += formato.length * cw;
+    };
+    if (reloj && c.piezas[0] === reloj) ponReloj();
     const length = Math.max(1, c.piezas.reduce((n, p) => n + largoPieza(p), 0));
-    const hueco = 1 + (c.reloj ? ANCHO_RELOJ + 1 : 0);
-    columna.set(linea, col + length + hueco);
-    posicion.set(linea, x + length * cw + hueco * base);
-    const space = Math.max(0, (ESPACIADOS as readonly number[]).indexOf(espaciado));
-    return { id: c.fieldId, x, y: (linea - 1) * lh, fontSize, font: fuente, space, length, linea, columna: col, reloj: !!c.reloj };
-  });
+    d.campos.push({ id: c.fieldId, x, y, fontSize, font, length, ancho: length * cw, espaciado, linea, columna: col });
+    col += length;
+    x += length * cw;
+    if (reloj && c.piezas[0] !== reloj) ponReloj();
+    columna.set(linea, col + 1);
+    posicion.set(linea, x + base);
+  }
+  return d;
 }
 
-/** Texto de cada línea de la etiqueta tal como quedaría (el reloj como "HHmm"). */
+/** Texto de cada línea de la etiqueta tal como quedaría (el reloj con su formato, "HHmm"). */
 export function lineasEtiqueta(campos: Campo[], v: ValoresEtiqueta): string[] {
-  const textos = componerCampos(campos, v);
+  const textos = componerCampos(campos, { ...v, conReloj: false });
+  const d = disponerMensaje(campos);
+  const trozos = [
+    ...d.campos.map((c, i) => ({ linea: c.linea, columna: c.columna, texto: textos[i].texto.padEnd(c.length) })),
+    ...d.relojes.map((r) => ({ linea: r.linea, columna: r.columna, texto: r.formato as string })),
+  ].sort((a, b) => a.columna - b.columna);
   const lineas: string[] = [];
-  disponerCampos(campos).forEach((d, i) => {
-    let l = lineas[d.linea - 1] ?? '';
-    l = l.padEnd(d.columna) + textos[i].texto.padEnd(d.length);
-    if (d.reloj) l += ' HHmm';
-    lineas[d.linea - 1] = l;
-  });
+  for (const t of trozos) lineas[t.linea - 1] = (lineas[t.linea - 1] ?? '').padEnd(t.columna) + t.texto;
   return Array.from(lineas, (l) => (l ?? '').trimEnd());
 }
 
@@ -403,12 +449,12 @@ export function leerCampos(db: Database.Database, mensajeIds?: number[]): Map<nu
     : db.prepare('SELECT * FROM loteadora_mensaje_segmentos').all()) as FilaSegmento[];
   const porMensaje = new Map<number, FilaSegmento[]>();
   for (const f of filas) porMensaje.set(f.mensaje_id, [...(porMensaje.get(f.mensaje_id) ?? []), f]);
-  const disp = db.prepare('SELECT mensaje_id, field_id, linea, reloj, espaciado FROM loteadora_mensaje_campos').all() as
-    { mensaje_id: number; field_id: number; linea: number; reloj: number; espaciado: number | null }[];
+  const disp = db.prepare('SELECT mensaje_id, field_id, linea, espaciado FROM loteadora_mensaje_campos').all() as
+    { mensaje_id: number; field_id: number; linea: number; espaciado: number | null }[];
   const dispDe = new Map(disp.map((d) => [`${d.mensaje_id}|${d.field_id}`, d]));
   return new Map([...porMensaje].map(([id, fs]) => [id, filasACampos(fs).map((c) => {
     const d = dispDe.get(`${id}|${c.fieldId}`);
-    return { ...c, linea: d?.linea ?? 1, reloj: d?.reloj === 1, ...(d?.espaciado != null ? { espaciado: d.espaciado } : {}) };
+    return { ...c, linea: d?.linea ?? 1, ...(d?.espaciado != null ? { espaciado: d.espaciado } : {}) };
   })]));
 }
 
@@ -423,18 +469,19 @@ export function guardarCampos(db: Database.Database, mensajeId: number, campos: 
     insertar.run(mensajeId, ci * 1000 + pi, c.fieldId, p.tipo, p.valor ?? null, p.nombre ?? null, p.formato ?? null);
   }));
   db.prepare('DELETE FROM loteadora_mensaje_campos WHERE mensaje_id = ?').run(mensajeId);
-  const disp = db.prepare('INSERT INTO loteadora_mensaje_campos (mensaje_id, field_id, linea, reloj, espaciado) VALUES (?, ?, ?, ?, ?)');
-  for (const c of campos) disp.run(mensajeId, c.fieldId, c.linea ?? 1, c.reloj ? 1 : 0, c.espaciado ?? null);
+  const disp = db.prepare('INSERT INTO loteadora_mensaje_campos (mensaje_id, field_id, linea, espaciado) VALUES (?, ?, ?, ?)');
+  for (const c of campos) disp.run(mensajeId, c.fieldId, c.linea ?? 1, c.espaciado ?? null);
 }
 
 // ─── Copia de seguridad: exportar / importar (/admin → Plantillas) ───────────────
 // Plantillas + asociaciones artículo → plantilla en un JSON. Las asociaciones van
 // por NOMBRE de plantilla: los IDs internos cambian de una BD a otra.
 
+// Las copias de antes del reloj como pieza traen "reloj: true" en el campo: validarPlantilla lo convierte.
 export interface CopiaLoteadora {
   version: 1;
   exportadaAt: string;
-  plantillas: { name: string; campos: Campo[] }[];
+  plantillas: Plantilla[];
   articulos: { articuloId: string; plantilla: string }[];
 }
 
@@ -466,7 +513,7 @@ export function importarCopia(db: Database.Database, copia: any, sustituir: bool
   if (!copia || copia.version !== 1 || !Array.isArray(copia.plantillas)) {
     return { error: 'El archivo no es una copia de plantillas de la loteadora' };
   }
-  const plantillas: { name: string; campos: Campo[] }[] = [];
+  const plantillas: Plantilla[] = [];
   const nombres = new Set<string>();
   for (const p of copia.plantillas) {
     const v = validarPlantilla(p);

@@ -9,7 +9,7 @@
  */
 import { describe, it, expect } from 'bun:test'
 import net from 'net'
-import { buildRemoteFieldFrame, buildDownloadMessageFrame, listMessageNames, getPrinterStatus, loadPrintMessage, LOAD_APPLY_DELAY_MS } from '@/lib/loteadora-printer'
+import { buildRemoteFieldFrame, buildSendFileFrame, MAX_PIEZA_ARCHIVO, listMessageNames, getPrinterStatus, loadPrintMessage, LOAD_APPLY_DELAY_MS } from '@/lib/loteadora-printer'
 
 describe('buildRemoteFieldFrame', () => {
   it('reproduce el ejemplo del manual (checknum B0)', () => {
@@ -110,26 +110,18 @@ describe('listMessageNames', () => {
   })
 })
 
-describe('buildDownloadMessageFrame', () => {
-  it('codifica el Field Module como el ejemplo del manual (§3.5.17.3)', () => {
-    // Ejemplo del manual: x=176, y=40, tamaño 100, fuente "Abyssinica", puerto serie, ASCII, izquierda, ID 1, longitud 6
-    const frame = buildDownloadMessageFrame(0, 'P3', [{ id: 1, x: 176, y: 40, fontSize: 100, font: 'Abyssinica', length: 6 }])
-    const modulo = Buffer.from([0x03, 0x00, 0xb0, 0x00, 0x28, 0x00, 0x05, 0x00, 0x64, 0x0a,
-      ...Buffer.from('Abyssinica', 'ascii'), 0x80, 0x01, 0x06])
-    const datos = Buffer.from([0x02, ...Buffer.from('P3', 'ascii'), 0x01, ...modulo])
-
-    expect(frame.subarray(0, 4)).toEqual(Buffer.from([0x1b, 0x02, 0x00, 0x1c]))
-    expect(frame.subarray(4, 7)).toEqual(Buffer.from([0x00, 0x00, datos.length]))
-    expect(frame.subarray(7, 7 + datos.length)).toEqual(datos)
-    expect(frame.subarray(-3, -1)).toEqual(Buffer.from([0x1b, 0x03]))
-    expect(frame.reduce((acc, b) => (acc + b) & 0xff, 0)).toBe(0)
+describe('buildSendFileFrame', () => {
+  it('una sola pieza: longitud (2 bytes), OPERATION 03, nombre y archivo, sin ESC ETX ni checknum (§3.5.48)', () => {
+    const archivo = Buffer.from([0x00, 0x05, 0x05, 0x0c, 0xaa])
+    const frame = buildSendFileFrame(0, 'P3.msg', archivo)
+    const datos = Buffer.from([0x03, 6, ...Buffer.from('P3.msg', 'ascii'), ...archivo])
+    expect(frame.subarray(0, 4)).toEqual(Buffer.from([0x1b, 0x02, 0x00, 0x50]))
+    expect(frame.subarray(4, 6)).toEqual(Buffer.from([0x00, datos.length]))
+    expect(frame.subarray(6)).toEqual(datos)
   })
 
-  it('manda el espaciado elegido en el byte Space', () => {
-    const frame = buildDownloadMessageFrame(0, 'P3', [{ id: 1, x: 0, y: 0, fontSize: 30, font: 'Arial', length: 6, space: 0x06 }])
-    // Tras 03 X(2) Y(2) Rotación(1) va el Space
-    expect(frame[7 + 3 + 1 + 5 + 1]).toBe(0x06)
-    expect(() => buildDownloadMessageFrame(0, 'P3', [{ id: 1, x: 0, y: 0, fontSize: 30, font: 'Arial', length: 6, space: 11 }])).toThrow()
+  it('rechaza un archivo de más de una pieza', () => {
+    expect(() => buildSendFileFrame(0, 'P3.msg', Buffer.alloc(MAX_PIEZA_ARCHIVO + 1))).toThrow()
   })
 })
 

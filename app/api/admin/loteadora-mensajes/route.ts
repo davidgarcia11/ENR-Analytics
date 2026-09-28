@@ -7,7 +7,7 @@ import { guardarCampos, leerCampos, validarPlantilla } from '@/lib/loteadora-pla
 // lib/loteadora-plantilla.ts.
 //
 // Lectura abierta también a quien asigna artículos a plantillas (necesita el
-// desplegable); crear/editar/borrar siguen siendo solo de admin.
+// desplegable); crear y editar, admin o permiso de plantillas; borrar, solo admin.
 export async function GET() {
   const acceso = await requireAccess({ permiso: ['admin.loteadora.articulos', 'admin.loteadora.plantillas'] });
   if (!acceso.ok) return acceso.denied;

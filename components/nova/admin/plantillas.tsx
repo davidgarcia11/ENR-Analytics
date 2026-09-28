@@ -3,8 +3,8 @@
 // /admin → Loteadora › Plantillas: constructor de plantillas. Una plantilla (mensaje
 // de la máquina) tiene campos —uno por Field Module, con su ID de datos— y cada campo
 // es una secuencia de piezas (texto, dato fijo, fresco, cocida, caducidad, turno,
-// hora, línea) que se concatenan. Modelo, formatos y validación en
-// lib/loteadora-plantilla.ts; ver docs/loteadora.md §13.
+// hora, línea, reloj de la máquina) que se concatenan. Modelo, formatos y
+// validación en lib/loteadora-plantilla.ts; ver docs/loteadora.md §13.
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { AlertTriangle, ArrowLeft, ArrowRight, Loader2, MoreHorizontal, Pencil, Plus, Printer, Trash2, X } from "lucide-react";
@@ -13,7 +13,6 @@ import { Button } from "@/components/nova/ui/button";
 import { Input } from "@/components/nova/ui/input";
 import { Label } from "@/components/nova/ui/label";
 import { Badge } from "@/components/nova/ui/badge";
-import { Checkbox } from "@/components/nova/ui/checkbox";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/nova/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/nova/ui/table";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/nova/ui/dialog";
@@ -21,7 +20,7 @@ import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger,
 } from "@/components/nova/ui/dropdown-menu";
 import {
-  ESPACIADOS, FORMATOS_CADUCIDAD, FORMATOS_COCIDA, INFO_PIEZA, MAX_MANUAL, TIPOS_PIEZA, componerCampos, lineasEtiqueta,
+  ESPACIADOS, FORMATOS_CADUCIDAD, FORMATOS_COCIDA, FORMATOS_RELOJ, INFO_PIEZA, MAX_MANUAL, TIPOS_PIEZA, componerCampos, lineasEtiqueta,
   medidasDeTamano, piezasManuales, type MedidasMensaje,
   type Campo, type Pieza, type TipoPieza, type ValoresEtiqueta,
 } from "@/lib/loteadora-plantilla";
@@ -38,7 +37,6 @@ interface CampoEditable {
   fieldId: string;
   piezas: Pieza[];
   linea?: number;
-  reloj?: boolean;
   /** Espaciado propio del campo; sin él, el del mensaje */
   espaciado?: number;
 }
@@ -50,7 +48,7 @@ function valoresEjemplo(): ValoresEtiqueta {
   const dia = Math.floor((cocida.getTime() - new Date(cocida.getFullYear(), 0, 0).getTime()) / 86400000);
   const cad = new Date(cocida.getFullYear(), cocida.getMonth(), cocida.getDate() + 30);
   const iso = `${cad.getFullYear()}-${String(cad.getMonth() + 1).padStart(2, "0")}-${String(cad.getDate()).padStart(2, "0")}`;
-  return { fresco: "263221", cocidaAnio: cocida.getFullYear(), cocidaDia: dia, caducidad: iso, hora: "0930", turno: "1", linea: "1" };
+  return { fresco: "263221", cocidaAnio: cocida.getFullYear(), cocidaDia: dia, caducidad: iso, hora: "0930", turno: "1", linea: "1", conReloj: true };
 }
 const EJEMPLO = valoresEjemplo();
 // Los datos a introducir no tienen valor de ejemplo fijo: el suyo por defecto o <nombre>
@@ -64,15 +62,17 @@ const nuevaPieza = (tipo: TipoPieza): Pieza =>
     : tipo === "fijo" || tipo === "manual" ? { tipo, nombre: "", valor: "" }
       : tipo === "cocida" ? { tipo, formato: "AAJJJ" }
         : tipo === "caducidad" ? { tipo, formato: "DD/MM/AA" }
-          : { tipo };
+          : tipo === "reloj" ? { tipo, formato: "HHmm" }
+            : { tipo };
 
 // Plantilla nueva: arranca con un campo con la cocida (lo más habitual)
 const vacia = (): CampoEditable[] => [{ fieldId: "1", piezas: [nuevaPieza("texto"), nuevaPieza("cocida")] }];
 
 const aEditables = (campos: Campo[]): CampoEditable[] =>
-  campos.map((c) => ({ fieldId: String(c.fieldId), piezas: c.piezas.map((p) => ({ ...p })), linea: c.linea ?? 1, reloj: !!c.reloj, espaciado: c.espaciado }));
+  campos.map((c) => ({ fieldId: String(c.fieldId), piezas: c.piezas.map((p) => ({ ...p })), linea: c.linea ?? 1, espaciado: c.espaciado }));
 const aCampos = (campos: CampoEditable[]): Campo[] =>
-  campos.map((c) => ({ fieldId: Number(c.fieldId), piezas: c.piezas, linea: c.linea ?? 1, reloj: !!c.reloj, ...(c.espaciado !== undefined ? { espaciado: c.espaciado } : {}) }));
+  campos.map((c) => ({ fieldId: Number(c.fieldId), piezas: c.piezas, linea: c.linea ?? 1, ...(c.espaciado !== undefined ? { espaciado: c.espaciado } : {}) }));
+const FORMATO_ITEMS_RELOJ = FORMATOS_RELOJ.map((f) => ({ value: f, label: f }));
 const LINEA_ITEMS = [1, 2, 3].map((n) => ({ value: String(n), label: `Línea ${n}` }));
 const signo = (v: number) => (v > 0 ? `+${v}` : String(v));
 // "" = el espaciado del mensaje (se elige al crearlo en la máquina)
@@ -120,15 +120,15 @@ function EditorPieza({ pieza, onChange, onQuitar, onMover, primera, ultima }: {
           <Input value={pieza.valor ?? ""} onChange={(e) => onChange({ ...pieza, valor: e.target.value })} placeholder="Por defecto (opcional)" maxLength={MAX_MANUAL} className="h-7 w-36 font-mono text-xs" aria-label="Valor por defecto" />
         </>
       )}
-      {(pieza.tipo === "cocida" || pieza.tipo === "caducidad") && (
+      {(pieza.tipo === "cocida" || pieza.tipo === "caducidad" || pieza.tipo === "reloj") && (
         <Select
-          items={pieza.tipo === "cocida" ? FORMATO_ITEMS_COC : FORMATO_ITEMS_CAD}
+          items={pieza.tipo === "cocida" ? FORMATO_ITEMS_COC : pieza.tipo === "reloj" ? FORMATO_ITEMS_RELOJ : FORMATO_ITEMS_CAD}
           value={pieza.formato}
           onValueChange={(v) => onChange({ ...pieza, formato: v as string })}
         >
           <SelectTrigger size="sm" className="h-7 w-32 font-mono text-xs"><SelectValue /></SelectTrigger>
           <SelectContent>
-            {(pieza.tipo === "cocida" ? FORMATO_ITEMS_COC : FORMATO_ITEMS_CAD).map((f) => (
+            {(pieza.tipo === "cocida" ? FORMATO_ITEMS_COC : pieza.tipo === "reloj" ? FORMATO_ITEMS_RELOJ : FORMATO_ITEMS_CAD).map((f) => (
               <SelectItem key={f.value} value={f.value} className="font-mono text-xs">{f.label}</SelectItem>
             ))}
           </SelectContent>
@@ -194,10 +194,6 @@ function EditorCampo({ campo, ejemplo, onChange, onQuitar, puedeQuitar }: {
             {ESPACIADO_CAMPO_ITEMS.map((e) => <SelectItem key={e.value} value={e.value} className="text-xs">{e.label}</SelectItem>)}
           </SelectContent>
         </Select>
-        <label className="flex items-center gap-1.5 text-xs text-muted-foreground" title="Deja detrás de este campo el hueco del reloj (HHmm), que se pone a mano en la máquina">
-          <Checkbox checked={!!campo.reloj} onCheckedChange={(v) => onChange({ ...campo, reloj: v === true })} />
-          Reloj detrás
-        </label>
         <div className="ml-auto flex items-center gap-2">
           <span className="text-xs text-muted-foreground">Se imprime</span>
           <code className="rounded-md border bg-muted/40 px-2 py-1 font-mono text-sm whitespace-pre text-foreground">
@@ -278,7 +274,7 @@ export default function AdminPlantillas({ titulo, descripcion }: SeccionProps) {
 
   useEffect(() => { cargar(); cargarLinea(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, []);
 
-  // Crear en la loteadora (comando 1C, ver app/api/admin/loteadora-mensajes/[id]/crear-en-maquina)
+  // Crear en la loteadora (archivo .msg por el comando 50, ver app/api/admin/loteadora-mensajes/[id]/crear-en-maquina)
   const [enMaquina, setEnMaquina] = useState<Mensaje | null>(null);
   const [loteadoras, setLoteadoras] = useState<{ id: number; name: string }[]>([]);
   const [loteadoraId, setLoteadoraId] = useState<string | null>(null);
@@ -331,7 +327,7 @@ export default function AdminPlantillas({ titulo, descripcion }: SeccionProps) {
       const data = await res.json();
       if (!res.ok) { toast.error(data.error || "No se pudo crear en la loteadora"); return; }
       const donde = loteadoras.find((l) => String(l.id) === loteadoraId)?.name;
-      toast.success(`${enMaquina.name} ${data.existia ? "sustituido" : "creado"} en ${donde}. Mete el reloj a mano en la máquina.`, { duration: 8000 });
+      toast.success(`${enMaquina.name} ${data.existia ? "sustituido" : "creado"} en ${donde}.`, { duration: 8000 });
       setEnMaquina(null);
     } catch { toast.error("Error de conexión"); } finally { setCreandoEnMaquina(false); }
   };
@@ -490,7 +486,7 @@ export default function AdminPlantillas({ titulo, descripcion }: SeccionProps) {
                 {lineasEtiqueta(aCampos(campos), conManuales(ejemplo, aCampos(campos))).join("\n") || "—"}
               </pre>
               <p className="text-xs text-muted-foreground">
-                Con valores de ejemplo. «HHmm» es el hueco del reloj, que se pone a mano en la máquina. Es la disposición con la que se crea el mensaje en la loteadora.
+                Con valores de ejemplo. «HHmm» o «HH:mm» es el reloj, que la máquina rellena con la hora real. Es la disposición con la que se crea el mensaje en la loteadora.
               </p>
             </div>
 
@@ -575,8 +571,8 @@ export default function AdminPlantillas({ titulo, descripcion }: SeccionProps) {
           <p className="flex gap-2 rounded-lg border border-amber-500/20 bg-amber-400/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-400">
             <AlertTriangle className="size-4 shrink-0" />
             <span>
-              El reloj no se puede crear por red: mételo a mano en la máquina después. Si el mensaje ya existe en la loteadora, se
-              sustituye entero y <strong>se pierde el reloj</strong> que tuviera. Imprimiendo no se puede crear.
+              Si el mensaje ya existe en la loteadora, <strong>se sustituye entero</strong> (también lo que se le hubiera añadido a
+              mano en la máquina). Imprimiendo no se puede crear.
             </span>
           </p>
           <DialogFooter>
