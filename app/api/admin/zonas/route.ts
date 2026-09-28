@@ -33,7 +33,7 @@ export function guardarAsignaciones(db: Database.Database, zonaId: number, z: Zo
 }
 
 export async function GET() {
-  const acceso = await requireAccess({ role: 'admin' });
+  const acceso = await requireAccess({ permiso: 'admin.loteadora.maquinas' });
   if (!acceso.ok) return acceso.denied;
 
   const db = getDb();

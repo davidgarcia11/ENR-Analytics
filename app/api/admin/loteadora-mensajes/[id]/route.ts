@@ -5,7 +5,7 @@ import { guardarCampos, validarPlantilla } from '@/lib/loteadora-plantilla';
 
 // Edita nombre y campos de una plantilla (los campos se sustituyen enteros).
 export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-  const acceso = await requireAccess({ role: 'admin' });
+  const acceso = await requireAccess({ permiso: 'admin.loteadora.plantillas' });
   if (!acceso.ok) return acceso.denied;
 
   const { id } = await params;

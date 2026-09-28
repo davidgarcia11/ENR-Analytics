@@ -39,7 +39,7 @@ function medidasPropuestas(db: Database.Database, mensajeId: number, loteadoraId
 
 // GET ?loteadoraId= → { medidas, origen }: lo que propone el diálogo al elegir máquina
 export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-  const acceso = await requireAccess({ role: 'admin' });
+  const acceso = await requireAccess({ permiso: 'admin.loteadora.plantillas' });
   if (!acceso.ok) return acceso.denied;
 
   const mensajeId = Number((await params).id);
@@ -52,7 +52,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
 
 // Body: { loteadoraId, medidas }
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-  const acceso = await requireAccess({ role: 'admin' });
+  const acceso = await requireAccess({ permiso: 'admin.loteadora.plantillas' });
   if (!acceso.ok) return acceso.denied;
 
   const mensajeId = Number((await params).id);

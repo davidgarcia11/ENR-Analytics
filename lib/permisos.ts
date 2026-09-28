@@ -35,6 +35,19 @@ export const PERMISOS = {
     grupo: 'Loteadora',
     seccionAdmin: 'datos-fijos',
   },
+  // Crear y editar, no eliminar: los DELETE siguen siendo solo del admin.
+  'admin.loteadora.maquinas': {
+    label: 'Crear y editar loteadoras (máquinas)',
+    corto: 'Máquinas',
+    grupo: 'Loteadora',
+    seccionAdmin: 'loteadoras',
+  },
+  'admin.loteadora.plantillas': {
+    label: 'Crear y editar plantillas y crearlas en la loteadora',
+    corto: 'Plantillas',
+    grupo: 'Loteadora',
+    seccionAdmin: 'plantillas',
+  },
 } as const satisfies Record<string, DefinicionPermiso>;
 
 export type Permiso = keyof typeof PERMISOS;
@@ -68,15 +81,23 @@ export function puedeEntrarEnAdmin(user: UsuarioConPermisos | null | undefined):
 
 // Rutas de /api/admin que se abren a un permiso además de al admin. Cualquier ruta
 // que NO esté aquí sigue siendo solo de admin (denegado por defecto). `metodos`
-// vacío = todos. Cada ruta vuelve a comprobar el permiso con requireAccess.
-export const RUTAS_ADMIN_POR_PERMISO: { prefijo: string; metodos?: string[]; permiso: Permiso }[] = [
+// vacío = todos. Con varios permisos basta con uno. Gana la primera regla que
+// encaje. Cada ruta vuelve a comprobar el permiso con requireAccess.
+export const RUTAS_ADMIN_POR_PERMISO: { prefijo: string; metodos?: string[]; permiso: Permiso | Permiso[] }[] = [
   { prefijo: '/api/admin/loteadora-articulos', permiso: 'admin.loteadora.articulos' },
-  // Solo lectura: el desplegable de plantillas al asociar un artículo.
-  { prefijo: '/api/admin/loteadora-mensajes', metodos: ['GET'], permiso: 'admin.loteadora.articulos' },
+  // Lectura: el desplegable de plantillas al asociar un artículo, y la sección Plantillas.
+  { prefijo: '/api/admin/loteadora-mensajes', metodos: ['GET'], permiso: ['admin.loteadora.articulos', 'admin.loteadora.plantillas'] },
+  // Crear, editar y crear en la máquina (sin DELETE).
+  { prefijo: '/api/admin/loteadora-mensajes', metodos: ['POST', 'PUT'], permiso: 'admin.loteadora.plantillas' },
   { prefijo: '/api/admin/loteadora-datos-fijos', permiso: 'admin.loteadora.datos-fijos' },
+  // Lectura de las loteadoras: la sección Máquinas y el "Crear en la loteadora" de Plantillas.
+  { prefijo: '/api/admin/loteadoras', metodos: ['GET'], permiso: ['admin.loteadora.maquinas', 'admin.loteadora.plantillas'] },
+  { prefijo: '/api/admin/loteadoras', metodos: ['POST', 'PUT'], permiso: 'admin.loteadora.maquinas' },
+  // Solo leer las zonas, para elegir la de cada máquina (gestionarlas sigue siendo del admin).
+  { prefijo: '/api/admin/zonas', metodos: ['GET'], permiso: 'admin.loteadora.maquinas' },
 ];
 
-export function permisoDeRutaAdmin(pathname: string, metodo: string): Permiso | null {
+export function permisoDeRutaAdmin(pathname: string, metodo: string): Permiso | Permiso[] | null {
   const regla = RUTAS_ADMIN_POR_PERMISO.find(
     (r) =>
       (pathname === r.prefijo || pathname.startsWith(r.prefijo + '/')) &&

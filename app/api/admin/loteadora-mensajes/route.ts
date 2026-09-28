@@ -9,7 +9,7 @@ import { guardarCampos, leerCampos, validarPlantilla } from '@/lib/loteadora-pla
 // Lectura abierta también a quien asigna artículos a plantillas (necesita el
 // desplegable); crear/editar/borrar siguen siendo solo de admin.
 export async function GET() {
-  const acceso = await requireAccess({ permiso: 'admin.loteadora.articulos' });
+  const acceso = await requireAccess({ permiso: ['admin.loteadora.articulos', 'admin.loteadora.plantillas'] });
   if (!acceso.ok) return acceso.denied;
 
   const db = getDb();
@@ -19,7 +19,7 @@ export async function GET() {
 }
 
 export async function POST(req: NextRequest) {
-  const acceso = await requireAccess({ role: 'admin' });
+  const acceso = await requireAccess({ permiso: 'admin.loteadora.plantillas' });
   if (!acceso.ok) return acceso.denied;
 
   const parsed = validarPlantilla(await req.json());

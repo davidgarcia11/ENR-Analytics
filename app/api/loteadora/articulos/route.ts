@@ -12,11 +12,11 @@ import { leerCampos } from '@/lib/loteadora-plantilla'
 // con sus piezas (lib/loteadora-plantilla.ts), para que /loteadora pueda
 // autocargarla y pintar la vista previa real sin otra llamada.
 export async function GET() {
-  // También lo usa /admin → Artículos → Plantilla como buscador, así que basta con
-  // una de las dos: acceso a la pantalla /loteadora o el permiso de asignar artículos.
+  // También lo usan /admin → Artículos → Plantilla como buscador y /admin → Máquinas
+  // para las familias, así que basta con acceso a la pantalla /loteadora o uno de esos permisos.
   const denied = await requireScreenAccess('loteadora');
   if (denied) {
-    const acceso = await requireAccess({ permiso: 'admin.loteadora.articulos' });
+    const acceso = await requireAccess({ permiso: ['admin.loteadora.articulos', 'admin.loteadora.maquinas'] });
     if (!acceso.ok) return denied;
   }
 
