@@ -189,6 +189,7 @@ export function getDb(): Database.Database {
       linea INTEGER NOT NULL DEFAULT 1,
       reloj INTEGER NOT NULL DEFAULT 0,
       espaciado INTEGER,             -- NULL = el espaciado del mensaje
+      tamano INTEGER,                -- NULL = el tamaño del mensaje
       PRIMARY KEY (mensaje_id, field_id)
     );
 
@@ -398,6 +399,9 @@ export function getDb(): Database.Database {
   const camposColumns = _db.prepare("PRAGMA table_info(loteadora_mensaje_campos)").all() as { name: string }[];
   if (!camposColumns.some(c => c.name === 'espaciado')) {
     _db.exec('ALTER TABLE loteadora_mensaje_campos ADD COLUMN espaciado INTEGER');
+  }
+  if (!camposColumns.some((c) => c.name === 'tamano')) {
+    _db.exec('ALTER TABLE loteadora_mensaje_campos ADD COLUMN tamano INTEGER');
   }
   // Zona de la loteadora (informativa y para decidir quién la ve). Al borrar la
   // zona, la loteadora se queda sin zona.

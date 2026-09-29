@@ -11,6 +11,7 @@ interface LoteadoraRow {
   ip: string;
   port: number;
   slave_address: number;
+  linea: string | null;
   plantilla: string | null;
   campos: string | null;
   usuario: string | null;
@@ -31,7 +32,7 @@ export async function GET() {
 
   const db = getDb();
   const loteadoras = db.prepare(
-    `SELECT l.id, l.name, l.ip, l.port, l.slave_address, l.zona_id, z.nombre AS zona,
+    `SELECT l.id, l.name, l.ip, l.port, l.slave_address, l.zona_id, l.linea, z.nombre AS zona,
             e.plantilla, e.campos, e.usuario, e.enviado_at
      FROM loteadoras l
      LEFT JOIN zonas z ON z.id = l.zona_id
@@ -45,9 +46,9 @@ export async function GET() {
   const idDe = new Map((db.prepare('SELECT id, name FROM loteadora_mensajes').all() as { id: number; name: string }[]).map((m) => [m.name, m.id]));
   const camposDe = leerCampos(db, [...new Set(visibles.map((l) => idDe.get(l.plantilla ?? '')).filter((id): id is number => id !== undefined))]);
   // Sin la plantilla (borrada o renombrada), un campo por línea
-  const lineas = (plantilla: string, enviados: { fieldId: number; texto: string }[]): TrozoEtiqueta[][] => {
+  const lineas = (plantilla: string, enviados: { fieldId: number; texto: string }[], linea: string | null): TrozoEtiqueta[][] => {
     const campos = camposDe.get(idDe.get(plantilla) ?? -1);
-    return campos ? trozosEtiqueta(campos, new Map(enviados.map((e) => [e.fieldId, e.texto]))) : enviados.map((e) => [{ texto: e.texto }]);
+    return campos ? trozosEtiqueta(campos, new Map(enviados.map((e) => [e.fieldId, e.texto])), linea?.length) : enviados.map((e) => [{ texto: e.texto }]);
   };
 
   const estados = await Promise.all(
@@ -57,7 +58,7 @@ export async function GET() {
       zona: l.zona,
       state: await getPrinterStatus({ ip: l.ip, port: l.port, slaveAddress: l.slave_address }),
       ultimoEnvio: l.plantilla
-        ? { plantilla: l.plantilla, lineas: lineas(l.plantilla, JSON.parse(l.campos ?? '[]')), usuario: l.usuario, enviadoAt: l.enviado_at }
+        ? { plantilla: l.plantilla, lineas: lineas(l.plantilla, JSON.parse(l.campos ?? '[]'), l.linea), usuario: l.usuario, enviadoAt: l.enviado_at }
         : null,
     }))
   );

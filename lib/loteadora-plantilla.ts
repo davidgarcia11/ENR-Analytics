@@ -47,6 +47,8 @@ export interface Campo {
   linea?: number;
   /** Espaciado entre caracteres de este campo (uno de ESPACIADOS); sin él, el del mensaje */
   espaciado?: number;
+  /** Tamaño de letra de este campo (y de su reloj); sin él, el del mensaje */
+  tamano?: number;
 }
 
 // Pieza 'reloj': hora real de la máquina en cada impresión. No se envía por el 1D
@@ -276,7 +278,11 @@ export function validarPlantilla(body: any): { error: string } | { value: Planti
     if (espaciado !== undefined && !(ESPACIADOS as readonly number[]).includes(espaciado)) {
       return { error: `Campo ID ${fieldId}: el espaciado debe ser uno de: ${ESPACIADOS.join(', ')}` };
     }
-    campos.push({ fieldId, piezas, linea, ...(espaciado !== undefined ? { espaciado } : {}) });
+    const tamano = c.tamano === undefined || c.tamano === null || c.tamano === '' ? undefined : Number(c.tamano);
+    if (tamano !== undefined && (!Number.isInteger(tamano) || tamano < 5 || tamano > 1200)) {
+      return { error: `Campo ID ${fieldId}: el tamaño debe ser un número entero entre 5 y 1200` };
+    }
+    campos.push({ fieldId, piezas, linea, ...(espaciado !== undefined ? { espaciado } : {}), ...(tamano !== undefined ? { tamano } : {}) });
   }
 
   return { value: { name, campos } };
@@ -296,9 +302,11 @@ export function validarPlantilla(body: any): { error: string } | { value: Planti
 
 export const FUENTE_MENSAJE = 'Arial';
 
-// Espaciado entre caracteres que admite la máquina (protocolo §3.5.17.3): el byte
-// "Space" es el índice en esta lista (05 = 0, el valor por defecto).
-export const ESPACIADOS = [30, 20, 10, 5, 2, 0, -2, -5, -10, -20, -30] as const;
+// Espaciado entre caracteres, en puntos: de 5 en 5 entre +30 y −30, más ±2 (los que
+// daba el antiguo comando 1C). El .msg lo guarda con su valor (lib/loteadora-msg.ts).
+// ponytail: los intermedios (±25, ±15) no los ofrece el comando 1C; si alguno sale
+// raro en la máquina, probarlo con un .msg hecho a mano con ese espaciado.
+export const ESPACIADOS = [30, 25, 20, 15, 10, 5, 2, 0, -2, -5, -10, -15, -20, -25, -30] as const;
 
 export interface MedidasMensaje {
   fuente: string;
@@ -334,14 +342,17 @@ export function validarMedidas(m: any): { error: string } | { value: MedidasMens
   return { value: { fuente, tamano, espaciado, ancho, interlineado } };
 }
 
-/** Nº máximo de caracteres que puede ocupar una pieza (dimensiona el campo en la máquina). */
-export function largoPieza(p: Pieza): number {
+/**
+ * Nº máximo de caracteres que puede ocupar una pieza (dimensiona el campo en la máquina).
+ * `largoLinea`: lo que mide la línea de la loteadora ("5" → 1, "18" → 2); sin ella, 2.
+ */
+export function largoPieza(p: Pieza, largoLinea = 2): number {
   switch (p.tipo) {
     case 'texto': return (p.valor ?? '').length;
     case 'fijo': return Math.max((p.valor ?? '').length, 6); // margen: el valor se edita después
     case 'fresco': return 6;
     case 'turno': return 1;
-    case 'linea': return 2;
+    case 'linea': return Math.max(1, largoLinea);
     case 'hora': return 4;
     case 'cocida': return ({ AAJJJ: 5, AJJJ: 4, JJJ: 3 } as Record<string, number>)[p.formato ?? 'AAJJJ'] ?? (p.formato ?? '').length;
     case 'caducidad': return (p.formato ?? 'DD/MM/AAAA').length;
@@ -367,19 +378,29 @@ export interface RelojDispuesto {
 
 export interface MensajeDispuesto { campos: CampoDispuesto[]; relojes: RelojDispuesto[] }
 
-export function disponerMensaje(campos: Campo[], medidas: MedidasMensaje = medidasPorDefecto(campos)): MensajeDispuesto {
-  const { fuente: font, tamano: fontSize, interlineado: lh } = medidas;
-  // Ancho de un carácter sin espaciado; cada campo le suma el suyo (o el del mensaje).
-  // El espacio entre campos va con el ancho base.
+// Un campo con tamaño propio escala el ancho por carácter y el alto de su línea en
+// proporción al tamaño del mensaje. Cada línea mide lo que su campo más grande; los
+// campos de una misma línea se alinean por arriba. `largoLinea`: ver largoPieza.
+export function disponerMensaje(
+  campos: Campo[], medidas: MedidasMensaje = medidasPorDefecto(campos), largoLinea?: number,
+): MensajeDispuesto {
+  const { fuente: font } = medidas;
+  // Ancho de un carácter sin espaciado (con el tamaño del mensaje); cada campo le suma
+  // el suyo (o el del mensaje). El espacio entre campos va con el ancho base.
   const base = Math.max(1, medidas.ancho - medidas.espaciado);
+  const escala = (c: Campo) => (c.tamano ?? medidas.tamano) / medidas.tamano;
+  const alto = [1, 2, 3].map((l) => Math.max(0, ...campos.filter((c) => (c.linea ?? 1) === l).map((c) => Math.round(medidas.interlineado * escala(c)))) || medidas.interlineado);
+  const yDe = (linea: number) => alto.slice(0, linea - 1).reduce((a, b) => a + b, 0);
   const columna = new Map<number, number>(); // en caracteres (vista previa)
   const posicion = new Map<number, number>(); // en puntos (máquina)
   const d: MensajeDispuesto = { campos: [], relojes: [] };
   for (const c of campos) {
     const linea = c.linea ?? 1;
     const espaciado = c.espaciado ?? medidas.espaciado;
-    const cw = Math.max(1, base + espaciado);
-    const y = (linea - 1) * lh;
+    const fontSize = c.tamano ?? medidas.tamano;
+    const baseCampo = Math.max(1, Math.round(base * escala(c)));
+    const cw = Math.max(1, baseCampo + espaciado);
+    const y = yDe(linea);
     let col = columna.get(linea) ?? 0;
     let x = posicion.get(linea) ?? 0;
     const reloj = c.piezas.find((p) => p.tipo === 'reloj');
@@ -390,13 +411,13 @@ export function disponerMensaje(campos: Campo[], medidas: MedidasMensaje = medid
       x += formato.length * cw;
     };
     if (reloj && c.piezas[0] === reloj) ponReloj();
-    const length = Math.max(1, c.piezas.reduce((n, p) => n + largoPieza(p), 0));
+    const length = Math.max(1, c.piezas.reduce((n, p) => n + largoPieza(p, largoLinea), 0));
     d.campos.push({ id: c.fieldId, x, y, fontSize, font, length, ancho: length * cw, espaciado, linea, columna: col });
     col += length;
     x += length * cw;
     if (reloj && c.piezas[0] !== reloj) ponReloj();
     columna.set(linea, col + 1);
-    posicion.set(linea, x + base);
+    posicion.set(linea, x + baseCampo);
   }
   return d;
 }
@@ -404,7 +425,7 @@ export function disponerMensaje(campos: Campo[], medidas: MedidasMensaje = medid
 /** Texto de cada línea de la etiqueta tal como quedaría (el reloj con su formato, "HHmm"). */
 export function lineasEtiqueta(campos: Campo[], v: ValoresEtiqueta): string[] {
   const textos = new Map(componerCampos(campos, { ...v, conReloj: false }).map((c) => [c.fieldId, c.texto]));
-  return trozosEtiqueta(campos, textos).map((l) => l.map((t) => t.texto).join('').trimEnd());
+  return trozosEtiqueta(campos, textos, v.linea?.length).map((l) => l.map((t) => t.texto).join('').trimEnd());
 }
 
 export interface TrozoEtiqueta { texto: string; reloj?: boolean }
@@ -414,8 +435,8 @@ export interface TrozoEtiqueta { texto: string; reloj?: boolean }
  * texto de cada campo (`textos`, por fieldId) en su sitio y el reloj con su formato.
  * Lo usan la vista previa (lineasEtiqueta) y el último envío de /loteadora.
  */
-export function trozosEtiqueta(campos: Campo[], textos: Map<number, string>): TrozoEtiqueta[][] {
-  const d = disponerMensaje(campos);
+export function trozosEtiqueta(campos: Campo[], textos: Map<number, string>, largoLinea?: number): TrozoEtiqueta[][] {
+  const d = disponerMensaje(campos, undefined, largoLinea);
   const todos = [
     ...d.campos.map((c) => ({ linea: c.linea, columna: c.columna, texto: (textos.get(c.id) ?? '').padEnd(c.length), reloj: false })),
     ...d.relojes.map((r) => ({ linea: r.linea, columna: r.columna, texto: r.formato as string, reloj: true })),
@@ -465,12 +486,12 @@ export function leerCampos(db: Database.Database, mensajeIds?: number[]): Map<nu
     : db.prepare('SELECT * FROM loteadora_mensaje_segmentos').all()) as FilaSegmento[];
   const porMensaje = new Map<number, FilaSegmento[]>();
   for (const f of filas) porMensaje.set(f.mensaje_id, [...(porMensaje.get(f.mensaje_id) ?? []), f]);
-  const disp = db.prepare('SELECT mensaje_id, field_id, linea, espaciado FROM loteadora_mensaje_campos').all() as
-    { mensaje_id: number; field_id: number; linea: number; espaciado: number | null }[];
+  const disp = db.prepare('SELECT mensaje_id, field_id, linea, espaciado, tamano FROM loteadora_mensaje_campos').all() as
+    { mensaje_id: number; field_id: number; linea: number; espaciado: number | null; tamano: number | null }[];
   const dispDe = new Map(disp.map((d) => [`${d.mensaje_id}|${d.field_id}`, d]));
   return new Map([...porMensaje].map(([id, fs]) => [id, filasACampos(fs).map((c) => {
     const d = dispDe.get(`${id}|${c.fieldId}`);
-    return { ...c, linea: d?.linea ?? 1, ...(d?.espaciado != null ? { espaciado: d.espaciado } : {}) };
+    return { ...c, linea: d?.linea ?? 1, ...(d?.espaciado != null ? { espaciado: d.espaciado } : {}), ...(d?.tamano != null ? { tamano: d.tamano } : {}) };
   })]));
 }
 
@@ -485,8 +506,8 @@ export function guardarCampos(db: Database.Database, mensajeId: number, campos: 
     insertar.run(mensajeId, ci * 1000 + pi, c.fieldId, p.tipo, p.valor ?? null, p.nombre ?? null, p.formato ?? null);
   }));
   db.prepare('DELETE FROM loteadora_mensaje_campos WHERE mensaje_id = ?').run(mensajeId);
-  const disp = db.prepare('INSERT INTO loteadora_mensaje_campos (mensaje_id, field_id, linea, espaciado) VALUES (?, ?, ?, ?)');
-  for (const c of campos) disp.run(mensajeId, c.fieldId, c.linea ?? 1, c.espaciado ?? null);
+  const disp = db.prepare('INSERT INTO loteadora_mensaje_campos (mensaje_id, field_id, linea, espaciado, tamano) VALUES (?, ?, ?, ?, ?)');
+  for (const c of campos) disp.run(mensajeId, c.fieldId, c.linea ?? 1, c.espaciado ?? null, c.tamano ?? null);
 }
 
 // ─── Copia de seguridad: exportar / importar (/admin → Plantillas) ───────────────

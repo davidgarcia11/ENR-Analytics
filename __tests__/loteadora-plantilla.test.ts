@@ -155,7 +155,7 @@ describe('copia de seguridad (exportar / importar)', () => {
         orden INTEGER NOT NULL, field_id INTEGER NOT NULL, tipo TEXT NOT NULL, valor TEXT, nombre TEXT, formato TEXT);
       CREATE TABLE loteadora_articulo_mensajes (articulo_id TEXT PRIMARY KEY, mensaje_id INTEGER NOT NULL);
       CREATE TABLE loteadora_mensaje_campos (mensaje_id INTEGER NOT NULL, field_id INTEGER NOT NULL,
-        linea INTEGER NOT NULL DEFAULT 1, reloj INTEGER NOT NULL DEFAULT 0, espaciado INTEGER, PRIMARY KEY (mensaje_id, field_id));
+        linea INTEGER NOT NULL DEFAULT 1, reloj INTEGER NOT NULL DEFAULT 0, espaciado INTEGER, tamano INTEGER, PRIMARY KEY (mensaje_id, field_id));
     `)
     return db
   }
@@ -338,6 +338,28 @@ describe('medidas del mensaje (fuente, tamaño, espaciado)', () => {
     const r = validarPlantilla({ name: 'X', campos: [{ fieldId: 1, piezas: [{ tipo: 'hora' }], espaciado: 10 }] })
     expect('value' in r && r.value.campos[0].espaciado).toBe(10)
     expect('error' in validarPlantilla({ name: 'X', campos: [{ fieldId: 1, piezas: [{ tipo: 'hora' }], espaciado: 7 }] })).toBe(true)
+  })
+
+  it('cada campo puede tener su tamaño: escala su ancho y el alto de su línea', () => {
+    const d = disponerMensaje([
+      { fieldId: 1, piezas: [{ tipo: 'texto', valor: 'AB' }, { tipo: 'reloj', formato: 'HHmm' }], linea: 1, tamano: 70 },
+      { fieldId: 2, piezas: [{ tipo: 'texto', valor: 'XY' }], linea: 1 },
+      { fieldId: 3, piezas: [{ tipo: 'texto', valor: 'Z' }], linea: 2 },
+    ], medidasDeTamano(35))
+    // tamaño 70 = el doble: 66 puntos por carácter; su reloj, igual; el campo 2 detrás tras un espacio de 66
+    expect(d.campos.map((c) => [c.id, c.x, c.y, c.fontSize, c.ancho])).toEqual([
+      [1, 0, 0, 70, 2 * 66], [2, 2 * 66 + 4 * 66 + 66, 0, 35, 2 * 33], [3, 0, 72, 35, 33],
+    ])
+    expect(d.relojes.map((r) => [r.x, r.fontSize, r.ancho])).toEqual([[2 * 66, 70, 4 * 66]])
+    const r = validarPlantilla({ name: 'X', campos: [{ fieldId: 1, piezas: [{ tipo: 'hora' }], tamano: 50 }] })
+    expect('value' in r && r.value.campos[0].tamano).toBe(50)
+    expect('error' in validarPlantilla({ name: 'X', campos: [{ fieldId: 1, piezas: [{ tipo: 'hora' }], tamano: 2 }] })).toBe(true)
+  })
+
+  it('la línea reserva lo que mide la de la loteadora (por defecto 2)', () => {
+    const campos: Campo[] = [{ fieldId: 1, piezas: [{ tipo: 'texto', valor: 'L' }, { tipo: 'linea' }] }]
+    expect(disponerMensaje(campos).campos[0].length).toBe(3)
+    expect(disponerMensaje(campos, undefined, 1).campos[0].length).toBe(2)
   })
 
   it('valida las medidas', () => {
