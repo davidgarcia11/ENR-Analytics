@@ -206,8 +206,16 @@ function LoteadoraPanel() {
   }, []);
 
   // Confirmación antes de tocar la máquina (cargar la plantilla de un artículo o
-  // enviar datos): un solo diálogo, con la acción a ejecutar si se acepta.
-  const [confirmacion, setConfirmacion] = useState<{ titulo: string; detalle: React.ReactNode; boton: string; accion: () => void } | null>(null);
+  // enviar datos): un solo diálogo, con la acción a ejecutar si se acepta y, si
+  // hace falta, qué deshacer si se cancela.
+  const [confirmacion, setConfirmacion] = useState<{
+    titulo: string; detalle: React.ReactNode; boton: string; accion: () => void; alCancelar?: () => void;
+  } | null>(null);
+  const cancelarConfirmacion = () => { confirmacion?.alCancelar?.(); setConfirmacion(null); };
+
+  // Formulario tal como estaba antes de elegir un artículo: si se cancela la carga de
+  // su plantilla, se vuelve a él (sin artículo, o el artículo y los datos de antes).
+  const antesDelArticulo = useRef<{ loteadora: string; articuloId: string; form: LoteadoraFormState } | null>(null);
 
   // Envío
   const [sending, setSending] = useState(false);
@@ -258,11 +266,14 @@ function LoteadoraPanel() {
       toast.warning(`La loteadora está imprimiendo: no se ha cargado ${nombre}. Para la impresión y pulsa "Volver a cargar".`);
       return;
     }
+    const antes = antesDelArticulo.current;
+    const deshacer = antes && antes.loteadora === selectedLoteadora && antes.articuloId === selectedArticulo.id ? antes : null;
     setConfirmacion({
       titulo: "Cambiar la plantilla de la loteadora",
       detalle: <>Se cargará <span className="font-mono font-medium text-foreground">{nombre}</span> en <span className="font-medium text-foreground">{loteadoraSeleccionada?.name}</span> para el artículo <span className="font-medium text-foreground">{selectedArticulo.id} — {selectedArticulo.descripcion}</span>.</>,
       boton: "Cargar plantilla",
       accion: () => cargarMensaje(nombre),
+      alCancelar: deshacer ? () => setFormStates((prev) => ({ ...prev, [deshacer.loteadora]: deshacer.form })) : undefined,
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedArticulo?.id, selectedArticulo?.plantilla?.messageName, selectedLoteadora]);
@@ -353,6 +364,7 @@ function LoteadoraPanel() {
 
   const handleArticuloChange = (id: string | null) => {
     const art = articulos.find((a) => a.id === id) ?? null;
+    if (art) antesDelArticulo.current = { loteadora: selectedLoteadora, articuloId: art.id, form: currentForm };
     if (!art) {
       updateForm({ selectedArticuloId: null, plantillaPreguntada: null });
       return;
@@ -895,14 +907,14 @@ function LoteadoraPanel() {
             </Card>
           </main>
         </div>
-        <Dialog open={!!confirmacion} onOpenChange={(o) => !o && setConfirmacion(null)}>
+        <Dialog open={!!confirmacion} onOpenChange={(o) => !o && cancelarConfirmacion()}>
           <DialogContent>
             <DialogHeader>
               <DialogTitle>{confirmacion?.titulo}</DialogTitle>
               <DialogDescription render={<div />}>{confirmacion?.detalle}</DialogDescription>
             </DialogHeader>
             <DialogFooter>
-              <Button variant="outline" onClick={() => setConfirmacion(null)}>Cancelar</Button>
+              <Button variant="outline" onClick={cancelarConfirmacion}>Cancelar</Button>
               <Button onClick={() => { confirmacion?.accion(); setConfirmacion(null); }}>{confirmacion?.boton}</Button>
             </DialogFooter>
           </DialogContent>
