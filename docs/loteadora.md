@@ -284,6 +284,8 @@ El comando `1D` (envío de lote/caducidad) sigue actuando igual que antes: sobre
 
 El botón **"Limpiar buffer"** de `/loteadora` llama a `POST /api/loteadora/limpiar-buffer` (`{loteadoraId}`), que ejecuta `clearRemoteFieldBuffer()` (comando `21` — Clear Buffers of 1D). Equivale a pulsar el botón "Clear" de **Ajustes de comunicación → Buffer** en la propia máquina: vacía la cola de envíos `1D` pendientes sin imprimir nada ni cambiar ningún valor.
 
+**Solo con permiso** (sept. 2026): el botón solo lo ven el admin y quien tenga el permiso `loteadora.limpiar-buffer` (por su rol o como extra, en `/admin` → Usuarios o Roles y permisos). La ruta lo vuelve a comprobar además del acceso a la pantalla. Vaciar el buffer descarta envíos pendientes, así que no es para cualquier operario.
+
 **Por qué hace falta:** el campo remoto solo se actualiza cuando la impresora consume la cola al disparar una impresión real (paso por la célula fotoeléctrica). Si se hacen varios envíos de prueba sin que la máquina llegue a imprimir, la cola (hasta 10 según el "Number" configurado en Buffer Setting) se llena y no se vacía sola — los envíos siguientes devuelven aviso de buffer lleno (`42`/`43`, ver §6) y el valor mostrado en pantalla puede quedarse desactualizado (`Null Null` hasta el primer disparo real). Este botón permite desatascarlo desde el dashboard sin ir a la máquina.
 
 Se descartó automatizar el disparo de impresión en sí (comando `13`, Trigger Print) porque dispara una impresión física real cada vez — limpiar el buffer no imprime nada, así que es una acción segura de repetir.

@@ -695,7 +695,8 @@ artículos de `/muestras` o asignar artículos a plantillas de loteadora.
   migrada automáticamente a `user_permissions` — quien lo tenía lo conserva — y
   eliminada), `admin.loteadora.articulos` (sección Loteadora › Artículos) y
   `admin.loteadora.datos-fijos` (sección Loteadora › Datos fijos: precios y nº de
-  certificado de las plantillas), `admin.loteadora.maquinas` (sección Máquinas: crear y
+  certificado de las plantillas), `loteadora.limpiar-buffer` (botón "Limpiar buffer" de /loteadora, sin sección de /admin),
+  `admin.loteadora.maquinas` (sección Máquinas: crear y
   editar loteadoras, ve todas sin filtro de zona) y `admin.loteadora.plantillas` (sección
   Plantillas: crear y editar, y "Crear en la loteadora…"). Una regla puede abrirse a
   varios permisos (`permiso: [...]`, basta con uno), igual que `requireAccess({ permiso: [...] })`.
