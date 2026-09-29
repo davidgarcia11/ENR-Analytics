@@ -351,6 +351,8 @@ Un artículo solo puede tener una plantilla a la vez (`articulo_id` es clave pri
 
 **Migración desde el modelo anterior** (6 columnas fijas `lot/cocida/expiry/hora/turno/linea_field_id` en `loteadora_mensajes`): al arrancar, cada columna se convierte en un campo con una sola pieza de ese tipo, sin literales, y la caducidad en `DD/MM/AAAA` (lo que se imprimía hasta entonces), así que las plantillas existentes siguen enviando exactamente lo mismo; si dos columnas compartían ID (las añadidas más tarde valían 0 por defecto) gana la primera. Después se eliminan las columnas. **Antes de tocar nada se guarda una copia completa de la BD** junto a `app.db` (`app.db.pre-plantillas-campos-<fecha>`, con `VACUUM INTO`): para volver atrás, restaurar ese fichero y desplegar la versión anterior.
 
+**Duplicar una plantilla** (menú de cada plantilla → **"Duplicar"**): abre el formulario de plantilla nueva con los mismos campos y piezas (reloj incluido) y el primer nombre libre `NOMBRE_2`, `NOMBRE_3`… Pensado para un artículo que necesita otro espaciado o un campo más: se duplica, se ajusta, se crea en la loteadora y se le asocia en Artículos. No copia los artículos asociados (siguen con la original) ni las medidas de cada máquina (al crearla se proponen las últimas de esa máquina). Mismo acceso que crear plantillas.
+
 **Crear el mensaje en la máquina desde el admin** (menú de cada plantilla → **"Crear en la loteadora…"**; también se ofrece al guardar una plantilla nueva):
 - Cada campo tiene su **línea** (1-3), en `loteadora_mensaje_campos`.
 - **Pieza Reloj** (en "+ Pieza" del constructor): hora real de la máquina en cada impresión, formato `HHmm` (por defecto) o `HH:mm`.

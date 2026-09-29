@@ -7,7 +7,7 @@
 // validación en lib/loteadora-plantilla.ts; ver docs/loteadora.md §13.
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
-import { AlertTriangle, ArrowLeft, ArrowRight, Loader2, MoreHorizontal, Pencil, Plus, Printer, Trash2, X } from "lucide-react";
+import { AlertTriangle, ArrowLeft, ArrowRight, Copy, Loader2, MoreHorizontal, Pencil, Plus, Printer, Trash2, X } from "lucide-react";
 import { useApiFetch, useSession } from "@/components/SessionProvider";
 import { Button } from "@/components/nova/ui/button";
 import { Input } from "@/components/nova/ui/input";
@@ -336,6 +336,14 @@ export default function AdminPlantillas({ titulo, descripcion }: SeccionProps) {
 
   const abrirAlta = () => { setNombre(""); setCampos(vacia()); setError(""); setFormulario("nueva"); };
   const abrirEdicion = (m: Mensaje) => { setNombre(m.name); setCampos(aEditables(m.campos)); setError(""); setFormulario(m); };
+  // Plantilla nueva a partir de otra: mismos campos y piezas, primer nombre libre
+  // NOMBRE_2, NOMBRE_3... Los artículos asociados siguen con la original.
+  const abrirDuplicado = (m: Mensaje) => {
+    const usados = new Set(mensajes.map((x) => x.name));
+    let n = 2;
+    while (usados.has(`${m.name}_${n}`)) n++;
+    setNombre(`${m.name}_${n}`); setCampos(aEditables(m.campos)); setError(""); setFormulario("nueva");
+  };
 
   const siguienteId = () => {
     const usados = new Set(campos.map((c) => Number(c.fieldId)));
@@ -429,6 +437,7 @@ export default function AdminPlantillas({ titulo, descripcion }: SeccionProps) {
                       />
                       <DropdownMenuContent align="end" className="min-w-40">
                         <DropdownMenuItem onClick={() => abrirEdicion(m)}><Pencil />Editar</DropdownMenuItem>
+                        <DropdownMenuItem onClick={() => abrirDuplicado(m)}><Copy />Duplicar</DropdownMenuItem>
                         <DropdownMenuItem onClick={() => abrirCrearEnMaquina(m)}><Printer />Crear en la loteadora…</DropdownMenuItem>
                         {esAdmin && (
                           <>
