@@ -42,9 +42,9 @@ type EstadoVivo = "activa" | "en_error" | "standby" | "apagada";
 
 // Mismos colores que el estado de las loteadoras en /loteadora (app/loteadora/page.tsx)
 const ESTADO_INFO: Record<EstadoVivo, { label: string; className: string }> = {
-  activa: { label: "Imprimiendo", className: "bg-emerald-400/10 text-emerald-600" },
+  activa: { label: "Imprimiendo", className: "bg-amber-400/10 text-amber-600" },
   en_error: { label: "En error", className: "bg-rose-400/10 text-rose-500" },
-  standby: { label: "Sin imprimir", className: "bg-amber-400/10 text-amber-600" },
+  standby: { label: "Conectada", className: "bg-emerald-400/10 text-emerald-600" },
   apagada: { label: "Sin conexión", className: "bg-muted text-muted-foreground" },
 };
 
