@@ -35,6 +35,12 @@ export const PERMISOS = {
     grupo: 'Loteadora',
     seccionAdmin: 'datos-fijos',
   },
+  // En /loteadora (sin sección de /admin): vaciar la cola de envíos pendientes de una máquina.
+  'loteadora.limpiar-buffer': {
+    label: 'Limpiar el buffer de la loteadora (descarta los envíos pendientes)',
+    corto: 'Limpiar buffer',
+    grupo: 'Loteadora',
+  },
   // Crear y editar, no eliminar: los DELETE siguen siendo solo del admin.
   'admin.loteadora.maquinas': {
     label: 'Crear y editar loteadoras (máquinas)',

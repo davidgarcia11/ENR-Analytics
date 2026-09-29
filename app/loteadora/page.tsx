@@ -23,6 +23,7 @@ import {
 } from "lucide-react";
 import Header from "@/components/shadcn-space/blocks/topbar-02/header";
 import { RequireAccess, useApiFetch, useSession } from "@/components/SessionProvider";
+import { tienePermiso } from "@/lib/permisos";
 import { type ThemeMode } from "@/components/nova/mode-toggle";
 import { NovaPortalProvider } from "@/components/nova/portal-container";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/nova/ui/card";
@@ -587,7 +588,8 @@ function LoteadoraPanel() {
                     </Alert>
                   )}
 
-                  {selectedLoteadora && (
+                  {/* Solo con permiso (admin o 'loteadora.limpiar-buffer'): descarta envíos pendientes */}
+                  {selectedLoteadora && tienePermiso(sessionUser, "loteadora.limpiar-buffer") && (
                     <div className="grid gap-1.5">
                       <Button
                         type="button"

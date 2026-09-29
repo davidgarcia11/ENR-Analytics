@@ -13,9 +13,12 @@ interface LoteadoraRow {
 
 // Vacía la cola de campos remotos pendientes de una loteadora (comando 21).
 // No imprime nada — solo descarta envíos en cola que no se hayan consumido.
+// Además de la pantalla, exige el permiso 'loteadora.limpiar-buffer' (admin siempre).
 export async function POST(req: NextRequest) {
   const acceso = await requireAccess({ screen: 'loteadora' });
   if (!acceso.ok) return acceso.denied;
+  const permiso = await requireAccess({ permiso: 'loteadora.limpiar-buffer' });
+  if (!permiso.ok) return permiso.denied;
 
   const { loteadoraId } = await req.json();
   if (!loteadoraId) {
