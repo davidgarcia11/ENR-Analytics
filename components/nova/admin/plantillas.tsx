@@ -39,6 +39,8 @@ interface CampoEditable {
   linea?: number;
   /** Espaciado propio del campo; sin él, el del mensaje */
   espaciado?: number;
+  /** Tamaño de letra propio del campo; sin él, el del mensaje */
+  tamano?: number;
 }
 
 // Valores de ejemplo para la vista previa: cocida hace unos días, caducidad a +30.
@@ -69,9 +71,12 @@ const nuevaPieza = (tipo: TipoPieza): Pieza =>
 const vacia = (): CampoEditable[] => [{ fieldId: "1", piezas: [nuevaPieza("texto"), nuevaPieza("cocida")] }];
 
 const aEditables = (campos: Campo[]): CampoEditable[] =>
-  campos.map((c) => ({ fieldId: String(c.fieldId), piezas: c.piezas.map((p) => ({ ...p })), linea: c.linea ?? 1, espaciado: c.espaciado }));
+  campos.map((c) => ({ fieldId: String(c.fieldId), piezas: c.piezas.map((p) => ({ ...p })), linea: c.linea ?? 1, espaciado: c.espaciado, tamano: c.tamano }));
 const aCampos = (campos: CampoEditable[]): Campo[] =>
-  campos.map((c) => ({ fieldId: Number(c.fieldId), piezas: c.piezas, linea: c.linea ?? 1, ...(c.espaciado !== undefined ? { espaciado: c.espaciado } : {}) }));
+  campos.map((c) => ({
+    fieldId: Number(c.fieldId), piezas: c.piezas, linea: c.linea ?? 1,
+    ...(c.espaciado !== undefined ? { espaciado: c.espaciado } : {}), ...(c.tamano !== undefined ? { tamano: c.tamano } : {}),
+  }));
 const FORMATO_ITEMS_RELOJ = FORMATOS_RELOJ.map((f) => ({ value: f, label: f }));
 const LINEA_ITEMS = [1, 2, 3].map((n) => ({ value: String(n), label: `Línea ${n}` }));
 const signo = (v: number) => (v > 0 ? `+${v}` : String(v));
@@ -166,8 +171,9 @@ function EditorCampo({ campo, ejemplo, onChange, onQuitar, puedeQuitar }: {
   const vista = componerCampos([{ fieldId: 0, piezas: campo.piezas }], conManuales(ejemplo, [{ fieldId: 0, piezas: campo.piezas }]))[0].texto;
 
   return (
-    <div className="space-y-3 rounded-xl border p-3">
-      <div className="flex items-center gap-2">
+    <div className="min-w-0 space-y-3 rounded-xl border p-3">
+      {/* flex-wrap: con ID, línea, espaciado, tamaño y "Se imprime" no cabe en una fila */}
+      <div className="flex flex-wrap items-center gap-2">
         <Label htmlFor={`campo-${campo.fieldId}`} className="text-xs text-muted-foreground">ID del campo</Label>
         <Input
           id={`campo-${campo.fieldId}`}
@@ -194,9 +200,21 @@ function EditorCampo({ campo, ejemplo, onChange, onQuitar, puedeQuitar }: {
             {ESPACIADO_CAMPO_ITEMS.map((e) => <SelectItem key={e.value} value={e.value} className="text-xs">{e.label}</SelectItem>)}
           </SelectContent>
         </Select>
-        <div className="ml-auto flex items-center gap-2">
+        {/* Vacío = el tamaño del mensaje (se elige al crearlo en la máquina) */}
+        <Input
+          type="number"
+          min={5}
+          max={1200}
+          value={campo.tamano ?? ""}
+          onChange={(e) => onChange({ ...campo, tamano: e.target.value === "" ? undefined : Number(e.target.value) })}
+          placeholder="Tamaño"
+          title="Tamaño de letra de este campo y de su reloj. Vacío: el del mensaje"
+          className="h-8 w-24 text-xs"
+          aria-label="Tamaño de letra del campo"
+        />
+        <div className="ml-auto flex min-w-0 max-w-full items-center gap-2">
           <span className="text-xs text-muted-foreground">Se imprime</span>
-          <code className="rounded-md border bg-muted/40 px-2 py-1 font-mono text-sm whitespace-pre text-foreground">
+          <code className="min-w-0 overflow-x-auto rounded-md border bg-muted/40 px-2 py-1 font-mono text-sm whitespace-pre text-foreground">
             {vista ? conEspacios(vista) : "—"}
           </code>
           {puedeQuitar && (
@@ -456,7 +474,7 @@ export default function AdminPlantillas({ titulo, descripcion }: SeccionProps) {
       </TablaCard>
 
       <Dialog open={!!formulario} onOpenChange={(o) => !o && cerrar()}>
-        <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-3xl">
+        <DialogContent className="max-h-[90vh] overflow-x-hidden overflow-y-auto sm:max-w-4xl">
           <form onSubmit={guardar} className="grid gap-5">
             <DialogHeader>
               <DialogTitle>{editando ? "Editar plantilla" : "Nueva plantilla"}</DialogTitle>

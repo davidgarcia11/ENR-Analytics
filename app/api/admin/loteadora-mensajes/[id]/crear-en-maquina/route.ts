@@ -65,8 +65,8 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   if (campos.length === 0) return NextResponse.json({ error: 'La plantilla no tiene campos' }, { status: 400 });
 
   const loteadoraId = Number(body.loteadoraId);
-  const loteadora = db.prepare('SELECT ip, port, slave_address FROM loteadoras WHERE id = ?').get(loteadoraId) as
-    { ip: string; port: number; slave_address: number } | undefined;
+  const loteadora = db.prepare('SELECT ip, port, slave_address, linea FROM loteadoras WHERE id = ?').get(loteadoraId) as
+    { ip: string; port: number; slave_address: number; linea: string | null } | undefined;
   if (!loteadora) return NextResponse.json({ error: 'Loteadora no encontrada' }, { status: 404 });
   const config = { ip: loteadora.ip, port: loteadora.port, slaveAddress: loteadora.slave_address };
 
@@ -81,7 +81,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
 
   try {
     const antes = await listMessageNames(config).catch(() => null);
-    await sendMessageFile(config, mensaje.name, generarMsg(mensaje.name, disponerMensaje(campos, medidas)));
+    await sendMessageFile(config, mensaje.name, generarMsg(mensaje.name, disponerMensaje(campos, medidas, loteadora.linea?.length)));
     const despues = await listMessageNames(config).catch(() => null);
     if (despues && !despues.includes(mensaje.name)) {
       return NextResponse.json({ error: 'La loteadora aceptó el mensaje pero no aparece en su lista. Revísalo en la máquina.' }, { status: 502 });

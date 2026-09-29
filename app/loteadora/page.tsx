@@ -510,10 +510,14 @@ function LoteadoraPanel() {
   // Imprimiendo (P_Status 00 en el estado en vivo) no se deja cambiar nada, ni de
   // artículo (se bloquea el desplegable); el
   // servidor lo vuelve a comprobar en el momento (el estado aquí puede tener 60s).
-  const imprimiendo = estadoLoteadoras.find((e) => String(e.id) === selectedLoteadora)?.state === "activa";
-  const canSend = compuestos.length > 0 && faltan.length === 0 && !!selectedLoteadora && !sending && !imprimiendo;
+  const estadoDe = (id: string) => estadoLoteadoras.find((e) => String(e.id) === id)?.state;
+  const imprimiendo = estadoDe(selectedLoteadora) === "activa";
+  // Sin conexión no se puede elegir en el desplegable; si la elegida se desconecta
+  // después, se avisa y se bloquea igual que imprimiendo (el servidor fallaría).
+  const sinConexion = estadoDe(selectedLoteadora) === "apagada";
+  const canSend = compuestos.length > 0 && faltan.length === 0 && !!selectedLoteadora && !sending && !imprimiendo && !sinConexion;
   const diasReadonly = !modoManual && jdeOnline && diasDesdeJde !== null;
-  const canCargarMensaje = !!selectedLoteadora && !!plantilla && !cargandoMensaje && !imprimiendo;
+  const canCargarMensaje = !!selectedLoteadora && !!plantilla && !cargandoMensaje && !imprimiendo && !sinConexion;
   const loteadoraItems = loteadoras.map((l) => ({ value: String(l.id), label: l.zona ? `${l.name} · ${l.zona}` : l.name }));
 
   // Solo los artículos de las familias de la loteadora elegida (sin familias = todos)
@@ -563,7 +567,10 @@ function LoteadoraPanel() {
                       </SelectTrigger>
                       <SelectContent align="start" alignItemWithTrigger={false}>
                         {loteadoras.map((l) => (
-                          <SelectItem key={l.id} value={String(l.id)}>{l.name}{l.zona && <span className="text-muted-foreground"> · {l.zona}</span>}</SelectItem>
+                          <SelectItem key={l.id} value={String(l.id)} disabled={estadoDe(String(l.id)) === "apagada"}>
+                            {l.name}{l.zona && <span className="text-muted-foreground"> · {l.zona}</span>}
+                            {estadoDe(String(l.id)) === "apagada" && <span className="text-muted-foreground"> · Sin conexión</span>}
+                          </SelectItem>
                         ))}
                       </SelectContent>
                     </Select>
@@ -574,6 +581,16 @@ function LoteadoraPanel() {
                       <AlertTriangle className="text-amber-600" />
                       <AlertDescription className="flex flex-wrap items-center gap-x-2 text-xs text-amber-700 dark:text-amber-400">
                         La loteadora está imprimiendo: para la impresión en la máquina para cambiar de artículo o enviar datos.
+                        <button type="button" onClick={fetchEstadoLoteadoras} className="underline hover:opacity-80">Comprobar de nuevo</button>
+                      </AlertDescription>
+                    </Alert>
+                  )}
+
+                  {sinConexion && (
+                    <Alert className="border-rose-500/20 bg-rose-400/10 py-2">
+                      <PowerOff className="text-rose-500" />
+                      <AlertDescription className="flex flex-wrap items-center gap-x-2 text-xs text-rose-600">
+                        La loteadora no responde: comprueba que está encendida y con el cable de red.
                         <button type="button" onClick={fetchEstadoLoteadoras} className="underline hover:opacity-80">Comprobar de nuevo</button>
                       </AlertDescription>
                     </Alert>
@@ -618,7 +635,7 @@ function LoteadoraPanel() {
                       onValueChange={(v) => handleArticuloChange(v as string | null)}
                       itemToStringLabel={articuloLabel}
                     >
-                      <ComboboxInput placeholder={articuloPlaceholder} disabled={!selectedLoteadora || !jdeOnline || loadingArticulos || imprimiendo} showClear />
+                      <ComboboxInput placeholder={articuloPlaceholder} disabled={!selectedLoteadora || !jdeOnline || loadingArticulos || imprimiendo || sinConexion} showClear />
                       <ComboboxContent>
                         <ComboboxEmpty>Sin resultados</ComboboxEmpty>
                         <ComboboxList>
