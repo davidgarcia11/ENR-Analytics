@@ -23,6 +23,7 @@ import {
 } from "lucide-react";
 import Header from "@/components/shadcn-space/blocks/topbar-02/header";
 import { RequireAccess, useApiFetch, useSession } from "@/components/SessionProvider";
+import { tienePermiso } from "@/lib/permisos";
 import { type ThemeMode } from "@/components/nova/mode-toggle";
 import { NovaPortalProvider } from "@/components/nova/portal-container";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/nova/ui/card";
@@ -45,7 +46,8 @@ interface Articulo { id: string; descripcion: string; diasCaducidad: number; fam
 interface Loteadora { id: number; name: string; linea: string; familias: string; zona: string | null }
 type EstadoLoteadoraValor = "activa" | "en_error" | "standby" | "apagada";
 // ultimoEnvio: lo último que mandó el panel a esa máquina (no lo que tenga si se cambió a mano)
-interface UltimoEnvio { plantilla: string; campos: { fieldId: number; texto: string }[]; usuario: string | null; enviadoAt: string }
+// `lineas`: lo enviado colocado como en la etiqueta; los trozos `reloj` no se envían (los pone la máquina)
+interface UltimoEnvio { plantilla: string; lineas: { texto: string; reloj?: boolean }[][]; usuario: string | null; enviadoAt: string }
 interface EstadoLoteadora { id: number; name: string; zona: string | null; state: EstadoLoteadoraValor; ultimoEnvio: UltimoEnvio | null }
 
 // Formulario de UN trabajo de impresión (artículo/fechas/turno/plantilla elegida).
@@ -73,10 +75,12 @@ interface LoteadoraFormState {
 
 // Colores fijos (enum cerrado de 4 estados) — mismo formato "bg-x/10 text-x" que el
 // resto de indicadores de estado en Nova (ver components/nova/mrp-materials-table.tsx).
+// Imprimiendo en ámbar: mientras imprime no se puede cambiar nada (aviso); conectada
+// y parada, en verde: lista para cambiar de plantilla o enviar.
 const ESTADO_INFO: Record<EstadoLoteadoraValor, { label: string; className: string; icon: typeof CheckCircle2 }> = {
-  activa: { label: "Imprimiendo", className: "bg-emerald-400/10 text-emerald-600", icon: CheckCircle2 },
+  activa: { label: "Imprimiendo", className: "bg-amber-400/10 text-amber-600", icon: Printer },
   en_error: { label: "En error", className: "bg-rose-400/10 text-rose-500", icon: XCircle },
-  standby: { label: "Conectada (sin imprimir)", className: "bg-amber-400/10 text-amber-600", icon: AlertTriangle },
+  standby: { label: "Conectada", className: "bg-emerald-400/10 text-emerald-600", icon: CheckCircle2 },
   apagada: { label: "Sin conexión", className: "bg-muted text-muted-foreground", icon: PowerOff },
 };
 
@@ -203,8 +207,16 @@ function LoteadoraPanel() {
   }, []);
 
   // Confirmación antes de tocar la máquina (cargar la plantilla de un artículo o
-  // enviar datos): un solo diálogo, con la acción a ejecutar si se acepta.
-  const [confirmacion, setConfirmacion] = useState<{ titulo: string; detalle: React.ReactNode; boton: string; accion: () => void } | null>(null);
+  // enviar datos): un solo diálogo, con la acción a ejecutar si se acepta y, si
+  // hace falta, qué deshacer si se cancela.
+  const [confirmacion, setConfirmacion] = useState<{
+    titulo: string; detalle: React.ReactNode; boton: string; accion: () => void; alCancelar?: () => void;
+  } | null>(null);
+  const cancelarConfirmacion = () => { confirmacion?.alCancelar?.(); setConfirmacion(null); };
+
+  // Formulario tal como estaba antes de elegir un artículo: si se cancela la carga de
+  // su plantilla, se vuelve a él (sin artículo, o el artículo y los datos de antes).
+  const antesDelArticulo = useRef<{ loteadora: string; articuloId: string; form: LoteadoraFormState } | null>(null);
 
   // Envío
   const [sending, setSending] = useState(false);
@@ -255,11 +267,14 @@ function LoteadoraPanel() {
       toast.warning(`La loteadora está imprimiendo: no se ha cargado ${nombre}. Para la impresión y pulsa "Volver a cargar".`);
       return;
     }
+    const antes = antesDelArticulo.current;
+    const deshacer = antes && antes.loteadora === selectedLoteadora && antes.articuloId === selectedArticulo.id ? antes : null;
     setConfirmacion({
       titulo: "Cambiar la plantilla de la loteadora",
       detalle: <>Se cargará <span className="font-mono font-medium text-foreground">{nombre}</span> en <span className="font-medium text-foreground">{loteadoraSeleccionada?.name}</span> para el artículo <span className="font-medium text-foreground">{selectedArticulo.id} — {selectedArticulo.descripcion}</span>.</>,
       boton: "Cargar plantilla",
       accion: () => cargarMensaje(nombre),
+      alCancelar: deshacer ? () => setFormStates((prev) => ({ ...prev, [deshacer.loteadora]: deshacer.form })) : undefined,
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedArticulo?.id, selectedArticulo?.plantilla?.messageName, selectedLoteadora]);
@@ -350,6 +365,7 @@ function LoteadoraPanel() {
 
   const handleArticuloChange = (id: string | null) => {
     const art = articulos.find((a) => a.id === id) ?? null;
+    if (art) antesDelArticulo.current = { loteadora: selectedLoteadora, articuloId: art.id, form: currentForm };
     if (!art) {
       updateForm({ selectedArticuloId: null, plantillaPreguntada: null });
       return;
@@ -572,7 +588,8 @@ function LoteadoraPanel() {
                     </Alert>
                   )}
 
-                  {selectedLoteadora && (
+                  {/* Solo con permiso (admin o 'loteadora.limpiar-buffer'): descarta envíos pendientes */}
+                  {selectedLoteadora && tienePermiso(sessionUser, "loteadora.limpiar-buffer") && (
                     <div className="grid gap-1.5">
                       <Button
                         type="button"
@@ -870,9 +887,13 @@ function LoteadoraPanel() {
                                 {l.ultimoEnvio.usuario && <> · {l.ultimoEnvio.usuario}</>}
                               </p>
                               <p className="truncate font-mono text-xs text-muted-foreground">{l.ultimoEnvio.plantilla}</p>
-                              <div className="mt-1 grid gap-0.5">
-                                {l.ultimoEnvio.campos.map((c) => (
-                                  <span key={c.fieldId} className="truncate font-mono text-xs whitespace-pre text-foreground" title={`Campo ${c.fieldId}`}>{c.texto}</span>
+                              <div className="mt-1 grid gap-0.5 overflow-x-auto">
+                                {l.ultimoEnvio.lineas.map((linea, i) => (
+                                  <span key={i} className="font-mono text-sm font-semibold whitespace-pre text-foreground">
+                                    {linea.map((t, j) => t.reloj
+                                      ? <span key={j} className="font-normal text-muted-foreground" title="Reloj de la máquina (hora de cada impresión)">{t.texto}</span>
+                                      : t.texto)}
+                                  </span>
                                 ))}
                               </div>
                             </div>
@@ -888,14 +909,14 @@ function LoteadoraPanel() {
             </Card>
           </main>
         </div>
-        <Dialog open={!!confirmacion} onOpenChange={(o) => !o && setConfirmacion(null)}>
+        <Dialog open={!!confirmacion} onOpenChange={(o) => !o && cancelarConfirmacion()}>
           <DialogContent>
             <DialogHeader>
               <DialogTitle>{confirmacion?.titulo}</DialogTitle>
               <DialogDescription render={<div />}>{confirmacion?.detalle}</DialogDescription>
             </DialogHeader>
             <DialogFooter>
-              <Button variant="outline" onClick={() => setConfirmacion(null)}>Cancelar</Button>
+              <Button variant="outline" onClick={cancelarConfirmacion}>Cancelar</Button>
               <Button onClick={() => { confirmacion?.accion(); setConfirmacion(null); }}>{confirmacion?.boton}</Button>
             </DialogFooter>
           </DialogContent>
