@@ -403,15 +403,31 @@ export function disponerMensaje(campos: Campo[], medidas: MedidasMensaje = medid
 
 /** Texto de cada línea de la etiqueta tal como quedaría (el reloj con su formato, "HHmm"). */
 export function lineasEtiqueta(campos: Campo[], v: ValoresEtiqueta): string[] {
-  const textos = componerCampos(campos, { ...v, conReloj: false });
+  const textos = new Map(componerCampos(campos, { ...v, conReloj: false }).map((c) => [c.fieldId, c.texto]));
+  return trozosEtiqueta(campos, textos).map((l) => l.map((t) => t.texto).join('').trimEnd());
+}
+
+export interface TrozoEtiqueta { texto: string; reloj?: boolean }
+
+/**
+ * Cada línea de la etiqueta como trozos, con los espacios de delante ya puestos: el
+ * texto de cada campo (`textos`, por fieldId) en su sitio y el reloj con su formato.
+ * Lo usan la vista previa (lineasEtiqueta) y el último envío de /loteadora.
+ */
+export function trozosEtiqueta(campos: Campo[], textos: Map<number, string>): TrozoEtiqueta[][] {
   const d = disponerMensaje(campos);
-  const trozos = [
-    ...d.campos.map((c, i) => ({ linea: c.linea, columna: c.columna, texto: textos[i].texto.padEnd(c.length) })),
-    ...d.relojes.map((r) => ({ linea: r.linea, columna: r.columna, texto: r.formato as string })),
+  const todos = [
+    ...d.campos.map((c) => ({ linea: c.linea, columna: c.columna, texto: (textos.get(c.id) ?? '').padEnd(c.length), reloj: false })),
+    ...d.relojes.map((r) => ({ linea: r.linea, columna: r.columna, texto: r.formato as string, reloj: true })),
   ].sort((a, b) => a.columna - b.columna);
-  const lineas: string[] = [];
-  for (const t of trozos) lineas[t.linea - 1] = (lineas[t.linea - 1] ?? '').padEnd(t.columna) + t.texto;
-  return Array.from(lineas, (l) => (l ?? '').trimEnd());
+  const lineas: TrozoEtiqueta[][] = [];
+  const largo: number[] = [];
+  for (const t of todos) {
+    const n = largo[t.linea - 1] ?? 0;
+    (lineas[t.linea - 1] ??= []).push({ texto: ' '.repeat(Math.max(0, t.columna - n)) + t.texto, ...(t.reloj ? { reloj: true } : {}) });
+    largo[t.linea - 1] = Math.max(n, t.columna) + t.texto.length;
+  }
+  return Array.from(lineas, (l) => l ?? []);
 }
 
 // ─── Persistencia (tabla loteadora_mensaje_segmentos) ────────────────────────────

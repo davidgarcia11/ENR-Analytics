@@ -45,7 +45,8 @@ interface Articulo { id: string; descripcion: string; diasCaducidad: number; fam
 interface Loteadora { id: number; name: string; linea: string; familias: string; zona: string | null }
 type EstadoLoteadoraValor = "activa" | "en_error" | "standby" | "apagada";
 // ultimoEnvio: lo último que mandó el panel a esa máquina (no lo que tenga si se cambió a mano)
-interface UltimoEnvio { plantilla: string; campos: { fieldId: number; texto: string }[]; usuario: string | null; enviadoAt: string }
+// `lineas`: lo enviado colocado como en la etiqueta; los trozos `reloj` no se envían (los pone la máquina)
+interface UltimoEnvio { plantilla: string; lineas: { texto: string; reloj?: boolean }[][]; usuario: string | null; enviadoAt: string }
 interface EstadoLoteadora { id: number; name: string; zona: string | null; state: EstadoLoteadoraValor; ultimoEnvio: UltimoEnvio | null }
 
 // Formulario de UN trabajo de impresión (artículo/fechas/turno/plantilla elegida).
@@ -73,10 +74,12 @@ interface LoteadoraFormState {
 
 // Colores fijos (enum cerrado de 4 estados) — mismo formato "bg-x/10 text-x" que el
 // resto de indicadores de estado en Nova (ver components/nova/mrp-materials-table.tsx).
+// Imprimiendo en ámbar: mientras imprime no se puede cambiar nada (aviso); conectada
+// y parada, en verde: lista para cambiar de plantilla o enviar.
 const ESTADO_INFO: Record<EstadoLoteadoraValor, { label: string; className: string; icon: typeof CheckCircle2 }> = {
-  activa: { label: "Imprimiendo", className: "bg-emerald-400/10 text-emerald-600", icon: CheckCircle2 },
+  activa: { label: "Imprimiendo", className: "bg-amber-400/10 text-amber-600", icon: Printer },
   en_error: { label: "En error", className: "bg-rose-400/10 text-rose-500", icon: XCircle },
-  standby: { label: "Conectada (sin imprimir)", className: "bg-amber-400/10 text-amber-600", icon: AlertTriangle },
+  standby: { label: "Conectada", className: "bg-emerald-400/10 text-emerald-600", icon: CheckCircle2 },
   apagada: { label: "Sin conexión", className: "bg-muted text-muted-foreground", icon: PowerOff },
 };
 
@@ -870,9 +873,13 @@ function LoteadoraPanel() {
                                 {l.ultimoEnvio.usuario && <> · {l.ultimoEnvio.usuario}</>}
                               </p>
                               <p className="truncate font-mono text-xs text-muted-foreground">{l.ultimoEnvio.plantilla}</p>
-                              <div className="mt-1 grid gap-0.5">
-                                {l.ultimoEnvio.campos.map((c) => (
-                                  <span key={c.fieldId} className="truncate font-mono text-xs whitespace-pre text-foreground" title={`Campo ${c.fieldId}`}>{c.texto}</span>
+                              <div className="mt-1 grid gap-0.5 overflow-x-auto">
+                                {l.ultimoEnvio.lineas.map((linea, i) => (
+                                  <span key={i} className="font-mono text-sm font-semibold whitespace-pre text-foreground">
+                                    {linea.map((t, j) => t.reloj
+                                      ? <span key={j} className="font-normal text-muted-foreground" title="Reloj de la máquina (hora de cada impresión)">{t.texto}</span>
+                                      : t.texto)}
+                                  </span>
                                 ))}
                               </div>
                             </div>

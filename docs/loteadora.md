@@ -237,13 +237,14 @@ Ejemplo real configurado durante el desarrollo de esta función: IP `192.168.111
 Tanto `/loteadora` como la pestaña **Loteadoras** de `/admin` muestran el estado real de cada máquina, refrescado automáticamente cada 60 segundos mientras la página/pestaña está abierta (`setInterval`, limpiado al desmontar o al cambiar de pestaña):
 
 - `/loteadora`: sección "Estado de las loteadoras" (`GET /api/loteadora/estado`, solo habilitadas) + el propio badge "JDE conectado" se refresca en el mismo ciclo (reintenta `fetchArticulos()`, que hace de comprobación de vida de JDE ahora que ya no hay marcas). Para no esperar los 60 s (p. ej. tras parar la impresión en la máquina), hay un botón de refrescar (icono ↻) junto al selector de loteadora y en la cabecera de "Estado de las loteadoras".
-- Estados: **Imprimiendo** (`00`), **Conectada (sin imprimir)** (`12`), **En error** (`01` o NAK) y **Sin conexión**. En `/admin` el estado `12` se llama "Sin imprimir".
+- Estados: **Imprimiendo** (`00`, en ámbar: mientras imprime no se puede cambiar de artículo ni enviar), **Conectada** (`12`, conectada y parada, en verde), **En error** (`01` o NAK) y **Sin conexión**. Mismos nombres y colores en `/admin`.
 - `/admin` → Loteadoras: badge adicional junto a "Habilitada/Deshabilitada" (`GET /api/admin/loteadoras/estado`, todas, se comprueba solo mientras esa pestaña está activa).
 
 Cada comprobación abre y cierra una conexión TCP breve por loteadora (el protocolo solo admite un cliente a la vez) — no se mantiene ninguna conexión persistente.
 
 **Último envío** (sept. 2026): debajo de cada loteadora, en "Estado de las loteadoras", sale lo último que se le mandó desde el panel: plantilla, texto de cada campo, hora y quién lo envió.
 - `POST /api/loteadora/enviar` lo guarda tras cada envío correcto en `loteadora_ultimo_envio`, una fila por loteadora que se sobrescribe, y `GET /api/loteadora/estado` lo devuelve como `ultimoEnvio`.
+- Se enseña **como en la etiqueta**: cada campo en su línea y en su sitio (1, 2 o 3 líneas), con `trozosEtiqueta()` de `lib/loteadora-plantilla.ts`, la misma disposición que la vista previa del admin. El reloj no se envía (lo pone la máquina en cada impresión), pero se pinta en gris su `HHmm` / `HH:mm` donde va. Sale de la plantilla **actual** (`ultimoEnvio.lineas`): si se editó después del envío puede no coincidir, y si ya no existe, un campo por línea.
 - El envío usa `requireAccess({ screen: 'loteadora' })` en vez de `requireScreenAccess`, para tener el usuario. Es la misma regla; `__tests__/loteadora-access.test.ts` acepta las dos formas.
 - **Es lo último que mandó el panel, no lo que tiene la máquina.** La máquina no tiene comando para preguntárselo. El aviso de "contenido impreso" (`AE`) exigiría una conexión abierta permanente, y el protocolo solo admite un cliente. Si se cambia algo a mano en la pantalla de la máquina, el panel no se entera.
 

@@ -5,7 +5,7 @@
  */
 import { describe, it, expect } from 'bun:test'
 import {
-  componerCampos, disponerMensaje, exportarCopia, lineasEtiqueta, medidasDeTamano, medidasPorDefecto, piezasManuales, validarMedidas, filasACampos, formatearCaducidad, formatearCocida, importarCopia, validarPlantilla, variablesUsadas,
+  componerCampos, disponerMensaje, exportarCopia, trozosEtiqueta, lineasEtiqueta, medidasDeTamano, medidasPorDefecto, piezasManuales, validarMedidas, filasACampos, formatearCaducidad, formatearCocida, importarCopia, validarPlantilla, variablesUsadas,
   type Campo, type ValoresEtiqueta,
 } from '@/lib/loteadora-plantilla'
 
@@ -249,6 +249,17 @@ describe('disposición en la etiqueta (crear el mensaje en la máquina)', () => 
     expect(componerCampos(campos, valores)[0]).toEqual({ fieldId: 1, texto: 'L263641 ', faltan: [] })
     expect(componerCampos(campos, { ...valores, conReloj: true })[0].texto).toBe('L263641 HHmm')
     expect(variablesUsadas(campos).has('reloj' as never)).toBe(false)
+  })
+
+  it('último envío: los textos enviados en sus líneas, con el reloj marcado', () => {
+    const campos: Campo[] = [
+      { fieldId: 1, piezas: [{ tipo: 'texto', valor: 'L' }, { tipo: 'cocida' }, { tipo: 'turno' }, { tipo: 'texto', valor: ' ' }, { tipo: 'reloj', formato: 'HHmm' }], linea: 1 },
+      { fieldId: 2, piezas: [{ tipo: 'texto', valor: 'CAD ' }, { tipo: 'caducidad', formato: 'DD/MM/AA' }], linea: 2 },
+    ]
+    expect(trozosEtiqueta(campos, new Map([[1, 'L263641 '], [2, 'CAD 06/01/27']]))).toEqual([
+      [{ texto: 'L263641 ' }, { texto: 'HHmm', reloj: true }],
+      [{ texto: 'CAD 06/01/27' }],
+    ])
   })
 
   it('valida la línea y el reloj', () => {
