@@ -61,22 +61,36 @@ function createTestDb() {
     INSERT INTO users VALUES (2, 'user1', 'user',       0);
     INSERT INTO users VALUES (3, 'sup1',  'supervisor', 0);
 
-    -- sup1 tiene el permiso de muestras y el de asignar artículos a plantillas;
-    -- una clave que ya no está en el catálogo se ignora.
+    -- sup1 tiene el permiso de muestras y los de artículos → plantilla (ver, asociar,
+    -- desvincular); una clave que ya no está en el catálogo se ignora.
     INSERT INTO user_permissions VALUES (3, 'muestras.config');
+    INSERT INTO user_permissions VALUES (3, 'admin.loteadora.articulos.ver');
+    INSERT INTO user_permissions VALUES (3, 'admin.loteadora.articulos.editar');
+    INSERT INTO user_permissions VALUES (3, 'admin.loteadora.articulos.eliminar');
     INSERT INTO user_permissions VALUES (3, 'admin.loteadora.articulos');
     INSERT INTO user_permissions VALUES (2, 'permiso.que.ya.no.existe');
 
     -- calidad1 no tiene extras: su permiso le viene del rol 'calidad'
     INSERT INTO users VALUES (4, 'calidad1', 'calidad', 0);
     INSERT INTO roles VALUES (4, 'calidad', 'Calidad');
-    INSERT INTO role_permissions VALUES (4, 'admin.loteadora.articulos');
+    INSERT INTO role_permissions VALUES (4, 'admin.loteadora.articulos.editar');
     INSERT INTO user_permissions VALUES (4, 'muestras.config');
 
-    -- tecnico1: crea y edita máquinas y plantillas (sin eliminar)
+    -- tecnico1: ve, crea y edita máquinas y plantillas y crea en la loteadora (sin eliminar)
     INSERT INTO users VALUES (5, 'tecnico1', 'tecnico', 0);
-    INSERT INTO user_permissions VALUES (5, 'admin.loteadora.maquinas');
-    INSERT INTO user_permissions VALUES (5, 'admin.loteadora.plantillas');
+    INSERT INTO user_permissions VALUES (5, 'admin.loteadora.maquinas.ver');
+    INSERT INTO user_permissions VALUES (5, 'admin.loteadora.maquinas.editar');
+    INSERT INTO user_permissions VALUES (5, 'admin.loteadora.zonas.ver');
+    INSERT INTO user_permissions VALUES (5, 'admin.loteadora.plantillas.ver');
+    INSERT INTO user_permissions VALUES (5, 'admin.loteadora.plantillas.editar');
+    INSERT INTO user_permissions VALUES (5, 'admin.loteadora.plantillas.crear-en-maquina');
+
+    -- encargado1: sueltos (eliminar máquinas, editar zonas, copia y crear en la loteadora)
+    INSERT INTO users VALUES (6, 'encargado1', 'encargado', 0);
+    INSERT INTO user_permissions VALUES (6, 'admin.loteadora.maquinas.eliminar');
+    INSERT INTO user_permissions VALUES (6, 'admin.loteadora.zonas.editar');
+    INSERT INTO user_permissions VALUES (6, 'admin.loteadora.plantillas.copia');
+    INSERT INTO user_permissions VALUES (6, 'admin.loteadora.plantillas.crear-en-maquina');
 
     INSERT INTO roles VALUES (1, 'admin',      'Administrador');
     INSERT INTO roles VALUES (2, 'user',       'Usuario');
@@ -304,20 +318,20 @@ describe('requireAccess — regla `permiso`', () => {
 
 describe('permisosDeUsuario', () => {
   it('devuelve solo claves del catálogo', () => {
-    expect(permisosDeUsuario(3, 'supervisor').sort()).toEqual(['admin.loteadora.articulos', 'muestras.config'])
+    expect(permisosDeUsuario(3, 'supervisor').sort()).toEqual(['admin.loteadora.articulos.editar', 'admin.loteadora.articulos.eliminar', 'admin.loteadora.articulos.ver', 'muestras.config'])
     expect(permisosDeUsuario(2, 'user')).toEqual([])
   })
 })
 
 describe('permisos concedidos a un rol', () => {
   it('el usuario hereda los de su rol y suma sus extras', () => {
-    expect(permisosDeRol('calidad')).toEqual(['admin.loteadora.articulos'])
-    expect(permisosDeUsuario(4, 'calidad').sort()).toEqual(['admin.loteadora.articulos', 'muestras.config'])
+    expect(permisosDeRol('calidad')).toEqual(['admin.loteadora.articulos.editar'])
+    expect(permisosDeUsuario(4, 'calidad').sort()).toEqual(['admin.loteadora.articulos.editar', 'muestras.config'])
   })
 
   it('requireAccess pasa por el permiso del rol', async () => {
     comoCalidad()
-    expect((await requireAccess({ permiso: 'admin.loteadora.articulos' })).ok).toBe(true)
+    expect((await requireAccess({ permiso: 'admin.loteadora.articulos.editar' })).ok).toBe(true)
   })
 
   it('el proxy le abre /admin y las rutas de su permiso, nada más', () => {
@@ -353,7 +367,7 @@ describe('/admin para usuarios sin rol admin (proxy)', () => {
   })
 })
 
-describe('permisos de máquinas y plantillas (crear y editar, no eliminar)', () => {
+describe('permisos de la loteadora por acción', () => {
   it('abre la lectura, el alta y la edición', () => {
     for (const [ruta, metodo] of [
       ['/api/admin/loteadoras', 'GET'], ['/api/admin/loteadoras', 'POST'], ['/api/admin/loteadoras/3', 'PUT'],
@@ -363,7 +377,7 @@ describe('permisos de máquinas y plantillas (crear y editar, no eliminar)', () 
     ]) expect(puedeUsarApiAdmin(ruta, metodo, 5, 'tecnico')).toBe(true)
   })
 
-  it('eliminar, zonas y la copia completa siguen siendo del admin', () => {
+  it('sin el permiso de esa acción no: eliminar, editar zonas, copia', () => {
     for (const [ruta, metodo] of [
       ['/api/admin/loteadoras/3', 'DELETE'], ['/api/admin/loteadora-mensajes/5', 'DELETE'],
       ['/api/admin/zonas', 'POST'], ['/api/admin/zonas/1', 'PUT'], ['/api/admin/loteadora-copia', 'GET'], ['/api/admin/loteadora-copia', 'POST'],
@@ -375,10 +389,27 @@ describe('permisos de máquinas y plantillas (crear y editar, no eliminar)', () 
     expect(puedeUsarApiAdmin('/api/admin/loteadoras', 'GET', 3, 'supervisor')).toBe(false)
   })
 
+  it('cada acción suelta abre solo lo suyo', () => {
+    for (const [ruta, metodo] of [
+      ['/api/admin/loteadoras/3', 'DELETE'], ['/api/admin/zonas', 'POST'], ['/api/admin/zonas/1', 'PUT'],
+      ['/api/admin/loteadora-copia', 'GET'], ['/api/admin/loteadora-copia', 'POST'],
+      ['/api/admin/loteadora-mensajes/5/crear-en-maquina', 'POST'],
+    ]) expect(puedeUsarApiAdmin(ruta, metodo, 6, 'encargado')).toBe(true)
+    for (const [ruta, metodo] of [
+      ['/api/admin/loteadoras/3', 'PUT'], ['/api/admin/zonas/1', 'DELETE'],
+      ['/api/admin/loteadora-mensajes/5', 'PUT'], ['/api/admin/loteadora-mensajes/5', 'DELETE'],
+    ]) expect(puedeUsarApiAdmin(ruta, metodo, 6, 'encargado')).toBe(false)
+  })
+
+  it('ver o asociar artículos no deja desvincular', () => {
+    expect(puedeUsarApiAdmin('/api/admin/loteadora-articulos/1210100221', 'DELETE', 4, 'calidad')).toBe(false)
+    expect(puedeUsarApiAdmin('/api/admin/loteadora-articulos/1210100221', 'DELETE', 3, 'supervisor')).toBe(true)
+  })
+
   it('requireAccess con varios permisos pasa con uno solo', async () => {
     comoSuperv()
-    expect((await requireAccess({ permiso: ['admin.loteadora.maquinas', 'admin.loteadora.articulos'] })).ok).toBe(true)
-    expect((await requireAccess({ permiso: ['admin.loteadora.maquinas', 'admin.loteadora.plantillas'] })).ok).toBe(false)
+    expect((await requireAccess({ permiso: ['admin.loteadora.maquinas.ver', 'admin.loteadora.articulos.ver'] })).ok).toBe(true)
+    expect((await requireAccess({ permiso: ['admin.loteadora.maquinas.ver', 'admin.loteadora.plantillas.ver'] })).ok).toBe(false)
   })
 })
 

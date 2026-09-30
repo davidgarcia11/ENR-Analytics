@@ -1,15 +1,16 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getDb } from '@/lib/sqlite';
 import { requireAccess } from '@/lib/permissions';
+import { permisosLoteadora as L } from '@/lib/permisos';
 import { guardarCampos, leerCampos, validarPlantilla } from '@/lib/loteadora-plantilla';
 
 // Plantillas (mensajes de la máquina) con sus campos y piezas — modelo en
 // lib/loteadora-plantilla.ts.
 //
 // Lectura abierta también a quien asigna artículos a plantillas (necesita el
-// desplegable); crear y editar, admin o permiso de plantillas; borrar, solo admin.
+// desplegable); crear y editar, con el permiso de editar plantillas.
 export async function GET() {
-  const acceso = await requireAccess({ permiso: ['admin.loteadora.articulos', 'admin.loteadora.plantillas'] });
+  const acceso = await requireAccess({ permiso: [...L('plantillas'), ...L('articulos', 'ver', 'editar')] });
   if (!acceso.ok) return acceso.denied;
 
   const db = getDb();
@@ -19,7 +20,7 @@ export async function GET() {
 }
 
 export async function POST(req: NextRequest) {
-  const acceso = await requireAccess({ permiso: 'admin.loteadora.plantillas' });
+  const acceso = await requireAccess({ permiso: L('plantillas', 'editar') });
   if (!acceso.ok) return acceso.denied;
 
   const parsed = validarPlantilla(await req.json());

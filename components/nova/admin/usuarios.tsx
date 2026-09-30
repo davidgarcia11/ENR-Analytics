@@ -4,7 +4,7 @@
 // reseteo/borrado en diálogos, y un panel lateral de "Accesos" (clic en la fila) que
 // responde de un vistazo qué ve y qué puede configurar un usuario: lo que le da su rol
 // (matriz de "Roles y permisos") más sus permisos extra, que se activan aquí mismo.
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, Fragment } from "react";
 import { toast } from "sonner";
 import { Eye, KeyRound, Loader2, Lock, MoreHorizontal, Pencil, Trash2, UserPlus } from "lucide-react";
 import { useApiFetch } from "@/components/SessionProvider";
@@ -400,14 +400,17 @@ export default function AdminUsuarios({ titulo, descripcion }: SeccionProps) {
                     <p className="text-sm text-muted-foreground">Todo: es administrador.</p>
                   ) : (
                     <div className="divide-y rounded-lg border">
-                      {LISTA_PERMISOS.map((p) => {
+                      {LISTA_PERMISOS.map((p, i) => {
                         const porRol = permisosDelRol(accesos.role).includes(p);
+                        const nuevoGrupo = i === 0 || PERMISOS[LISTA_PERMISOS[i - 1]].grupo !== PERMISOS[p].grupo;
                         return (
-                          <div key={p} className="flex items-center justify-between gap-4 p-3">
+                          <Fragment key={p}>
+                          {nuevoGrupo && <p className="bg-muted/30 px-3 py-1.5 text-xs font-medium text-muted-foreground">{PERMISOS[p].grupo}</p>}
+                          <div className="flex items-center justify-between gap-4 p-3">
                             <div className="grid gap-0.5">
                               <Label htmlFor={`permiso-${p}`}>{PERMISOS[p].label}</Label>
                               <span className="flex items-center gap-1 text-xs text-muted-foreground">
-                                {porRol ? <><Lock className="size-3" />Por su rol ({rolLabel(accesos.role)})</> : PERMISOS[p].grupo}
+                                {porRol ? <><Lock className="size-3" />Por su rol ({rolLabel(accesos.role)})</> : "Extra de esta persona"}
                               </span>
                             </div>
                             <Switch
@@ -417,6 +420,7 @@ export default function AdminUsuarios({ titulo, descripcion }: SeccionProps) {
                               onCheckedChange={() => togglePermisoExtra(accesos, p)}
                             />
                           </div>
+                          </Fragment>
                         );
                       })}
                     </div>

@@ -2,12 +2,13 @@
 
 // /admin → Artículos → Plantilla (loteadora_articulo_mensajes), sobre Nova. Mismas
 // rutas que la versión anterior. Es la sección que puede abrir un usuario no admin
-// con el permiso 'admin.loteadora.articulos' (lib/permisos.ts): por eso solo LEE
+// con los permisos de Artículos (ver, asociar, desvincular; lib/permisos.ts): por eso solo LEE
 // las plantillas (GET), nunca las edita.
 import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { Link2, Loader2, MoreHorizontal, Unlink } from "lucide-react";
-import { useApiFetch } from "@/components/SessionProvider";
+import { useApiFetch, useSession } from "@/components/SessionProvider";
+import { tienePermiso, type Permiso } from "@/lib/permisos";
 import { Button } from "@/components/nova/ui/button";
 import { Input } from "@/components/nova/ui/input";
 import { Label } from "@/components/nova/ui/label";
@@ -37,6 +38,9 @@ interface Mensaje {
 
 export default function AdminArticulosPlantilla({ titulo, descripcion }: SeccionProps) {
   const apiFetch = useApiFetch();
+  // Cada botón según su permiso (lib/permisos.ts); el servidor lo vuelve a comprobar.
+  const usuario = useSession().user;
+  const puede = (accion: string) => tienePermiso(usuario, `admin.loteadora.articulos.${accion}` as Permiso);
   const [asociaciones, setAsociaciones] = useState<Asociacion[]>([]);
   const [articulos, setArticulos] = useState<Articulo[]>([]);
   const [mensajes, setMensajes] = useState<Mensaje[]>([]);
@@ -127,11 +131,13 @@ export default function AdminArticulosPlantilla({ titulo, descripcion }: Seccion
   return (
     <>
       <CabeceraSeccion titulo={titulo} descripcion={descripcion}>
-        <BotonesCopia ruta="/api/admin/loteadora-articulos/copia" archivo="articulos-loteadora" onImportado={cargarAsociaciones} />
-        <Button onClick={abrirAsociar}>
-          <Link2 />
-          Asociar artículo
-        </Button>
+        <BotonesCopia ruta="/api/admin/loteadora-articulos/copia" archivo="articulos-loteadora" onImportado={cargarAsociaciones} puedeImportar={puede("editar")} />
+        {puede("editar") && (
+          <Button onClick={abrirAsociar}>
+            <Link2 />
+            Asociar artículo
+          </Button>
+        )}
       </CabeceraSeccion>
       <TablaCard
         toolbar={<Buscador value={busqueda} onChange={setBusqueda} placeholder="Buscar por artículo o plantilla…" />}
@@ -158,18 +164,20 @@ export default function AdminArticulosPlantilla({ titulo, descripcion }: Seccion
                     </TableCell>
                     <TableCell><Badge variant="secondary" className="font-mono">{a.mensaje_name}</Badge></TableCell>
                     <TableCell>
-                      <DropdownMenu>
-                        <DropdownMenuTrigger
-                          render={
-                            <Button variant="ghost" size="icon-sm" aria-label={`Acciones de ${a.articulo_id}`}>
-                              <MoreHorizontal />
-                            </Button>
-                          }
-                        />
-                        <DropdownMenuContent align="end" className="min-w-44">
-                          <DropdownMenuItem variant="destructive" onClick={() => setQuitando(a)}><Unlink />Quitar asociación</DropdownMenuItem>
-                        </DropdownMenuContent>
-                      </DropdownMenu>
+                      {puede("eliminar") && (
+                        <DropdownMenu>
+                          <DropdownMenuTrigger
+                            render={
+                              <Button variant="ghost" size="icon-sm" aria-label={`Acciones de ${a.articulo_id}`}>
+                                <MoreHorizontal />
+                              </Button>
+                            }
+                          />
+                          <DropdownMenuContent align="end" className="min-w-44">
+                            <DropdownMenuItem variant="destructive" onClick={() => setQuitando(a)}><Unlink />Quitar asociación</DropdownMenuItem>
+                          </DropdownMenuContent>
+                        </DropdownMenu>
+                      )}
                     </TableCell>
                   </TableRow>
                 ))

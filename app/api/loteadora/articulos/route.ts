@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 import { requireAccess, requireScreenAccess } from '@/lib/permissions'
+import { permisosLoteadora as L } from '@/lib/permisos';
 import { getDbConnection } from '@/lib/db'
 import { getDb } from '@/lib/sqlite'
 import { leerCampos } from '@/lib/loteadora-plantilla'
@@ -16,7 +17,7 @@ export async function GET() {
   // para las familias, así que basta con acceso a la pantalla /loteadora o uno de esos permisos.
   const denied = await requireScreenAccess('loteadora');
   if (denied) {
-    const acceso = await requireAccess({ permiso: ['admin.loteadora.articulos', 'admin.loteadora.maquinas'] });
+    const acceso = await requireAccess({ permiso: [...L('articulos'), ...L('maquinas')] });
     if (!acceso.ok) return denied;
   }
 

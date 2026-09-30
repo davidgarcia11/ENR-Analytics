@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { getDb } from '@/lib/sqlite';
 import { getPrinterStatus } from '@/lib/loteadora-printer';
 import { requireAccess } from '@/lib/permissions';
+import { permisosLoteadora as L } from '@/lib/permisos';
 
 interface LoteadoraRow {
   id: number;
@@ -13,7 +14,7 @@ interface LoteadoraRow {
 // Estado en vivo (admin) de TODAS las loteadoras, habilitadas o no, para la
 // pestaña Loteadoras de /admin.
 export async function GET() {
-  const acceso = await requireAccess({ permiso: 'admin.loteadora.maquinas' });
+  const acceso = await requireAccess({ permiso: L('maquinas') });
   if (!acceso.ok) return acceso.denied;
 
   const db = getDb();

@@ -1,11 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getDb } from '@/lib/sqlite';
 import { requireAccess } from '@/lib/permissions';
+import { permisosLoteadora as L } from '@/lib/permisos';
 import { guardarAsignaciones, parseZonaInput } from '../route';
 
 // Renombra una zona y sustituye sus roles y usuarios. Solo admin.
 export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-  const acceso = await requireAccess({ role: 'admin' });
+  const acceso = await requireAccess({ permiso: L('zonas', 'editar') });
   if (!acceso.ok) return acceso.denied;
 
   const zonaId = Number((await params).id);
@@ -28,7 +29,7 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
 // Borra la zona: sus loteadoras se quedan sin zona (ON DELETE SET NULL) y se
 // quitan sus asignaciones a roles y usuarios (ON DELETE CASCADE).
 export async function DELETE(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-  const acceso = await requireAccess({ role: 'admin' });
+  const acceso = await requireAccess({ permiso: L('zonas', 'eliminar') });
   if (!acceso.ok) return acceso.denied;
 
   const zonaId = Number((await params).id);
