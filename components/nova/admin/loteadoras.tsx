@@ -7,6 +7,7 @@ import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { Loader2, MoreHorizontal, Pencil, Plus, Trash2 } from "lucide-react";
 import { useApiFetch, useSession } from "@/components/SessionProvider";
+import { tienePermiso, type Permiso } from "@/lib/permisos";
 import { Button } from "@/components/nova/ui/button";
 import { Input } from "@/components/nova/ui/input";
 import { Label } from "@/components/nova/ui/label";
@@ -64,8 +65,9 @@ const aLista = (csv: string) => csv.split(",").filter(Boolean);
 
 export default function AdminLoteadoras({ titulo, descripcion }: SeccionProps) {
   const apiFetch = useApiFetch();
-  // Con el permiso de la sección se crea y edita; eliminar (y la copia) solo el admin.
-  const esAdmin = useSession().user?.role === "admin";
+  // Cada botón según su permiso (lib/permisos.ts); el servidor lo vuelve a comprobar.
+  const usuario = useSession().user;
+  const puede = (accion: string) => tienePermiso(usuario, `admin.loteadora.maquinas.${accion}` as Permiso);
   const [loteadoras, setLoteadoras] = useState<Loteadora[]>([]);
   const [estados, setEstados] = useState<Record<number, EstadoVivo>>({});
   const [cargando, setCargando] = useState(true);
@@ -175,10 +177,10 @@ export default function AdminLoteadoras({ titulo, descripcion }: SeccionProps) {
   return (
     <>
       <CabeceraSeccion titulo={titulo} descripcion={descripcion}>
-        <Button onClick={abrirAlta}>
+        {puede("editar") && <Button onClick={abrirAlta}>
           <Plus />
           Nueva loteadora
-        </Button>
+        </Button>}
       </CabeceraSeccion>
       <TablaCard
         toolbar={<span className="text-sm text-muted-foreground">El estado se comprueba en vivo cada minuto mientras esta sección está abierta.</span>}
@@ -233,6 +235,7 @@ export default function AdminLoteadoras({ titulo, descripcion }: SeccionProps) {
                         </div>
                       </TableCell>
                       <TableCell>
+                        {(puede("editar") || puede("eliminar")) && (
                         <DropdownMenu>
                           <DropdownMenuTrigger
                             render={
@@ -242,15 +245,16 @@ export default function AdminLoteadoras({ titulo, descripcion }: SeccionProps) {
                             }
                           />
                           <DropdownMenuContent align="end" className="min-w-40">
-                            <DropdownMenuItem onClick={() => abrirEdicion(l)}><Pencil />Editar</DropdownMenuItem>
-                            {esAdmin && (
+                            {puede("editar") && <DropdownMenuItem onClick={() => abrirEdicion(l)}><Pencil />Editar</DropdownMenuItem>}
+                            {puede("eliminar") && (
                               <>
-                                <DropdownMenuSeparator />
+                                {puede("editar") && <DropdownMenuSeparator />}
                                 <DropdownMenuItem variant="destructive" onClick={() => setBorrando(l)}><Trash2 />Eliminar</DropdownMenuItem>
                               </>
                             )}
                           </DropdownMenuContent>
                         </DropdownMenu>
+                        )}
                       </TableCell>
                     </TableRow>
                   );

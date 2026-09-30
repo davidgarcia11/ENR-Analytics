@@ -1,12 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getDb } from '@/lib/sqlite';
 import { requireAccess } from '@/lib/permissions';
+import { permisosLoteadora as L } from '@/lib/permisos';
 
 // Lista las asociaciones artículo -> plantilla (solo SQLite; la descripción
 // del artículo se resuelve en el front cruzando con GET /api/loteadora/articulos,
 // para no duplicar aquí una consulta a Oracle).
 export async function GET() {
-  const acceso = await requireAccess({ permiso: 'admin.loteadora.articulos' });
+  const acceso = await requireAccess({ permiso: L('articulos') });
   if (!acceso.ok) return acceso.denied;
 
   const db = getDb();
@@ -20,7 +21,7 @@ export async function GET() {
 }
 
 export async function POST(req: NextRequest) {
-  const acceso = await requireAccess({ permiso: 'admin.loteadora.articulos' });
+  const acceso = await requireAccess({ permiso: L('articulos', 'editar') });
   if (!acceso.ok) return acceso.denied;
 
   const { articuloId, mensajeId } = await req.json();

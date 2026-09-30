@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import type Database from 'better-sqlite3';
 import { getDb } from '@/lib/sqlite';
 import { requireAccess } from '@/lib/permissions';
+import { permisosLoteadora as L } from '@/lib/permisos';
 import {
   disponerMensaje, leerCampos, medidasPorDefecto, numeroLineas, validarMedidas, type Campo, type MedidasMensaje,
 } from '@/lib/loteadora-plantilla';
@@ -11,7 +12,7 @@ import { getPrinterStatus, listMessageNames, sendMessageFile } from '@/lib/lotea
 // Crea (o sustituye) en una loteadora el mensaje de una plantilla: genera su .msg
 // (lib/loteadora-msg.ts) con los campos (y sus relojes) colocados por disponerMensaje()
 // y las medidas elegidas (fuente, tamaño, espaciado...), que se recuerdan por
-// mensaje y máquina, y lo envía con el comando 50. Admin o permiso de plantillas.
+// mensaje y máquina, y lo envía con el comando 50. Permiso "Crear en la loteadora".
 // Ver docs/loteadora.md §9 y §13.
 
 interface FilaMedidas extends MedidasMensaje { tres_lineas: number }
@@ -40,7 +41,7 @@ function medidasPropuestas(db: Database.Database, mensajeId: number, loteadoraId
 
 // GET ?loteadoraId= → { medidas, origen }: lo que propone el diálogo al elegir máquina
 export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-  const acceso = await requireAccess({ permiso: 'admin.loteadora.plantillas' });
+  const acceso = await requireAccess({ permiso: L('plantillas', 'crear-en-maquina') });
   if (!acceso.ok) return acceso.denied;
 
   const mensajeId = Number((await params).id);
@@ -53,7 +54,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
 
 // Body: { loteadoraId, medidas }
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-  const acceso = await requireAccess({ permiso: 'admin.loteadora.plantillas' });
+  const acceso = await requireAccess({ permiso: L('plantillas', 'crear-en-maquina') });
   if (!acceso.ok) return acceso.denied;
 
   const mensajeId = Number((await params).id);

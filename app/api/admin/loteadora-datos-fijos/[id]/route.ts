@@ -1,12 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getDb } from '@/lib/sqlite';
 import { requireAccess } from '@/lib/permissions';
+import { permisosLoteadora as L } from '@/lib/permisos';
 import { ASCII_IMPRIMIBLE } from '@/lib/loteadora-plantilla';
 
 // Cambia el valor de UN dato fijo. Solo piezas tipo 'fijo': no sirve para editar
 // literales ni variables de la plantilla.
 export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-  const acceso = await requireAccess({ permiso: 'admin.loteadora.datos-fijos' });
+  const acceso = await requireAccess({ permiso: L('datos-fijos', 'editar') });
   if (!acceso.ok) return acceso.denied;
 
   const { id } = await params;

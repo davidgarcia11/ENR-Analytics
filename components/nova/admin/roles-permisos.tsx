@@ -4,13 +4,17 @@
 // rol, en vez de repartirlo entre "Roles" (lista) y "Pantallas" (una fila por panel).
 //
 //   Filas    = cada panel que se puede ver (screens / screen_permissions) y cada
-//              configuración del catálogo (lib/permisos.ts → role_permissions)
+//              configuración del catálogo (lib/permisos.ts → role_permissions),
+//              agrupadas por su grupo (Loteadora · Máquinas: Ver, Crear y editar...)
 //   Columnas = "Público" (solo paneles: lo ve cualquiera, incluso sin sesión) + un rol
+//
+// La primera columna (qué es cada fila) queda fija al desplazarse a la derecha: con
+// muchos roles, si no, se pierde de vista qué fila es cada una.
 //
 // Cada casilla se guarda al marcarla (actualización optimista; si el servidor falla,
 // se deshace y avisa). El admin lo tiene todo y no es editable. Los permisos
 // individuales de un usuario (excepciones) se siguen dando en Usuarios.
-import { useEffect, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { Check, Globe, Loader2, Lock, MoreHorizontal, Plus, Trash2 } from "lucide-react";
 import { useApiFetch } from "@/components/SessionProvider";
@@ -22,7 +26,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/nova/ui/dialog";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/nova/ui/dropdown-menu";
 import { PANELS } from "@/lib/panels";
-import { LISTA_PERMISOS, PERMISOS, type Permiso } from "@/lib/permisos";
+import { LISTA_PERMISOS, PERMISOS, type DefinicionPermiso, type Permiso } from "@/lib/permisos";
 import { CabeceraSeccion, ConfirmarDialog, ErrorForm, FilaVacia, TablaCard, type SeccionProps } from "./comun";
 
 interface Rol {
@@ -41,13 +45,22 @@ interface ScreenConfig {
 const aNombreInterno = (label: string) =>
   label.trim().toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/[^a-z0-9_]+/g, "_").replace(/^_+|_+$/g, "");
 
+// Columna fija a la izquierda (fondo opaco para que no se vea lo que pasa por debajo)
+const FIJA = "sticky left-0 z-10 bg-card";
+
 function Grupo({ titulo, columnas }: { titulo: string; columnas: number }) {
   return (
     <TableRow className="hover:bg-transparent">
-      <TableCell colSpan={columnas} className="bg-muted/20 py-2 text-xs font-medium text-muted-foreground">{titulo}</TableCell>
+      <TableCell colSpan={columnas} className="bg-muted/20 py-2 text-xs font-medium text-muted-foreground">
+        <span className="sticky left-3">{titulo}</span>
+      </TableCell>
     </TableRow>
   );
 }
+
+// Permisos del catálogo agrupados por su grupo, en el orden del catálogo
+const GRUPOS_PERMISOS = [...new Set(LISTA_PERMISOS.map((p) => PERMISOS[p].grupo))]
+  .map((grupo) => ({ grupo, permisos: LISTA_PERMISOS.filter((p) => PERMISOS[p].grupo === grupo) }));
 
 function Bloqueado({ titulo }: { titulo: string }) {
   return (
@@ -221,7 +234,7 @@ export default function AdminRolesPermisos({ titulo, descripcion }: SeccionProps
         <Table>
           <TableHeader>
             <TableRow>
-              <TableHead className="min-w-56">Permiso</TableHead>
+              <TableHead className={`${FIJA} min-w-56`}>Permiso</TableHead>
               <TableHead className="w-24 text-center">
                 <span className="inline-flex items-center gap-1"><Globe className="size-3.5" />Público</span>
               </TableHead>
@@ -266,7 +279,7 @@ export default function AdminRolesPermisos({ titulo, descripcion }: SeccionProps
                   const ocupado = guardando.has(`pantalla:${key}`);
                   return (
                     <TableRow key={key}>
-                      <TableCell>
+                      <TableCell className={FIJA}>
                         <span className="flex items-center gap-2 font-medium text-foreground">
                           <Icon className="size-4 text-muted-foreground" />
                           {label}
@@ -304,13 +317,15 @@ export default function AdminRolesPermisos({ titulo, descripcion }: SeccionProps
                   );
                 })}
 
-                <Grupo titulo="Configurar" columnas={columnas} />
-                {LISTA_PERMISOS.map((p) => (
+                {GRUPOS_PERMISOS.map(({ grupo, permisos }) => (
+                  <Fragment key={grupo}>
+                <Grupo titulo={`Configurar · ${grupo}`} columnas={columnas} />
+                {permisos.map((p) => (
                   <TableRow key={p}>
-                    <TableCell>
+                    <TableCell className={FIJA} title={PERMISOS[p].label}>
                       <div className="flex flex-col">
-                        <span className="font-medium text-foreground">{PERMISOS[p].label}</span>
-                        <span className="text-xs text-muted-foreground">{PERMISOS[p].grupo}</span>
+                        <span className="font-medium text-foreground">{(PERMISOS[p] as DefinicionPermiso).accion ?? PERMISOS[p].label}</span>
+                        {(PERMISOS[p] as DefinicionPermiso).accion && <span className="text-xs text-muted-foreground">{PERMISOS[p].label}</span>}
                       </div>
                     </TableCell>
                     <TableCell className="text-center text-muted-foreground/40">—</TableCell>
@@ -330,6 +345,8 @@ export default function AdminRolesPermisos({ titulo, descripcion }: SeccionProps
                       </TableCell>
                     ))}
                   </TableRow>
+                ))}
+                  </Fragment>
                 ))}
               </>
             )}

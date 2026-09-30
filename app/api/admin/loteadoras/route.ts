@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getDb } from '@/lib/sqlite';
 import { requireAccess } from '@/lib/permissions';
+import { permisosLoteadora as L } from '@/lib/permisos';
 
 const IPV4_REGEX = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/;
 
@@ -36,7 +37,7 @@ export function parseLoteadoraInput(body: any) {
 }
 
 export async function GET() {
-  const acceso = await requireAccess({ permiso: ['admin.loteadora.maquinas', 'admin.loteadora.plantillas'] });
+  const acceso = await requireAccess({ permiso: [...L('maquinas'), ...L('plantillas', 'ver', 'editar', 'crear-en-maquina')] });
   if (!acceso.ok) return acceso.denied;
 
   const db = getDb();
@@ -48,7 +49,7 @@ export async function GET() {
 }
 
 export async function POST(req: NextRequest) {
-  const acceso = await requireAccess({ permiso: 'admin.loteadora.maquinas' });
+  const acceso = await requireAccess({ permiso: L('maquinas', 'editar') });
   if (!acceso.ok) return acceso.denied;
 
   const body = await req.json();

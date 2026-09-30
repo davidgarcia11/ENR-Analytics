@@ -2,12 +2,13 @@
 
 // /admin → Loteadora › Datos fijos: los valores constantes de las plantillas (precio,
 // nº de certificado...) en una sola tabla. Los cambia quien tenga el permiso
-// 'admin.loteadora.datos-fijos' (por su rol o como extra) sin poder tocar el resto de
-// la plantilla, que sigue siendo solo de admin (Plantillas).
+// de Datos fijos (ver / cambiar valores; por su rol o como extra) sin poder tocar el
+// resto de la plantilla (eso es de Plantillas).
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { Loader2 } from "lucide-react";
-import { useApiFetch } from "@/components/SessionProvider";
+import { useApiFetch, useSession } from "@/components/SessionProvider";
+import { tienePermiso, type Permiso } from "@/lib/permisos";
 import { Button } from "@/components/nova/ui/button";
 import { Input } from "@/components/nova/ui/input";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/nova/ui/table";
@@ -23,6 +24,9 @@ interface DatoFijo {
 
 export default function AdminDatosFijos({ titulo, descripcion }: SeccionProps) {
   const apiFetch = useApiFetch();
+  // Cada botón según su permiso (lib/permisos.ts); el servidor lo vuelve a comprobar.
+  const usuario = useSession().user;
+  const puede = (accion: string) => tienePermiso(usuario, `admin.loteadora.datos-fijos.${accion}` as Permiso);
   const [datos, setDatos] = useState<DatoFijo[]>([]);
   const [borradores, setBorradores] = useState<Record<number, string>>({});
   const [cargando, setCargando] = useState(true);
@@ -89,15 +93,16 @@ export default function AdminDatosFijos({ titulo, descripcion }: SeccionProps) {
                         value={borradores[d.id] ?? ""}
                         onChange={(e) => setBorradores((b) => ({ ...b, [d.id]: e.target.value }))}
                         onKeyDown={(e) => e.key === "Enter" && cambiado && guardar(d)}
+                        readOnly={!puede("editar")}
                         className="max-w-xs font-mono"
                         aria-label={`${d.nombre} de ${d.plantilla}`}
                       />
                     </TableCell>
                     <TableCell className="text-right">
-                      <Button size="sm" variant={cambiado ? "default" : "outline"} disabled={!cambiado || guardando === d.id} onClick={() => guardar(d)}>
+                      {puede("editar") && <Button size="sm" variant={cambiado ? "default" : "outline"} disabled={!cambiado || guardando === d.id} onClick={() => guardar(d)}>
                         {guardando === d.id && <Loader2 className="animate-spin" />}
                         Guardar
-                      </Button>
+                      </Button>}
                     </TableCell>
                   </TableRow>
                 );

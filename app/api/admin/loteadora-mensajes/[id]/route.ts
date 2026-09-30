@@ -1,11 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getDb } from '@/lib/sqlite';
 import { requireAccess } from '@/lib/permissions';
+import { permisosLoteadora as L } from '@/lib/permisos';
 import { guardarCampos, validarPlantilla } from '@/lib/loteadora-plantilla';
 
 // Edita nombre y campos de una plantilla (los campos se sustituyen enteros).
 export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-  const acceso = await requireAccess({ permiso: 'admin.loteadora.plantillas' });
+  const acceso = await requireAccess({ permiso: L('plantillas', 'editar') });
   if (!acceso.ok) return acceso.denied;
 
   const { id } = await params;
@@ -34,7 +35,7 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
 
 // Borra la plantilla; sus campos y las asociaciones de artículos caen en cascada.
 export async function DELETE(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-  const acceso = await requireAccess({ role: 'admin' });
+  const acceso = await requireAccess({ permiso: L('plantillas', 'eliminar') });
   if (!acceso.ok) return acceso.denied;
 
   const { id } = await params;

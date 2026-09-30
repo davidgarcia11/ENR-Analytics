@@ -2,9 +2,10 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getDb } from '@/lib/sqlite';
 import { parseLoteadoraInput } from '../route';
 import { requireAccess } from '@/lib/permissions';
+import { permisosLoteadora as L } from '@/lib/permisos';
 
 export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-  const acceso = await requireAccess({ permiso: 'admin.loteadora.maquinas' });
+  const acceso = await requireAccess({ permiso: L('maquinas', 'editar') });
   if (!acceso.ok) return acceso.denied;
 
   const { id } = await params;
@@ -39,7 +40,7 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
 }
 
 export async function DELETE(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-  const acceso = await requireAccess({ role: 'admin' });
+  const acceso = await requireAccess({ permiso: L('maquinas', 'eliminar') });
   if (!acceso.ok) return acceso.denied;
 
   const { id } = await params;

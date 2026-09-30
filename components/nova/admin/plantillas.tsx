@@ -7,8 +7,9 @@
 // validación en lib/loteadora-plantilla.ts; ver docs/loteadora.md §13.
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
-import { AlertTriangle, ArrowLeft, ArrowRight, Copy, Loader2, MoreHorizontal, Pencil, Plus, Printer, Trash2, X } from "lucide-react";
+import { AlertTriangle, ArrowLeft, ArrowRight, Copy, Eye, Loader2, MoreHorizontal, Pencil, Plus, Printer, Trash2, X } from "lucide-react";
 import { useApiFetch, useSession } from "@/components/SessionProvider";
+import { tienePermiso, type Permiso } from "@/lib/permisos";
 import { Button } from "@/components/nova/ui/button";
 import { Input } from "@/components/nova/ui/input";
 import { Label } from "@/components/nova/ui/label";
@@ -261,8 +262,9 @@ function EditorCampo({ campo, ejemplo, onChange, onQuitar, puedeQuitar }: {
 
 export default function AdminPlantillas({ titulo, descripcion }: SeccionProps) {
   const apiFetch = useApiFetch();
-  // Con el permiso de la sección se crea y edita; eliminar (y la copia) solo el admin.
-  const esAdmin = useSession().user?.role === "admin";
+  // Cada botón según su permiso (lib/permisos.ts); el servidor lo vuelve a comprobar.
+  const usuario = useSession().user;
+  const puede = (accion: string) => tienePermiso(usuario, `admin.loteadora.plantillas.${accion}` as Permiso);
   const [mensajes, setMensajes] = useState<Mensaje[]>([]);
   const [cargando, setCargando] = useState(true);
 
@@ -293,6 +295,8 @@ export default function AdminPlantillas({ titulo, descripcion }: SeccionProps) {
   useEffect(() => { cargar(); cargarLinea(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, []);
 
   // Crear en la loteadora (archivo .msg por el comando 50, ver app/api/admin/loteadora-mensajes/[id]/crear-en-maquina)
+  // Vista previa de la etiqueta sin abrir el editor
+  const [enVista, setEnVista] = useState<Mensaje | null>(null);
   const [enMaquina, setEnMaquina] = useState<Mensaje | null>(null);
   const [loteadoras, setLoteadoras] = useState<{ id: number; name: string }[]>([]);
   const [loteadoraId, setLoteadoraId] = useState<string | null>(null);
@@ -387,7 +391,7 @@ export default function AdminPlantillas({ titulo, descripcion }: SeccionProps) {
       cerrar();
       cargar();
       // Plantilla nueva: se ofrece crearla ya en la máquina (el usuario confirma)
-      if (esNueva) abrirCrearEnMaquina({ id: data.id, name: data.name, campos: data.campos });
+      if (esNueva && puede("crear-en-maquina")) abrirCrearEnMaquina({ id: data.id, name: data.name, campos: data.campos });
     } catch { setError("Error de conexión"); } finally { setGuardando(false); }
   };
 
@@ -409,11 +413,13 @@ export default function AdminPlantillas({ titulo, descripcion }: SeccionProps) {
   return (
     <>
       <CabeceraSeccion titulo={titulo} descripcion={descripcion}>
-        {esAdmin && <BotonesCopia ruta="/api/admin/loteadora-copia" archivo="plantillas-loteadora" conPlantillas onImportado={cargar} />}
-        <Button onClick={abrirAlta}>
-          <Plus />
-          Nueva plantilla
-        </Button>
+        {puede("copia") && <BotonesCopia ruta="/api/admin/loteadora-copia" archivo="plantillas-loteadora" conPlantillas onImportado={cargar} />}
+        {puede("editar") && (
+          <Button onClick={abrirAlta}>
+            <Plus />
+            Nueva plantilla
+          </Button>
+        )}
       </CabeceraSeccion>
       <TablaCard
         toolbar={<span className="text-sm text-muted-foreground">Vista previa con valores de ejemplo. El nombre debe coincidir exactamente con el mensaje creado en la máquina.</span>}
@@ -454,10 +460,11 @@ export default function AdminPlantillas({ titulo, descripcion }: SeccionProps) {
                         }
                       />
                       <DropdownMenuContent align="end" className="min-w-40">
-                        <DropdownMenuItem onClick={() => abrirEdicion(m)}><Pencil />Editar</DropdownMenuItem>
-                        <DropdownMenuItem onClick={() => abrirDuplicado(m)}><Copy />Duplicar</DropdownMenuItem>
-                        <DropdownMenuItem onClick={() => abrirCrearEnMaquina(m)}><Printer />Crear en la loteadora…</DropdownMenuItem>
-                        {esAdmin && (
+                        <DropdownMenuItem onClick={() => setEnVista(m)}><Eye />Vista previa</DropdownMenuItem>
+                        {puede("editar") && <DropdownMenuItem onClick={() => abrirEdicion(m)}><Pencil />Editar</DropdownMenuItem>}
+                        {puede("editar") && <DropdownMenuItem onClick={() => abrirDuplicado(m)}><Copy />Duplicar</DropdownMenuItem>}
+                        {puede("crear-en-maquina") && <DropdownMenuItem onClick={() => abrirCrearEnMaquina(m)}><Printer />Crear en la loteadora…</DropdownMenuItem>}
+                        {puede("eliminar") && (
                           <>
                             <DropdownMenuSeparator />
                             <DropdownMenuItem variant="destructive" onClick={() => setBorrando(m)}><Trash2 />Eliminar</DropdownMenuItem>
@@ -526,6 +533,25 @@ export default function AdminPlantillas({ titulo, descripcion }: SeccionProps) {
               </Button>
             </DialogFooter>
           </form>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={!!enVista} onOpenChange={(o) => !o && setEnVista(null)}>
+        <DialogContent className="sm:max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>Vista previa</DialogTitle>
+            <DialogDescription>
+              Así quedará <span className="font-mono text-foreground">{enVista?.name}</span> en la etiqueta, con valores de ejemplo.
+            </DialogDescription>
+          </DialogHeader>
+          <pre className="overflow-x-auto rounded-lg border bg-muted/40 px-3 py-2 font-mono text-sm text-foreground">
+            {enVista ? lineasEtiqueta(enVista.campos, conManuales(ejemplo, enVista.campos)).join("\n") || "—" : ""}
+          </pre>
+          <p className="text-xs text-muted-foreground">«HHmm» o «HH:mm» es el reloj, que la máquina rellena con la hora real.</p>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setEnVista(null)}>Cerrar</Button>
+            {puede("editar") && <Button onClick={() => { const m = enVista; setEnVista(null); if (m) abrirEdicion(m); }}><Pencil />Editar</Button>}
+          </DialogFooter>
         </DialogContent>
       </Dialog>
 

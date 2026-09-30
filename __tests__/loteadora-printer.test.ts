@@ -125,6 +125,31 @@ describe('buildSendFileFrame', () => {
   })
 })
 
+describe('getPrinterStatus', () => {
+  // Servidor que corta las primeras `fallos` conexiones y luego responde "parada" (P_Status 12)
+  const servidor = async (fallos: number, fn: (port: number) => Promise<void>) => {
+    let n = 0
+    const server = net.createServer((socket) => {
+      if (n++ < fallos) { socket.destroy(); return }
+      socket.once('data', () => socket.write(Buffer.from([0x1b, 0x06, 0x00, 0x12, 0x14, 0x1b, 0x03, 0x00])))
+    })
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
+    try { await fn((server.address() as net.AddressInfo).port) } finally { server.close() }
+  }
+
+  it('si falla una vez, reintenta y da el estado real', async () => {
+    await servidor(1, async (port) => {
+      expect(await getPrinterStatus({ ip: '127.0.0.1', port, slaveAddress: 0 })).toBe('standby')
+    })
+  })
+
+  it('solo da "Sin conexión" si fallan los dos intentos', async () => {
+    await servidor(2, async (port) => {
+      expect(await getPrinterStatus({ ip: '127.0.0.1', port, slaveAddress: 0 })).toBe('apagada')
+    })
+  })
+})
+
 describe('loadPrintMessage', () => {
   it('espera entre cargar (1E) y aplicar (01) y nunca abre dos conexiones a la vez', async () => {
     const recibidos: { cmd: number; t: number }[] = []
