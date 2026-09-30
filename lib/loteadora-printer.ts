@@ -174,6 +174,9 @@ function sendCommandAhora(config: LoteadoraConfig, frame: Buffer, timeoutMs: num
     socket.setTimeout(timeoutMs);
     socket.on('timeout', () => finish(undefined, new Error('Tiempo de espera agotado conectando con la loteadora')));
     socket.on('error', (err) => finish(undefined, new Error(`Error de conexión con la loteadora: ${err.message}`)));
+    // Si la máquina cierra la conexión sin contestar (p. ej. porque ya tiene otro
+    // cliente), falla ya en vez de esperar al tiempo máximo.
+    socket.on('close', () => finish(undefined, new Error('La loteadora cerró la conexión sin responder')));
 
     socket.connect(config.port, config.ip, () => socket.write(frame));
 
@@ -260,25 +263,45 @@ export interface PrinterStatusDetail {
   rawBytes: string | null;
 }
 
+// Tiempo máximo de la consulta de estado. Con 3 s, si la máquina tardaba en
+// contestar tras un rato sin tráfico (el reintento de conexión de Windows llega a
+// los 3 s), salía "Sin conexión" aunque estuviera bien; un ping la "despertaba".
+export const STATUS_TIMEOUT_MS = 5000;
+
+// Estado con un reintento: solo se da por "Sin conexión" si fallan los dos. Cada
+// fallo queda en el log del servidor con el motivo (tiempo agotado, rechazada,
+// cortada...) para saber qué pasó la próxima vez.
 async function queryPrinterStatus(config: LoteadoraConfig): Promise<PrinterStatusDetail> {
   try {
-    const frame = buildNoDataFrame(config.slaveAddress, CMD_REQUEST_PRINTER_STATUS);
-    const result = await sendCommand(config, frame, 3000);
-
-    if (result.kind === 'nak') return { state: 'en_error', rawBytes: null };
-
-    // Cabecera: ESC ACK Slave P_Status CmdID [Printer Status data...] ESC ETX Checknum
-    const statusBytes = result.data.subarray(5, result.data.length - 3);
-    const rawBytes = statusBytes.length > 0
-      ? Array.from(statusBytes).map(b => b.toString(16).padStart(2, '0').toUpperCase()).join(' ')
-      : null;
-
-    if (result.status === 0x00) return { state: 'activa', rawBytes };
-    if (result.status === 0x12) return { state: 'standby', rawBytes };
-    return { state: 'en_error', rawBytes };
-  } catch {
-    return { state: 'apagada', rawBytes: null };
+    return await queryPrinterStatusUnaVez(config);
+  } catch (err: any) {
+    console.warn(`[loteadora ${config.ip}] estado: sin respuesta (${err?.message}); se reintenta`);
+    try {
+      const detalle = await queryPrinterStatusUnaVez(config);
+      console.warn(`[loteadora ${config.ip}] estado: respondió al reintento`);
+      return detalle;
+    } catch (err2: any) {
+      console.warn(`[loteadora ${config.ip}] estado: sin conexión (${err2?.message})`);
+      return { state: 'apagada', rawBytes: null };
+    }
   }
+}
+
+async function queryPrinterStatusUnaVez(config: LoteadoraConfig): Promise<PrinterStatusDetail> {
+  const frame = buildNoDataFrame(config.slaveAddress, CMD_REQUEST_PRINTER_STATUS);
+  const result = await sendCommand(config, frame, STATUS_TIMEOUT_MS);
+
+  if (result.kind === 'nak') return { state: 'en_error', rawBytes: null };
+
+  // Cabecera: ESC ACK Slave P_Status CmdID [Printer Status data...] ESC ETX Checknum
+  const statusBytes = result.data.subarray(5, result.data.length - 3);
+  const rawBytes = statusBytes.length > 0
+    ? Array.from(statusBytes).map(b => b.toString(16).padStart(2, '0').toUpperCase()).join(' ')
+    : null;
+
+  if (result.status === 0x00) return { state: 'activa', rawBytes };
+  if (result.status === 0x12) return { state: 'standby', rawBytes };
+  return { state: 'en_error', rawBytes };
 }
 
 // Consulta el estado real de una loteadora (comando 14 — Request Printer

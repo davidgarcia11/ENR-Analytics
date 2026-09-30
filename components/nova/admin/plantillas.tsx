@@ -7,7 +7,7 @@
 // validación en lib/loteadora-plantilla.ts; ver docs/loteadora.md §13.
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
-import { AlertTriangle, ArrowLeft, ArrowRight, Copy, Loader2, MoreHorizontal, Pencil, Plus, Printer, Trash2, X } from "lucide-react";
+import { AlertTriangle, ArrowLeft, ArrowRight, Copy, Eye, Loader2, MoreHorizontal, Pencil, Plus, Printer, Trash2, X } from "lucide-react";
 import { useApiFetch, useSession } from "@/components/SessionProvider";
 import { Button } from "@/components/nova/ui/button";
 import { Input } from "@/components/nova/ui/input";
@@ -293,6 +293,8 @@ export default function AdminPlantillas({ titulo, descripcion }: SeccionProps) {
   useEffect(() => { cargar(); cargarLinea(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, []);
 
   // Crear en la loteadora (archivo .msg por el comando 50, ver app/api/admin/loteadora-mensajes/[id]/crear-en-maquina)
+  // Vista previa de la etiqueta sin abrir el editor
+  const [enVista, setEnVista] = useState<Mensaje | null>(null);
   const [enMaquina, setEnMaquina] = useState<Mensaje | null>(null);
   const [loteadoras, setLoteadoras] = useState<{ id: number; name: string }[]>([]);
   const [loteadoraId, setLoteadoraId] = useState<string | null>(null);
@@ -454,6 +456,7 @@ export default function AdminPlantillas({ titulo, descripcion }: SeccionProps) {
                         }
                       />
                       <DropdownMenuContent align="end" className="min-w-40">
+                        <DropdownMenuItem onClick={() => setEnVista(m)}><Eye />Vista previa</DropdownMenuItem>
                         <DropdownMenuItem onClick={() => abrirEdicion(m)}><Pencil />Editar</DropdownMenuItem>
                         <DropdownMenuItem onClick={() => abrirDuplicado(m)}><Copy />Duplicar</DropdownMenuItem>
                         <DropdownMenuItem onClick={() => abrirCrearEnMaquina(m)}><Printer />Crear en la loteadora…</DropdownMenuItem>
@@ -526,6 +529,25 @@ export default function AdminPlantillas({ titulo, descripcion }: SeccionProps) {
               </Button>
             </DialogFooter>
           </form>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={!!enVista} onOpenChange={(o) => !o && setEnVista(null)}>
+        <DialogContent className="sm:max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>Vista previa</DialogTitle>
+            <DialogDescription>
+              Así quedará <span className="font-mono text-foreground">{enVista?.name}</span> en la etiqueta, con valores de ejemplo.
+            </DialogDescription>
+          </DialogHeader>
+          <pre className="overflow-x-auto rounded-lg border bg-muted/40 px-3 py-2 font-mono text-sm text-foreground">
+            {enVista ? lineasEtiqueta(enVista.campos, conManuales(ejemplo, enVista.campos)).join("\n") || "—" : ""}
+          </pre>
+          <p className="text-xs text-muted-foreground">«HHmm» o «HH:mm» es el reloj, que la máquina rellena con la hora real.</p>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setEnVista(null)}>Cerrar</Button>
+            <Button onClick={() => { const m = enVista; setEnVista(null); if (m) abrirEdicion(m); }}><Pencil />Editar</Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
 
