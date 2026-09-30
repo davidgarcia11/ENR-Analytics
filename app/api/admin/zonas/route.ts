@@ -2,9 +2,10 @@ import { NextRequest, NextResponse } from 'next/server';
 import type Database from 'better-sqlite3';
 import { getDb } from '@/lib/sqlite';
 import { requireAccess } from '@/lib/permissions';
+import { permisosLoteadora as L } from '@/lib/permisos';
 
 // Zonas de las loteadoras (/admin → Zonas), con los roles y usuarios que ven cada
-// una. Solo admin. Reglas de visibilidad en lib/loteadora-zonas.ts.
+// una. Con los permisos de Zonas (lib/permisos.ts). Reglas de visibilidad en lib/loteadora-zonas.ts.
 
 export interface ZonaInput { nombre: string; roles: number[]; usuarios: number[] }
 
@@ -32,8 +33,11 @@ export function guardarAsignaciones(db: Database.Database, zonaId: number, z: Zo
   for (const id of z.usuarios) usu.run(id, zonaId);
 }
 
-export async function GET() {
-  const acceso = await requireAccess({ permiso: 'admin.loteadora.maquinas' });
+// GET → lista de zonas. Con ?opciones=1 (formulario de zonas, permiso de editar
+// zonas) → { zonas, roles, usuarios }: solo lo justo para elegir a quién se asigna,
+// sin abrir las rutas de usuarios y roles, que son del admin.
+export async function GET(req: NextRequest) {
+  const acceso = await requireAccess({ permiso: [...L('zonas'), ...L('maquinas', 'editar')] });
   if (!acceso.ok) return acceso.denied;
 
   const db = getDb();
@@ -43,15 +47,23 @@ export async function GET() {
   ).all() as { id: number }[];
   const roles = db.prepare('SELECT zona_id, role_id FROM role_zonas').all() as { zona_id: number; role_id: number }[];
   const usuarios = db.prepare('SELECT zona_id, user_id FROM user_zonas').all() as { zona_id: number; user_id: number }[];
-  return NextResponse.json(zonas.map((z) => ({
+  const lista = zonas.map((z) => ({
     ...z,
     roles: roles.filter((r) => r.zona_id === z.id).map((r) => r.role_id),
     usuarios: usuarios.filter((u) => u.zona_id === z.id).map((u) => u.user_id),
-  })));
+  }));
+  if (!req.nextUrl.searchParams.get('opciones')) return NextResponse.json(lista);
+
+  const puedeEditar = await requireAccess({ permiso: L('zonas', 'editar') });
+  return NextResponse.json({
+    zonas: lista,
+    roles: puedeEditar.ok ? db.prepare('SELECT id, name, label FROM roles ORDER BY label').all() : [],
+    usuarios: puedeEditar.ok ? db.prepare('SELECT id, username, name, surname, role FROM users ORDER BY name, surname, username').all() : [],
+  });
 }
 
 export async function POST(req: NextRequest) {
-  const acceso = await requireAccess({ role: 'admin' });
+  const acceso = await requireAccess({ permiso: L('zonas', 'editar') });
   if (!acceso.ok) return acceso.denied;
 
   const db = getDb();

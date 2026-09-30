@@ -1,13 +1,14 @@
 import { NextResponse } from 'next/server';
 import { getDb } from '@/lib/sqlite';
 import { requireAccess } from '@/lib/permissions';
+import { permisosLoteadora as L } from '@/lib/permisos';
 
 // Datos fijos de todas las plantillas (piezas tipo 'fijo': precio, nº de
 // certificado...). Los ve y cambia quien tenga el permiso
-// 'admin.loteadora.datos-fijos' (lib/permisos.ts) sin poder tocar el resto de la
+// los permisos de Datos fijos (lib/permisos.ts) sin poder tocar el resto de la
 // plantilla, que sigue siendo solo de admin.
 export async function GET() {
-  const acceso = await requireAccess({ permiso: 'admin.loteadora.datos-fijos' });
+  const acceso = await requireAccess({ permiso: L('datos-fijos') });
   if (!acceso.ok) return acceso.denied;
 
   const db = getDb();

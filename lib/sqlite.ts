@@ -503,6 +503,30 @@ export function getDb(): Database.Database {
     })();
   }
 
+  // Permisos de la loteadora: de uno por sección a uno por acción (ver, crear y
+  // editar, eliminar...). Cada permiso antiguo se convierte en lo que ya dejaba
+  // hacer, sin dar nada nuevo (eliminar seguía siendo del admin). Una sola vez.
+  if (!_db.prepare("SELECT 1 FROM migraciones WHERE clave = 'permisos-por-accion'").get()) {
+    const equivalentes: Record<string, string[]> = {
+      'admin.loteadora.maquinas': ['maquinas.ver', 'maquinas.editar', 'zonas.ver'],
+      'admin.loteadora.plantillas': ['plantillas.ver', 'plantillas.editar', 'plantillas.crear-en-maquina'],
+      'admin.loteadora.articulos': ['articulos.ver', 'articulos.editar', 'articulos.eliminar'],
+      'admin.loteadora.datos-fijos': ['datos-fijos.ver', 'datos-fijos.editar'],
+    };
+    _db.transaction(() => {
+      for (const [tabla, col] of [['user_permissions', 'user_id'], ['role_permissions', 'role_id']]) {
+        for (const [antiguo, nuevos] of Object.entries(equivalentes)) {
+          for (const nuevo of nuevos) {
+            _db!.prepare(`INSERT OR IGNORE INTO ${tabla} (${col}, permission) SELECT ${col}, ? FROM ${tabla} WHERE permission = ?`)
+              .run(`admin.loteadora.${nuevo}`, antiguo);
+          }
+          _db!.prepare(`DELETE FROM ${tabla} WHERE permission = ?`).run(antiguo);
+        }
+      }
+      _db!.prepare("INSERT INTO migraciones (clave) VALUES ('permisos-por-accion')").run();
+    })();
+  }
+
   // Arial: el ancho por carácter por defecto pasa de tamaño × 0,6 a tamaño × 33/35 (medido
   // en la máquina con el .msg). Una vez, y solo a las medidas guardadas con el valor por
   // defecto antiguo: las ajustadas a mano se dejan.

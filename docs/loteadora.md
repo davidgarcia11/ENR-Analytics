@@ -33,14 +33,14 @@ Rama: `feature/loteadora`.
 | `app/api/loteadora/estado/route.ts` | GET público — estado en vivo (`activa`/`en_error`/`standby`/`apagada`) de las loteadoras habilitadas |
 | `app/api/loteadora/mensajes/route.ts` | GET — lista las plantillas guardadas en una loteadora (requiere permiso de pantalla, §16) |
 | `app/api/loteadora/cargar-mensaje/route.ts` | POST — carga/aplica una plantilla en la loteadora (requiere permiso de pantalla §16; rechaza con `409` si la loteadora está imprimiendo, §11) |
-| `app/api/admin/loteadoras/route.ts` y `[id]/route.ts` | CRUD de loteadoras (IP/puerto/slave) desde `/admin`. Crear y editar: admin o permiso `admin.loteadora.maquinas`; eliminar, solo admin |
+| `app/api/admin/loteadoras/route.ts` y `[id]/route.ts` | CRUD de loteadoras (IP/puerto/slave) desde `/admin`. Permisos de Máquinas por acción (ver, crear y editar, eliminar; §18) |
 | `app/api/admin/loteadoras/estado/route.ts` | GET admin — estado en vivo de **todas** las loteadoras (habilitadas o no) |
 | `app/api/admin/loteadora-mensajes/route.ts` y `[id]/route.ts` | CRUD de plantillas (nombre + campos con piezas) desde `/admin` → Loteadora › Plantillas |
 | `app/api/admin/loteadora-datos-fijos/route.ts` y `[id]/route.ts` | Lista y cambia los datos fijos de las plantillas (precio, nº de certificado) desde `/admin` → Loteadora › Datos fijos |
-| `app/api/admin/loteadora-mensajes/[id]/crear-en-maquina/route.ts` | POST — crea (o sustituye) en una loteadora el mensaje de una plantilla: genera su `.msg` (`lib/loteadora-msg.ts`) con la disposición automática, reloj incluido, y lo envía con el comando `50`. Admin o permiso `admin.loteadora.plantillas`; rechaza con `409` si la máquina está imprimiendo (§13) |
-| `app/api/admin/loteadora-articulos/copia/route.ts` | GET exporta / POST importa **solo las asociaciones** artículo → plantilla (botones de la sección Artículos). Abierta al permiso `admin.loteadora.articulos`: ignora las plantillas del archivo y exige que cada artículo apunte a una que ya exista (§13) |
-| `app/api/admin/loteadora-copia/route.ts` | GET exporta / POST importa en JSON las plantillas y las asociaciones de artículos (botones Exportar/Importar de Plantillas, solo admin, §13) |
-| `app/api/admin/loteadora-articulos/route.ts` y `[articuloId]/route.ts` | CRUD de asociaciones artículo→plantilla (`loteadora_articulo_mensajes`) desde `/admin` → Loteadora › Artículos. Abierto también a usuarios no admin con el permiso `admin.loteadora.articulos`, por su rol o como extra (DOCUMENTACION.md §5b) |
+| `app/api/admin/loteadora-mensajes/[id]/crear-en-maquina/route.ts` | POST — crea (o sustituye) en una loteadora el mensaje de una plantilla: genera su `.msg` (`lib/loteadora-msg.ts`) con la disposición automática, reloj incluido, y lo envía con el comando `50`. Admin o permiso de Plantillas (§18); rechaza con `409` si la máquina está imprimiendo (§13) |
+| `app/api/admin/loteadora-articulos/copia/route.ts` | GET exporta / POST importa **solo las asociaciones** artículo → plantilla (botones de la sección Artículos). Abierta al permiso de Artículos (§18): ignora las plantillas del archivo y exige que cada artículo apunte a una que ya exista (§13) |
+| `app/api/admin/loteadora-copia/route.ts` | GET exporta / POST importa en JSON las plantillas y las asociaciones de artículos (botones Exportar/Importar de Plantillas, permiso `plantillas.copia`, §13 y §18) |
+| `app/api/admin/loteadora-articulos/route.ts` y `[articuloId]/route.ts` | CRUD de asociaciones artículo→plantilla (`loteadora_articulo_mensajes`) desde `/admin` → Loteadora › Artículos. Abierto también a usuarios no admin con el permiso de Artículos (§18), por su rol o como extra (DOCUMENTACION.md §5b) |
 | `lib/loteadora-printer.ts` | Construye las tramas del protocolo TIJ y las envía por TCP (`buildRemoteFieldFrame`, `sendRemoteFields`, `getPrinterStatus`, `listMessageNames`, `loadPrintMessage`) |
 | `components/nova/date-picker.tsx` | Selector de UNA fecha exacta (Popover + Calendar en modo `single`) — nuevo, no existía ningún panel Nova con selector de fecha única (solo rango, `date-range-picker.tsx`) |
 | `components/nova/ui/combobox.tsx` | Combobox de Base UI instalado por CLI para la búsqueda de artículo — primer uso en el proyecto, ver §14 |
@@ -396,11 +396,11 @@ Un artículo solo puede tener una plantilla a la vez (`articulo_id` es clave pri
 - Las plantillas anteriores a esta función quedan con todos sus campos en la línea 1. Los `N01`…`N17` reciben su disposición real con la migración `disposicion-nuevo-loteado`, una sola vez y solo si no tienen ninguna guardada.
 - Diferencia mínima con el script original: en `N01` y `N13`, el reloj se creó con un espacio más delante. Si se vuelven a crear desde el admin, el campo de después queda un carácter más a la izquierda.
 
-**Copia de seguridad: Exportar / Importar** (botones de `/admin` → Plantillas, solo admin; `exportarCopia` / `importarCopia` en `lib/loteadora-plantilla.ts`, ruta `/api/admin/loteadora-copia`):
+**Copia de seguridad: Exportar / Importar** (botones de `/admin` → Plantillas, permiso `plantillas.copia`; `exportarCopia` / `importarCopia` en `lib/loteadora-plantilla.ts`, ruta `/api/admin/loteadora-copia`):
 - **Exportar** descarga `plantillas-loteadora-<fecha>.json` con todas las plantillas y las asociaciones artículo → plantilla. Las asociaciones van **por nombre de plantilla**, porque los IDs internos cambian entre BD.
 - **Importar** sube ese archivo y **valida todo antes de escribir**: plantillas con `validarPlantilla`, sin nombres repetidos, y artículos de 10 dígitos cuya plantilla esté en el archivo o en la BD. Si algo falla, no se importa nada.
 - Sin marcar **"Sustituir las que ya existan"**, solo añade lo que falta: plantillas con un nombre nuevo y artículos sin asociar. Marcada, sustituye los campos de las plantillas con el mismo nombre y reasocia los artículos que apuntaban a otra. Sirve para restaurar una copia.
-- En la sección **Artículos** hay también Exportar/Importar, pero **solo de las asociaciones** (`/api/admin/loteadora-articulos/copia`). Esa sección la puede abrir un usuario no admin con el permiso `admin.loteadora.articulos`, así que desde ahí nunca se crean ni tocan plantillas: las del archivo se ignoran. Acepta también un archivo de la copia completa.
+- En la sección **Artículos** hay también Exportar/Importar, pero **solo de las asociaciones** (`/api/admin/loteadora-articulos/copia`). Esa sección la puede abrir un usuario no admin con el permiso de Artículos (§18), así que desde ahí nunca se crean ni tocan plantillas: las del archivo se ignoran. Acepta también un archivo de la copia completa.
 - Los botones y el diálogo son un único componente, `BotonesCopia`, en `components/nova/admin/comun.tsx`.
 - Nunca borra nada que no esté en el archivo. Al terminar muestra cuántas plantillas y asociaciones se crearon, se sustituyeron o se dejaron sin tocar.
 - Los tests están en `__tests__/loteadora-plantilla.test.ts`, con una BD en memoria.
@@ -411,17 +411,17 @@ Un artículo solo puede tener una plantilla a la vez (`articulo_id` es clave pri
 
 ### Admin — Loteadora › Plantillas (constructor)
 
-`components/nova/admin/plantillas.tsx`. La tabla enseña, por plantilla, lo que se imprimiría en cada campo con valores de ejemplo, salvo la **Línea**, que es la real de la primera loteadora que la tenga configurada en `/admin` → Loteadoras. Se manda tal cual, sin prefijo. La plantilla es común a todas las loteadoras, así que en `/loteadora` la vista previa usa la línea de la loteadora elegida. El diálogo de alta/edición es un constructor: nombre del mensaje + lista de campos, cada uno con su ID y sus piezas (añadir con "+ Pieza", reordenar con las flechas, quitar con la ×); al lado de cada campo, **"Se imprime"** con el resultado en vivo y los espacios visibles como `·`. CRUD en `app/api/admin/loteadora-mensajes/route.ts` (GET/POST) y `[id]/route.ts` (PUT/DELETE): crear y editar, admin o permiso `admin.loteadora.plantillas`; eliminar, solo admin. Sustituyen los campos enteros en una transacción. `validarPlantilla()` exige: nombre ASCII no vacío y único, al menos un campo, IDs 0-255 **sin repetir**, al menos una pieza por campo, textos y datos fijos no vacíos y en ASCII, datos fijos con nombre y formatos válidos.
+`components/nova/admin/plantillas.tsx`. La tabla enseña, por plantilla, lo que se imprimiría en cada campo con valores de ejemplo, salvo la **Línea**, que es la real de la primera loteadora que la tenga configurada en `/admin` → Loteadoras. Se manda tal cual, sin prefijo. La plantilla es común a todas las loteadoras, así que en `/loteadora` la vista previa usa la línea de la loteadora elegida. El diálogo de alta/edición es un constructor: nombre del mensaje + lista de campos, cada uno con su ID y sus piezas (añadir con "+ Pieza", reordenar con las flechas, quitar con la ×); al lado de cada campo, **"Se imprime"** con el resultado en vivo y los espacios visibles como `·`. CRUD en `app/api/admin/loteadora-mensajes/route.ts` (GET/POST) y `[id]/route.ts` (PUT/DELETE): crear y editar con `plantillas.editar`; eliminar con `plantillas.eliminar` (§18). Sustituyen los campos enteros en una transacción. `validarPlantilla()` exige: nombre ASCII no vacío y único, al menos un campo, IDs 0-255 **sin repetir**, al menos una pieza por campo, textos y datos fijos no vacíos y en ASCII, datos fijos con nombre y formatos válidos.
 
 ### Admin — Loteadora › Datos fijos
 
-`components/nova/admin/datos-fijos.tsx`: todos los datos fijos de todas las plantillas en una tabla (plantilla, dato, campo, valor), editables uno a uno. Es la forma de que **personas concretas** cambien un precio o un nº de certificado sin poder tocar el resto de la plantilla: permiso `admin.loteadora.datos-fijos` (por rol o como extra, DOCUMENTACION.md §5b), que solo abre esta sección y las rutas `GET /api/admin/loteadora-datos-fijos` y `PATCH /api/admin/loteadora-datos-fijos/:id` (esta última solo modifica piezas tipo `fijo`, y valida ASCII). El cambio se aplica en el siguiente envío.
+`components/nova/admin/datos-fijos.tsx`: todos los datos fijos de todas las plantillas en una tabla (plantilla, dato, campo, valor), editables uno a uno. Es la forma de que **personas concretas** cambien un precio o un nº de certificado sin poder tocar el resto de la plantilla: permiso de Datos fijos (§18) (por rol o como extra, DOCUMENTACION.md §5b), que solo abre esta sección y las rutas `GET /api/admin/loteadora-datos-fijos` y `PATCH /api/admin/loteadora-datos-fijos/:id` (esta última solo modifica piezas tipo `fijo`, y valida ASCII). El cambio se aplica en el siguiente envío.
 
 ### Admin — Loteadora › Artículos
 
 CRUD de `loteadora_articulo_mensajes` en `app/api/admin/loteadora-articulos/route.ts` (GET/POST, upsert por `articulo_id`) y `[articuloId]/route.ts` (DELETE). La sección (`components/nova/admin/articulos-plantilla.tsx`) hace la asociación en un diálogo: el buscador de artículo reutiliza `GET /api/loteadora/articulos` (el mismo catálogo y el mismo `Combobox` que `/loteadora`) y avisa si el artículo ya tiene plantilla (se sustituye); `POST` valida `articuloId` con el regex ya usado en el proyecto (`/^\d{10}$/`) y que `mensajeId` exista.
 
-Esta sección (Loteadora › Artículos) la puede abrir también un usuario no admin con el permiso `admin.loteadora.articulos`, por su rol o como extra (DOCUMENTACION.md §5b): solo ve esta sección de `/admin`, puede leer las plantillas (`GET /api/admin/loteadora-mensajes`) pero no crearlas ni editarlas.
+Esta sección (Loteadora › Artículos) la puede abrir también un usuario no admin con el permiso de Artículos (§18), por su rol o como extra (DOCUMENTACION.md §5b): solo ve esta sección de `/admin`, puede leer las plantillas (`GET /api/admin/loteadora-mensajes`) pero no crearlas ni editarlas.
 
 ### Cómo llega a `/loteadora`
 
@@ -543,7 +543,7 @@ Este panel fue el piloto del provider junto a `/produccion`. Los demás paneles 
 
 Cada loteadora puede tener una **zona** (Funes 1, Funes 2, Pasteurizado...). Es informativa, se ve en el selector de `/loteadora`, en su estado y en Máquinas, y además decide **qué loteadoras ve cada rol o usuario**.
 
-- **Las zonas se gestionan en `/admin` → Loteadora › Zonas**, solo admin (`components/nova/admin/zonas.tsx`, rutas `/api/admin/zonas` y `/api/admin/zonas/:id`).
+- **Las zonas se gestionan en `/admin` → Loteadora › Zonas**, con los permisos de Zonas (§18) (`components/nova/admin/zonas.tsx`, rutas `/api/admin/zonas` y `/api/admin/zonas/:id`). El formulario pide los roles y usuarios asignables a la propia ruta (`GET /api/admin/zonas?opciones=1`, solo con `zonas.editar`), no a las rutas de usuarios y roles, que son del admin.
   - Se crean, renombran y borran ahí.
   - Nacen tres, **Funes 1, Funes 2 y Pasteurizado**, una sola vez por BD (migración `zonas-iniciales`); si se borra una, no reaparece.
   - En cada zona se eligen los **roles** (casillas) y los **usuarios** (buscador) que la ven.
@@ -563,3 +563,25 @@ Cada loteadora puede tener una **zona** (Funes 1, Funes 2, Pasteurizado...). Es 
 - Por eso estas rutas usan `requireAccess({ screen: 'loteadora' })`, que da el usuario, en vez de `requireScreenAccess`. La regla de pantalla es la misma, y `__tests__/loteadora-access.test.ts` acepta las dos formas.
 
 Relación con producción: las "sub-plantas" de `/produccion` (Funes 1 / Funes 2 / Funes Past.) están fijas en el código porque salen de JDE (primer dígito de `TO55TAREA`, ver `docs/produccion.md`). Las zonas de la loteadora son otra cosa: una lista propia, editable desde el admin.
+
+---
+
+## 18. Permisos por acción
+
+Desde sept. 2026 cada sección de `/admin` → Loteadora tiene un permiso por acción, que se asigna por rol (Roles y permisos) o por usuario (Usuarios) como el resto (`lib/permisos.ts`, DOCUMENTACION.md §5b):
+
+| Sección de `/admin` (Loteadora ›) | Ver | Crear y editar | Eliminar / desvincular | Otras |
+|---|---|---|---|---|
+| Máquinas | `maquinas.ver` | `maquinas.editar` | `maquinas.eliminar` | — |
+| Zonas | `zonas.ver` | `zonas.editar` | `zonas.eliminar` | — |
+| Plantillas | `plantillas.ver` | `plantillas.editar` (incluye duplicar) | `plantillas.eliminar` | `plantillas.crear-en-maquina`, `plantillas.copia` (exportar/importar) |
+| Artículos | `articulos.ver` | `articulos.editar` (asociar) | `articulos.eliminar` (desvincular) | — |
+| Datos fijos | `datos-fijos.ver` | `datos-fijos.editar` | — | — |
+
+(todas con el prefijo `admin.loteadora.`; aparte, `loteadora.limpiar-buffer` en `/loteadora`)
+
+- **Cualquier permiso de una sección la abre** en `/admin`. Dentro, cada botón aparece solo con su permiso (`tienePermiso` en cada componente de `components/nova/admin/`), y **cada ruta lo vuelve a comprobar** (proxy + `requireAccess`): sin el permiso, 403 aunque se llame a mano.
+- Lecturas cruzadas que se permiten porque una sección las necesita: Plantillas lee las loteadoras (para "Crear en la loteadora" y la línea de ejemplo); Artículos lee las plantillas (desplegable); Máquinas con `editar` lee las zonas (para elegir la de cada máquina) y la lista de artículos de JDE (familias).
+- La vista previa de una plantilla está con cualquier permiso de Plantillas.
+- El admin lo tiene todo.
+- Migración `permisos-por-accion`: ver DOCUMENTACION.md §5b.

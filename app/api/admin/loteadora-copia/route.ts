@@ -1,20 +1,21 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getDb } from '@/lib/sqlite';
 import { requireAccess } from '@/lib/permissions';
+import { permisosLoteadora as L } from '@/lib/permisos';
 import { exportarCopia, importarCopia } from '@/lib/loteadora-plantilla';
 
 // Copia de seguridad de las plantillas y de las asociaciones artículo → plantilla
 // (/admin → Plantillas, botones Exportar/Importar). Solo admin. Lógica y reglas
 // en lib/loteadora-plantilla.ts (exportarCopia / importarCopia).
 export async function GET() {
-  const acceso = await requireAccess({ role: 'admin' });
+  const acceso = await requireAccess({ permiso: L('plantillas', 'copia') });
   if (!acceso.ok) return acceso.denied;
   return NextResponse.json(exportarCopia(getDb()));
 }
 
 // Body: { copia: CopiaLoteadora, sustituir?: boolean }
 export async function POST(req: NextRequest) {
-  const acceso = await requireAccess({ role: 'admin' });
+  const acceso = await requireAccess({ permiso: L('plantillas', 'copia') });
   if (!acceso.ok) return acceso.denied;
 
   const body = await req.json().catch(() => null);

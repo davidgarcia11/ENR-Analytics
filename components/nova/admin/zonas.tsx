@@ -7,7 +7,8 @@
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { Loader2, MoreHorizontal, Pencil, Plus, Trash2 } from "lucide-react";
-import { useApiFetch } from "@/components/SessionProvider";
+import { useApiFetch, useSession } from "@/components/SessionProvider";
+import { tienePermiso, type Permiso } from "@/lib/permisos";
 import { Button } from "@/components/nova/ui/button";
 import { Input } from "@/components/nova/ui/input";
 import { Label } from "@/components/nova/ui/label";
@@ -32,6 +33,9 @@ const nombreUsuario = (u: Usuario) => [u.name, u.surname].filter(Boolean).join("
 
 export default function AdminZonas({ titulo, descripcion }: SeccionProps) {
   const apiFetch = useApiFetch();
+  // Cada botón según su permiso (lib/permisos.ts); el servidor lo vuelve a comprobar.
+  const usuario = useSession().user;
+  const puede = (accion: string) => tienePermiso(usuario, `admin.loteadora.zonas.${accion}` as Permiso);
   const [zonas, setZonas] = useState<Zona[]>([]);
   const [roles, setRoles] = useState<Rol[]>([]);
   const [usuarios, setUsuarios] = useState<Usuario[]>([]);
@@ -53,10 +57,12 @@ export default function AdminZonas({ titulo, descripcion }: SeccionProps) {
 
   const cargar = async () => {
     try {
-      const [z, r, u] = await Promise.all(["/api/admin/zonas", "/api/admin/roles", "/api/admin/users"].map((url) => apiFetch(url)));
-      if (z.ok) setZonas(await z.json());
-      if (r.ok) setRoles(await r.json());
-      if (u.ok) setUsuarios(await u.json());
+      // Zonas con los roles y usuarios a los que se pueden asignar (ver GET /api/admin/zonas)
+      const res = await apiFetch("/api/admin/zonas?opciones=1");
+      if (res.ok) {
+        const d = await res.json();
+        setZonas(d.zonas); setRoles(d.roles); setUsuarios(d.usuarios);
+      }
     } finally { setCargando(false); }
   };
 
@@ -108,10 +114,12 @@ export default function AdminZonas({ titulo, descripcion }: SeccionProps) {
   return (
     <>
       <CabeceraSeccion titulo={titulo} descripcion={descripcion}>
-        <Button onClick={() => abrir("nueva")}>
-          <Plus />
-          Nueva zona
-        </Button>
+        {puede("editar") && (
+          <Button onClick={() => abrir("nueva")}>
+            <Plus />
+            Nueva zona
+          </Button>
+        )}
       </CabeceraSeccion>
       <TablaCard
         toolbar={
@@ -152,14 +160,16 @@ export default function AdminZonas({ titulo, descripcion }: SeccionProps) {
                     </div>
                   </TableCell>
                   <TableCell>
-                    <DropdownMenu>
-                      <DropdownMenuTrigger render={<Button variant="ghost" size="icon-sm" aria-label={`Acciones de ${z.nombre}`}><MoreHorizontal /></Button>} />
-                      <DropdownMenuContent align="end" className="min-w-40">
-                        <DropdownMenuItem onClick={() => abrir(z)}><Pencil />Editar</DropdownMenuItem>
-                        <DropdownMenuSeparator />
-                        <DropdownMenuItem variant="destructive" onClick={() => setBorrando(z)}><Trash2 />Eliminar</DropdownMenuItem>
-                      </DropdownMenuContent>
-                    </DropdownMenu>
+                    {(puede("editar") || puede("eliminar")) && (
+                      <DropdownMenu>
+                        <DropdownMenuTrigger render={<Button variant="ghost" size="icon-sm" aria-label={`Acciones de ${z.nombre}`}><MoreHorizontal /></Button>} />
+                        <DropdownMenuContent align="end" className="min-w-40">
+                          {puede("editar") && <DropdownMenuItem onClick={() => abrir(z)}><Pencil />Editar</DropdownMenuItem>}
+                          {puede("editar") && puede("eliminar") && <DropdownMenuSeparator />}
+                          {puede("eliminar") && <DropdownMenuItem variant="destructive" onClick={() => setBorrando(z)}><Trash2 />Eliminar</DropdownMenuItem>}
+                        </DropdownMenuContent>
+                      </DropdownMenu>
+                    )}
                   </TableCell>
                 </TableRow>
               ))

@@ -117,8 +117,10 @@ export function Buscador({ value, onChange, placeholder }: { value: string; onCh
  * /api/admin/loteadora-articulos/copia (solo asociaciones). Reglas en
  * importarCopia (lib/loteadora-plantilla.ts).
  */
-export function BotonesCopia({ ruta, archivo, conPlantillas, onImportado }: {
+export function BotonesCopia({ ruta, archivo, conPlantillas, onImportado, puedeImportar = true }: {
   ruta: string;
+  /** Sin permiso para importar, solo se ve Exportar */
+  puedeImportar?: boolean;
   /** Prefijo del archivo descargado: `<archivo>-AAAA-MM-DD.json` */
   archivo: string;
   /** La copia lleva plantillas (si no, solo asociaciones de artículos) */
@@ -185,10 +187,12 @@ export function BotonesCopia({ ruta, archivo, conPlantillas, onImportado }: {
         <Download />
         Exportar
       </Button>
-      <Button variant="outline" onClick={() => archivoRef.current?.click()} title="Da de alta lo que traiga un archivo exportado">
-        <Upload />
-        Importar
-      </Button>
+      {puedeImportar && (
+        <Button variant="outline" onClick={() => archivoRef.current?.click()} title="Da de alta lo que traiga un archivo exportado">
+          <Upload />
+          Importar
+        </Button>
+      )}
       <input ref={archivoRef} type="file" accept=".json,application/json" className="hidden" onChange={(e) => elegir(e.target.files?.[0])} />
 
       <Dialog open={!!importacion} onOpenChange={(o) => !o && setImportacion(null)}>

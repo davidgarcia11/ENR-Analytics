@@ -463,15 +463,16 @@ Las cookies con `secure: true` no funcionan sobre HTTP (solo HTTPS). Cuando el d
 - **Admin** (`role === 'admin'`): ve todas las secciones.
 - **Usuario con algún permiso de configuración que desbloquee una sección** — por su
   rol o como extra suyo (§5b): entra en `/admin` y solo ve esa(s) sección(es), con
-  "Configuración" en vez de "Administración" bajo el logo. Hoy desbloquean sección
-  `admin.loteadora.articulos` → Loteadora › Artículos, `admin.loteadora.datos-fijos` →
-  Loteadora › Datos fijos, `admin.loteadora.maquinas` → Loteadora › Máquinas y
-  `admin.loteadora.plantillas` → Loteadora › Plantillas (estos dos, crear y editar:
-  Eliminar y Exportar/Importar solo los ve el admin).
+  "Configuración" en vez de "Administración" bajo el logo. Hoy desbloquean sección los
+  permisos por acción de la loteadora (Máquinas, Zonas, Plantillas, Artículos y Datos
+  fijos; ver §5b): cualquiera de los de una sección la abre, y dentro solo aparecen los
+  botones de las acciones que se tengan.
 - Cualquier otro usuario → al login. La misma regla la aplican `proxy.ts` (antes de
   mandar el HTML) y `<RequireAccess allow={puedeEntrarEnAdmin}>` en la página.
-- Las secciones sin permiso asociado (todas salvo Artículos) y `/admin/logs` (que redirige a
-  la sección de logs) siguen siendo **solo admin**.
+- Las secciones sin permiso asociado (usuarios, roles, logs, etc.) y `/admin/logs` (que
+  redirige a la sección de logs) siguen siendo **solo admin**.
+- **Roles y permisos** es una matriz (filas = paneles y permisos agrupados por sección y
+  acción, columnas = roles). La primera columna queda fija al desplazarse a la derecha.
 - La sección activa va en la URL (`/admin?seccion=logs`): recargar no te devuelve a la
   primera y se puede enlazar directamente a una sección.
 
@@ -587,15 +588,15 @@ sincronización, último error) y botón "Sincronizar ahora" — ver
 | PUT | `/api/admin/jde-statuses/:code` | Actualiza la descripción de un código existente. No permite crear ni borrar |
 | GET | `/api/jde-statuses` | Lista pública (con sesión) consumida por `/comparativa-seres` |
 | GET | `/api/admin/logs` | Logs de consultas con paginación, filtros y estadísticas (ver sección 7) |
-| GET / POST | `/api/admin/zonas` · PUT / DELETE `/api/admin/zonas/:id` | Zonas de las loteadoras y roles/usuarios que ven cada una (solo admin, ver `docs/loteadora.md` §17) |
-| GET / POST | `/api/admin/loteadora-articulos/copia` | Exporta / importa solo las asociaciones artículo → plantilla (sección Artículos; abierta al permiso `admin.loteadora.articulos`) |
+| GET / POST | `/api/admin/zonas` · PUT / DELETE `/api/admin/zonas/:id` | Zonas de las loteadoras y roles/usuarios que ven cada una (permisos de Zonas; `GET ?opciones=1` añade los roles y usuarios asignables, solo con `zonas.editar`; ver `docs/loteadora.md` §17) |
+| GET / POST | `/api/admin/loteadora-articulos/copia` | Exporta (ver) / importa (asociar) solo las asociaciones artículo → plantilla (sección Artículos) |
 | GET / POST | `/api/admin/loteadora-copia` | Exporta / importa en JSON las plantillas de la loteadora y sus asociaciones de artículos (botones de `/admin` → Plantillas, ver `docs/loteadora.md` §13) |
 
 Todas son solo de admin salvo las abiertas a un permiso en `RUTAS_ADMIN_POR_PERMISO`
-(§5b) — hoy `/api/admin/loteadora-articulos` (todo), `/api/admin/loteadora-datos-fijos` (todo),
-`/api/admin/loteadora-mensajes` (GET, POST y PUT, incluido `crear-en-maquina`),
-`/api/admin/loteadoras` (GET, POST y PUT, incluido `estado`) y `GET /api/admin/zonas`.
-Los DELETE, la gestión de zonas y `/api/admin/loteadora-copia` siguen siendo solo de admin.
+(§5b): las de la loteadora (`loteadoras`, `zonas`, `loteadora-mensajes`, `loteadora-copia`,
+`loteadora-articulos`, `loteadora-datos-fijos`), cada método a su acción (GET = ver,
+POST/PUT/PATCH = crear y editar, DELETE = eliminar; `crear-en-maquina` y la copia, a sus
+permisos propios).
 
 ---
 
@@ -693,13 +694,28 @@ artículos de `/muestras` o asignar artículos a plantillas de loteadora.
   todos implícitamente (sin filas). Una clave que ya no esté en el catálogo se ignora.
 - **Permisos actuales**: `muestras.config` (antes columna `users.can_configure_muestras`,
   migrada automáticamente a `user_permissions` — quien lo tenía lo conserva — y
-  eliminada), `admin.loteadora.articulos` (sección Loteadora › Artículos) y
-  `admin.loteadora.datos-fijos` (sección Loteadora › Datos fijos: precios y nº de
-  certificado de las plantillas), `loteadora.limpiar-buffer` (botón "Limpiar buffer" de /loteadora, sin sección de /admin),
-  `admin.loteadora.maquinas` (sección Máquinas: crear y
-  editar loteadoras, ve todas sin filtro de zona) y `admin.loteadora.plantillas` (sección
-  Plantillas: crear y editar, y "Crear en la loteadora…"). Una regla puede abrirse a
-  varios permisos (`permiso: [...]`, basta con uno), igual que `requireAccess({ permiso: [...] })`.
+  eliminada), `loteadora.limpiar-buffer` (botón "Limpiar buffer" de /loteadora, sin
+  sección de /admin) y los **permisos por acción de la loteadora** (sept. 2026):
+
+  | Sección de `/admin` (Loteadora ›) | Ver | Crear y editar | Eliminar / desvincular | Otras |
+  |---|---|---|---|---|
+  | Máquinas | `maquinas.ver` | `maquinas.editar` | `maquinas.eliminar` | — |
+  | Zonas | `zonas.ver` | `zonas.editar` | `zonas.eliminar` | — |
+  | Plantillas | `plantillas.ver` | `plantillas.editar` (incluye duplicar) | `plantillas.eliminar` | `plantillas.crear-en-maquina`, `plantillas.copia` (exportar/importar) |
+  | Artículos | `articulos.ver` | `articulos.editar` (asociar) | `articulos.eliminar` (desvincular) | — |
+  | Datos fijos | `datos-fijos.ver` | `datos-fijos.editar` | — | — |
+  
+  (todas con el prefijo `admin.loteadora.`; aparte, `loteadora.limpiar-buffer` en `/loteadora`)
+
+  Antes había uno por sección (`admin.loteadora.maquinas`, `.plantillas`, `.articulos`,
+  `.datos-fijos`) y eliminar era solo del admin. La migración `permisos-por-accion`
+  convirtió cada uno en las acciones que ya dejaba hacer (máquinas → ver, editar y ver
+  zonas; plantillas → ver, editar y crear en la loteadora; artículos → ver, asociar y
+  desvincular; datos fijos → ver y editar), sin dar nada nuevo. `permisosLoteadora(seccion,
+  ...acciones)` devuelve las claves de una sección (sin acciones, todas). Una regla puede
+  abrirse a varios permisos (`permiso: [...]`, basta con uno), igual que `requireAccess({
+  permiso: [...] })`, y su `prefijo` puede ser una expresión regular (rutas con un id en
+  medio, como `…/:id/crear-en-maquina`).
 - **Servidor, denegado por defecto**: `proxy.ts` sigue cortando `/admin*` y
   `/api/admin/*` a quien no sea admin, salvo: la página `/admin` exacta si algún
   permiso efectivo suyo tiene `seccionAdmin`, y las rutas de `RUTAS_ADMIN_POR_PERMISO`
