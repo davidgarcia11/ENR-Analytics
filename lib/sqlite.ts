@@ -193,6 +193,25 @@ export function getDb(): Database.Database {
       PRIMARY KEY (mensaje_id, field_id)
     );
 
+    -- Registro de todo lo enviado a las loteadoras desde /loteadora (trazabilidad, se
+    -- guarda siempre). Copia los nombres de máquina y plantilla y no tiene claves
+    -- ajenas: sigue valiendo aunque se borren. Ver lib/loteadora-registro.ts.
+    CREATE TABLE IF NOT EXISTS loteadora_envios (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      loteadora_id INTEGER NOT NULL,
+      loteadora TEXT NOT NULL,
+      usuario TEXT,
+      plantilla TEXT NOT NULL,
+      articulo_id TEXT NOT NULL,
+      articulo_desc TEXT,
+      campos TEXT NOT NULL,          -- JSON: [{ fieldId, texto }]
+      datos TEXT NOT NULL,           -- JSON: lo rellenado (lote, cocida, turno...)
+      resultado TEXT NOT NULL,       -- 'ok' | 'aviso' | 'error'
+      mensaje TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_loteadora_envios_maquina ON loteadora_envios (loteadora_id, id);
+
     -- Último envío hecho desde /loteadora a cada máquina (se sobrescribe en cada
     -- envío correcto): se enseña en "Estado de las loteadoras". Es lo último que
     -- mandó el panel, no lo que tenga la máquina si se cambió a mano en ella.

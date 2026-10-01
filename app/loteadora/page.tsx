@@ -48,7 +48,8 @@ type EstadoLoteadoraValor = "activa" | "en_error" | "standby" | "apagada";
 // ultimoEnvio: lo último que mandó el panel a esa máquina (no lo que tenga si se cambió a mano)
 // `lineas`: lo enviado colocado como en la etiqueta; los trozos `reloj` no se envían (los pone la máquina)
 interface UltimoEnvio { plantilla: string; lineas: { texto: string; reloj?: boolean }[][]; usuario: string | null; enviadoAt: string }
-interface EstadoLoteadora { id: number; name: string; zona: string | null; state: EstadoLoteadoraValor; ultimoEnvio: UltimoEnvio | null }
+// `motivo`: solo si no responde, por qué (tiempo agotado, rechaza o cierra la conexión...)
+interface EstadoLoteadora { id: number; name: string; zona: string | null; state: EstadoLoteadoraValor; motivo?: string; ultimoEnvio: UltimoEnvio | null }
 
 // Formulario de UN trabajo de impresión (artículo/fechas/turno/plantilla elegida).
 // Se guarda uno por loteadora (ver `formStates` en el componente) para que cambiar
@@ -444,6 +445,7 @@ function LoteadoraPanel() {
         body: JSON.stringify({
           loteadoraId: Number(selectedLoteadora),
           articuloId: selectedArticulo?.id,
+          articuloDesc: selectedArticulo?.descripcion, // solo para el registro de envíos
           // Valores en crudo: el texto de cada campo lo compone el servidor con la
           // plantilla del artículo (el mismo cálculo que la vista previa).
           fresco: lote,
@@ -567,7 +569,12 @@ function LoteadoraPanel() {
                       </SelectTrigger>
                       <SelectContent align="start" alignItemWithTrigger={false}>
                         {loteadoras.map((l) => (
-                          <SelectItem key={l.id} value={String(l.id)} disabled={estadoDe(String(l.id)) === "apagada"}>
+                          <SelectItem
+                            key={l.id}
+                            value={String(l.id)}
+                            disabled={estadoDe(String(l.id)) === "apagada"}
+                            title={estadoLoteadoras.find((e) => e.id === l.id)?.motivo}
+                          >
                             {l.name}{l.zona && <span className="text-muted-foreground"> · {l.zona}</span>}
                             {estadoDe(String(l.id)) === "apagada" && <span className="text-muted-foreground"> · Sin conexión</span>}
                           </SelectItem>
@@ -590,7 +597,7 @@ function LoteadoraPanel() {
                     <Alert className="border-rose-500/20 bg-rose-400/10 py-2">
                       <PowerOff className="text-rose-500" />
                       <AlertDescription className="flex flex-wrap items-center gap-x-2 text-xs text-rose-600">
-                        La loteadora no responde: comprueba que está encendida y con el cable de red.
+                        {estadoLoteadoras.find((e) => String(e.id) === selectedLoteadora)?.motivo ?? "La loteadora no responde"}. Comprueba que está encendida y con el cable de red.
                         <button type="button" onClick={fetchEstadoLoteadoras} className="underline hover:opacity-80">Comprobar de nuevo</button>
                       </AlertDescription>
                     </Alert>
@@ -897,6 +904,7 @@ function LoteadoraPanel() {
                               {info.label}
                             </Badge>
                           </div>
+                          {l.motivo && <p className="mt-1 text-xs text-muted-foreground">{l.motivo}</p>}
                           {l.ultimoEnvio ? (
                             <div className="mt-2 border-t border-border pt-2">
                               <p className="text-[11px] text-muted-foreground">

@@ -70,6 +70,8 @@ export default function AdminLoteadoras({ titulo, descripcion }: SeccionProps) {
   const puede = (accion: string) => tienePermiso(usuario, `admin.loteadora.maquinas.${accion}` as Permiso);
   const [loteadoras, setLoteadoras] = useState<Loteadora[]>([]);
   const [estados, setEstados] = useState<Record<number, EstadoVivo>>({});
+  // Por qué no responde cada una (solo las "Sin conexión")
+  const [motivos, setMotivos] = useState<Record<number, string>>({});
   const [cargando, setCargando] = useState(true);
 
   // null = cerrado; "nueva" = alta; una loteadora = edición
@@ -111,8 +113,9 @@ export default function AdminLoteadoras({ titulo, descripcion }: SeccionProps) {
     try {
       const res = await apiFetch("/api/admin/loteadoras/estado");
       if (!res.ok) return;
-      const data: { id: number; state: EstadoVivo }[] = await res.json();
+      const data: { id: number; state: EstadoVivo; motivo?: string }[] = await res.json();
       setEstados(Object.fromEntries(data.map((d) => [d.id, d.state])));
+      setMotivos(Object.fromEntries(data.filter((d) => d.motivo).map((d) => [d.id, d.motivo!])));
     } catch { /* se reintenta en el siguiente ciclo */ }
   };
 
@@ -233,6 +236,7 @@ export default function AdminLoteadoras({ titulo, descripcion }: SeccionProps) {
                             <Badge variant="outline" className="text-muted-foreground"><Loader2 className="animate-spin" />Comprobando</Badge>
                           )}
                         </div>
+                        {motivos[l.id] && <p className="mt-1 max-w-xs text-xs text-muted-foreground">{motivos[l.id]}</p>}
                       </TableCell>
                       <TableCell>
                         {(puede("editar") || puede("eliminar")) && (
