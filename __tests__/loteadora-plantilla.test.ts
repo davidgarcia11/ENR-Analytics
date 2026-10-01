@@ -5,7 +5,7 @@
  */
 import { describe, it, expect } from 'bun:test'
 import {
-  componerCampos, disponerMensaje, exportarCopia, trozosEtiqueta, lineasEtiqueta, medidasDeTamano, medidasPorDefecto, piezasManuales, validarMedidas, filasACampos, formatearCaducidad, formatearCocida, importarCopia, validarPlantilla, variablesUsadas,
+  aplicarAjusteTurno, componerCampos, disponerMensaje, exportarCopia, trozosEtiqueta, lineasEtiqueta, medidasDeTamano, medidasPorDefecto, piezasManuales, validarMedidas, filasACampos, formatearCaducidad, formatearCocida, importarCopia, validarPlantilla, variablesUsadas,
   type Campo, type ValoresEtiqueta,
 } from '@/lib/loteadora-plantilla'
 
@@ -150,7 +150,7 @@ describe('copia de seguridad (exportar / importar)', () => {
   const nuevaBd = () => {
     const db = new Database(':memory:')
     db.exec(`
-      CREATE TABLE loteadora_mensajes (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL UNIQUE);
+      CREATE TABLE loteadora_mensajes (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL UNIQUE, ajuste_turno TEXT);
       CREATE TABLE loteadora_mensaje_segmentos (id INTEGER PRIMARY KEY AUTOINCREMENT, mensaje_id INTEGER NOT NULL,
         orden INTEGER NOT NULL, field_id INTEGER NOT NULL, tipo TEXT NOT NULL, valor TEXT, nombre TEXT, formato TEXT);
       CREATE TABLE loteadora_articulo_mensajes (articulo_id TEXT PRIMARY KEY, mensaje_id INTEGER NOT NULL);
@@ -180,6 +180,12 @@ describe('copia de seguridad (exportar / importar)', () => {
 
     const r2 = importarCopia(db, exportada, false)
     expect('value' in r2 && r2.value.plantillas).toEqual({ creadas: 0, sustituidas: 0, omitidas: 2 })
+  })
+
+  it('la caducidad según el turno va y vuelve en la copia', () => {
+    const db = nuevaBd()
+    importarCopia(db, { version: 1, plantillas: [{ name: 'N20_X', campos: campos('DD/MM/AA'), ajusteTurno: { '3': 1 } }], articulos: [] }, false)
+    expect(exportarCopia(db).plantillas[0].ajusteTurno).toEqual({ '3': 1 })
   })
 
   it('sin "sustituir" no pisa lo existente; con "sustituir" sí', () => {
@@ -369,3 +375,45 @@ describe('medidas del mensaje (fuente, tamaño, espaciado)', () => {
     expect('error' in validarMedidas({ fuente: 'Arial', tamano: 2, espaciado: 0, ancho: 16, interlineado: 31 })).toBe(true)
   })
 })
+
+describe('caducidad según el turno', () => {
+  const campos: Campo[] = [
+    { fieldId: 1, piezas: [{ tipo: 'texto', valor: 'CAD ' }, { tipo: 'caducidad', formato: 'DD/MM/AA' }] },
+    { fieldId: 2, piezas: [{ tipo: 'caducidad', formato: 'DD', valor: '-1' }] },
+  ]
+
+  it('mueve todas las caducidades de la plantilla según el turno, encima del ajuste de cada pieza', () => {
+    const v = { caducidad: '2027-01-06', turno: '3' }
+    const textos = componerCampos(campos, aplicarAjusteTurno(v, { '3': 1 })).map((c) => c.texto)
+    expect(textos).toEqual(['CAD 07/01/27', '06'])
+    // otro turno, sin ajuste
+    expect(componerCampos(campos, aplicarAjusteTurno({ ...v, turno: '1' }, { '3': 1 }))[0].texto).toBe('CAD 06/01/27')
+  })
+
+  it('con ajuste, el turno es obligatorio aunque no se imprima', () => {
+    expect(variablesUsadas(campos).has('turno')).toBe(false)
+    expect(variablesUsadas(campos, { '3': 1 }).has('turno')).toBe(true)
+    expect(variablesUsadas(campos, { '3': 0 }).has('turno')).toBe(false)
+  })
+
+  it('valida: días enteros entre -30 y 30; los 0 no se guardan', () => {
+    const r = validarPlantilla({ name: 'X', campos, ajusteTurno: { '1': '0', '2': '', '3': '-1' } })
+    expect('value' in r && r.value.ajusteTurno).toEqual({ '3': -1 })
+    const sin = validarPlantilla({ name: 'X', campos, ajusteTurno: { '1': 0 } })
+    expect('value' in sin && sin.value.ajusteTurno).toBeUndefined()
+    expect('error' in validarPlantilla({ name: 'X', campos, ajusteTurno: { '3': 1.5 } })).toBe(true)
+    expect('error' in validarPlantilla({ name: 'X', campos, ajusteTurno: { '3': 40 } })).toBe(true)
+  })
+})
+
+describe('formatos de fecha con "-"', () => {
+  it('caducidad y cocida como fecha, con guion', () => {
+    expect(formatearCaducidad('2027-01-06', 'DD-MM-AA')).toBe('06-01-27')
+    expect(formatearCaducidad('2027-01-06', 'MM-DD-AAAA')).toBe('01-06-2027')
+    expect(formatearCaducidad('2027-01-06', 'DD/MM/AA')).toBe('06/01/27')
+    expect(formatearCocida(2026, 364, 'DD-MM-AAAA')).toBe('30-12-2026')
+    const r = validarPlantilla({ name: 'X', campos: [{ fieldId: 1, piezas: [{ tipo: 'caducidad', formato: 'DD-MM-AA' }] }] })
+    expect('value' in r).toBe(true)
+  })
+})
+

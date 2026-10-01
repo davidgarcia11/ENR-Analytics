@@ -31,7 +31,10 @@ function resumenDatos(d: Record<string, any>): string {
   if (d.fresco) partes.push(`Lote ${d.fresco}`);
   if (d.cocidaDia) partes.push(`Cocida ${String(d.cocidaAnio ?? "").slice(-2)}/${d.cocidaDia}`);
   if (d.turno) partes.push(`Turno ${d.turno}`);
-  if (d.caducidad) partes.push(`Cad. ${d.caducidad}`);
+  if (d.caducidad) {
+    const t = Number(d.ajusteCaducidadTurno) || 0;
+    partes.push(`Cad. ${d.caducidad}${t ? ` (${t > 0 ? "+" : ""}${t} por el turno)` : ""}`);
+  }
   for (const [nombre, valor] of Object.entries(d.manuales ?? {})) partes.push(`${nombre}: ${valor}`);
   return partes.join(" · ");
 }

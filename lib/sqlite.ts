@@ -415,6 +415,11 @@ export function getDb(): Database.Database {
   if (!loteadoraColumns.some(c => c.name === 'familias')) {
     _db.exec("ALTER TABLE loteadoras ADD COLUMN familias TEXT NOT NULL DEFAULT ''");
   }
+  // Caducidad según el turno de cada plantilla (JSON { "3": 1 }; NULL = sin ajuste)
+  const mensajesColumns = _db.prepare("PRAGMA table_info(loteadora_mensajes)").all() as { name: string }[];
+  if (!mensajesColumns.some(c => c.name === 'ajuste_turno')) {
+    _db.exec('ALTER TABLE loteadora_mensajes ADD COLUMN ajuste_turno TEXT');
+  }
   // Etiqueta colocada en el registro de envíos (tabla creada en v1.21.0 sin esta columna)
   const enviosColumns = _db.prepare("PRAGMA table_info(loteadora_envios)").all() as { name: string }[];
   if (!enviosColumns.some(c => c.name === 'lineas')) {

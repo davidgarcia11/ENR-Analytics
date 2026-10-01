@@ -308,8 +308,8 @@ Cada plantilla tiene **campos**, uno por Field Module del mensaje en la máquina
 | Texto | Un literal tal cual: `L`, `CAD `, `EXP: `, un espacio... | — |
 | Dato fijo | Un valor constante con nombre (precio, nº de certificado) | Nombre + valor; editable aparte (ver "Datos fijos") |
 | Fecha fresco | Lo que escribe el operario, tal cual | — |
-| Cocida | Día juliano de cocida con su año | `AAJJJ` (26150), `AJJJ` (6150), `JJJ` (150) |
-| Caducidad | Cocida + días de caducidad, más un **ajuste en días** opcional (`-1` = el día anterior; se guarda en `valor`) | `DD/MM/AA`, `DD/MM/AAAA`, `MM/DD/AA`, `MM/DD/AAAA`, `DD` (solo el día). Ejemplo: caducidad completa en un campo (`25/07/2026`) y el día anterior en otro (`DD`, ajuste `-1` → `24`) |
+| Cocida | Día juliano de cocida con su año | `AAJJJ` (26150), `AJJJ` (6150), `JJJ` (150), o como fecha con los mismos formatos que la caducidad (`DD/MM/AA`, `DD-MM-AA`…) |
+| Caducidad | Cocida + días de caducidad, más un **ajuste en días** opcional (`-1` = el día anterior; se guarda en `valor`) | `DD/MM/AA`, `DD/MM/AAAA`, `MM/DD/AA`, `MM/DD/AAAA`, los mismos con `-` como separador (`DD-MM-AA`…), `DD` (solo el día). Ejemplo: caducidad completa en un campo (`25/07/2026`) y el día anterior en otro (`DD`, ajuste `-1` → `24`) |
 | Turno | El turno elegido (1/2/3) | — |
 | Hora | Hora del envío, `HHmm` | — |
 | Línea | Línea de fabricación de la loteadora | — |
@@ -356,6 +356,13 @@ CREATE TABLE loteadora_articulo_mensajes (
 Un artículo solo puede tener una plantilla a la vez (`articulo_id` es clave primaria) — asociar de nuevo sustituye la anterior. Borrar una plantilla borra en cascada sus campos y sus asociaciones.
 
 **Migración desde el modelo anterior** (6 columnas fijas `lot/cocida/expiry/hora/turno/linea_field_id` en `loteadora_mensajes`): al arrancar, cada columna se convierte en un campo con una sola pieza de ese tipo, sin literales, y la caducidad en `DD/MM/AAAA` (lo que se imprimía hasta entonces), así que las plantillas existentes siguen enviando exactamente lo mismo; si dos columnas compartían ID (las añadidas más tarde valían 0 por defecto) gana la primera. Después se eliminan las columnas. **Antes de tocar nada se guarda una copia completa de la BD** junto a `app.db` (`app.db.pre-plantillas-campos-<fecha>`, con `VACUUM INTO`): para volver atrás, restaurar ese fichero y desplegar la versión anterior.
+
+**Caducidad según el turno** (sept. 2026): en el editor, si la plantilla imprime alguna caducidad, aparece **"Caducidad según el turno"** con los días que se suman (o restan, en negativo) en el turno 1, 2 y 3, entre −30 y 30. Es **por plantilla** (suele venir del cliente: p. ej. el turno de noche, un día más) y mueve **todas** las caducidades de la etiqueta a la vez, encima del ajuste propio de cada pieza (p. ej. el "−1" del día anterior). Se guarda en `loteadora_mensajes.ajuste_turno` (JSON `{ "3": 1 }`, NULL = sin ajuste; `leerAjustesTurno` / `guardarAjusteTurno`) y viaja con Exportar/Importar.
+- `/loteadora` manda la caducidad **sin** el ajuste (cocida + días) y el servidor aplica el del turno elegido (`aplicarAjusteTurno`) antes de componer los campos. La vista previa y la confirmación lo enseñan ya aplicado, con el aviso *"Caducidad +1 día por el turno 3"*.
+- Si la plantilla tiene algún ajuste distinto de 0, **el turno es obligatorio** al enviar, aunque la etiqueta no lo imprima (`variablesUsadas(campos, ajusteTurno)`).
+- El registro de envíos guarda la caducidad ya movida y cuánto se movió (`datos.ajusteCaducidadTurno`).
+- La cocida (aunque se imprima como fecha) y el campo "Días de caducidad" de `/loteadora` no cambian.
+- En el editor, "Así quedará en la etiqueta" deja elegir con qué turno se enseña, para ver el ajuste.
 
 **Vista previa** (menú de cada plantilla → **"Vista previa"**): enseña cómo quedará la etiqueta, línea a línea y con valores de ejemplo, sin abrir el editor (la misma que "Así quedará en la etiqueta"). Desde ahí se puede pasar a Editar.
 
