@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import { requireAccess } from '@/lib/permissions';
 import { puedeVerLoteadora, zonasVisibles } from '@/lib/loteadora-zonas';
 import { getDb } from '@/lib/sqlite';
-import { getPrinterStatus } from '@/lib/loteadora-printer';
+import { getPrinterStatusDetail } from '@/lib/loteadora-printer';
 import { leerCampos, trozosEtiqueta, type TrozoEtiqueta } from '@/lib/loteadora-plantilla';
 
 interface LoteadoraRow {
@@ -52,15 +52,20 @@ export async function GET() {
   };
 
   const estados = await Promise.all(
-    visibles.map(async (l) => ({
-      id: l.id,
-      name: l.name,
-      zona: l.zona,
-      state: await getPrinterStatus({ ip: l.ip, port: l.port, slaveAddress: l.slave_address }),
-      ultimoEnvio: l.plantilla
-        ? { plantilla: l.plantilla, lineas: lineas(l.plantilla, JSON.parse(l.campos ?? '[]'), l.linea), usuario: l.usuario, enviadoAt: l.enviado_at }
-        : null,
-    }))
+    visibles.map(async (l) => {
+      // Si no responde, `motivo` dice por qué (lib/loteadora-printer.ts → motivoSinConexion)
+      const { state, motivo } = await getPrinterStatusDetail({ ip: l.ip, port: l.port, slaveAddress: l.slave_address });
+      return {
+        id: l.id,
+        name: l.name,
+        zona: l.zona,
+        state,
+        ...(motivo ? { motivo } : {}),
+        ultimoEnvio: l.plantilla
+          ? { plantilla: l.plantilla, lineas: lineas(l.plantilla, JSON.parse(l.campos ?? '[]'), l.linea), usuario: l.usuario, enviadoAt: l.enviado_at }
+          : null,
+      };
+    })
   );
 
   return NextResponse.json(estados);

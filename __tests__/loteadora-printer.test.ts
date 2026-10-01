@@ -9,7 +9,7 @@
  */
 import { describe, it, expect } from 'bun:test'
 import net from 'net'
-import { buildRemoteFieldFrame, buildSendFileFrame, MAX_PIEZA_ARCHIVO, listMessageNames, getPrinterStatus, loadPrintMessage, LOAD_APPLY_DELAY_MS } from '@/lib/loteadora-printer'
+import { buildRemoteFieldFrame, buildSendFileFrame, MAX_PIEZA_ARCHIVO, motivoSinConexion, getPrinterStatusDetail, listMessageNames, getPrinterStatus, loadPrintMessage, LOAD_APPLY_DELAY_MS } from '@/lib/loteadora-printer'
 
 describe('buildRemoteFieldFrame', () => {
   it('reproduce el ejemplo del manual (checknum B0)', () => {
@@ -143,10 +143,23 @@ describe('getPrinterStatus', () => {
     })
   })
 
-  it('solo da "Sin conexión" si fallan los dos intentos', async () => {
+  it('solo da "Sin conexión" si fallan los dos intentos, con el motivo', async () => {
     await servidor(2, async (port) => {
       expect(await getPrinterStatus({ ip: '127.0.0.1', port, slaveAddress: 0 })).toBe('apagada')
     })
+    await servidor(2, async (port) => {
+      const d = await getPrinterStatusDetail({ ip: '127.0.0.1', port, slaveAddress: 0 })
+      expect(d.motivo).toMatch(/^Cierra la conexión/)
+    })
+  })
+
+  it('traduce el motivo de "Sin conexión"', () => {
+    expect(motivoSinConexion('Tiempo de espera agotado conectando con la loteadora')).toMatch(/^No responde/)
+    expect(motivoSinConexion('Error de conexión con la loteadora: connect ECONNREFUSED 10.0.0.1:8010')).toMatch(/^Rechaza la conexión/)
+    expect(motivoSinConexion('La loteadora cerró la conexión sin responder')).toMatch(/^Cierra la conexión/)
+    expect(motivoSinConexion('Error de conexión con la loteadora: read ECONNRESET')).toMatch(/^Cierra la conexión/)
+    expect(motivoSinConexion('Error de conexión con la loteadora: connect EHOSTUNREACH 10.0.0.1:8010')).toMatch(/^Red inalcanzable/)
+    expect(motivoSinConexion('Falta la IP o el puerto de la loteadora')).toBe('Falta la IP o el puerto de la loteadora')
   })
 })
 

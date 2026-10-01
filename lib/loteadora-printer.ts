@@ -261,6 +261,19 @@ export interface PrinterStatusDetail {
    * o la máquina no devolvió datos.
    */
   rawBytes: string | null;
+  /** Solo si `state` es 'apagada': por qué no respondió, en claro (ver motivoSinConexion) */
+  motivo?: string;
+}
+
+// Motivo de "Sin conexión" para la pantalla, a partir del error de la conexión. Dice
+// en qué punto falló, que es más que un ping: un rechazo o un corte quieren decir que
+// la máquina sí está en la red.
+export function motivoSinConexion(error: string): string {
+  if (/Tiempo de espera agotado/i.test(error)) return 'No responde (tiempo agotado): apagada, sin red o IP incorrecta';
+  if (/ECONNREFUSED/.test(error)) return 'Rechaza la conexión: el puerto no está abierto o no es el de la máquina';
+  if (/cerró la conexión|ECONNRESET|EPIPE/i.test(error)) return 'Cierra la conexión: probablemente otro equipo está conectado a ella';
+  if (/EHOSTUNREACH|ENETUNREACH|EHOSTDOWN/.test(error)) return 'Red inalcanzable: no hay camino de red hasta la máquina';
+  return error;
 }
 
 // Tiempo máximo de la consulta de estado. Con 3 s, si la máquina tardaba en
@@ -282,7 +295,7 @@ async function queryPrinterStatus(config: LoteadoraConfig): Promise<PrinterStatu
       return detalle;
     } catch (err2: any) {
       console.warn(`[loteadora ${config.ip}] estado: sin conexión (${err2?.message})`);
-      return { state: 'apagada', rawBytes: null };
+      return { state: 'apagada', rawBytes: null, motivo: motivoSinConexion(String(err2?.message ?? '')) };
     }
   }
 }

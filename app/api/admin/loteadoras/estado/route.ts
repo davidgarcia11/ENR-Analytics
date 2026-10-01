@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { getDb } from '@/lib/sqlite';
-import { getPrinterStatus } from '@/lib/loteadora-printer';
+import { getPrinterStatusDetail } from '@/lib/loteadora-printer';
 import { requireAccess } from '@/lib/permissions';
 import { permisosLoteadora as L } from '@/lib/permisos';
 
@@ -12,7 +12,7 @@ interface LoteadoraRow {
 }
 
 // Estado en vivo (admin) de TODAS las loteadoras, habilitadas o no, para la
-// pestaña Loteadoras de /admin.
+// pestaña Loteadoras de /admin. Si no responde, `motivo` dice por qué.
 export async function GET() {
   const acceso = await requireAccess({ permiso: L('maquinas') });
   if (!acceso.ok) return acceso.denied;
@@ -21,10 +21,10 @@ export async function GET() {
   const loteadoras = db.prepare('SELECT id, ip, port, slave_address FROM loteadoras').all() as LoteadoraRow[];
 
   const estados = await Promise.all(
-    loteadoras.map(async (l) => ({
-      id: l.id,
-      state: await getPrinterStatus({ ip: l.ip, port: l.port, slaveAddress: l.slave_address }),
-    }))
+    loteadoras.map(async (l) => {
+      const { state, motivo } = await getPrinterStatusDetail({ ip: l.ip, port: l.port, slaveAddress: l.slave_address });
+      return { id: l.id, state, ...(motivo ? { motivo } : {}) };
+    })
   );
 
   return NextResponse.json(estados);
