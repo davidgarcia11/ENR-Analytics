@@ -577,6 +577,7 @@ Desde sept. 2026 cada sección de `/admin` → Loteadora tiene un permiso por ac
 | Plantillas | `plantillas.ver` | `plantillas.editar` (incluye duplicar) | `plantillas.eliminar` | `plantillas.crear-en-maquina`, `plantillas.copia` (exportar/importar) |
 | Artículos | `articulos.ver` | `articulos.editar` (asociar) | `articulos.eliminar` (desvincular) | — |
 | Datos fijos | `datos-fijos.ver` | `datos-fijos.editar` | — | — |
+| Registro | `registro.ver` | — | — | — |
 
 (todas con el prefijo `admin.loteadora.`; aparte, `loteadora.limpiar-buffer` en `/loteadora`)
 
@@ -585,3 +586,15 @@ Desde sept. 2026 cada sección de `/admin` → Loteadora tiene un permiso por ac
 - La vista previa de una plantilla está con cualquier permiso de Plantillas.
 - El admin lo tiene todo.
 - Migración `permisos-por-accion`: ver DOCUMENTACION.md §5b.
+
+---
+
+## 19. Registro de envíos
+
+Cada **"Enviar a loteadora"** que llega a la máquina queda guardado en `loteadora_envios` (`lib/loteadora-registro.ts`, lo escribe `POST /api/loteadora/enviar`), vaya bien o mal: fecha, máquina, usuario, plantilla, artículo (código y descripción), el **texto de cada campo** tal como se envió, **lo rellenado** (lote, cocida, caducidad, turno, datos a introducir) y el **resultado** (`ok`, `aviso` —p. ej. impresión parada— o `error`, con su mensaje).
+
+- **Se guarda siempre** (trazabilidad: poder mirar un lote de hace meses). Copia los nombres de máquina y plantilla y no tiene claves ajenas, así que sigue valiendo aunque se borren o renombren.
+- **No se guardan** los envíos que el panel rechaza antes de mandarlos (máquina imprimiendo, datos que faltan…): no llegaron a la máquina. Guardar en el registro nunca bloquea la respuesta del envío.
+- **Consulta:** `/admin` → Loteadora › **Registro** (`components/nova/admin/registro-loteadora.tsx`), con el permiso `admin.loteadora.registro.ver` (§18; el admin siempre). Lo más reciente primero, de 50 en 50, con filtros por máquina, fechas (en hora local), usuario y búsqueda por artículo, lote, plantilla o texto enviado. `GET /api/admin/loteadora-registro`.
+- La descripción del artículo la manda `/loteadora` solo para el registro (`articuloDesc`); el resto lo calcula el servidor.
+

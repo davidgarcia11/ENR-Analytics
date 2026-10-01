@@ -30,7 +30,7 @@ import NotificationDropdown from "@/components/shadcn-space/blocks/topbar-02/hea
 import ProfileDropdown, { iniciales } from "@/components/shadcn-space/blocks/topbar-02/header/dropdown-profile"
 import { getNavData } from "@/components/shadcn-space/blocks/topbar-02/data"
 import {
-  BellRing, ChevronsUpDown, FileCode, FileText, LayoutGrid, Link2, MapPin, Printer, Receipt, RefreshCw, ScanBarcode, Settings, ShieldCheck, Tag, Users,
+  BellRing, ChevronsUpDown, FileCode, FileText, History, LayoutGrid, Link2, MapPin, Printer, Receipt, RefreshCw, ScanBarcode, Settings, ShieldCheck, Tag, Users,
   type LucideIcon,
 } from "lucide-react"
 import { puedeEntrarEnAdmin, seccionesAdminPorPermisos } from "@/lib/permisos"
@@ -43,6 +43,7 @@ import AdminPlantillas from "@/components/nova/admin/plantillas"
 import AdminArticulosPlantilla from "@/components/nova/admin/articulos-plantilla"
 import AdminDatosFijos from "@/components/nova/admin/datos-fijos"
 import AdminZonas from "@/components/nova/admin/zonas"
+import AdminRegistroLoteadora from "@/components/nova/admin/registro-loteadora"
 import AdminMuestrasSync from "@/components/nova/admin/muestras-sync"
 import AdminLogsConsultas from "@/components/nova/admin/logs-consultas"
 import AdminConfirmacionesPda from "@/components/nova/admin/confirmaciones-pda"
@@ -79,6 +80,7 @@ const GRUPOS_ADMIN: GrupoAdmin[] = [
       { key: "plantillas", label: "Plantillas", descripcion: "Mensajes de las máquinas: sus campos y qué se imprime en cada uno", icon: FileCode, Componente: AdminPlantillas },
       { key: "articulos-plantilla", label: "Artículos", descripcion: "Qué plantilla se carga al elegir cada artículo en /loteadora", icon: Link2, Componente: AdminArticulosPlantilla },
       { key: "datos-fijos", label: "Datos fijos", descripcion: "Precios, nº de certificado y otros valores fijos de las plantillas", icon: Receipt, Componente: AdminDatosFijos },
+      { key: "registro-loteadora", label: "Registro", descripcion: "Todo lo enviado a las loteadoras: qué, a qué máquina, cuándo, quién y cómo fue", icon: History, Componente: AdminRegistroLoteadora },
     ],
   },
   {

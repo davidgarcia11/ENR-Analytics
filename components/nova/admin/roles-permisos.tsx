@@ -8,8 +8,10 @@
 //              agrupadas por su grupo (Loteadora · Máquinas: Ver, Crear y editar...)
 //   Columnas = "Público" (solo paneles: lo ve cualquiera, incluso sin sesión) + un rol
 //
-// La primera columna (qué es cada fila) queda fija al desplazarse a la derecha: con
-// muchos roles, si no, se pierde de vista qué fila es cada una.
+// La primera columna (qué es cada fila) queda fija al desplazarse a la derecha, y la
+// cabecera (qué rol es cada columna) al bajar: con muchos roles o muchos permisos, si
+// no, se pierde de vista qué casilla es cuál. Para que la cabecera se quede arriba,
+// la matriz se desplaza dentro de su recuadro (alto de la pantalla), no la página.
 //
 // Cada casilla se guarda al marcarla (actualización optimista; si el servidor falla,
 // se deshace y avisa). El admin lo tiene todo y no es editable. Los permisos
@@ -45,8 +47,13 @@ interface ScreenConfig {
 const aNombreInterno = (label: string) =>
   label.trim().toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/[^a-z0-9_]+/g, "_").replace(/^_+|_+$/g, "");
 
-// Columna fija a la izquierda (fondo opaco para que no se vea lo que pasa por debajo)
+// Columna fija a la izquierda y cabecera fija arriba (fondo opaco para que no se vea
+// lo que pasa por debajo; la esquina, por encima de las dos)
 const FIJA = "sticky left-0 z-10 bg-card";
+const CABECERA = "sticky top-0 z-20 bg-muted!";
+const ESQUINA = "sticky left-0 top-0 z-30 bg-muted!";
+// La tabla se desplaza dentro de su recuadro (si no, la cabecera no puede quedarse fija)
+const DESPLAZABLE = "[&_[data-slot=table-container]]:max-h-[calc(100vh-14rem)] [&_[data-slot=table-container]]:overflow-auto";
 
 function Grupo({ titulo, columnas }: { titulo: string; columnas: number }) {
   return (
@@ -231,15 +238,16 @@ export default function AdminRolesPermisos({ titulo, descripcion }: SeccionProps
           </span>
         }
       >
+        <div className={DESPLAZABLE}>
         <Table>
           <TableHeader>
             <TableRow>
-              <TableHead className={`${FIJA} min-w-56`}>Permiso</TableHead>
-              <TableHead className="w-24 text-center">
+              <TableHead className={`${ESQUINA} min-w-56`}>Permiso</TableHead>
+              <TableHead className={`${CABECERA} w-24 text-center`}>
                 <span className="inline-flex items-center gap-1"><Globe className="size-3.5" />Público</span>
               </TableHead>
               {roles.map((r) => (
-                <TableHead key={r.id} className="w-32 text-center">
+                <TableHead key={r.id} className={`${CABECERA} w-32 text-center`}>
                   <div className="flex items-center justify-center gap-0.5">
                     <div className="flex flex-col leading-tight">
                       <span className="text-foreground">{r.label}</span>
@@ -352,6 +360,7 @@ export default function AdminRolesPermisos({ titulo, descripcion }: SeccionProps
             )}
           </TableBody>
         </Table>
+        </div>
       </TablaCard>
 
       <Dialog open={creando} onOpenChange={(o) => !o && cerrar()}>

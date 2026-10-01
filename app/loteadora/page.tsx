@@ -444,6 +444,7 @@ function LoteadoraPanel() {
         body: JSON.stringify({
           loteadoraId: Number(selectedLoteadora),
           articuloId: selectedArticulo?.id,
+          articuloDesc: selectedArticulo?.descripcion, // solo para el registro de envíos
           // Valores en crudo: el texto de cada campo lo compone el servidor con la
           // plantilla del artículo (el mismo cálculo que la vista previa).
           fresco: lote,
