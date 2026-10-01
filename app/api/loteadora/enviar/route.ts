@@ -4,7 +4,7 @@ import { requireAccess } from '@/lib/permissions';
 import { puedeVerLoteadora, zonasVisibles } from '@/lib/loteadora-zonas';
 import { sendRemoteFields, getPrinterStatus, getPrinterStatusDetail } from '@/lib/loteadora-printer';
 import {
-  ASCII_IMPRIMIBLE, INFO_PIEZA, MAX_MANUAL, componerCampos, leerCampos, piezasManuales, variablesUsadas, type ValoresEtiqueta,
+  ASCII_IMPRIMIBLE, INFO_PIEZA, MAX_MANUAL, componerCampos, leerCampos, piezasManuales, trozosEtiqueta, variablesUsadas, type ValoresEtiqueta,
 } from '@/lib/loteadora-plantilla';
 import { registrarEnvio, type ResultadoEnvio } from '@/lib/loteadora-registro';
 
@@ -133,6 +133,8 @@ export async function POST(req: NextRequest) {
         loteadoraId: Number(loteadoraId), loteadora: loteadora.name, usuario, plantilla,
         articuloId: String(articuloId), articuloDesc: body.articuloDesc ? String(body.articuloDesc).slice(0, 120) : null,
         campos: enviados, datos: { ...valores }, resultado, mensaje,
+        // La etiqueta colocada ahora, con la plantilla y la línea de este momento
+        lineas: trozosEtiqueta(campos, new Map(enviados.map((c) => [c.fieldId, c.texto])), loteadora.linea?.length),
       });
     } catch (e) {
       console.error('No se pudo guardar el envío en el registro de la loteadora:', e);

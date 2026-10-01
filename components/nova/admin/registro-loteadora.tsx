@@ -91,7 +91,7 @@ export default function AdminRegistroLoteadora({ titulo, descripcion }: SeccionP
               <TableHead>Máquina</TableHead>
               <TableHead>Usuario</TableHead>
               <TableHead>Artículo</TableHead>
-              <TableHead>Lo enviado</TableHead>
+              <TableHead>Plantilla y lo enviado</TableHead>
               <TableHead>Resultado</TableHead>
             </TableRow>
           </TableHeader>
@@ -111,10 +111,19 @@ export default function AdminRegistroLoteadora({ titulo, descripcion }: SeccionP
                     {f.articuloDesc && <span className="block max-w-56 truncate text-xs text-muted-foreground" title={f.articuloDesc}>{f.articuloDesc}</span>}
                   </TableCell>
                   <TableCell>
-                    <span className="block font-mono text-xs text-muted-foreground">{f.plantilla}</span>
-                    {f.campos.map((c) => (
-                      <span key={c.fieldId} className="block font-mono text-sm font-semibold whitespace-pre text-foreground" title={`Campo ${c.fieldId}`}>{c.texto}</span>
-                    ))}
+                    <Badge variant="outline" className="mb-1 font-mono font-normal" title="Plantilla enviada">{f.plantilla}</Badge>
+                    {/* Como en la etiqueta (guardada al enviar); los primeros envíos, un campo por línea */}
+                    {f.lineas
+                      ? f.lineas.map((linea, i) => (
+                        <span key={i} className="block font-mono text-sm font-semibold whitespace-pre text-foreground">
+                          {linea.map((t, j) => t.reloj
+                            ? <span key={j} className="font-normal text-muted-foreground" title="Reloj de la máquina (hora de cada impresión)">{t.texto}</span>
+                            : t.texto)}
+                        </span>
+                      ))
+                      : f.campos.map((c) => (
+                        <span key={c.fieldId} className="block font-mono text-sm font-semibold whitespace-pre text-foreground" title={`Campo ${c.fieldId}`}>{c.texto}</span>
+                      ))}
                     {resumenDatos(f.datos) && <span className="mt-0.5 block text-xs text-muted-foreground">{resumenDatos(f.datos)}</span>}
                   </TableCell>
                   <TableCell>

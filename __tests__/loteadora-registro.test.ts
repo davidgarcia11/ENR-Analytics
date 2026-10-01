@@ -13,7 +13,7 @@ function nuevaBd() {
       id INTEGER PRIMARY KEY AUTOINCREMENT, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
       loteadora_id INTEGER NOT NULL, loteadora TEXT NOT NULL, usuario TEXT, plantilla TEXT NOT NULL,
       articulo_id TEXT NOT NULL, articulo_desc TEXT, campos TEXT NOT NULL, datos TEXT NOT NULL,
-      resultado TEXT NOT NULL, mensaje TEXT
+      resultado TEXT NOT NULL, mensaje TEXT, lineas TEXT
     );
   `)
   return db as any
@@ -22,7 +22,7 @@ function nuevaBd() {
 const envio = (cambios: Partial<EnvioRegistro>): EnvioRegistro => ({
   loteadoraId: 1, loteadora: 'Línea 2', usuario: 'Operaria A', plantilla: 'N01_X', articuloId: '1234567890',
   articuloDesc: 'Producto de prueba', campos: [{ fieldId: 1, texto: 'L263641 ' }], datos: { fresco: '263221', turno: '1' },
-  resultado: 'ok', mensaje: null, ...cambios,
+  resultado: 'ok', mensaje: null, lineas: null, ...cambios,
 })
 
 describe('registro de envíos', () => {
@@ -34,6 +34,16 @@ describe('registro de envíos', () => {
     expect(total).toBe(2)
     expect(filas[0]).toMatchObject({ resultado: 'error', mensaje: 'Tiempo de espera agotado', campos: [{ fieldId: 1, texto: 'L263641 ' }] })
     expect(filas[1].datos).toEqual({ fresco: '263221', turno: '1' })
+  })
+
+  it('guarda la etiqueta tal como quedaba al enviar, con el reloj marcado', () => {
+    const db = nuevaBd()
+    const lineas = [[{ texto: 'L263641 ' }, { texto: 'HHmm', reloj: true }], [{ texto: 'CAD 06/01/27' }]]
+    registrarEnvio(db, envio({ lineas }))
+    registrarEnvio(db, envio({}))
+    const { filas } = buscarEnvios(db, {})
+    expect(filas[1].lineas).toEqual(lineas)
+    expect(filas[0].lineas).toBeNull()
   })
 
   it('filtra por máquina, usuario, búsqueda (lote, artículo...) y fechas', () => {
