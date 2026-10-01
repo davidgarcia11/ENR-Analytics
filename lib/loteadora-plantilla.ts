@@ -22,7 +22,11 @@ export type TipoPieza = (typeof TIPOS_PIEZA)[number];
 export type TipoVariable = Exclude<TipoPieza, 'texto' | 'fijo' | 'reloj'>;
 
 // 'DD' = solo el día (p. ej. el día anterior a la caducidad en otro campo: "24").
-export const FORMATOS_CADUCIDAD = ['DD/MM/AA', 'DD/MM/AAAA', 'MM/DD/AA', 'MM/DD/AAAA', 'DD'] as const;
+// Con "/" o con "-" como separador.
+export const FORMATOS_CADUCIDAD = [
+  'DD/MM/AA', 'DD/MM/AAAA', 'MM/DD/AA', 'MM/DD/AAAA',
+  'DD-MM-AA', 'DD-MM-AAAA', 'MM-DD-AA', 'MM-DD-AAAA', 'DD',
+] as const;
 // La cocida también puede imprimirse como fecha ("PROD: 21/09/26").
 export const FORMATOS_COCIDA = ['AAJJJ', 'AJJJ', 'JJJ', ...FORMATOS_CADUCIDAD] as const;
 
@@ -58,7 +62,26 @@ export interface Campo {
 export const FORMATOS_RELOJ = ['HHmm', 'HH:mm'] as const;
 export type FormatoReloj = (typeof FORMATOS_RELOJ)[number];
 
-export interface Plantilla { name: string; campos: Campo[] }
+// Caducidad según el turno: días que se suman (o restan) a TODAS las caducidades de la
+// plantilla según el turno elegido en /loteadora (p. ej. { '3': 1 }: el turno de noche,
+// un día más). Por plantilla porque suele venir del cliente. Los turnos que no estén,
+// 0. Se aplica antes de componer (aplicarAjusteTurno) y encima del ajuste de cada pieza.
+export type AjusteTurno = Partial<Record<'1' | '2' | '3', number>>;
+export const TURNOS = ['1', '2', '3'] as const;
+
+export interface Plantilla { name: string; campos: Campo[]; ajusteTurno?: AjusteTurno }
+
+export const tieneAjusteTurno = (a?: AjusteTurno | null): boolean => !!a && Object.values(a).some((n) => !!n);
+
+/** Días del ajuste para ese turno (0 si no hay) */
+export const diasPorTurno = (a: AjusteTurno | null | undefined, turno?: string): number =>
+  (turno && a ? a[turno as '1' | '2' | '3'] ?? 0 : 0);
+
+/** Los valores con la caducidad ya movida según el turno (si la plantilla lo lleva). */
+export function aplicarAjusteTurno(v: ValoresEtiqueta, a?: AjusteTurno | null): ValoresEtiqueta {
+  const dias = diasPorTurno(a, v.turno);
+  return dias && v.caducidad ? { ...v, caducidad: sumarDias(v.caducidad, dias) } : v;
+}
 
 export const INFO_PIEZA: Record<TipoPieza, { label: string; ayuda: string }> = {
   texto: { label: 'Texto', ayuda: 'Literal que se imprime tal cual ("L", "CAD ", un espacio...)' },
@@ -111,11 +134,12 @@ export function formatearCaducidad(iso: string, formato: string = 'DD/MM/AAAA'):
   const [a, m, d] = iso.split('-');
   if (formato === 'DD') return d;
   const anio = formato.endsWith('AAAA') ? a : a.slice(-2);
-  return formato.startsWith('MM') ? `${m}/${d}/${anio}` : `${d}/${m}/${anio}`;
+  const sep = formato.includes('-') ? '-' : '/';
+  return formato.startsWith('MM') ? `${m}${sep}${d}${sep}${anio}` : `${d}${sep}${m}${sep}${anio}`;
 }
 
 export function formatearCocida(anio: number, dia: number, formato: string = 'AAJJJ'): string {
-  if (formato.includes('/')) {
+  if (formato.includes('/') || formato.includes('-')) {
     // Día juliano → fecha (UTC para que no se mueva un día por la zona horaria)
     return formatearCaducidad(new Date(Date.UTC(anio, 0, dia)).toISOString().slice(0, 10), formato);
   }
@@ -159,12 +183,16 @@ export function piezasManuales(campos: Campo[]): { nombre: string; porDefecto: s
   return [...vistos].map(([nombre, porDefecto]) => ({ nombre, porDefecto }));
 }
 
-/** Variables (no literales) que usa una plantilla: decide qué pide /loteadora. */
-export function variablesUsadas(campos: Campo[]): Set<TipoVariable> {
+/**
+ * Variables (no literales) que usa una plantilla: decide qué pide /loteadora. Con
+ * caducidad según el turno, el turno es obligatorio aunque no se imprima.
+ */
+export function variablesUsadas(campos: Campo[], ajusteTurno?: AjusteTurno | null): Set<TipoVariable> {
   const usadas = new Set<TipoVariable>();
   for (const c of campos) for (const p of c.piezas) {
     if (p.tipo !== 'texto' && p.tipo !== 'fijo' && p.tipo !== 'reloj') usadas.add(p.tipo);
   }
+  if (usadas.has('caducidad') && tieneAjusteTurno(ajusteTurno)) usadas.add('turno');
   return usadas;
 }
 
@@ -285,7 +313,20 @@ export function validarPlantilla(body: any): { error: string } | { value: Planti
     campos.push({ fieldId, piezas, linea, ...(espaciado !== undefined ? { espaciado } : {}), ...(tamano !== undefined ? { tamano } : {}) });
   }
 
-  return { value: { name, campos } };
+  // Caducidad según el turno: días enteros entre -30 y 30; los 0 no se guardan
+  const ajusteTurno: AjusteTurno = {};
+  if (body?.ajusteTurno !== undefined && body?.ajusteTurno !== null) {
+    if (typeof body.ajusteTurno !== 'object') return { error: 'La caducidad según el turno no es válida' };
+    for (const t of TURNOS) {
+      const v = body.ajusteTurno[t];
+      if (v === undefined || v === null || v === '' || Number(v) === 0) continue;
+      const n = Number(v);
+      if (!Number.isInteger(n) || n < -30 || n > 30) return { error: `Caducidad según el turno: el turno ${t} debe ser un número entero de días entre -30 y 30` };
+      ajusteTurno[t] = n;
+    }
+  }
+
+  return { value: { name, campos, ...(tieneAjusteTurno(ajusteTurno) ? { ajusteTurno } : {}) } };
 }
 
 // ─── Disposición en la etiqueta (para crear el mensaje en la máquina) ────────────
@@ -495,6 +536,16 @@ export function leerCampos(db: Database.Database, mensajeIds?: number[]): Map<nu
   })]));
 }
 
+/** Caducidad según el turno de varias plantillas (clave = mensaje_id); sin ajuste, no aparece. */
+export function leerAjustesTurno(db: Database.Database): Map<number, AjusteTurno> {
+  const filas = db.prepare('SELECT id, ajuste_turno FROM loteadora_mensajes WHERE ajuste_turno IS NOT NULL').all() as { id: number; ajuste_turno: string }[];
+  return new Map(filas.map((f) => [f.id, JSON.parse(f.ajuste_turno) as AjusteTurno]));
+}
+
+export function guardarAjusteTurno(db: Database.Database, mensajeId: number, a?: AjusteTurno): void {
+  db.prepare('UPDATE loteadora_mensajes SET ajuste_turno = ? WHERE id = ?').run(tieneAjusteTurno(a) ? JSON.stringify(a) : null, mensajeId);
+}
+
 /** Sustituye todos los campos de una plantilla (llamar dentro de una transacción). */
 export function guardarCampos(db: Database.Database, mensajeId: number, campos: Campo[]): void {
   db.prepare('DELETE FROM loteadora_mensaje_segmentos WHERE mensaje_id = ?').run(mensajeId);
@@ -525,6 +576,7 @@ export interface CopiaLoteadora {
 export function exportarCopia(db: Database.Database): CopiaLoteadora {
   const mensajes = db.prepare('SELECT id, name FROM loteadora_mensajes ORDER BY name').all() as { id: number; name: string }[];
   const campos = leerCampos(db);
+  const ajustes = leerAjustesTurno(db);
   const articulos = db.prepare(
     `SELECT am.articulo_id AS articuloId, m.name AS plantilla
      FROM loteadora_articulo_mensajes am JOIN loteadora_mensajes m ON m.id = am.mensaje_id
@@ -533,7 +585,7 @@ export function exportarCopia(db: Database.Database): CopiaLoteadora {
   return {
     version: 1,
     exportadaAt: new Date().toISOString(),
-    plantillas: mensajes.map((m) => ({ name: m.name, campos: campos.get(m.id) ?? [] })),
+    plantillas: mensajes.map((m) => ({ name: m.name, campos: campos.get(m.id) ?? [], ...(ajustes.has(m.id) ? { ajusteTurno: ajustes.get(m.id) } : {}) })),
     articulos,
   };
 }
@@ -578,8 +630,10 @@ export function importarCopia(db: Database.Database, copia: any, sustituir: bool
     const insertar = db.prepare('INSERT INTO loteadora_mensajes (name) VALUES (?)');
     for (const p of plantillas) {
       const existente = idDe.get(p.name) as { id: number } | undefined;
-      if (!existente) { guardarCampos(db, Number(insertar.run(p.name).lastInsertRowid), p.campos); r.plantillas.creadas++; }
-      else if (sustituir) { guardarCampos(db, existente.id, p.campos); r.plantillas.sustituidas++; }
+      if (!existente) {
+        const id = Number(insertar.run(p.name).lastInsertRowid);
+        guardarCampos(db, id, p.campos); guardarAjusteTurno(db, id, p.ajusteTurno); r.plantillas.creadas++;
+      } else if (sustituir) { guardarCampos(db, existente.id, p.campos); guardarAjusteTurno(db, existente.id, p.ajusteTurno); r.plantillas.sustituidas++; }
       else r.plantillas.omitidas++;
     }
     const actual = db.prepare('SELECT mensaje_id FROM loteadora_articulo_mensajes WHERE articulo_id = ?');

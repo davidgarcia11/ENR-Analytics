@@ -4,7 +4,8 @@ import { requireAccess } from '@/lib/permissions';
 import { puedeVerLoteadora, zonasVisibles } from '@/lib/loteadora-zonas';
 import { sendRemoteFields, getPrinterStatus, getPrinterStatusDetail } from '@/lib/loteadora-printer';
 import {
-  ASCII_IMPRIMIBLE, INFO_PIEZA, MAX_MANUAL, componerCampos, leerCampos, piezasManuales, trozosEtiqueta, variablesUsadas, type ValoresEtiqueta,
+  ASCII_IMPRIMIBLE, INFO_PIEZA, MAX_MANUAL, aplicarAjusteTurno, componerCampos, diasPorTurno, leerAjustesTurno, leerCampos, piezasManuales,
+  trozosEtiqueta, variablesUsadas, type ValoresEtiqueta,
 } from '@/lib/loteadora-plantilla';
 import { registrarEnvio, type ResultadoEnvio } from '@/lib/loteadora-registro';
 
@@ -46,8 +47,11 @@ export async function POST(req: NextRequest) {
     );
   }
 
+  // Caducidad según el turno de la plantilla (si la lleva, el turno es obligatorio)
+  const ajusteTurno = leerAjustesTurno(db).get(asociacion!.mensaje_id) ?? null;
+
   // Validar solo lo que la plantilla usa.
-  const usadas = variablesUsadas(campos);
+  const usadas = variablesUsadas(campos, ajusteTurno);
   const valores: ValoresEtiqueta = {};
 
   if (usadas.has('fresco')) {
@@ -109,7 +113,9 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  const compuestos = componerCampos(campos, valores);
+  // La caducidad llega sin el ajuste del turno: se aplica aquí, a todas las de la plantilla
+  const diasTurno = diasPorTurno(ajusteTurno, valores.turno);
+  const compuestos = componerCampos(campos, aplicarAjusteTurno(valores, ajusteTurno));
   const faltan = [...new Set(compuestos.flatMap((c) => c.faltan))];
   if (faltan.length > 0) {
     return NextResponse.json({ error: `Faltan datos para la plantilla: ${faltan.map((t) => INFO_PIEZA[t].label).join(', ')}` }, { status: 400 });
@@ -132,7 +138,9 @@ export async function POST(req: NextRequest) {
       registrarEnvio(db, {
         loteadoraId: Number(loteadoraId), loteadora: loteadora.name, usuario, plantilla,
         articuloId: String(articuloId), articuloDesc: body.articuloDesc ? String(body.articuloDesc).slice(0, 120) : null,
-        campos: enviados, datos: { ...valores }, resultado, mensaje,
+        campos: enviados, resultado, mensaje,
+        // Lo rellenado; la caducidad, ya con el ajuste del turno (y cuánto fue)
+        datos: { ...aplicarAjusteTurno(valores, ajusteTurno), ...(diasTurno ? { ajusteCaducidadTurno: diasTurno } : {}) },
         // La etiqueta colocada ahora, con la plantilla y la línea de este momento
         lineas: trozosEtiqueta(campos, new Map(enviados.map((c) => [c.fieldId, c.texto])), loteadora.linea?.length),
       });
