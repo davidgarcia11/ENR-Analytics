@@ -208,7 +208,8 @@ export function getDb(): Database.Database {
       campos TEXT NOT NULL,          -- JSON: [{ fieldId, texto }]
       datos TEXT NOT NULL,           -- JSON: lo rellenado (lote, cocida, turno...)
       resultado TEXT NOT NULL,       -- 'ok' | 'aviso' | 'error'
-      mensaje TEXT
+      mensaje TEXT,
+      lineas TEXT                    -- JSON: la etiqueta colocada al enviar (trozosEtiqueta); NULL en los primeros envíos
     );
     CREATE INDEX IF NOT EXISTS idx_loteadora_envios_maquina ON loteadora_envios (loteadora_id, id);
 
@@ -413,6 +414,11 @@ export function getDb(): Database.Database {
   // separadas por comas. Vacío = todas.
   if (!loteadoraColumns.some(c => c.name === 'familias')) {
     _db.exec("ALTER TABLE loteadoras ADD COLUMN familias TEXT NOT NULL DEFAULT ''");
+  }
+  // Etiqueta colocada en el registro de envíos (tabla creada en v1.21.0 sin esta columna)
+  const enviosColumns = _db.prepare("PRAGMA table_info(loteadora_envios)").all() as { name: string }[];
+  if (!enviosColumns.some(c => c.name === 'lineas')) {
+    _db.exec('ALTER TABLE loteadora_envios ADD COLUMN lineas TEXT');
   }
   // Espaciado propio de cada campo (tabla creada en v1.11.0 sin esta columna)
   const camposColumns = _db.prepare("PRAGMA table_info(loteadora_mensaje_campos)").all() as { name: string }[];

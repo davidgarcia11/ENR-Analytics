@@ -592,10 +592,11 @@ Desde sept. 2026 cada sección de `/admin` → Loteadora tiene un permiso por ac
 
 ## 19. Registro de envíos
 
-Cada **"Enviar a loteadora"** que llega a la máquina queda guardado en `loteadora_envios` (`lib/loteadora-registro.ts`, lo escribe `POST /api/loteadora/enviar`), vaya bien o mal: fecha, máquina, usuario, plantilla, artículo (código y descripción), el **texto de cada campo** tal como se envió, **lo rellenado** (lote, cocida, caducidad, turno, datos a introducir) y el **resultado** (`ok`, `aviso` —p. ej. impresión parada— o `error`, con su mensaje).
+Cada **"Enviar a loteadora"** que llega a la máquina queda guardado en `loteadora_envios` (`lib/loteadora-registro.ts`, lo escribe `POST /api/loteadora/enviar`), vaya bien o mal: fecha, máquina, usuario, plantilla, artículo (código y descripción), el **texto de cada campo** tal como se envió, **lo rellenado** (lote, cocida, caducidad, turno, datos a introducir) el **resultado** (`ok`, `aviso` —p. ej. impresión parada— o `error`, con su mensaje) y **la etiqueta colocada** en ese momento (`lineas`, con `trozosEtiqueta()`: cada campo en su línea y su sitio, el reloj marcado).
 
 - **Se guarda siempre** (trazabilidad: poder mirar un lote de hace meses). Copia los nombres de máquina y plantilla y no tiene claves ajenas, así que sigue valiendo aunque se borren o renombren.
 - **No se guardan** los envíos que el panel rechaza antes de mandarlos (máquina imprimiendo, datos que faltan…): no llegaron a la máquina. Guardar en el registro nunca bloquea la respuesta del envío.
 - **Consulta:** `/admin` → Loteadora › **Registro** (`components/nova/admin/registro-loteadora.tsx`), con el permiso `admin.loteadora.registro.ver` (§18; el admin siempre). Lo más reciente primero, de 50 en 50, con filtros por máquina, fechas (en hora local), usuario y búsqueda por artículo, lote, plantilla o texto enviado. `GET /api/admin/loteadora-registro`.
 - La descripción del artículo la manda `/loteadora` solo para el registro (`articuloDesc`); el resto lo calcula el servidor.
+- En la tabla se ve el **nombre de la plantilla** enviada y **lo enviado como en la etiqueta**, en sus líneas y con el `HHmm` del reloj en gris. Se usa la disposición guardada al enviar, no la plantilla actual: aunque la plantilla se edite después, el registro enseña la etiqueta tal como se mandó. Los envíos de antes de guardarla (columna `lineas` NULL, primeros días de v1.21.0) salen un campo por línea.
 
