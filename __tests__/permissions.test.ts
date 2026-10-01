@@ -401,6 +401,11 @@ describe('permisos de la loteadora por acción', () => {
     ]) expect(puedeUsarApiAdmin(ruta, metodo, 6, 'encargado')).toBe(false)
   })
 
+  it('el registro de envíos solo se ve con su permiso', () => {
+    expect(puedeUsarApiAdmin('/api/admin/loteadora-registro', 'GET', 5, 'tecnico')).toBe(false)
+    expect(puedeUsarApiAdmin('/api/admin/loteadora-registro', 'GET', 1, 'admin')).toBe(true)
+  })
+
   it('ver o asociar artículos no deja desvincular', () => {
     expect(puedeUsarApiAdmin('/api/admin/loteadora-articulos/1210100221', 'DELETE', 4, 'calidad')).toBe(false)
     expect(puedeUsarApiAdmin('/api/admin/loteadora-articulos/1210100221', 'DELETE', 3, 'supervisor')).toBe(true)

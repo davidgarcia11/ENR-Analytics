@@ -472,7 +472,8 @@ Las cookies con `secure: true` no funcionan sobre HTTP (solo HTTPS). Cuando el d
 - Las secciones sin permiso asociado (usuarios, roles, logs, etc.) y `/admin/logs` (que
   redirige a la sección de logs) siguen siendo **solo admin**.
 - **Roles y permisos** es una matriz (filas = paneles y permisos agrupados por sección y
-  acción, columnas = roles). La primera columna queda fija al desplazarse a la derecha.
+  acción, columnas = roles). La primera columna queda fija al desplazarse a la derecha y
+  la cabecera con los roles al bajar (la matriz se desplaza dentro de su recuadro).
 - La sección activa va en la URL (`/admin?seccion=logs`): recargar no te devuelve a la
   primera y se puede enlazar directamente a una sección.
 
@@ -590,6 +591,7 @@ sincronización, último error) y botón "Sincronizar ahora" — ver
 | GET | `/api/admin/logs` | Logs de consultas con paginación, filtros y estadísticas (ver sección 7) |
 | GET / POST | `/api/admin/zonas` · PUT / DELETE `/api/admin/zonas/:id` | Zonas de las loteadoras y roles/usuarios que ven cada una (permisos de Zonas; `GET ?opciones=1` añade los roles y usuarios asignables, solo con `zonas.editar`; ver `docs/loteadora.md` §17) |
 | GET / POST | `/api/admin/loteadora-articulos/copia` | Exporta (ver) / importa (asociar) solo las asociaciones artículo → plantilla (sección Artículos) |
+| GET | `/api/admin/loteadora-registro` | Registro de envíos a las loteadoras, con filtros y por páginas (permiso `registro.ver`, ver `docs/loteadora.md` §19) |
 | GET / POST | `/api/admin/loteadora-copia` | Exporta / importa en JSON las plantillas de la loteadora y sus asociaciones de artículos (botones de `/admin` → Plantillas, ver `docs/loteadora.md` §13) |
 
 Todas son solo de admin salvo las abiertas a un permiso en `RUTAS_ADMIN_POR_PERMISO`
@@ -704,6 +706,7 @@ artículos de `/muestras` o asignar artículos a plantillas de loteadora.
   | Plantillas | `plantillas.ver` | `plantillas.editar` (incluye duplicar) | `plantillas.eliminar` | `plantillas.crear-en-maquina`, `plantillas.copia` (exportar/importar) |
   | Artículos | `articulos.ver` | `articulos.editar` (asociar) | `articulos.eliminar` (desvincular) | — |
   | Datos fijos | `datos-fijos.ver` | `datos-fijos.editar` | — | — |
+  | Registro | `registro.ver` | — | — | — |
   
   (todas con el prefijo `admin.loteadora.`; aparte, `loteadora.limpiar-buffer` en `/loteadora`)
 

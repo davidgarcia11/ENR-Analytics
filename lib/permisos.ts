@@ -44,13 +44,14 @@ export const PERMISOS = {
   'admin.loteadora.articulos.eliminar': { label: 'Desvincular artículos de su plantilla', corto: 'Artículos: desvincular', grupo: 'Loteadora · Artículos', accion: 'Desvincular', seccionAdmin: 'articulos-plantilla' },
   'admin.loteadora.datos-fijos.ver': { label: 'Ver los datos fijos de las plantillas', corto: 'Datos fijos: ver', grupo: 'Loteadora · Datos fijos', accion: 'Ver', seccionAdmin: 'datos-fijos' },
   'admin.loteadora.datos-fijos.editar': { label: 'Cambiar los datos fijos (precios, nº de certificado...)', corto: 'Datos fijos: editar', grupo: 'Loteadora · Datos fijos', accion: 'Cambiar valores', seccionAdmin: 'datos-fijos' },
+  'admin.loteadora.registro.ver': { label: 'Ver el registro de envíos de la loteadora (qué se mandó, a qué máquina, cuándo y quién)', corto: 'Registro: ver', grupo: 'Loteadora · Registro', accion: 'Ver', seccionAdmin: 'registro-loteadora' },
   // En /loteadora (sin sección de /admin): vaciar la cola de envíos pendientes de una máquina.
   'loteadora.limpiar-buffer': { label: 'Limpiar el buffer de la loteadora (descarta los envíos pendientes)', corto: 'Limpiar buffer', grupo: 'Loteadora · Uso diario', accion: 'Limpiar buffer' },
 } as const satisfies Record<string, DefinicionPermiso>;
 
 export type Permiso = keyof typeof PERMISOS;
 
-type Seccion = 'maquinas' | 'zonas' | 'plantillas' | 'articulos' | 'datos-fijos';
+type Seccion = 'maquinas' | 'zonas' | 'plantillas' | 'articulos' | 'datos-fijos' | 'registro';
 /** Permisos de una sección de la loteadora; sin acciones, todos (los que dejan verla). */
 export function permisosLoteadora(seccion: Seccion, ...acciones: string[]): Permiso[] {
   const prefijo = `admin.loteadora.${seccion}.`;
@@ -113,6 +114,8 @@ export const RUTAS_ADMIN_POR_PERMISO: { prefijo: string | RegExp; metodos?: stri
   { prefijo: '/api/admin/loteadoras', metodos: ['GET'], permiso: [...L('maquinas'), ...L('plantillas', 'ver', 'editar', 'crear-en-maquina')] },
   { prefijo: '/api/admin/loteadoras', metodos: ['POST', 'PUT'], permiso: L('maquinas', 'editar') },
   { prefijo: '/api/admin/loteadoras', metodos: ['DELETE'], permiso: L('maquinas', 'eliminar') },
+  // Registro de envíos (solo lectura)
+  { prefijo: '/api/admin/loteadora-registro', metodos: ['GET'], permiso: L('registro') },
   // Zonas. Lectura también para elegir la zona de una máquina.
   { prefijo: '/api/admin/zonas', metodos: ['GET'], permiso: [...L('zonas'), ...L('maquinas', 'editar')] },
   { prefijo: '/api/admin/zonas', metodos: ['POST', 'PUT'], permiso: L('zonas', 'editar') },

@@ -6,6 +6,7 @@ import { sendRemoteFields, getPrinterStatus, getPrinterStatusDetail } from '@/li
 import {
   ASCII_IMPRIMIBLE, INFO_PIEZA, MAX_MANUAL, componerCampos, leerCampos, piezasManuales, variablesUsadas, type ValoresEtiqueta,
 } from '@/lib/loteadora-plantilla';
+import { registrarEnvio, type ResultadoEnvio } from '@/lib/loteadora-registro';
 
 // Envía una etiqueta a una loteadora física por TCP (comando 1D del protocolo TIJ).
 // Exige permiso de pantalla: dispara una acción física real.
@@ -28,8 +29,8 @@ export async function POST(req: NextRequest) {
   const db = getDb();
 
   const loteadora = db.prepare(
-    'SELECT ip, port, slave_address, linea, zona_id FROM loteadoras WHERE id = ? AND enabled = 1'
-  ).get(Number(loteadoraId)) as { ip: string; port: number; slave_address: number; linea: string; zona_id: number | null } | undefined;
+    'SELECT name, ip, port, slave_address, linea, zona_id FROM loteadoras WHERE id = ? AND enabled = 1'
+  ).get(Number(loteadoraId)) as { name: string; ip: string; port: number; slave_address: number; linea: string; zona_id: number | null } | undefined;
   if (!loteadora || !puedeVerLoteadora(zonasVisibles(db, acceso.user), loteadora.zona_id)) {
     return NextResponse.json({ error: 'Loteadora no encontrada, deshabilitada o sin acceso (zona)' }, { status: 404 });
   }
@@ -119,6 +120,24 @@ export async function POST(req: NextRequest) {
   }
 
   const config = { ip: loteadora.ip, port: loteadora.port, slaveAddress: loteadora.slave_address };
+  const plantilla = (db.prepare('SELECT name FROM loteadora_mensajes WHERE id = ?').get(asociacion!.mensaje_id) as { name: string }).name;
+  const u = acceso.user;
+  const usuario = u ? [u.name, u.surname].filter(Boolean).join(' ') || u.username : null;
+  const enviados = compuestos.map((c) => ({ fieldId: c.fieldId, texto: c.texto }));
+
+  // Registro de envíos (lib/loteadora-registro.ts): cada envío que llega a la máquina,
+  // vaya bien o mal. Nunca bloquea la respuesta.
+  const registrar = (resultado: ResultadoEnvio, mensaje: string | null) => {
+    try {
+      registrarEnvio(db, {
+        loteadoraId: Number(loteadoraId), loteadora: loteadora.name, usuario, plantilla,
+        articuloId: String(articuloId), articuloDesc: body.articuloDesc ? String(body.articuloDesc).slice(0, 120) : null,
+        campos: enviados, datos: { ...valores }, resultado, mensaje,
+      });
+    } catch (e) {
+      console.error('No se pudo guardar el envío en el registro de la loteadora:', e);
+    }
+  };
 
   // Imprimiendo no se cambian los datos: parte de la tirada saldría con un lote
   // y parte con otro (trazabilidad). Ver docs/loteadora.md §6.
@@ -128,19 +147,17 @@ export async function POST(req: NextRequest) {
 
   try {
     const { warning } = await sendRemoteFields(config, compuestos.map((c) => ({ id: c.fieldId, text: c.texto })));
+    registrar(warning ? 'aviso' : 'ok', warning);
 
     // Último envío de esta loteadora, para "Estado de las loteadoras". Nunca
     // bloquea la respuesta: el envío ya se ha hecho.
     try {
-      const plantilla = db.prepare('SELECT name FROM loteadora_mensajes WHERE id = ?').get(asociacion!.mensaje_id) as { name: string };
-      const u = acceso.user;
       db.prepare(
         `INSERT INTO loteadora_ultimo_envio (loteadora_id, plantilla, campos, usuario, enviado_at)
          VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
          ON CONFLICT(loteadora_id) DO UPDATE SET plantilla = excluded.plantilla, campos = excluded.campos,
            usuario = excluded.usuario, enviado_at = excluded.enviado_at`
-      ).run(Number(loteadoraId), plantilla.name, JSON.stringify(compuestos.map((c) => ({ fieldId: c.fieldId, texto: c.texto }))),
-        u ? [u.name, u.surname].filter(Boolean).join(' ') || u.username : null);
+      ).run(Number(loteadoraId), plantilla, JSON.stringify(enviados), usuario);
       // Último valor de cada dato a introducir: /loteadora lo propone la próxima vez
       const guardarManual = db.prepare(
         `INSERT INTO loteadora_manuales_ultimos (mensaje_id, nombre, valor) VALUES (?, ?, ?)
@@ -154,6 +171,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ ok: true, warning });
   } catch (err: any) {
     console.error('Envío a loteadora error:', err);
+    registrar('error', String(err?.message ?? err));
     // Detalle adicional (bytes de estado en crudo) para el "ver más" del front —
     // no se traduce a texto porque la tabla de significado por bit no se puede
     // reconstruir de forma fiable desde el manual (ver lib/loteadora-printer.ts).
