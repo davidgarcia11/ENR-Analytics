@@ -35,12 +35,15 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/nova/ui/dialog";
 import { Combobox, ComboboxContent, ComboboxEmpty, ComboboxInput, ComboboxItem, ComboboxList } from "@/components/nova/ui/combobox";
 import { Toaster } from "@/components/nova/ui/sonner";
-import { INFO_PIEZA, MAX_MANUAL, componerCampos, piezasManuales, variablesUsadas, type Campo, type TipoVariable } from "@/lib/loteadora-plantilla";
+import {
+  INFO_PIEZA, MAX_MANUAL, aplicarAjusteTurno, componerCampos, diasPorTurno, piezasManuales, variablesUsadas,
+  type AjusteTurno, type Campo, type TipoVariable,
+} from "@/lib/loteadora-plantilla";
 
 // Plantilla del artículo: nombre del mensaje en la máquina y sus campos con piezas
 // (lib/loteadora-plantilla.ts) — deciden qué pide el formulario y la vista previa.
 // ultimosManuales: último valor enviado de cada "dato a introducir" de la plantilla
-interface PlantillaArticulo { messageName: string; campos: Campo[]; ultimosManuales: Record<string, string> }
+interface PlantillaArticulo { messageName: string; campos: Campo[]; ultimosManuales: Record<string, string>; ajusteTurno: AjusteTurno | null }
 interface Articulo { id: string; descripcion: string; diasCaducidad: number; familia: string; familiaDesc: string; plantilla: PlantillaArticulo | null }
 // familias: códigos F4101.IMSRP2 separados por comas que ofrece esta loteadora (vacío = todas)
 interface Loteadora { id: number; name: string; linea: string; familias: string; zona: string | null }
@@ -417,6 +420,7 @@ function LoteadoraPanel() {
       detalle: (
         <>
           Se enviará a <span className="font-medium text-foreground">{loteadoraSeleccionada?.name}</span>:
+          {avisoTurno && <span className="mt-1 block text-xs font-medium text-amber-600">{avisoTurno}</span>}
           <span className="mt-2 grid gap-1">
             {compuestos.map((c) => (
               <span key={c.fieldId} className="flex gap-2 font-mono text-sm text-foreground">
@@ -494,10 +498,14 @@ function LoteadoraPanel() {
   // Lo que pide el formulario depende de la plantilla del artículo: sin artículo (o
   // sin plantilla) se enseña todo; con plantilla, solo lo que usan sus campos.
   const plantilla = selectedArticulo?.plantilla ?? null;
-  const usadas = plantilla ? variablesUsadas(plantilla.campos) : null;
+  const usadas = plantilla ? variablesUsadas(plantilla.campos, plantilla.ajusteTurno) : null;
   const necesita = (t: TipoVariable) => !usadas || usadas.has(t);
+  // Caducidad según el turno (de la plantilla): la vista previa la enseña ya movida,
+  // igual que la calculará el servidor (a la caducidad se le manda sin el ajuste).
+  const diasTurno = diasPorTurno(plantilla?.ajusteTurno, turno || undefined);
+  const avisoTurno = diasTurno ? `Caducidad ${diasTurno > 0 ? "+" : ""}${diasTurno} día${Math.abs(diasTurno) === 1 ? "" : "s"} por el turno ${turno}` : null;
   const compuestos = plantilla
-    ? componerCampos(plantilla.campos, {
+    ? componerCampos(plantilla.campos, aplicarAjusteTurno({
         fresco: lote ?? undefined,
         cocidaAnio: cocidaYear ?? undefined,
         cocidaDia: cocidaValida ? cocidaDiaNum : undefined,
@@ -506,7 +514,7 @@ function LoteadoraPanel() {
         turno: turno || undefined,
         manuales: currentForm.manuales,
         linea: lineaLoteadora ?? undefined,
-      })
+      }, plantilla.ajusteTurno))
     : [];
   const faltan = [...new Set(compuestos.flatMap((c) => c.faltan))];
   // Imprimiendo (P_Status 00 en el estado en vivo) no se deja cambiar nada, ni de
@@ -799,6 +807,11 @@ function LoteadoraPanel() {
                 {/* ── Columna derecha: la etiqueta es el centro visual ── */}
                 <div className="flex flex-col gap-4 lg:pl-6">
                   <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Vista previa de impresión</p>
+                  {avisoTurno && (
+                    <p className="flex items-center gap-1.5 text-xs font-medium text-amber-600">
+                      <AlertTriangle className="size-3.5" />{avisoTurno}
+                    </p>
+                  )}
 
                   {/* Etiqueta: grid de 2 columnas (en vez de la lista apilada original a
                       text-4xl) — más compacta que la versión original pero con más

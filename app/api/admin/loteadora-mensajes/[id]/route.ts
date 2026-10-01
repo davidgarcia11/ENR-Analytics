@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getDb } from '@/lib/sqlite';
 import { requireAccess } from '@/lib/permissions';
 import { permisosLoteadora as L } from '@/lib/permisos';
-import { guardarCampos, validarPlantilla } from '@/lib/loteadora-plantilla';
+import { guardarAjusteTurno, guardarCampos, validarPlantilla } from '@/lib/loteadora-plantilla';
 
 // Edita nombre y campos de una plantilla (los campos se sustituyen enteros).
 export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
@@ -15,7 +15,7 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
   if ('error' in parsed) {
     return NextResponse.json({ error: parsed.error }, { status: 400 });
   }
-  const { name, campos } = parsed.value;
+  const { name, campos, ajusteTurno } = parsed.value;
 
   const db = getDb();
   if (!db.prepare('SELECT 1 FROM loteadora_mensajes WHERE id = ?').get(mensajeId)) {
@@ -28,6 +28,7 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
   db.transaction(() => {
     db.prepare('UPDATE loteadora_mensajes SET name = ? WHERE id = ?').run(name, mensajeId);
     guardarCampos(db, mensajeId, campos);
+    guardarAjusteTurno(db, mensajeId, ajusteTurno);
   })();
 
   return NextResponse.json({ ok: true });

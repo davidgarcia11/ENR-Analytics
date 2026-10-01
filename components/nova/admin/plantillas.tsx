@@ -21,7 +21,8 @@ import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger,
 } from "@/components/nova/ui/dropdown-menu";
 import {
-  ESPACIADOS, FORMATOS_CADUCIDAD, FORMATOS_COCIDA, FORMATOS_RELOJ, INFO_PIEZA, MAX_MANUAL, TIPOS_PIEZA, componerCampos, lineasEtiqueta,
+  ESPACIADOS, FORMATOS_CADUCIDAD, FORMATOS_COCIDA, FORMATOS_RELOJ, INFO_PIEZA, MAX_MANUAL, TIPOS_PIEZA, TURNOS, aplicarAjusteTurno,
+  componerCampos, lineasEtiqueta, tieneAjusteTurno, type AjusteTurno,
   medidasDeTamano, piezasManuales, type MedidasMensaje,
   type Campo, type Pieza, type TipoPieza, type ValoresEtiqueta,
 } from "@/lib/loteadora-plantilla";
@@ -31,6 +32,8 @@ interface Mensaje {
   id: number;
   name: string;
   campos: Campo[];
+  /** Caducidad según el turno (null = sin ajuste) */
+  ajusteTurno: AjusteTurno | null;
 }
 
 // En el formulario el ID se edita como texto (puede estar a medio escribir)
@@ -271,6 +274,10 @@ export default function AdminPlantillas({ titulo, descripcion }: SeccionProps) {
   const [formulario, setFormulario] = useState<"nueva" | Mensaje | null>(null);
   const [nombre, setNombre] = useState("");
   const [campos, setCampos] = useState<CampoEditable[]>(vacia);
+  // Caducidad según el turno: días por turno (texto mientras se escribe)
+  const [ajusteTurno, setAjusteTurno] = useState<Record<string, string>>({});
+  // Turno con el que se enseña la vista previa del formulario (para ver el ajuste)
+  const [turnoVista, setTurnoVista] = useState("1");
   const [borrando, setBorrando] = useState<Mensaje | null>(null);
   const [guardando, setGuardando] = useState(false);
   const [error, setError] = useState("");
@@ -356,15 +363,16 @@ export default function AdminPlantillas({ titulo, descripcion }: SeccionProps) {
 
   const cerrar = () => { setFormulario(null); setBorrando(null); setError(""); };
 
-  const abrirAlta = () => { setNombre(""); setCampos(vacia()); setError(""); setFormulario("nueva"); };
-  const abrirEdicion = (m: Mensaje) => { setNombre(m.name); setCampos(aEditables(m.campos)); setError(""); setFormulario(m); };
+  const aTexto = (a: AjusteTurno | null) => Object.fromEntries(Object.entries(a ?? {}).map(([t, n]) => [t, String(n)]));
+  const abrirAlta = () => { setNombre(""); setCampos(vacia()); setAjusteTurno({}); setError(""); setFormulario("nueva"); };
+  const abrirEdicion = (m: Mensaje) => { setNombre(m.name); setCampos(aEditables(m.campos)); setAjusteTurno(aTexto(m.ajusteTurno)); setError(""); setFormulario(m); };
   // Plantilla nueva a partir de otra: mismos campos y piezas, primer nombre libre
   // NOMBRE_2, NOMBRE_3... Los artículos asociados siguen con la original.
   const abrirDuplicado = (m: Mensaje) => {
     const usados = new Set(mensajes.map((x) => x.name));
     let n = 2;
     while (usados.has(`${m.name}_${n}`)) n++;
-    setNombre(`${m.name}_${n}`); setCampos(aEditables(m.campos)); setError(""); setFormulario("nueva");
+    setNombre(`${m.name}_${n}`); setCampos(aEditables(m.campos)); setAjusteTurno(aTexto(m.ajusteTurno)); setError(""); setFormulario("nueva");
   };
 
   const siguienteId = () => {
@@ -383,7 +391,7 @@ export default function AdminPlantillas({ titulo, descripcion }: SeccionProps) {
       const res = await apiFetch(esNueva ? "/api/admin/loteadora-mensajes" : `/api/admin/loteadora-mensajes/${formulario.id}`, {
         method: esNueva ? "POST" : "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name: nombre, campos: aCampos(campos) }),
+        body: JSON.stringify({ name: nombre, campos: aCampos(campos), ajusteTurno }),
       });
       const data = await res.json();
       if (!res.ok) { setError(data.error || "Error al guardar"); return; }
@@ -391,7 +399,7 @@ export default function AdminPlantillas({ titulo, descripcion }: SeccionProps) {
       cerrar();
       cargar();
       // Plantilla nueva: se ofrece crearla ya en la máquina (el usuario confirma)
-      if (esNueva && puede("crear-en-maquina")) abrirCrearEnMaquina({ id: data.id, name: data.name, campos: data.campos });
+      if (esNueva && puede("crear-en-maquina")) abrirCrearEnMaquina({ id: data.id, name: data.name, campos: data.campos, ajusteTurno: data.ajusteTurno });
     } catch { setError("Error de conexión"); } finally { setGuardando(false); }
   };
 
@@ -409,6 +417,9 @@ export default function AdminPlantillas({ titulo, descripcion }: SeccionProps) {
   };
 
   const editando = formulario && formulario !== "nueva";
+  // Ejemplo del formulario: con el turno elegido para la vista previa y su ajuste de caducidad
+  const ajusteNumerico: AjusteTurno = Object.fromEntries(Object.entries(ajusteTurno).map(([t, v]) => [t, Number(v) || 0]));
+  const ejemploForm = aplicarAjusteTurno({ ...ejemplo, turno: turnoVista }, ajusteNumerico);
 
   return (
     <>
@@ -442,7 +453,7 @@ export default function AdminPlantillas({ titulo, descripcion }: SeccionProps) {
                   <TableCell className="align-top font-mono text-sm font-medium text-foreground">{m.name}</TableCell>
                   <TableCell>
                     <div className="flex flex-wrap gap-1.5">
-                      {componerCampos(m.campos, conManuales(ejemplo, m.campos)).map((c) => (
+                      {componerCampos(m.campos, aplicarAjusteTurno(conManuales(ejemplo, m.campos), m.ajusteTurno)).map((c) => (
                         <Badge key={c.fieldId} variant="outline" className="gap-1.5 font-normal">
                           <span className="text-muted-foreground">ID {c.fieldId}</span>
                           <span className="font-mono whitespace-pre text-foreground">{conEspacios(c.texto) || "—"}</span>
@@ -500,7 +511,7 @@ export default function AdminPlantillas({ titulo, descripcion }: SeccionProps) {
               <Label>Campos</Label>
               {campos.map((c, i) => (
                 <EditorCampo
-                  ejemplo={ejemplo}
+                  ejemplo={ejemploForm}
                   key={i}
                   campo={c}
                   puedeQuitar={campos.length > 1}
@@ -514,10 +525,49 @@ export default function AdminPlantillas({ titulo, descripcion }: SeccionProps) {
               </Button>
             </div>
 
+            {/* Solo si la plantilla imprime alguna caducidad */}
+            {campos.some((c) => c.piezas.some((p) => p.tipo === "caducidad")) && (
+              <div className="grid gap-2 rounded-xl border p-3">
+                <Label>Caducidad según el turno</Label>
+                <div className="flex flex-wrap items-center gap-3">
+                  {TURNOS.map((t) => (
+                    <label key={t} className="flex items-center gap-1.5 text-sm">
+                      Turno {t}
+                      <Input
+                        type="number"
+                        min={-30}
+                        max={30}
+                        value={ajusteTurno[t] ?? ""}
+                        onChange={(e) => setAjusteTurno({ ...ajusteTurno, [t]: e.target.value })}
+                        placeholder="0"
+                        className="h-8 w-20 font-mono"
+                        aria-label={`Días de caducidad de más o de menos en el turno ${t}`}
+                      />
+                      <span className="text-xs text-muted-foreground">días</span>
+                    </label>
+                  ))}
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  Se suman (o restan, en negativo) a todas las caducidades de la etiqueta según el turno elegido en /loteadora. Si
+                  hay alguno, el turno es obligatorio al enviar. Vacío o 0: no cambia.
+                </p>
+              </div>
+            )}
+
             <div className="grid gap-1.5">
-              <Label>Así quedará en la etiqueta</Label>
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <Label>Así quedará en la etiqueta</Label>
+                {tieneAjusteTurno(ajusteNumerico) && (
+                  <Select items={TURNOS.map((t) => ({ value: t, label: `Con el turno ${t}` }))} value={turnoVista} onValueChange={(v) => setTurnoVista(v as string)}>
+                    <SelectTrigger size="sm" className="h-7 w-36 text-xs"><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      {TURNOS.map((t) => <SelectItem key={t} value={t} className="text-xs">Con el turno {t}</SelectItem>)}
+                    </SelectContent>
+                  </Select>
+                )}
+              </div>
               <pre className="overflow-x-auto rounded-lg border bg-muted/40 px-3 py-2 font-mono text-sm text-foreground">
-                {lineasEtiqueta(aCampos(campos), conManuales(ejemplo, aCampos(campos))).join("\n") || "—"}
+                {lineasEtiqueta(aCampos(campos), conManuales(ejemploForm, aCampos(campos))).join("\n") || "—"}
               </pre>
               <p className="text-xs text-muted-foreground">
                 Con valores de ejemplo. «HHmm» o «HH:mm» es el reloj, que la máquina rellena con la hora real. Es la disposición con la que se crea el mensaje en la loteadora.
@@ -545,7 +595,7 @@ export default function AdminPlantillas({ titulo, descripcion }: SeccionProps) {
             </DialogDescription>
           </DialogHeader>
           <pre className="overflow-x-auto rounded-lg border bg-muted/40 px-3 py-2 font-mono text-sm text-foreground">
-            {enVista ? lineasEtiqueta(enVista.campos, conManuales(ejemplo, enVista.campos)).join("\n") || "—" : ""}
+            {enVista ? lineasEtiqueta(enVista.campos, aplicarAjusteTurno(conManuales(ejemplo, enVista.campos), enVista.ajusteTurno)).join("\n") || "—" : ""}
           </pre>
           <p className="text-xs text-muted-foreground">«HHmm» o «HH:mm» es el reloj, que la máquina rellena con la hora real.</p>
           <DialogFooter>
@@ -564,7 +614,7 @@ export default function AdminPlantillas({ titulo, descripcion }: SeccionProps) {
             </DialogDescription>
           </DialogHeader>
           <pre className="overflow-x-auto rounded-lg border bg-muted/40 px-3 py-2 font-mono text-sm text-foreground">
-            {enMaquina ? lineasEtiqueta(enMaquina.campos, conManuales(ejemplo, enMaquina.campos)).join("\n") : ""}
+            {enMaquina ? lineasEtiqueta(enMaquina.campos, aplicarAjusteTurno(conManuales(ejemplo, enMaquina.campos), enMaquina.ajusteTurno)).join("\n") : ""}
           </pre>
           <div className="grid gap-1.5">
             <Label>Loteadora</Label>

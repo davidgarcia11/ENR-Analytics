@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getDb } from '@/lib/sqlite';
 import { requireAccess } from '@/lib/permissions';
 import { permisosLoteadora as L } from '@/lib/permisos';
-import { guardarCampos, leerCampos, validarPlantilla } from '@/lib/loteadora-plantilla';
+import { guardarAjusteTurno, guardarCampos, leerAjustesTurno, leerCampos, validarPlantilla } from '@/lib/loteadora-plantilla';
 
 // Plantillas (mensajes de la máquina) con sus campos y piezas — modelo en
 // lib/loteadora-plantilla.ts.
@@ -16,7 +16,8 @@ export async function GET() {
   const db = getDb();
   const mensajes = db.prepare('SELECT id, name, created_at FROM loteadora_mensajes ORDER BY name').all() as { id: number }[];
   const campos = leerCampos(db);
-  return NextResponse.json(mensajes.map((m) => ({ ...m, campos: campos.get(m.id) ?? [] })));
+  const ajustes = leerAjustesTurno(db);
+  return NextResponse.json(mensajes.map((m) => ({ ...m, campos: campos.get(m.id) ?? [], ajusteTurno: ajustes.get(m.id) ?? null })));
 }
 
 export async function POST(req: NextRequest) {
@@ -27,7 +28,7 @@ export async function POST(req: NextRequest) {
   if ('error' in parsed) {
     return NextResponse.json({ error: parsed.error }, { status: 400 });
   }
-  const { name, campos } = parsed.value;
+  const { name, campos, ajusteTurno } = parsed.value;
 
   const db = getDb();
   if (db.prepare('SELECT 1 FROM loteadora_mensajes WHERE name = ?').get(name)) {
@@ -39,9 +40,10 @@ export async function POST(req: NextRequest) {
       const result = db.prepare('INSERT INTO loteadora_mensajes (name) VALUES (?)').run(name);
       const mensajeId = Number(result.lastInsertRowid);
       guardarCampos(db, mensajeId, campos);
+      guardarAjusteTurno(db, mensajeId, ajusteTurno);
       return mensajeId;
     })();
-    return NextResponse.json({ id, name, campos }, { status: 201 });
+    return NextResponse.json({ id, name, campos, ajusteTurno: ajusteTurno ?? null }, { status: 201 });
   } catch (err: any) {
     console.error('Create loteadora_mensaje error:', err);
     return NextResponse.json({ error: err.message }, { status: 500 });
