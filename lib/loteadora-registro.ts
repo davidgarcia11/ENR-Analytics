@@ -7,6 +7,7 @@
 //
 // Sin dependencias de servidor a propósito: las funciones reciben la conexión.
 import type Database from 'better-sqlite3';
+import type { TrozoEtiqueta } from './loteadora-plantilla';
 
 export type ResultadoEnvio = 'ok' | 'aviso' | 'error';
 
@@ -24,16 +25,22 @@ export interface EnvioRegistro {
   resultado: ResultadoEnvio;
   /** El aviso o el error, si lo hubo */
   mensaje: string | null;
+  /**
+   * La etiqueta tal como quedaba al enviar (trozosEtiqueta: cada línea con sus
+   * trozos, el reloj marcado). Se guarda en el momento para que no cambie aunque se
+   * edite la plantilla después. null en los envíos de antes de guardarla.
+   */
+  lineas: TrozoEtiqueta[][] | null;
 }
 
 export interface FilaRegistro extends EnvioRegistro { id: number; /** UTC, "AAAA-MM-DD HH:MM:SS" */ fecha: string }
 
 export function registrarEnvio(db: Database.Database, e: EnvioRegistro): void {
   db.prepare(
-    `INSERT INTO loteadora_envios (loteadora_id, loteadora, usuario, plantilla, articulo_id, articulo_desc, campos, datos, resultado, mensaje)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    `INSERT INTO loteadora_envios (loteadora_id, loteadora, usuario, plantilla, articulo_id, articulo_desc, campos, datos, resultado, mensaje, lineas)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   ).run(e.loteadoraId, e.loteadora, e.usuario, e.plantilla, e.articuloId, e.articuloDesc,
-    JSON.stringify(e.campos), JSON.stringify(e.datos), e.resultado, e.mensaje);
+    JSON.stringify(e.campos), JSON.stringify(e.datos), e.resultado, e.mensaje, e.lineas ? JSON.stringify(e.lineas) : null);
 }
 
 export interface FiltrosRegistro {
@@ -67,10 +74,13 @@ export function buscarEnvios(db: Database.Database, f: FiltrosRegistro): { filas
   const pagina = Math.max(1, f.pagina ?? 1);
   const filas = db.prepare(
     `SELECT id, created_at AS fecha, loteadora_id AS loteadoraId, loteadora, usuario, plantilla, articulo_id AS articuloId,
-            articulo_desc AS articuloDesc, campos, datos, resultado, mensaje
+            articulo_desc AS articuloDesc, campos, datos, resultado, mensaje, lineas
      FROM loteadora_envios ${where} ORDER BY id DESC LIMIT ? OFFSET ?`
-  ).all(...args, POR_PAGINA, (pagina - 1) * POR_PAGINA) as (Omit<FilaRegistro, 'campos' | 'datos'> & { campos: string; datos: string })[];
-  return { filas: filas.map((r) => ({ ...r, campos: JSON.parse(r.campos), datos: JSON.parse(r.datos) })), total };
+  ).all(...args, POR_PAGINA, (pagina - 1) * POR_PAGINA) as (Omit<FilaRegistro, 'campos' | 'datos' | 'lineas'> & { campos: string; datos: string; lineas: string | null })[];
+  return {
+    filas: filas.map((r) => ({ ...r, campos: JSON.parse(r.campos), datos: JSON.parse(r.datos), lineas: r.lineas ? JSON.parse(r.lineas) : null })),
+    total,
+  };
 }
 
 /** Máquinas que aparecen en el registro (para el filtro), aunque ya no existan. */
