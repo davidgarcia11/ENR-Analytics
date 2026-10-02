@@ -310,7 +310,7 @@ Cada plantilla tiene **campos**, uno por Field Module del mensaje en la máquina
 | Dato fijo | Un valor constante con nombre (precio, nº de certificado) | Nombre + valor; editable aparte (ver "Datos fijos") |
 | Fecha fresco | Lo que escribe el operario, tal cual | — |
 | Cocida | Día juliano de cocida con su año | `AAJJJ` (26150), `AJJJ` (6150), `JJJ` (150), o como fecha con los mismos formatos que la caducidad (`DD/MM/AA`, `DD-MM-AA`…) |
-| Caducidad | Cocida + días de caducidad, más un **ajuste en días** opcional (`-1` = el día anterior; se guarda en `valor`) | `DD/MM/AA`, `DD/MM/AAAA`, `MM/DD/AA`, `MM/DD/AAAA`, los mismos con `-` como separador (`DD-MM-AA`…), `DD` (solo el día), `AAAA MES DD` (mes en siglas: `2027 FE 24`; siglas fijas `SIGLAS_MES`: JA FE MR AL MA JN JL AU SE OC NO DE, pedidas por un cliente — si otro pide otras, otro formato). Ejemplo: caducidad completa en un campo (`25/07/2026`) y el día anterior en otro (`DD`, ajuste `-1` → `24`) |
+| Caducidad | Cocida + días de caducidad, más un **ajuste en días** opcional (`-1` = el día anterior; se guarda en `valor`) | `DD/MM/AA`, `DD/MM/AAAA`, `MM/DD/AA`, `MM/DD/AAAA`, los mismos con `-` como separador (`DD-MM-AA`…), `DD` (solo el día), `MM/AAAA` y `MM-AAAA` (solo mes y año: `02/2027`), `AAAA MES DD` (mes en siglas: `2027 FE 24`; siglas fijas `SIGLAS_MES`: JA FE MR AL MA JN JL AU SE OC NO DE, pedidas por un cliente — si otro pide otras, otro formato). Ejemplo: caducidad completa en un campo (`25/07/2026`) y el día anterior en otro (`DD`, ajuste `-1` → `24`) |
 | Turno | El turno elegido (1/2/3) | — |
 | Hora | Hora del envío, `HHmm` | — |
 | Línea | Línea de fabricación de la loteadora | — |

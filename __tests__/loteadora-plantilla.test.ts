@@ -25,6 +25,9 @@ describe('formatos', () => {
     expect(formatearCaducidad('2027-01-06', 'DD/MM/AAAA')).toBe('06/01/2027')
     expect(formatearCaducidad('2027-01-06', 'MM/DD/AA')).toBe('01/06/27')
     expect(formatearCaducidad('2027-01-06', 'MM/DD/AAAA')).toBe('01/06/2027')
+    expect(formatearCaducidad('2027-02-24', 'MM/AAAA')).toBe('02/2027')
+    expect(formatearCaducidad('2027-02-24', 'MM-AAAA')).toBe('02-2027')
+    expect(largoPieza({ tipo: 'caducidad', formato: 'MM/AAAA' })).toBe(7)
   })
 
   it('cocida con padding del día juliano', () => {
