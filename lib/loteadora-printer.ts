@@ -253,16 +253,126 @@ export interface PrinterStatusDetail {
   state: PrinterState;
   /**
    * Bytes de estado en crudo del comando 14 (ej. "50 02 00 04"), tal cual los
-   * devuelve la máquina — sin traducir. La tabla de significado por bit
-   * (Chart 3-1 del manual) tiene ~90 avisos repartidos en 3 variantes de
-   * firmware (4/5/12 bytes) y no se puede reconstruir de forma fiable desde
-   * el PDF, así que de momento se expone el dato crudo en vez de adivinar
-   * una traducción que podría ser incorrecta. `null` si no se pudo consultar
-   * o la máquina no devolvió datos.
+   * devuelve la máquina. Traducidos en `avisos` (avisosDeEstado). `null` si no se
+   * pudo consultar o la máquina no devolvió datos.
    */
   rawBytes: string | null;
+  /** Avisos y errores activos, en claro (vacío si no hay o no se reconoce el formato) */
+  avisos?: string[];
   /** Solo si `state` es 'apagada': por qué no respondió, en claro (ver motivoSinConexion) */
   motivo?: string;
+}
+
+// Avisos y errores de la máquina (Chart 3-1 del manual, comando 14). Cada bit de los
+// datos de estado es uno: el bit 0 es el de más a la izquierda del primer byte. Hay
+// tres variantes según el modelo, que se distinguen por el nº de bytes: T1 (4), T2
+// (5) y T6 (12). Cada fila: [nombre, bit en T1, en T2, en T6] (null = no existe).
+// Extraída del PDF con `pdftotext -table` (sept. 2026); comprobada con el ejemplo
+// del manual y con la Loteadora Pruebas (T2: "00 00 18 00 00" = "El bloqueo del
+// cartucho 1/2 es anormal", lo mismo que su pantalla).
+const AVISOS_ESTADO: [string, number | null, number | null, number | null][] = [
+  ['Impresiones solapadas', 0, 0, 0],
+  ['Encoder demasiado rápido', 1, 1, 1],
+  ['Toca mantenimiento', 2, 2, 2],
+  ['Batería baja', 3, null, null],
+  ['Batería del reloj baja', 4, 3, 3],
+  ['Sin batería del reloj', 5, 4, 4],
+  ['Retardo o intervalo de impresión demasiado corto', 6, 5, 5],
+  ['Productos demasiado juntos', null, null, 6],
+  ['Poco tiempo de servicio restante', 7, 6, 7],
+  ['Sin activar', 8, 7, 8],
+  ['Modo depuración', 9, 8, 9],
+  ['Tinta baja (1)', 10, 9, 10],
+  ['Tinta baja (2)', null, 10, 11],
+  ['Tinta baja (3)', null, null, 12],
+  ['Tinta baja (4)', null, null, 13],
+  ['Tinta baja (5)', null, null, 14],
+  ['Tinta baja (6)', null, null, 15],
+  ['Tipo de cartucho 1 anómalo', 11, 11, 16],
+  ['Tipo de cartucho 2 anómalo', null, 12, 17],
+  ['Tipo de cartucho 3 anómalo', null, null, 18],
+  ['Tipo de cartucho 4 anómalo', null, null, 19],
+  ['Tipo de cartucho 5 anómalo', null, null, 20],
+  ['Tipo de cartucho 6 anómalo', null, null, 21],
+  ['Tiempo de servicio caducado', 12, 13, 22],
+  ['Sin activar (caducado)', 13, 14, 23],
+  ['Depósito de tinta vacío (1)', 14, 15, 24],
+  ['Depósito de tinta vacío (2)', null, 16, 25],
+  ['Depósito de tinta vacío (3)', null, null, 26],
+  ['Depósito de tinta vacío (4)', null, null, 27],
+  ['Depósito de tinta vacío (5)', null, null, 28],
+  ['Depósito de tinta vacío (6)', null, null, 29],
+  ['Cartucho 1 no detectado', 15, 17, 30],
+  ['Cartucho 2 no detectado', null, 18, 31],
+  ['Cartucho 3 no detectado', null, null, 32],
+  ['Cartucho 4 no detectado', null, null, 33],
+  ['Cartucho 5 no detectado', null, null, 34],
+  ['Cartucho 6 no detectado', null, null, 35],
+  ['El bloqueo del cartucho 1 es anormal', 16, 19, 36],
+  ['El bloqueo del cartucho 2 es anormal', null, 20, 37],
+  ['El bloqueo del cartucho 3 es anormal', null, null, 38],
+  ['El bloqueo del cartucho 4 es anormal', null, null, 39],
+  ['El bloqueo del cartucho 5 es anormal', null, null, 40],
+  ['El bloqueo del cartucho 6 es anormal', null, null, 41],
+  ['Cartucho 1 caducado', 17, 21, 42],
+  ['Cartucho 2 caducado', null, 22, 43],
+  ['Cartucho 3 caducado', null, null, 44],
+  ['Cartucho 4 caducado', null, null, 45],
+  ['Cartucho 5 caducado', null, null, 46],
+  ['Cartucho 6 caducado', null, null, 47],
+  ['Cartucho 1 sin instalar', 18, 23, 48],
+  ['Cartucho 2 sin instalar', null, 24, 49],
+  ['Cartucho 3 sin instalar', null, null, 50],
+  ['Cartucho 4 sin instalar', null, null, 51],
+  ['Cartucho 5 sin instalar', null, null, 52],
+  ['Cartucho 6 sin instalar', null, null, 53],
+  ['Cartucho 1: fallo de verificación', 19, 25, 54],
+  ['Cartucho 2: fallo de verificación', null, 26, 55],
+  ['Cartucho 3: fallo de verificación', null, null, 56],
+  ['Cartucho 4: fallo de verificación', null, null, 57],
+  ['Cartucho 5: fallo de verificación', null, null, 58],
+  ['Cartucho 6: fallo de verificación', null, null, 59],
+  ['Cartucho 1: fallo de autenticación', 20, 27, 60],
+  ['Cartucho 2: fallo de autenticación', null, 28, 61],
+  ['Cartucho 3: fallo de autenticación', null, null, 62],
+  ['Cartucho 4: fallo de autenticación', null, null, 63],
+  ['Cartucho 5: fallo de autenticación', null, null, 64],
+  ['Cartucho 6: fallo de autenticación', null, null, 65],
+  ['Cartucho 1: información incorrecta', 21, 29, 66],
+  ['Cartucho 2: información incorrecta', null, 30, 67],
+  ['Cartucho 3: información incorrecta', null, null, 68],
+  ['Cartucho 4: información incorrecta', null, null, 69],
+  ['Cartucho 5: información incorrecta', null, null, 70],
+  ['Cartucho 6: información incorrecta', null, null, 71],
+  ['Cartucho 1: tipo incorrecto', 22, 31, 72],
+  ['Cartucho 2: tipo incorrecto', null, 32, 73],
+  ['Cartucho 3: tipo incorrecto', null, null, 74],
+  ['Cartucho 4: tipo incorrecto', null, null, 75],
+  ['Cartucho 5: tipo incorrecto', null, null, 76],
+  ['Cartucho 6: tipo incorrecto', null, null, 77],
+  ['Porcentaje de tinta (1) incorrecto', 23, 33, 78],
+  ['Porcentaje de tinta (2) incorrecto', null, 34, 79],
+  ['Porcentaje de tinta (3) incorrecto', null, null, 80],
+  ['Porcentaje de tinta (4) incorrecto', null, null, 81],
+  ['Porcentaje de tinta (5) incorrecto', null, null, 82],
+  ['Porcentaje de tinta (6) incorrecto', null, null, 83],
+  ['RFID 1 precalentando', null, 35, 84],
+  ['RFID 2 precalentando', null, 36, 85],
+  ['RFID 3 precalentando', null, null, 86],
+  ['RFID 4 precalentando', null, null, 87],
+  ['RFID 5 precalentando', null, null, 88],
+  ['RFID 6 precalentando', null, null, 89],
+  ['Error de máquina (201)', 24, 37, 90],
+  ['Error de máquina (202)', 25, 38, 91],
+];
+
+export function avisosDeEstado(rawBytes: string | null): string[] {
+  if (!rawBytes) return [];
+  const bytes = rawBytes.split(' ').map((b) => parseInt(b, 16));
+  const columna = ({ 4: 1, 5: 2, 12: 3 } as Record<number, 1 | 2 | 3>)[bytes.length];
+  if (!columna) return [];
+  const activo = (bit: number) => (bytes[bit >> 3] & (0x80 >> (bit & 7))) !== 0;
+  return AVISOS_ESTADO.filter((f) => f[columna] !== null && activo(f[columna]!)).map((f) => f[0]);
 }
 
 // Motivo de "Sin conexión" para la pantalla, a partir del error de la conexión. Dice
@@ -312,9 +422,10 @@ async function queryPrinterStatusUnaVez(config: LoteadoraConfig): Promise<Printe
     ? Array.from(statusBytes).map(b => b.toString(16).padStart(2, '0').toUpperCase()).join(' ')
     : null;
 
-  if (result.status === 0x00) return { state: 'activa', rawBytes };
-  if (result.status === 0x12) return { state: 'standby', rawBytes };
-  return { state: 'en_error', rawBytes };
+  const avisos = avisosDeEstado(rawBytes);
+  if (result.status === 0x00) return { state: 'activa', rawBytes, avisos };
+  if (result.status === 0x12) return { state: 'standby', rawBytes, avisos };
+  return { state: 'en_error', rawBytes, avisos };
 }
 
 // Consulta el estado real de una loteadora (comando 14 — Request Printer
