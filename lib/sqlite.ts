@@ -46,7 +46,13 @@ export function getDb(): Database.Database {
   _db = new Database(DB_PATH);
   _db.pragma('journal_mode = WAL');
   _db.pragma('foreign_keys = ON');
-  if (existia) copiaDeSeguridad(_db, path.join(path.dirname(DB_PATH), 'backups'));
+  // Una sola copia por arranque del proceso: el seguimiento por ping (instrumentation.ts)
+  // y la app cargan este módulo por separado y cada uno abre su conexión.
+  const g = globalThis as { __copiaAlArrancar?: boolean };
+  if (existia && !g.__copiaAlArrancar) {
+    g.__copiaAlArrancar = true;
+    copiaDeSeguridad(_db, path.join(path.dirname(DB_PATH), 'backups'));
+  }
 
   // Crear tablas si no existen
   _db.exec(`
@@ -212,6 +218,20 @@ export function getDb(): Database.Database {
       lineas TEXT                    -- JSON: la etiqueta colocada al enviar (trozosEtiqueta); NULL en los primeros envíos
     );
     CREATE INDEX IF NOT EXISTS idx_loteadora_envios_maquina ON loteadora_envios (loteadora_id, id);
+
+    -- Seguimiento de conexión por ping (lib/loteadora-ping.ts): una fila por cambio
+    -- (conexion / sin_conexion), una cada 30 min si no cambia y 'inicio' al arrancar
+    -- el servidor. Sin claves ajenas: sigue valiendo aunque se borre la máquina.
+    CREATE TABLE IF NOT EXISTS loteadora_ping (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      fecha TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      loteadora_id INTEGER NOT NULL,
+      loteadora TEXT NOT NULL,
+      ip TEXT NOT NULL,
+      estado TEXT NOT NULL,          -- 'conexion' | 'sin_conexion' | 'inicio'
+      ms INTEGER                     -- tiempo de respuesta del ping (si respondió)
+    );
+    CREATE INDEX IF NOT EXISTS idx_loteadora_ping_maquina ON loteadora_ping (loteadora_id, id);
 
     -- Último envío hecho desde /loteadora a cada máquina (se sobrescribe en cada
     -- envío correcto): se enseña en "Estado de las loteadoras". Es lo último que

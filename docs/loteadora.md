@@ -608,3 +608,16 @@ Cada **"Enviar a loteadora"** que llega a la máquina queda guardado en `loteado
 - La descripción del artículo la manda `/loteadora` solo para el registro (`articuloDesc`); el resto lo calcula el servidor.
 - En la tabla se ve el **nombre de la plantilla** enviada y **lo enviado como en la etiqueta**, en sus líneas y con el `HHmm` del reloj en gris. Se usa la disposición guardada al enviar, no la plantilla actual: aunque la plantilla se edite después, el registro enseña la etiqueta tal como se mandó. Los envíos de antes de guardarla (columna `lineas` NULL, primeros días de v1.21.0) salen un campo por línea.
 
+---
+
+## 20. Seguimiento de conexión por ping
+
+`lib/loteadora-ping.ts`, arrancado por `instrumentation.ts` al iniciar el servidor (no en el build ni en el navegador). Mientras el servidor esté encendido, **haga o no uso nadie de la app**:
+
+- **Cada 30 s** hace un ping (el de Windows, `ping -n 1 -w 1000`) a cada loteadora **habilitada**; las nuevas entran solas en la siguiente vuelta.
+- Es un **ping**, no el comando de estado: solo dice si responde en la red (no si imprime o tiene errores, eso sigue en "Estado de las loteadoras"), pero no ocupa la única conexión TCP de la máquina ni retrasa los envíos.
+- Guarda en `loteadora_ping` una fila **cuando cambia** (Con conexión ↔ Sin conexión) y, si no cambia, **una cada 30 min** (para que se vea que el seguimiento seguía activo), con el tiempo de respuesta del ping. Al arrancar el servidor guarda **"Seguimiento iniciado"** en cada loteadora: el hueco anterior es del servidor (despliegue, reinicio), no de la máquina. Se guarda siempre (ocupa poco: como mucho ~1 MB al año por máquina).
+- **Exportar:** `/admin` → Máquinas → menú de la loteadora → **"Historial de conexión"** descarga un CSV (`;` y BOM, se abre con Excel): fecha (hora local), estado, respuesta en ms, IP. Con cualquier permiso de Máquinas. `GET /api/admin/loteadoras/:id/historial-conexion`.
+- **En desarrollo no se arranca**, salvo con `LOTEADORA_PING=1` (si no, el PC de desarrollo haría ping a las máquinas de su BD).
+- El seguimiento y la app cargan `lib/sqlite.ts` por separado (cada uno abre su conexión); la copia de seguridad del arranque se hace una sola vez por proceso.
+

@@ -591,6 +591,7 @@ sincronización, último error) y botón "Sincronizar ahora" — ver
 | GET | `/api/admin/logs` | Logs de consultas con paginación, filtros y estadísticas (ver sección 7) |
 | GET / POST | `/api/admin/zonas` · PUT / DELETE `/api/admin/zonas/:id` | Zonas de las loteadoras y roles/usuarios que ven cada una (permisos de Zonas; `GET ?opciones=1` añade los roles y usuarios asignables, solo con `zonas.editar`; ver `docs/loteadora.md` §17) |
 | GET / POST | `/api/admin/loteadora-articulos/copia` | Exporta (ver) / importa (asociar) solo las asociaciones artículo → plantilla (sección Artículos) |
+| GET | `/api/admin/loteadoras/:id/historial-conexion` | Historial de conexión (ping cada 30 s en segundo plano, `instrumentation.ts` + `lib/loteadora-ping.ts`) de una loteadora, en CSV (ver `docs/loteadora.md` §20) |
 | GET | `/api/admin/loteadora-registro` | Registro de envíos a las loteadoras, con filtros y por páginas (permiso `registro.ver`, ver `docs/loteadora.md` §19) |
 | GET / POST | `/api/admin/loteadora-copia` | Exporta / importa en JSON las plantillas de la loteadora y sus asociaciones de artículos (botones de `/admin` → Plantillas, ver `docs/loteadora.md` §13) |
 
