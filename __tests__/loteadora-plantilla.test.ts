@@ -5,7 +5,7 @@
  */
 import { describe, it, expect } from 'bun:test'
 import {
-  aplicarAjusteTurno, componerCampos, disponerMensaje, exportarCopia, trozosEtiqueta, lineasEtiqueta, medidasDeTamano, medidasPorDefecto, piezasManuales, validarMedidas, filasACampos, formatearCaducidad, formatearCocida, importarCopia, validarPlantilla, variablesUsadas,
+  aplicarAjusteTurno, componerCampos, disponerMensaje, exportarCopia, trozosEtiqueta, lineasEtiqueta, medidasDeTamano, medidasPorDefecto, piezasManuales, validarMedidas, filasACampos, formatearCaducidad, formatearCocida, importarCopia, largoPieza, validarPlantilla, variablesUsadas,
   type Campo, type ValoresEtiqueta,
 } from '@/lib/loteadora-plantilla'
 
@@ -37,6 +37,18 @@ describe('formatos', () => {
     expect(formatearCocida(2026, 1, 'DD/MM/AA')).toBe('01/01/26')
     expect(formatearCocida(2026, 264, 'DD/MM/AA')).toBe('21/09/26')
     expect(formatearCocida(2024, 366, 'DD/MM/AAAA')).toBe('31/12/2024') // bisiesto
+  })
+
+  it('año, mes en siglas y día (AAAA MES DD)', () => {
+    expect(formatearCaducidad('2027-02-24', 'AAAA MES DD')).toBe('2027 FE 24')
+    const meses = Array.from({ length: 12 }, (_, i) => formatearCaducidad(`2027-${String(i + 1).padStart(2, '0')}-05`, 'AAAA MES DD').slice(5, 7))
+    expect(meses).toEqual(['JA', 'FE', 'MR', 'AL', 'MA', 'JN', 'JL', 'AU', 'SE', 'OC', 'NO', 'DE'])
+    expect(formatearCocida(2026, 55, 'AAAA MES DD')).toBe('2026 FE 24')
+    // Reserva en la máquina lo que mide de verdad (10), no el nombre del formato (11)
+    expect(largoPieza({ tipo: 'caducidad', formato: 'AAAA MES DD' })).toBe(10)
+    expect(largoPieza({ tipo: 'cocida', formato: 'AAAA MES DD' })).toBe(10)
+    expect(largoPieza({ tipo: 'cocida', formato: 'AAJJJ' })).toBe(5)
+    expect(largoPieza({ tipo: 'caducidad', formato: 'DD' })).toBe(2)
   })
 })
 
