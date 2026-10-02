@@ -9,7 +9,7 @@
  */
 import { describe, it, expect } from 'bun:test'
 import net from 'net'
-import { buildRemoteFieldFrame, buildSendFileFrame, MAX_PIEZA_ARCHIVO, motivoSinConexion, getPrinterStatusDetail, listMessageNames, getPrinterStatus, loadPrintMessage, LOAD_APPLY_DELAY_MS } from '@/lib/loteadora-printer'
+import { avisosDeEstado, buildRemoteFieldFrame, buildSendFileFrame, MAX_PIEZA_ARCHIVO, motivoSinConexion, getPrinterStatusDetail, listMessageNames, getPrinterStatus, loadPrintMessage, LOAD_APPLY_DELAY_MS } from '@/lib/loteadora-printer'
 
 describe('buildRemoteFieldFrame', () => {
   it('reproduce el ejemplo del manual (checknum B0)', () => {
@@ -151,6 +151,18 @@ describe('getPrinterStatus', () => {
       const d = await getPrinterStatusDetail({ ip: '127.0.0.1', port, slaveAddress: 0 })
       expect(d.motivo).toMatch(/^Cierra la conexión/)
     })
+  })
+
+  it('traduce los avisos de la máquina según su variante (nº de bytes)', () => {
+    // Ejemplo del manual (T1, 4 bytes): bits 1, 3 y 14
+    expect(avisosDeEstado('50 02 00 00')).toEqual(['Encoder demasiado rápido', 'Batería baja', 'Depósito de tinta vacío (1)'])
+    // Loteadora Pruebas (T2, 5 bytes): bits 19 y 20
+    expect(avisosDeEstado('00 00 18 00 00')).toEqual(['El bloqueo del cartucho 1 es anormal', 'El bloqueo del cartucho 2 es anormal'])
+    // T6 (12 bytes): bit 6 = productos demasiado juntos (solo existe en T6)
+    expect(avisosDeEstado('02 00 00 00 00 00 00 00 00 00 00 00')).toEqual(['Productos demasiado juntos'])
+    // Sin datos o formato desconocido: nada
+    expect(avisosDeEstado(null)).toEqual([])
+    expect(avisosDeEstado('FF FF')).toEqual([])
   })
 
   it('traduce el motivo de "Sin conexión"', () => {

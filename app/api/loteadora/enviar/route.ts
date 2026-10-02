@@ -182,10 +182,12 @@ export async function POST(req: NextRequest) {
   } catch (err: any) {
     console.error('Envío a loteadora error:', err);
     registrar('error', String(err?.message ?? err));
-    // Detalle adicional (bytes de estado en crudo) para el "ver más" del front —
-    // no se traduce a texto porque la tabla de significado por bit no se puede
-    // reconstruir de forma fiable desde el manual (ver lib/loteadora-printer.ts).
-    const detail = await getPrinterStatusDetail(config).catch(() => null);
-    return NextResponse.json({ error: err.message, detail: detail?.rawBytes ?? null }, { status: 502 });
+    // Detalle para el "ver más" del front: los avisos de la máquina en claro y sus
+    // bytes de estado en crudo (avisosDeEstado en lib/loteadora-printer.ts).
+    const estado = await getPrinterStatusDetail(config).catch(() => null);
+    const detail = estado?.rawBytes
+      ? [estado.avisos?.join(' · '), `(${estado.rawBytes})`].filter(Boolean).join(' ')
+      : null;
+    return NextResponse.json({ error: err.message, detail }, { status: 502 });
   }
 }
