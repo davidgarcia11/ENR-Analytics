@@ -5,7 +5,7 @@
 // abre una conexión TCP breve a cada máquina), cada 60 s — ver docs/loteadora.md §10.
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
-import { Loader2, MoreHorizontal, Pencil, Plus, Trash2 } from "lucide-react";
+import { Activity, Loader2, MoreHorizontal, Pencil, Plus, Trash2 } from "lucide-react";
 import { useApiFetch, useSession } from "@/components/SessionProvider";
 import { tienePermiso, type Permiso } from "@/lib/permisos";
 import { Button } from "@/components/nova/ui/button";
@@ -109,6 +109,20 @@ export default function AdminLoteadoras({ titulo, descripcion }: SeccionProps) {
       const res = await apiFetch("/api/admin/loteadoras");
       if (res.ok) setLoteadoras(await res.json());
     } finally { setCargando(false); }
+  };
+
+  // Historial de conexión (ping cada 30 s, lib/loteadora-ping.ts) en CSV
+  const descargarHistorial = async (l: Loteadora) => {
+    try {
+      const res = await apiFetch(`/api/admin/loteadoras/${l.id}/historial-conexion`);
+      if (!res.ok) { toast.error("No se pudo descargar el historial"); return; }
+      const url = URL.createObjectURL(await res.blob());
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `conexion-${l.name.replace(/[^A-Za-z0-9_-]+/g, "_")}.csv`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch { toast.error("Error de conexión"); }
   };
 
   const cargarEstados = async () => {
@@ -249,7 +263,7 @@ export default function AdminLoteadoras({ titulo, descripcion }: SeccionProps) {
                         )}
                       </TableCell>
                       <TableCell>
-                        {(puede("editar") || puede("eliminar")) && (
+                        {/* El historial de conexión lo ve cualquiera con acceso a Máquinas */}
                         <DropdownMenu>
                           <DropdownMenuTrigger
                             render={
@@ -258,17 +272,17 @@ export default function AdminLoteadoras({ titulo, descripcion }: SeccionProps) {
                               </Button>
                             }
                           />
-                          <DropdownMenuContent align="end" className="min-w-40">
+                          <DropdownMenuContent align="end" className="min-w-48">
+                            <DropdownMenuItem onClick={() => descargarHistorial(l)}><Activity />Historial de conexión</DropdownMenuItem>
                             {puede("editar") && <DropdownMenuItem onClick={() => abrirEdicion(l)}><Pencil />Editar</DropdownMenuItem>}
                             {puede("eliminar") && (
                               <>
-                                {puede("editar") && <DropdownMenuSeparator />}
+                                <DropdownMenuSeparator />
                                 <DropdownMenuItem variant="destructive" onClick={() => setBorrando(l)}><Trash2 />Eliminar</DropdownMenuItem>
                               </>
                             )}
                           </DropdownMenuContent>
                         </DropdownMenu>
-                        )}
                       </TableCell>
                     </TableRow>
                   );
