@@ -70,7 +70,7 @@ export default function AdminLoteadoras({ titulo, descripcion }: SeccionProps) {
   const puede = (accion: string) => tienePermiso(usuario, `admin.loteadora.maquinas.${accion}` as Permiso);
   const [loteadoras, setLoteadoras] = useState<Loteadora[]>([]);
   const [estados, setEstados] = useState<Record<number, EstadoVivo>>({});
-  // Por qué no responde cada una (solo las "Sin conexión")
+  // Por qué no responde cada una (solo las "Sin conexión") o qué avisos tiene (las demás)
   const [motivos, setMotivos] = useState<Record<number, string>>({});
   const [cargando, setCargando] = useState(true);
 
@@ -113,9 +113,9 @@ export default function AdminLoteadoras({ titulo, descripcion }: SeccionProps) {
     try {
       const res = await apiFetch("/api/admin/loteadoras/estado");
       if (!res.ok) return;
-      const data: { id: number; state: EstadoVivo; motivo?: string }[] = await res.json();
+      const data: { id: number; state: EstadoVivo; motivo?: string; avisos?: string[] }[] = await res.json();
       setEstados(Object.fromEntries(data.map((d) => [d.id, d.state])));
-      setMotivos(Object.fromEntries(data.filter((d) => d.motivo).map((d) => [d.id, d.motivo!])));
+      setMotivos(Object.fromEntries(data.filter((d) => d.motivo || d.avisos).map((d) => [d.id, d.motivo ?? d.avisos!.join(" · ")])));
     } catch { /* se reintenta en el siguiente ciclo */ }
   };
 

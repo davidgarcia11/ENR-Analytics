@@ -52,7 +52,8 @@ type EstadoLoteadoraValor = "activa" | "en_error" | "standby" | "apagada";
 // `lineas`: lo enviado colocado como en la etiqueta; los trozos `reloj` no se envían (los pone la máquina)
 interface UltimoEnvio { plantilla: string; lineas: { texto: string; reloj?: boolean }[][]; usuario: string | null; enviadoAt: string }
 // `motivo`: solo si no responde, por qué (tiempo agotado, rechaza o cierra la conexión...)
-interface EstadoLoteadora { id: number; name: string; zona: string | null; state: EstadoLoteadoraValor; motivo?: string; ultimoEnvio: UltimoEnvio | null }
+// `avisos`: avisos y errores de la máquina en claro (tinta baja, cartucho no detectado...)
+interface EstadoLoteadora { id: number; name: string; zona: string | null; state: EstadoLoteadoraValor; motivo?: string; avisos?: string[]; ultimoEnvio: UltimoEnvio | null }
 
 // Formulario de UN trabajo de impresión (artículo/fechas/turno/plantilla elegida).
 // Se guarda uno por loteadora (ver `formStates` en el componente) para que cambiar
@@ -873,7 +874,7 @@ function LoteadoraPanel() {
                               {showSendErrorDetail ? "Ocultar detalle" : "Ver más"}
                             </button>
                             {showSendErrorDetail && (
-                              <p className="mt-1 font-mono text-xs">Código de estado de la máquina: {sendErrorDetail}</p>
+                              <p className="mt-1 text-xs">Estado de la máquina: {sendErrorDetail}</p>
                             )}
                           </div>
                         )}
@@ -918,6 +919,7 @@ function LoteadoraPanel() {
                             </Badge>
                           </div>
                           {l.motivo && <p className="mt-1 text-xs text-muted-foreground">{l.motivo}</p>}
+                          {l.avisos && <p className="mt-1 text-xs text-muted-foreground">{l.avisos.join(" · ")}</p>}
                           {l.ultimoEnvio ? (
                             <div className="mt-2 border-t border-border pt-2">
                               <p className="text-[11px] text-muted-foreground">

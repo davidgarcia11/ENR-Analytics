@@ -54,13 +54,15 @@ export async function GET() {
   const estados = await Promise.all(
     visibles.map(async (l) => {
       // Si no responde, `motivo` dice por qué (lib/loteadora-printer.ts → motivoSinConexion)
-      const { state, motivo } = await getPrinterStatusDetail({ ip: l.ip, port: l.port, slaveAddress: l.slave_address });
+      const { state, motivo, avisos } = await getPrinterStatusDetail({ ip: l.ip, port: l.port, slaveAddress: l.slave_address });
       return {
         id: l.id,
         name: l.name,
         zona: l.zona,
         state,
         ...(motivo ? { motivo } : {}),
+        // Avisos y errores de la máquina en claro (tinta baja, cartucho no detectado...)
+        ...(avisos?.length ? { avisos } : {}),
         ultimoEnvio: l.plantilla
           ? { plantilla: l.plantilla, lineas: lineas(l.plantilla, JSON.parse(l.campos ?? '[]'), l.linea), usuario: l.usuario, enviadoAt: l.enviado_at }
           : null,
