@@ -26,7 +26,11 @@ export type TipoVariable = Exclude<TipoPieza, 'texto' | 'fijo' | 'reloj'>;
 export const FORMATOS_CADUCIDAD = [
   'DD/MM/AA', 'DD/MM/AAAA', 'MM/DD/AA', 'MM/DD/AAAA',
   'DD-MM-AA', 'DD-MM-AAAA', 'MM-DD-AA', 'MM-DD-AAAA', 'DD',
+  'AAAA MES DD', // mes en siglas (SIGLAS_MES): "2027 FE 24"
 ] as const;
+// Siglas del mes del formato "AAAA MES DD", pedidas por un cliente.
+// ponytail: fijas; si otro cliente pide otras, otro formato (o pasarlas al admin)
+export const SIGLAS_MES = ['JA', 'FE', 'MR', 'AL', 'MA', 'JN', 'JL', 'AU', 'SE', 'OC', 'NO', 'DE'] as const;
 // La cocida también puede imprimirse como fecha ("PROD: 21/09/26").
 export const FORMATOS_COCIDA = ['AAJJJ', 'AJJJ', 'JJJ', ...FORMATOS_CADUCIDAD] as const;
 
@@ -133,13 +137,14 @@ export function sumarDias(iso: string, dias: number): string {
 export function formatearCaducidad(iso: string, formato: string = 'DD/MM/AAAA'): string {
   const [a, m, d] = iso.split('-');
   if (formato === 'DD') return d;
+  if (formato === 'AAAA MES DD') return `${a} ${SIGLAS_MES[Number(m) - 1]} ${d}`;
   const anio = formato.endsWith('AAAA') ? a : a.slice(-2);
   const sep = formato.includes('-') ? '-' : '/';
   return formato.startsWith('MM') ? `${m}${sep}${d}${sep}${anio}` : `${d}${sep}${m}${sep}${anio}`;
 }
 
 export function formatearCocida(anio: number, dia: number, formato: string = 'AAJJJ'): string {
-  if (formato.includes('/') || formato.includes('-')) {
+  if ((FORMATOS_CADUCIDAD as readonly string[]).includes(formato)) {
     // Día juliano → fecha (UTC para que no se mueva un día por la zona horaria)
     return formatearCaducidad(new Date(Date.UTC(anio, 0, dia)).toISOString().slice(0, 10), formato);
   }
@@ -395,8 +400,9 @@ export function largoPieza(p: Pieza, largoLinea = 2): number {
     case 'turno': return 1;
     case 'linea': return Math.max(1, largoLinea);
     case 'hora': return 4;
-    case 'cocida': return ({ AAJJJ: 5, AJJJ: 4, JJJ: 3 } as Record<string, number>)[p.formato ?? 'AAJJJ'] ?? (p.formato ?? '').length;
-    case 'caducidad': return (p.formato ?? 'DD/MM/AAAA').length;
+    // Lo que mide con una fecha cualquiera (todos los formatos tienen largo fijo)
+    case 'cocida': return formatearCocida(2000, 1, p.formato).length;
+    case 'caducidad': return formatearCaducidad('2000-01-01', p.formato).length;
     case 'manual': return MAX_MANUAL;
     case 'reloj': return 0; // va en su propio módulo, no ocupa sitio en el campo
   }
