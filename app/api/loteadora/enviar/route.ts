@@ -186,7 +186,7 @@ export async function POST(req: NextRequest) {
     // bytes de estado en crudo (avisosDeEstado en lib/loteadora-printer.ts).
     const estado = await getPrinterStatusDetail(config).catch(() => null);
     const detail = estado?.rawBytes
-      ? [estado.avisos?.join(' · '), `(${estado.rawBytes})`].filter(Boolean).join(' ')
+      ? [estado.avisos?.map((a) => a.texto).join(' · '), `(${estado.rawBytes})`].filter(Boolean).join(' ')
       : null;
     return NextResponse.json({ error: err.message, detail }, { status: 502 });
   }

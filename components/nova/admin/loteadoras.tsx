@@ -39,11 +39,12 @@ interface Loteadora {
   zona: string | null;
 }
 
-type EstadoVivo = "activa" | "en_error" | "standby" | "apagada";
+type EstadoVivo = "activa" | "con_avisos" | "en_error" | "standby" | "apagada";
 
 // Mismos colores que el estado de las loteadoras en /loteadora (app/loteadora/page.tsx)
 const ESTADO_INFO: Record<EstadoVivo, { label: string; className: string }> = {
-  activa: { label: "Imprimiendo", className: "bg-amber-400/10 text-amber-600" },
+  activa: { label: "Imprimiendo", className: "bg-sky-400/10 text-sky-600" },
+  con_avisos: { label: "Con avisos", className: "bg-amber-400/10 text-amber-600" },
   en_error: { label: "En error", className: "bg-rose-400/10 text-rose-500" },
   standby: { label: "Conectada", className: "bg-emerald-400/10 text-emerald-600" },
   apagada: { label: "Sin conexión", className: "bg-muted text-muted-foreground" },
@@ -70,8 +71,9 @@ export default function AdminLoteadoras({ titulo, descripcion }: SeccionProps) {
   const puede = (accion: string) => tienePermiso(usuario, `admin.loteadora.maquinas.${accion}` as Permiso);
   const [loteadoras, setLoteadoras] = useState<Loteadora[]>([]);
   const [estados, setEstados] = useState<Record<number, EstadoVivo>>({});
-  // Por qué no responde cada una (solo las "Sin conexión") o qué avisos tiene (las demás)
+  // Por qué no responde cada una (solo las "Sin conexión") y qué avisos tiene (las demás)
   const [motivos, setMotivos] = useState<Record<number, string>>({});
+  const [avisos, setAvisos] = useState<Record<number, { texto: string; error: boolean }[]>>({});
   const [cargando, setCargando] = useState(true);
 
   // null = cerrado; "nueva" = alta; una loteadora = edición
@@ -113,9 +115,10 @@ export default function AdminLoteadoras({ titulo, descripcion }: SeccionProps) {
     try {
       const res = await apiFetch("/api/admin/loteadoras/estado");
       if (!res.ok) return;
-      const data: { id: number; state: EstadoVivo; motivo?: string; avisos?: string[] }[] = await res.json();
+      const data: { id: number; state: EstadoVivo; motivo?: string; avisos?: { texto: string; error: boolean }[] }[] = await res.json();
       setEstados(Object.fromEntries(data.map((d) => [d.id, d.state])));
-      setMotivos(Object.fromEntries(data.filter((d) => d.motivo || d.avisos).map((d) => [d.id, d.motivo ?? d.avisos!.join(" · ")])));
+      setMotivos(Object.fromEntries(data.filter((d) => d.motivo).map((d) => [d.id, d.motivo!])));
+      setAvisos(Object.fromEntries(data.filter((d) => d.avisos).map((d) => [d.id, d.avisos!])));
     } catch { /* se reintenta en el siguiente ciclo */ }
   };
 
@@ -237,6 +240,13 @@ export default function AdminLoteadoras({ titulo, descripcion }: SeccionProps) {
                           )}
                         </div>
                         {motivos[l.id] && <p className="mt-1 max-w-xs text-xs text-muted-foreground">{motivos[l.id]}</p>}
+                        {avisos[l.id] && (
+                          <p className="mt-1 max-w-xs text-xs">
+                            {avisos[l.id].map((a, i) => (
+                              <span key={i} className={a.error ? "text-rose-500" : "text-amber-600"}>{i > 0 && " · "}{a.texto}</span>
+                            ))}
+                          </p>
+                        )}
                       </TableCell>
                       <TableCell>
                         {(puede("editar") || puede("eliminar")) && (

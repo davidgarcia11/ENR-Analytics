@@ -155,11 +155,14 @@ describe('getPrinterStatus', () => {
 
   it('traduce los avisos de la máquina según su variante (nº de bytes)', () => {
     // Ejemplo del manual (T1, 4 bytes): bits 1, 3 y 14
-    expect(avisosDeEstado('50 02 00 00')).toEqual(['Encoder demasiado rápido', 'Batería baja', 'Depósito de tinta vacío (1)'])
+    const textos = (raw: string) => avisosDeEstado(raw).map((a) => a.texto)
+    expect(textos('50 02 00 00')).toEqual(['Encoder demasiado rápido', 'Batería baja', 'Depósito de tinta vacío (1)'])
     // Loteadora Pruebas (T2, 5 bytes): bits 19 y 20
-    expect(avisosDeEstado('00 00 18 00 00')).toEqual(['El bloqueo del cartucho 1 es anormal', 'El bloqueo del cartucho 2 es anormal'])
+    expect(textos('00 00 18 00 00')).toEqual(['El bloqueo del cartucho 1 es anormal', 'El bloqueo del cartucho 2 es anormal'])
     // T6 (12 bytes): bit 6 = productos demasiado juntos (solo existe en T6)
-    expect(avisosDeEstado('02 00 00 00 00 00 00 00 00 00 00 00')).toEqual(['Productos demasiado juntos'])
+    expect(textos('02 00 00 00 00 00 00 00 00 00 00 00')).toEqual(['Productos demasiado juntos'])
+    // Avisos (amarillo) y errores (rojo), como en el manual
+    expect(avisosDeEstado('50 02 00 00').map((a) => a.error)).toEqual([false, false, true])
     // Sin datos o formato desconocido: nada
     expect(avisosDeEstado(null)).toEqual([])
     expect(avisosDeEstado('FF FF')).toEqual([])
