@@ -35,7 +35,9 @@ export interface LoteadoraConfig {
   slaveAddress: number;
 }
 
-export type PrinterState = 'activa' | 'en_error' | 'standby' | 'apagada';
+// 'con_avisos': responde con avisos (amarillos en el manual: tinta baja, batería...)
+// pero ningún error (rojos: depósito vacío, cartucho no detectado...). Ver avisosDeEstado.
+export type PrinterState = 'activa' | 'con_avisos' | 'en_error' | 'standby' | 'apagada';
 
 // Checknum = complemento a 2 de la suma módulo-256 de todos los bytes de la trama (protocolo §2.4)
 function checknum(bytes: number[]): number {
@@ -258,7 +260,7 @@ export interface PrinterStatusDetail {
    */
   rawBytes: string | null;
   /** Avisos y errores activos, en claro (vacío si no hay o no se reconoce el formato) */
-  avisos?: string[];
+  avisos?: AvisoMaquina[];
   /** Solo si `state` es 'apagada': por qué no respondió, en claro (ver motivoSinConexion) */
   motivo?: string;
 }
@@ -366,13 +368,19 @@ const AVISOS_ESTADO: [string, number | null, number | null, number | null][] = [
   ['Error de máquina (202)', 25, 38, 91],
 ];
 
-export function avisosDeEstado(rawBytes: string | null): string[] {
+// El manual los agrupa en avisos (amarillo) y errores (rojo): los errores empiezan en
+// "Tiempo de servicio caducado" y siguen hasta el final de la tabla.
+const PRIMER_ERROR = AVISOS_ESTADO.findIndex((f) => f[0] === 'Tiempo de servicio caducado');
+
+export interface AvisoMaquina { texto: string; /** rojo en el manual (si no, aviso amarillo) */ error: boolean }
+
+export function avisosDeEstado(rawBytes: string | null): AvisoMaquina[] {
   if (!rawBytes) return [];
   const bytes = rawBytes.split(' ').map((b) => parseInt(b, 16));
   const columna = ({ 4: 1, 5: 2, 12: 3 } as Record<number, 1 | 2 | 3>)[bytes.length];
   if (!columna) return [];
   const activo = (bit: number) => (bytes[bit >> 3] & (0x80 >> (bit & 7))) !== 0;
-  return AVISOS_ESTADO.filter((f) => f[columna] !== null && activo(f[columna]!)).map((f) => f[0]);
+  return AVISOS_ESTADO.flatMap((f, i) => (f[columna] !== null && activo(f[columna]!) ? [{ texto: f[0], error: i >= PRIMER_ERROR }] : []));
 }
 
 // Motivo de "Sin conexión" para la pantalla, a partir del error de la conexión. Dice
@@ -425,7 +433,10 @@ async function queryPrinterStatusUnaVez(config: LoteadoraConfig): Promise<Printe
   const avisos = avisosDeEstado(rawBytes);
   if (result.status === 0x00) return { state: 'activa', rawBytes, avisos };
   if (result.status === 0x12) return { state: 'standby', rawBytes, avisos };
-  return { state: 'en_error', rawBytes, avisos };
+  // Solo avisos (ningún error): "Con avisos". Con algún error, o si no se pudieron
+  // traducir, "En error".
+  const soloAvisos = avisos.length > 0 && avisos.every((a) => !a.error);
+  return { state: soloAvisos ? 'con_avisos' : 'en_error', rawBytes, avisos };
 }
 
 // Consulta el estado real de una loteadora (comando 14 — Request Printer

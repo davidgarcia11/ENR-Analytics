@@ -47,13 +47,16 @@ interface PlantillaArticulo { messageName: string; campos: Campo[]; ultimosManua
 interface Articulo { id: string; descripcion: string; diasCaducidad: number; familia: string; familiaDesc: string; plantilla: PlantillaArticulo | null }
 // familias: códigos F4101.IMSRP2 separados por comas que ofrece esta loteadora (vacío = todas)
 interface Loteadora { id: number; name: string; linea: string; familias: string; zona: string | null }
-type EstadoLoteadoraValor = "activa" | "en_error" | "standby" | "apagada";
+type EstadoLoteadoraValor = "activa" | "con_avisos" | "en_error" | "standby" | "apagada";
 // ultimoEnvio: lo último que mandó el panel a esa máquina (no lo que tenga si se cambió a mano)
 // `lineas`: lo enviado colocado como en la etiqueta; los trozos `reloj` no se envían (los pone la máquina)
 interface UltimoEnvio { plantilla: string; lineas: { texto: string; reloj?: boolean }[][]; usuario: string | null; enviadoAt: string }
 // `motivo`: solo si no responde, por qué (tiempo agotado, rechaza o cierra la conexión...)
 // `avisos`: avisos y errores de la máquina en claro (tinta baja, cartucho no detectado...)
-interface EstadoLoteadora { id: number; name: string; zona: string | null; state: EstadoLoteadoraValor; motivo?: string; avisos?: string[]; ultimoEnvio: UltimoEnvio | null }
+interface EstadoLoteadora {
+  id: number; name: string; zona: string | null; state: EstadoLoteadoraValor; motivo?: string;
+  avisos?: { texto: string; error: boolean }[]; ultimoEnvio: UltimoEnvio | null;
+}
 
 // Formulario de UN trabajo de impresión (artículo/fechas/turno/plantilla elegida).
 // Se guarda uno por loteadora (ver `formStates` en el componente) para que cambiar
@@ -78,12 +81,13 @@ interface LoteadoraFormState {
   manuales: Record<string, string>;
 }
 
-// Colores fijos (enum cerrado de 4 estados) — mismo formato "bg-x/10 text-x" que el
-// resto de indicadores de estado en Nova (ver components/nova/mrp-materials-table.tsx).
-// Imprimiendo en ámbar: mientras imprime no se puede cambiar nada (aviso); conectada
-// y parada, en verde: lista para cambiar de plantilla o enviar.
+// Colores fijos (enum cerrado) — mismo formato "bg-x/10 text-x" que el resto de
+// indicadores de estado en Nova (ver components/nova/mrp-materials-table.tsx). Cada
+// color, una cosa: verde = lista, azul = imprimiendo (no se puede cambiar nada),
+// ámbar = avisos de la máquina, rojo = error, gris = no responde.
 const ESTADO_INFO: Record<EstadoLoteadoraValor, { label: string; className: string; icon: typeof CheckCircle2 }> = {
-  activa: { label: "Imprimiendo", className: "bg-amber-400/10 text-amber-600", icon: Printer },
+  activa: { label: "Imprimiendo", className: "bg-sky-400/10 text-sky-600", icon: Printer },
+  con_avisos: { label: "Con avisos", className: "bg-amber-400/10 text-amber-600", icon: AlertTriangle },
   en_error: { label: "En error", className: "bg-rose-400/10 text-rose-500", icon: XCircle },
   standby: { label: "Conectada", className: "bg-emerald-400/10 text-emerald-600", icon: CheckCircle2 },
   apagada: { label: "Sin conexión", className: "bg-muted text-muted-foreground", icon: PowerOff },
@@ -918,8 +922,19 @@ function LoteadoraPanel() {
                               {info.label}
                             </Badge>
                           </div>
-                          {l.motivo && <p className="mt-1 text-xs text-muted-foreground">{l.motivo}</p>}
-                          {l.avisos && <p className="mt-1 text-xs text-muted-foreground">{l.avisos.join(" · ")}</p>}
+                          {/* Siempre una línea (aunque esté vacía, y cortada con "…" si no cabe;
+                              entera al pasar el ratón): así la separación del último envío queda
+                              a la misma altura en todas las tarjetas. Motivo de "Sin conexión" en
+                              gris; avisos en ámbar y errores en rojo, como en el manual. */}
+                          <p
+                            className="mt-1 h-4 truncate text-xs leading-4 text-muted-foreground"
+                            title={l.motivo ?? l.avisos?.map((a) => a.texto).join(" · ")}
+                          >
+                            {l.motivo}
+                            {l.avisos?.map((a, i) => (
+                              <span key={i} className={a.error ? "text-rose-500" : "text-amber-600"}>{i > 0 && " · "}{a.texto}</span>
+                            ))}
+                          </p>
                           {l.ultimoEnvio ? (
                             <div className="mt-2 border-t border-border pt-2">
                               <p className="text-[11px] text-muted-foreground">
