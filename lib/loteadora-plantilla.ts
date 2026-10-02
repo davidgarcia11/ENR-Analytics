@@ -26,6 +26,7 @@ export type TipoVariable = Exclude<TipoPieza, 'texto' | 'fijo' | 'reloj'>;
 export const FORMATOS_CADUCIDAD = [
   'DD/MM/AA', 'DD/MM/AAAA', 'MM/DD/AA', 'MM/DD/AAAA',
   'DD-MM-AA', 'DD-MM-AAAA', 'MM-DD-AA', 'MM-DD-AAAA', 'DD',
+  'MM/AAAA', 'MM-AAAA', // solo mes y año: "02/2027"
   'AAAA MES DD', // mes en siglas (SIGLAS_MES): "2027 FE 24"
 ] as const;
 // Siglas del mes del formato "AAAA MES DD", pedidas por un cliente.
@@ -140,6 +141,7 @@ export function formatearCaducidad(iso: string, formato: string = 'DD/MM/AAAA'):
   if (formato === 'AAAA MES DD') return `${a} ${SIGLAS_MES[Number(m) - 1]} ${d}`;
   const anio = formato.endsWith('AAAA') ? a : a.slice(-2);
   const sep = formato.includes('-') ? '-' : '/';
+  if (formato.length === 7) return `${m}${sep}${a}`; // MM/AAAA, MM-AAAA
   return formato.startsWith('MM') ? `${m}${sep}${d}${sep}${anio}` : `${d}${sep}${m}${sep}${anio}`;
 }
 
