@@ -1,4 +1,5 @@
-import { NextResponse } from 'next/server'
+import { NextRequest, NextResponse } from 'next/server'
+import { verifySession } from '@/lib/auth'
 import { requireAccess, requireScreenAccess } from '@/lib/permissions'
 import { permisosLoteadora as L } from '@/lib/permisos';
 import { getDbConnection } from '@/lib/db'
@@ -12,7 +13,11 @@ import { leerAjustesTurno, leerCampos } from '@/lib/loteadora-plantilla'
 // (loteadora_articulo_mensajes), se le adjunta el nombre de mensaje y sus campos
 // con sus piezas (lib/loteadora-plantilla.ts), para que /loteadora pueda
 // autocargarla y pintar la vista previa real sin otra llamada.
-export async function GET() {
+//
+// ?registrar=1: /loteadora lo manda solo al abrirse (no en el refresco de cada 60 s
+// ni desde /admin), y entonces se apunta en los logs de consulta (source 'loteadora').
+export async function GET(req: NextRequest) {
+  const startTime = Date.now()
   // También lo usan /admin → Artículos → Plantilla como buscador y /admin → Máquinas
   // para las familias, así que basta con acceso a la pantalla /loteadora o uno de esos permisos.
   const denied = await requireScreenAccess('loteadora');
@@ -67,6 +72,18 @@ export async function GET() {
     }]))
 
     const rowsConPlantilla = rows.map(r => ({ ...r, plantilla: plantillaPorArticulo.get(r.id) ?? null }))
+
+    // Registrar la apertura del panel en logs (nunca bloquea la respuesta) — mismo patrón que el resto de paneles.
+    if (req.nextUrl.searchParams.get('registrar') === '1') {
+      try {
+        const session = await verifySession().catch(() => null)
+        db.prepare(
+          'INSERT INTO query_logs (user_id, username, source, filters, result_count, execution_time_ms) VALUES (?, ?, ?, ?, ?, ?)'
+        ).run(session?.id ?? null, session ? session.username : 'Invitado', 'loteadora', JSON.stringify({}), rowsConPlantilla.length, Date.now() - startTime)
+      } catch (logErr) {
+        console.error('Error logging query:', logErr)
+      }
+    }
 
     return NextResponse.json(rowsConPlantilla)
   } catch (err: any) {

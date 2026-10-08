@@ -57,6 +57,8 @@ Al montar la página (y en cada refresco de 60s del estado en vivo, ver §10) se
 
 El código y la descripción del artículo elegido se muestran en una cabecera, justo encima del lote/fecha de caducidad en la vista previa, para que quede claro para qué artículo se está calculando/enviando.
 
+**Logs de consulta** (oct. 2026): la carga al abrir la página va con `?registrar=1` y apunta una fila en `query_logs` con `source: 'loteadora'` (usuario, nº de artículos y tiempo), que se ve en `/admin` → Logs de consultas como "Loteadora". El refresco de cada 60 s y los usos desde `/admin` (Artículos, Máquinas) no la llevan, para no llenar los logs. Como en el resto de paneles, apuntarlo nunca bloquea la respuesta.
+
 ### Consulta Oracle
 
 **Artículos** (`F4101`):
