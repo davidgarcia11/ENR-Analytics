@@ -4,7 +4,7 @@
 import { describe, it, expect } from 'bun:test'
 import { Database } from 'bun:sqlite'
 import {
-  crearClave, editarClave, eliminarClave, estadoClave, generarClave, huella, hoyLocal, leerClave, listarClaves,
+  crearClave, dentroDelLimite, editarClave, eliminarClave, estadoClave, generarClave, huella, hoyLocal, leerClave, listarClaves,
   revocarClave, rotarClave, validarDatosClave, verificarClave, type DatosClave,
 } from '@/lib/api-claves'
 
@@ -128,5 +128,17 @@ describe('gestión', () => {
     const vieja = crearClave(db, 'prueba', { ...DATOS, caducaEl: manana() }, null)
     rotarClave(db, vieja.fila.id, '7', null)
     expect(leerClave(db, vieja.fila.id)!.caducaEl).toBe(manana())
+  })
+})
+
+describe('dentroDelLimite', () => {
+  it('como mucho N por minuto y por clave; luego dice cuánto esperar', () => {
+    const t0 = 1_000_000_000
+    for (let i = 0; i < 3; i++) expect(dentroDelLimite(901, t0 + i, 3)).toEqual({ ok: true })
+    expect(dentroDelLimite(901, t0 + 20_000, 3)).toEqual({ ok: false, reintentarEn: 40 })
+    // Otra clave tiene su propia cuenta
+    expect(dentroDelLimite(902, t0 + 20_000, 3)).toEqual({ ok: true })
+    // Pasado el minuto, vuelve a empezar
+    expect(dentroDelLimite(901, t0 + 60_000, 3)).toEqual({ ok: true })
   })
 })

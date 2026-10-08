@@ -1,0 +1,276 @@
+# Especificación OpenAPI de la API de integración con GoLive.
+# Se mantiene a mano junto al código: si cambia app/api/integracion/** o
+# lib/integracion.ts, se cambia aquí en el mismo PR. Ver docs/integracion-golive.md.
+# Se importa tal cual en Apidog, Postman, Swagger UI, Insomnia...
+# Sin claves ni IPs reales: el servidor va como variable.
+openapi: 3.0.3
+info:
+  title: Dashboard de producción ENR — Integración GoLive
+  version: 1.1.0
+  description: |
+    API para que GoLive (JDE) avise al dashboard de producción de cada palet
+    escaneado contra una orden de fabricación.
+
+    **Estado actual:** el dashboard comprueba cada mensaje y lo **guarda**; todavía
+    no actúa con él. Una respuesta correcta confirma que el mensaje ha llegado y
+    cumple el contrato, no lo que haga el panel después.
+
+    **Autenticación:** cabecera `x-api-key` con una clave que facilita el equipo del
+    dashboard. Las claves de **prueba** (`enr_test_…`) solo guardan lo recibido,
+    marcado como prueba, y nunca se procesará; las **reales** (`enr_live_…`) se dan
+    al pasar a producción.
+
+    **Reintentos:** si no hay respuesta o llega un `500`, reintentar 2-3 veces con
+    el **mismo `id`**: el dashboard reconoce el reintento y no lo guarda dos veces.
+    Un `400` o un `401` no se reintentan (hay que corregir algo).
+
+    **Todos los valores van como texto, entre comillas.** El SSCC tiene 18 cifras
+    y como número JSON perdería precisión, así que un número se rechaza.
+
+    **Límites:** como mucho **120 peticiones por minuto con cada clave** (por encima,
+    `429` con `Retry-After`) y **10000 bytes** por mensaje (por encima, `413`). Un
+    escaneo ocupa unos 200 bytes.
+servers:
+  - url: http://{servidor}:{puerto}
+    description: Dashboard de producción (red interna de la empresa)
+    variables:
+      servidor:
+        default: localhost
+        description: IP o nombre del servidor del dashboard (la facilita el equipo del dashboard)
+      puerto:
+        default: '3000'
+security:
+  - claveApi: []
+tags:
+  - name: Integración
+    description: Avisos de GoLive al dashboard
+paths:
+  /api/integracion/v1/escaneo:
+    post:
+      tags: [Integración]
+      operationId: avisarEscaneo
+      summary: Aviso de palet escaneado
+      description: |
+        Un mensaje por cada palet escaneado contra una orden de fabricación, con el
+        resultado de la comprobación (`OK` si el artículo está en la orden, `NO_OK`
+        si no). Los campos que no estén en el esquema se aceptan y se guardan.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Escaneo'
+            examples:
+              ok:
+                summary: Escaneo correcto, con todos los campos
+                value:
+                  id: 3f2b8c1e-7a4d-4e9b-9c11-2d5e6f7a8b90
+                  articulo: '1210500019'
+                  resultado: OK
+                  linea: '18'
+                  lote: '263221'
+                  sscc: '384123450000000017'
+                  orden: '490387'
+              noOk:
+                summary: Artículo fuera de la orden, sin lote ni SSCC
+                value:
+                  id: 7c9d0e1f-2a3b-4c5d-8e6f-9a0b1c2d3e4f
+                  articulo: '1210500019'
+                  resultado: NO_OK
+                  linea: '18'
+                  lote: ''
+                  sscc: ''
+                  orden: '490387'
+                  motivo: El artículo no está en la orden
+              minimo:
+                summary: Solo los campos obligatorios
+                value:
+                  articulo: '1210500019'
+                  resultado: OK
+                  linea: '18'
+                  lote: '263221'
+                  sscc: '384123450000000017'
+      responses:
+        '202':
+          description: Recibido y guardado.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Recibido'
+              examples:
+                recibido:
+                  value: { ok: true, id: 3f2b8c1e-7a4d-4e9b-9c11-2d5e6f7a8b90, estado: recibido, prueba: true }
+                sinId:
+                  summary: Sin id en el mensaje, el dashboard devuelve el suyo
+                  value: { ok: true, id: '1542', estado: recibido, prueba: false }
+        '200':
+          description: Ese `id` ya se había recibido (un reintento). No se guarda otra vez.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Recibido'
+              examples:
+                duplicado:
+                  value: { ok: true, id: 3f2b8c1e-7a4d-4e9b-9c11-2d5e6f7a8b90, estado: duplicado, prueba: true }
+        '400':
+          description: |
+            Datos incorrectos: el cuerpo no es JSON, falta un campo o tiene mal
+            formato. `errores` dice cuál y por qué, uno por línea. No reintentar:
+            corregir el mensaje. El mensaje rechazado también queda guardado.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DatosIncorrectos'
+              examples:
+                campos:
+                  summary: Varios campos mal
+                  value:
+                    ok: false
+                    errores:
+                      - 'articulo: deben ser 10 cifras'
+                      - 'resultado: debe ser "OK" o "NO_OK"'
+                      - 'sscc: deben ser 18 cifras, sin el (00)'
+                falta:
+                  summary: Falta un obligatorio
+                  value: { ok: false, errores: ['linea: es obligatorio'] }
+                numero:
+                  summary: Un valor como número en vez de texto
+                  value: { ok: false, errores: ['sscc: debe ir como texto, entre comillas'] }
+                json:
+                  summary: El cuerpo no es JSON válido
+                  value: { ok: false, errores: ['El cuerpo no es un JSON válido'] }
+        '401':
+          description: |
+            Sin clave, o la clave no vale (no existe, está revocada o caducada, o no
+            da acceso a esta API). No se dice el motivo. No reintentar: revisar la
+            clave con el equipo del dashboard. No se guarda nada.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ClaveNoValida'
+              examples:
+                clave:
+                  value: { ok: false, error: Clave no válida (cabecera x-api-key) }
+        '413':
+          description: |
+            El cuerpo pasa de 10000 bytes. No se lee entero ni se reintenta: un escaneo
+            ocupa unos 200 bytes, así que hay un error en lo que se envía.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DatosIncorrectos'
+              examples:
+                grande:
+                  value: { ok: false, errores: ['El cuerpo ocupa demasiado (máximo 10000 bytes)'] }
+        '429':
+          description: |
+            Más de 120 peticiones en un minuto con la misma clave. Esperar los segundos
+            de `Retry-After` y reintentar con el mismo `id`. No se guarda nada.
+          headers:
+            Retry-After:
+              description: Segundos que faltan para poder volver a enviar.
+              schema:
+                type: integer
+                example: 23
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ClaveNoValida'
+              examples:
+                limite:
+                  value: { ok: false, error: 'Demasiadas peticiones: como mucho 120 por minuto con cada clave' }
+        '500':
+          description: Error del dashboard. Reintentar 2-3 veces con el mismo `id`.
+components:
+  securitySchemes:
+    claveApi:
+      type: apiKey
+      in: header
+      name: x-api-key
+      description: Clave de prueba (`enr_test_…`) o real (`enr_live_…`), facilitada por el equipo del dashboard.
+  schemas:
+    Escaneo:
+      type: object
+      required: [articulo, resultado, linea, lote, sscc]
+      additionalProperties: true
+      properties:
+        articulo:
+          type: string
+          pattern: '^\d{10}$'
+          description: Código largo del artículo en JDE (10 cifras).
+          example: '1210500019'
+        resultado:
+          type: string
+          enum: [OK, NO_OK]
+          description: '`OK` si el artículo está en la orden; `NO_OK` si no.'
+          example: OK
+        linea:
+          type: string
+          minLength: 1
+          maxLength: 10
+          description: Línea donde se ha escaneado (la misma que tiene cada loteadora en el dashboard).
+          example: '18'
+        lote:
+          type: string
+          maxLength: 30
+          description: Lote de la orden, tal cual en JDE. Puede ir vacío (`""`) si no se tiene, p. ej. en un `NO_OK`.
+          example: '263221'
+        sscc:
+          type: string
+          pattern: '^(\d{18})?$'
+          description: SSCC del palet, 18 cifras sin el `(00)`. Puede ir vacío (`""`).
+          example: '384123450000000017'
+        orden:
+          type: string
+          maxLength: 20
+          description: Nº de la orden de fabricación.
+          example: '490387'
+        motivo:
+          type: string
+          maxLength: 200
+          description: Por qué es `NO_OK`.
+          example: El artículo no está en la orden
+        id:
+          type: string
+          maxLength: 64
+          description: |
+            Identificador único del mensaje, generado por GoLive (p. ej. un UUID).
+            Opcional pero recomendado: con él, un reintento no se guarda dos veces.
+          example: 3f2b8c1e-7a4d-4e9b-9c11-2d5e6f7a8b90
+    Recibido:
+      type: object
+      required: [ok, id, estado, prueba]
+      properties:
+        ok:
+          type: boolean
+          enum: [true]
+        id:
+          type: string
+          description: El `id` del mensaje o, si no lo traía, el del dashboard.
+        estado:
+          type: string
+          enum: [recibido, duplicado]
+        prueba:
+          type: boolean
+          description: '`true` si llegó con una clave de prueba.'
+    DatosIncorrectos:
+      type: object
+      required: [ok, errores]
+      properties:
+        ok:
+          type: boolean
+          enum: [false]
+        errores:
+          type: array
+          items:
+            type: string
+          description: 'Un texto por problema: «campo: qué falla».'
+    ClaveNoValida:
+      type: object
+      required: [ok, error]
+      properties:
+        ok:
+          type: boolean
+          enum: [false]
+        error:
+          type: string

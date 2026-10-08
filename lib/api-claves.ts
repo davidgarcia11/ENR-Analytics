@@ -164,3 +164,25 @@ export function verificarClave(db: Database.Database, clave: string | null, ambi
   db.prepare('UPDATE api_claves SET ultimo_uso_at = CURRENT_TIMESTAMP, ultimo_uso_ip = ? WHERE id = ?').run(ip, c.id);
   return c;
 }
+
+/** Peticiones por minuto que admite cada clave; por encima, 429 */
+export const LIMITE_POR_MINUTO = 120;
+
+// Ventana de un minuto por clave, en memoria del proceso.
+// ponytail: en memoria, basta con un único servidor; con varios, a la BD o a un Redis
+const ventanas = new Map<number, { inicio: number; n: number }>();
+
+/**
+ * ¿Puede esta clave hacer otra petición? Ventana fija de un minuto. Si no, los
+ * segundos que faltan para la siguiente ventana (para la cabecera Retry-After).
+ */
+export function dentroDelLimite(claveId: number, ahora = Date.now(), limite = LIMITE_POR_MINUTO): { ok: true } | { ok: false; reintentarEn: number } {
+  const v = ventanas.get(claveId);
+  if (!v || ahora - v.inicio >= 60_000) {
+    ventanas.set(claveId, { inicio: ahora, n: 1 });
+    return { ok: true };
+  }
+  if (v.n >= limite) return { ok: false, reintentarEn: Math.ceil((v.inicio + 60_000 - ahora) / 1000) };
+  v.n++;
+  return { ok: true };
+}
