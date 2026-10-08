@@ -152,3 +152,52 @@ export function buscarMensajes(db: Database.Database, f: FiltrosMensajes): { fil
     total,
   };
 }
+
+/**
+ * Lee el cuerpo de una petición sin pasar de `max` bytes: si los supera, deja de leer y
+ * devuelve null. Así un cuerpo enorme no se carga entero en memoria antes de rechazarlo
+ * (ni siquiera con Content-Length falso o sin él).
+ */
+export async function leerCuerpo(req: Request, max = MAX_CUERPO): Promise<string | null> {
+  if (Number(req.headers.get('content-length')) > max) return null;
+  if (!req.body) return '';
+  const reader = req.body.getReader();
+  const trozos: Uint8Array[] = [];
+  let total = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    total += value.byteLength;
+    if (total > max) { await reader.cancel().catch(() => {}); return null; }
+    trozos.push(value);
+  }
+  return new TextDecoder().decode(Buffer.concat(trozos));
+}
+
+/** Días que se guardan los mensajes de prueba; los reales, siempre (trazabilidad) */
+export const DIAS_MENSAJES_PRUEBA = 90;
+
+/** Borra los mensajes de prueba con más de DIAS_MENSAJES_PRUEBA días. Devuelve cuántos. */
+export function limpiarPruebasAntiguas(db: Database.Database, dias = DIAS_MENSAJES_PRUEBA): number {
+  return db.prepare(
+    `DELETE FROM integracion_mensajes WHERE origen = 'prueba' AND created_at < datetime('now', ?)`
+  ).run(`-${dias} days`).changes;
+}
+
+/**
+ * Limpieza de mensajes de prueba al arrancar el servidor y luego una vez al día (lo
+ * arranca instrumentation.ts, una sola vez por proceso).
+ */
+export function arrancarLimpieza(getDb: () => Database.Database): void {
+  const g = globalThis as { __limpiezaIntegracion?: boolean };
+  if (g.__limpiezaIntegracion) return;
+  g.__limpiezaIntegracion = true;
+  const limpiar = () => {
+    try {
+      const n = limpiarPruebasAntiguas(getDb());
+      if (n) console.log(`[integración] ${n} mensaje(s) de prueba de más de ${DIAS_MENSAJES_PRUEBA} días borrados`);
+    } catch (e) { console.error('[integración] error al limpiar mensajes de prueba:', e); }
+  };
+  limpiar();
+  setInterval(limpiar, 24 * 60 * 60_000);
+}

@@ -13,6 +13,7 @@ Dashboard de producción para Elaborados Naturales. Conecta con Oracle JDE y mue
 - **Auth:** JWT (jose) + bcryptjs, cookie httpOnly
 - **Excel:** xlsx 0.18
 - **Gráficos:** recharts
+- **Documentación de API:** OpenAPI 3 (`docs/integracion-golive.openapi.yaml`) + swagger-ui-dist (visor instalado, versión fija)
 - **Iconos:** lucide-react
 - **Componentes UI:** Radix UI (solo Slot), class-variance-authority, clsx, tailwind-merge
 
@@ -96,6 +97,7 @@ docs/                         # Documentación específica por panel
   mrp.md                      # Panel de explosión de compras / MRP (sistema Nova)
   muestras.md                 # App de control de muestras pendientes/enviadas/completadas (sistema Nova)
   integracion-golive.md       # API de integración con GoLive: contrato, claves, bandeja de entrada
+  integracion-golive.openapi.yaml # Especificación OpenAPI 3 de esa API (Apidog/Postman/Swagger)
 ```
 
 ## Convenciones de código
@@ -228,7 +230,7 @@ Solo cuando se pida explícitamente usar Nova (no es el sistema por defecto toda
   - Cambios en el panel de costes (`/costes`, `api/costes`) → `docs/costes.md`
   - Cambios en el panel de MRP (`/mrp`, `api/mrp`) → `docs/mrp.md`
   - Cambios en el panel de muestras (`/muestras`, `api/muestras`) → `docs/muestras.md`
-  - Cambios en la API de integración con GoLive o en las claves de API (`api/integracion`, `api/admin/api-claves`, `lib/integracion.ts`, `lib/api-claves.ts`) → `docs/integracion-golive.md`
+  - Cambios en la API de integración con GoLive o en las claves de API (`api/integracion`, `api/admin/api-claves`, `lib/integracion.ts`, `lib/api-claves.ts`) → `docs/integracion-golive.md` (y, si cambia el contrato, `docs/integracion-golive.openapi.yaml` — lo exige `__tests__/openapi.test.ts`)
   - Nuevo panel → crear `docs/nombre-panel.md` y añadir referencia en `DOCUMENTACION.md` sección 9
 - Sugerir commit con mensaje siguiendo el estilo del proyecto (conventional + español)
 - Actualizar la tarea de ClickUp correspondiente (estado, comentario) según en qué paso del flujo Git se esté — ver `MANUAL_IA_ALIMENTAR_CLICKUP.md`
