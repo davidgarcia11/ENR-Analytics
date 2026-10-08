@@ -94,7 +94,7 @@ Se gestionan en **`/admin` → Integración › Claves de API**, **solo el admin
 
 | Acción | Qué hace |
 |---|---|
-| **Nueva clave** | Nombre (*«GoLive pruebas»*), entorno (**prueba** → `enr_test_…`, **real** → `enr_live_…`), a qué APIs da acceso (`AMBITOS`; hoy solo el escaneo), caducidad opcional y notas. La clave completa se enseña **una sola vez**, con botón de copiar |
+| **Nueva clave** | Nombre (*«GoLive pruebas»*), entorno (**prueba** → `enr_test_…`, **real** → `enr_live_…`), a qué APIs da acceso (`AMBITOS`; hoy solo «Aviso de escaneo de palet»), caducidad opcional y notas. La clave completa se enseña **una sola vez**, con botón de copiar |
 | **Editar** | Nombre, APIs, caducidad y notas. La clave no cambia |
 | **Rotar…** | Crea otra con la misma configuración y pone fin a la vieja: ya (se revoca) o dentro de 1 o 7 días. Mientras tanto valen las dos, para cambiarla sin cortes. Si la vieja ya caducaba antes, se respeta |
 | **Revocar** | Deja de valer al momento. No se puede deshacer |
@@ -107,7 +107,7 @@ Se gestionan en **`/admin` → Integración › Claves de API**, **solo el admin
 - Pasárselas a GoLive **por un canal privado** (no en un correo con más destinatarios, no en ClickUp). Empezar con **una de prueba**; la real, el día que pasen a producción.
 - Solo dentro de la red de la empresa: va por `http://`, sin cifrar. Si algún día llaman desde fuera, hace falta HTTPS antes de abrirlo.
 - **La IP que se ve (mensajes y «Último uso») es orientativa, no comprobada.** Sale de `x-forwarded-for`, que Next.js solo rellena si no viene en la petición: quien llama puede poner la que quiera (probado: con `x-forwarded-for: 10.99.99.99` se apunta esa). Por eso **no hay restricción por IP en la app**: sería falsa. Si hace falta de verdad (p. ej. cuando el panel actúe con los mensajes), la forma es que la integración escuche en **otro puerto** y abrir ese puerto en el **cortafuegos de Windows** solo a la IP de GoLive: ahí la IP la comprueba el sistema operativo.
-- **Una API nueva con clave:** una entrada en `AMBITOS` (`lib/api-claves.ts`) y `verificarClave(db, clave, '<ámbito>', ip)` en su ruta (y la ruta en `SIN_SESION` de `proxy.ts`).
+- **Una API nueva con clave:** una entrada en `AMBITOS` (`lib/api-claves.ts`), con una etiqueta que diga qué hace la API, no quién la usa (eso va en el nombre de cada clave), y `verificarClave(db, clave, '<ámbito>', ip)` en su ruta (y la ruta en `SIN_SESION` de `proxy.ts`).
 
 Historia: en la v1.28.0 había dos claves fijas en `.env.local` (`INTEGRACION_API_KEY` / `_PRUEBAS`); desde la v1.29.0 se gestionan en el panel y esas variables ya no se usan (se pueden borrar). En la misma versión se quitó `/api/jde-orders` (y su `SERES_API_KEY`), que no usaba nadie.
 

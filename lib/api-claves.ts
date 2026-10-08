@@ -11,9 +11,12 @@
 import { createHash, randomBytes } from 'crypto';
 import type Database from 'better-sqlite3';
 
-/** APIs a las que puede dar acceso una clave. Una API nueva con clave: una entrada aquí. */
+/**
+ * APIs a las que puede dar acceso una clave. Una API nueva con clave: una entrada aquí.
+ * La etiqueta dice qué es la API, no quién la usa (eso va en el nombre de cada clave).
+ */
 export const AMBITOS = {
-  escaneo: { label: 'GoLive — aviso de escaneo', ruta: 'POST /api/integracion/v1/escaneo' },
+  escaneo: { label: 'Aviso de escaneo de palet', ruta: 'POST /api/integracion/v1/escaneo' },
 } as const;
 export type Ambito = keyof typeof AMBITOS;
 export const LISTA_AMBITOS = Object.keys(AMBITOS) as Ambito[];
