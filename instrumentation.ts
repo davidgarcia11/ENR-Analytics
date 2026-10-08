@@ -1,9 +1,12 @@
 // Se ejecuta una vez al arrancar el servidor de Next.js (no en el build ni en el
 // navegador). Arranca el seguimiento de conexión de las loteadoras por ping
-// (lib/loteadora-ping.ts).
+// (lib/loteadora-ping.ts) y la limpieza diaria de los mensajes de prueba de la API de
+// integración (lib/integracion.ts).
 export async function register() {
   if (process.env.NEXT_RUNTIME !== 'nodejs') return;
   const { arrancarSeguimiento } = await import('./lib/loteadora-ping');
   const { getDb } = await import('./lib/sqlite');
   arrancarSeguimiento(getDb);
+  const { arrancarLimpieza } = await import('./lib/integracion');
+  arrancarLimpieza(getDb);
 }

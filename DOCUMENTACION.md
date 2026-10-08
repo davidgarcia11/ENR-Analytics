@@ -594,6 +594,7 @@ sincronización, último error) y botón "Sincronizar ahora" — ver
 | GET / POST | `/api/admin/loteadora-articulos/copia` | Exporta (ver) / importa (asociar) solo las asociaciones artículo → plantilla (sección Artículos) |
 | GET | `/api/admin/loteadoras/:id/historial-conexion` | Historial de conexión (ping cada 30 s en segundo plano, `instrumentation.ts` + `lib/loteadora-ping.ts`) de una loteadora, en CSV (ver `docs/loteadora.md` §20) |
 | GET / POST | `/api/admin/api-claves` · PATCH / DELETE `/api/admin/api-claves/:id` · POST `/api/admin/api-claves/:id/rotar` | Claves de API de los sistemas externos: listar, crear (la clave completa solo en esa respuesta), editar, revocar (`PATCH {revocar: true}`), eliminar (solo revocadas o caducadas) y rotar. Solo admin (`lib/api-claves.ts`, ver `docs/integracion-golive.md`) |
+| GET | `/api/admin/integracion/openapi` · `/api/admin/integracion/docs` | Especificación OpenAPI de la API de integración (`?descargar=1` la descarga) y su visor Swagger UI (`swagger-ui-dist`, instalado en el proyecto). Permiso `admin.integracion.ver`, ver `docs/integracion-golive.md` §6 |
 | GET | `/api/admin/integracion` | Mensajes recibidos por la API de integración con GoLive, con filtros y por páginas (permiso `admin.integracion.ver`, ver `docs/integracion-golive.md`) |
 | GET | `/api/admin/loteadora-registro` | Registro de envíos a las loteadoras, con filtros y por páginas (permiso `registro.ver`, ver `docs/loteadora.md` §19) |
 | GET / POST | `/api/admin/loteadora-copia` | Exporta / importa en JSON las plantillas de la loteadora y sus asociaciones de artículos (botones de `/admin` → Plantillas, ver `docs/loteadora.md` §13) |
@@ -702,7 +703,8 @@ artículos de `/muestras` o asignar artículos a plantillas de loteadora.
   migrada automáticamente a `user_permissions` — quien lo tenía lo conserva — y
   eliminada), `loteadora.limpiar-buffer` (botón "Limpiar buffer" de /loteadora, sin
   sección de /admin), `admin.integracion.ver` (`/admin` → Integración: mensajes recibidos
-  de GoLive, ver `docs/integracion-golive.md`) y los **permisos por acción de la
+  de GoLive y documentación de la API, ver `docs/integracion-golive.md`; abre dos secciones:
+  `seccionAdmin` puede ser una lista) y los **permisos por acción de la
   loteadora** (sept. 2026):
 
   | Sección de `/admin` (Loteadora ›) | Ver | Crear y editar | Eliminar / desvincular | Otras |
