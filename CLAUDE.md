@@ -49,8 +49,7 @@ app/                          # Rutas Next.js (App Router)
     orders/                   # GET control de pedidos
     plants/                   # GET plantas dinámicas (usado en pedidos y caducados)
     caducados/                # GET palets caducados/obsoletos/bloqueados
-    jde-orders/               # GET órdenes JDE (API externa, usada por herramientas externas)
-    integracion/v1/escaneo/   # POST avisos de escaneo de GoLive (x-api-key) — por ahora solo se guardan, ver docs/integracion-golive.md
+    integracion/v1/escaneo/   # POST avisos de escaneo de GoLive (x-api-key, claves de /admin) — por ahora solo se guardan, ver docs/integracion-golive.md
     comparativa-seres/        # GET comparativa SERES vs JDE
     consulta-stock-pda/       # GET stock FEFO por EAN escaneado (Reflex/SQL Server)
     compras/                  # GET previsión (F3460) vs venta real (F4211), coste (F4105), gramaje (F554101) — jerárquico Familia>Canal>Artículo (Nova)
@@ -67,6 +66,7 @@ lib/
   utils.ts                    # parseJdeDate, parseWasOqs, cn()
   reflex.ts                   # Conexión SQL Server (Reflex), análoga a db.ts para Oracle
   gs1.ts                      # Parser de códigos de barras GS1-128 (EAN/lote/cantidad/SSCC/fechas)
+  api-claves.ts               # Claves de API de sistemas externos (huella SHA-256, caducidad, rotar/revocar) — /admin → Integración
 components/
   AppShell.tsx                # AppShell (contenedor de página + Navbar) y PageHeader — punto de entrada de todo panel
   KpiCard.tsx                 # Tarjeta KPI reutilizable (icono + valor + caption, o children para casos custom)
@@ -228,7 +228,7 @@ Solo cuando se pida explícitamente usar Nova (no es el sistema por defecto toda
   - Cambios en el panel de costes (`/costes`, `api/costes`) → `docs/costes.md`
   - Cambios en el panel de MRP (`/mrp`, `api/mrp`) → `docs/mrp.md`
   - Cambios en el panel de muestras (`/muestras`, `api/muestras`) → `docs/muestras.md`
-  - Cambios en la API de integración con GoLive (`api/integracion`, `lib/integracion.ts`) → `docs/integracion-golive.md`
+  - Cambios en la API de integración con GoLive o en las claves de API (`api/integracion`, `api/admin/api-claves`, `lib/integracion.ts`, `lib/api-claves.ts`) → `docs/integracion-golive.md`
   - Nuevo panel → crear `docs/nombre-panel.md` y añadir referencia en `DOCUMENTACION.md` sección 9
 - Sugerir commit con mensaje siguiendo el estilo del proyecto (conventional + español)
 - Actualizar la tarea de ClickUp correspondiente (estado, comentario) según en qué paso del flujo Git se esté — ver `MANUAL_IA_ALIMENTAR_CLICKUP.md`

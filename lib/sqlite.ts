@@ -246,9 +246,30 @@ export function getDb(): Database.Database {
       errores TEXT,                  -- JSON: por qué no era válido
       id_externo TEXT,               -- "id" del mensaje (GoLive), para no duplicar reintentos
       ip TEXT,
-      estado TEXT NOT NULL DEFAULT 'recibido'
+      estado TEXT NOT NULL DEFAULT 'recibido',
+      clave_id INTEGER,              -- con qué clave llegó (api_claves.id)
+      clave_nombre TEXT              -- su nombre, copiado: sigue valiendo si se elimina la clave
     );
     CREATE INDEX IF NOT EXISTS idx_integracion_mensajes_id_externo ON integracion_mensajes (tipo, origen, id_externo);
+
+    -- Claves de API de los sistemas externos (lib/api-claves.ts), gestionadas desde
+    -- /admin → Integración › Claves de API. Solo la huella SHA-256, nunca la clave.
+    CREATE TABLE IF NOT EXISTS api_claves (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      nombre TEXT NOT NULL,
+      prefijo TEXT NOT NULL,         -- lo visible de la clave: "enr_live_3f9a"
+      hash TEXT NOT NULL UNIQUE,     -- SHA-256 de la clave completa
+      entorno TEXT NOT NULL,         -- 'real' | 'prueba'
+      ambitos TEXT NOT NULL,         -- JSON: APIs a las que da acceso (AMBITOS)
+      notas TEXT,
+      caduca_el TEXT,                -- último día en que vale (AAAA-MM-DD, local); NULL = sin caducidad
+      creada_por TEXT,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      revocada_por TEXT,
+      revocada_at TEXT,
+      ultimo_uso_at TEXT,
+      ultimo_uso_ip TEXT
+    );
 
     -- Último envío hecho desde /loteadora a cada máquina (se sobrescribe en cada
     -- envío correcto): se enseña en "Estado de las loteadoras". Es lo último que
@@ -417,6 +438,13 @@ export function getDb(): Database.Database {
   const logColumns = _db.prepare("PRAGMA table_info(query_logs)").all() as { name: string }[];
   if (!logColumns.some(c => c.name === 'source')) {
     _db.exec("ALTER TABLE query_logs ADD COLUMN source TEXT NOT NULL DEFAULT 'produccion'");
+  }
+
+  // Migración: con qué clave llegó cada mensaje de integración (BDs de la v1.28.0)
+  const integracionColumns = _db.prepare("PRAGMA table_info(integracion_mensajes)").all() as { name: string }[];
+  if (!integracionColumns.some(c => c.name === 'clave_id')) {
+    _db.exec("ALTER TABLE integracion_mensajes ADD COLUMN clave_id INTEGER");
+    _db.exec("ALTER TABLE integracion_mensajes ADD COLUMN clave_nombre TEXT");
   }
 
   // Migración: añadir columna screen a presets si no existe
