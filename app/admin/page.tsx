@@ -30,7 +30,7 @@ import NotificationDropdown from "@/components/shadcn-space/blocks/topbar-02/hea
 import ProfileDropdown, { iniciales } from "@/components/shadcn-space/blocks/topbar-02/header/dropdown-profile"
 import { getNavData } from "@/components/shadcn-space/blocks/topbar-02/data"
 import {
-  BellRing, ChevronsUpDown, FileCode, FileText, History, Inbox, LayoutGrid, Link2, MapPin, Printer, Receipt, RefreshCw, ScanBarcode, Settings, ShieldCheck, Tag, Users,
+  BellRing, ChevronsUpDown, FileCode, FileText, History, Inbox, KeyRound, LayoutGrid, Link2, MapPin, Printer, Receipt, RefreshCw, ScanBarcode, Settings, ShieldCheck, Tag, Users,
   type LucideIcon,
 } from "lucide-react"
 import { puedeEntrarEnAdmin, seccionesAdminPorPermisos } from "@/lib/permisos"
@@ -48,6 +48,7 @@ import AdminMuestrasSync from "@/components/nova/admin/muestras-sync"
 import AdminLogsConsultas from "@/components/nova/admin/logs-consultas"
 import AdminConfirmacionesPda from "@/components/nova/admin/confirmaciones-pda"
 import AdminIntegracion from "@/components/nova/admin/integracion"
+import AdminApiClaves from "@/components/nova/admin/api-claves"
 
 // ─── Navegación del panel (sidebar) ─────────────────────────────────────────────
 // Una sección nueva se añade aquí (y, si debe poder abrirla alguien que no es admin,
@@ -91,7 +92,14 @@ const GRUPOS_ADMIN: GrupoAdmin[] = [
       { key: "muestras", label: "Muestras", descripcion: "Caché de /muestras y sincronización manual", icon: RefreshCw, Componente: AdminMuestrasSync },
       { key: "logs", label: "Logs de consultas", descripcion: "Consultas ejecutadas por panel y usuario, y su rendimiento", icon: FileText, Componente: AdminLogsConsultas },
       { key: "confirmaciones-pda", label: "Confirmaciones PDA", descripcion: "Avisos de Consulta Stock PDA que aceptó cada operario al escanear", icon: ScanBarcode, Componente: AdminConfirmacionesPda },
-      { key: "integracion", label: "Integración", descripcion: "Mensajes recibidos de GoLive por la API de integración (por ahora solo se guardan)", icon: Inbox, Componente: AdminIntegracion },
+    ],
+  },
+  {
+    label: "Integración",
+    secciones: [
+      { key: "integracion", label: "Mensajes recibidos", descripcion: "Mensajes recibidos de GoLive por la API de integración (por ahora solo se guardan)", icon: Inbox, Componente: AdminIntegracion },
+      // Sin permiso en lib/permisos.ts: solo admin
+      { key: "api-claves", label: "Claves de API", descripcion: "Claves con las que llaman al dashboard los sistemas externos: crear, rotar, revocar y caducidad", icon: KeyRound, Componente: AdminApiClaves },
     ],
   },
 ]

@@ -1,25 +1,28 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getDb } from '@/lib/sqlite';
-import { MAX_CUERPO, guardarMensaje, origenDeClave, validarEscaneo, yaRecibido } from '@/lib/integracion';
+import { verificarClave } from '@/lib/api-claves';
+import { MAX_CUERPO, guardarMensaje, validarEscaneo, yaRecibido } from '@/lib/integracion';
 
 // POST /api/integracion/v1/escaneo — GoLive avisa de cada palet escaneado contra una
-// orden de fabricación. Sin sesión de usuario: se autentica con la cabecera x-api-key
-// (proxy.ts la deja pasar). Por ahora solo comprueba y guarda el mensaje
+// orden de fabricación. Sin sesión de usuario: se autentica con la cabecera x-api-key,
+// con una clave de /admin → Integración › Claves de API que dé acceso a 'escaneo'
+// (proxy.ts deja pasar la ruta). Por ahora solo comprueba y guarda el mensaje
 // (lib/integracion.ts): el panel no hace nada con él. Contrato y respuestas en
 // docs/integracion-golive.md.
 export async function POST(req: NextRequest) {
-  const origen = origenDeClave(req.headers.get('x-api-key'));
-  if (origen === 'sin-configurar') {
-    return NextResponse.json({ ok: false, error: 'La integración no está configurada en el servidor' }, { status: 503 });
-  }
-  // Las llamadas sin clave válida no se guardan (no son de GoLive)
-  if (!origen) return NextResponse.json({ ok: false, error: 'Clave no válida (cabecera x-api-key)' }, { status: 401 });
-
-  const cuerpo = await req.text();
+  // Orientativa: Next solo rellena x-forwarded-for si no viene, así que quien llama
+  // puede poner la que quiera. No sirve para restringir por IP (ver docs §3).
   const ip = req.headers.get('x-forwarded-for')?.split(',')[0].trim() ?? null;
   const db = getDb();
+  // Las llamadas sin clave válida no se guardan (no son de GoLive) ni se dice por qué
+  const clave = verificarClave(db, req.headers.get('x-api-key'), 'escaneo', ip);
+  if (!clave) return NextResponse.json({ ok: false, error: 'Clave no válida (cabecera x-api-key)' }, { status: 401 });
+
+  const origen = clave.entorno;
+  const deClave = { id: clave.id, nombre: clave.nombre };
+  const cuerpo = await req.text();
   const rechazar = (errores: string[]) => {
-    guardarMensaje(db, { tipo: 'escaneo', origen, cuerpo: cuerpo.slice(0, MAX_CUERPO), valido: false, errores, idExterno: null, ip });
+    guardarMensaje(db, { tipo: 'escaneo', origen, cuerpo: cuerpo.slice(0, MAX_CUERPO), valido: false, errores, idExterno: null, ip, clave: deClave });
     return NextResponse.json({ ok: false, errores }, { status: 400 });
   };
 
@@ -34,7 +37,7 @@ export async function POST(req: NextRequest) {
   if (idExterno && yaRecibido(db, 'escaneo', origen, idExterno)) {
     return NextResponse.json({ ok: true, id: idExterno, estado: 'duplicado', prueba: origen === 'prueba' });
   }
-  const registro = guardarMensaje(db, { tipo: 'escaneo', origen, cuerpo, valido: true, errores: null, idExterno, ip });
+  const registro = guardarMensaje(db, { tipo: 'escaneo', origen, cuerpo, valido: true, errores: null, idExterno, ip, clave: deClave });
   return NextResponse.json(
     { ok: true, id: idExterno ?? String(registro), estado: 'recibido', prueba: origen === 'prueba' },
     { status: 202 },

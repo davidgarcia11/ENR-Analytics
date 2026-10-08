@@ -3,28 +3,9 @@
  */
 import { describe, it, expect } from 'bun:test'
 import { Database } from 'bun:sqlite'
-import { buscarMensajes, guardarMensaje, origenDeClave, validarEscaneo, yaRecibido } from '@/lib/integracion'
+import { buscarMensajes, guardarMensaje, validarEscaneo, yaRecibido } from '@/lib/integracion'
 
 const ESCANEO = { articulo: '1210500019', resultado: 'OK', linea: '18', lote: '263221', sscc: '384123450000000017', orden: '490387' }
-
-describe('origenDeClave', () => {
-  const env = { real: 'clave-real-123', prueba: 'clave-prueba-456' }
-  it('distingue la clave real de la de pruebas', () => {
-    expect(origenDeClave('clave-real-123', env)).toBe('real')
-    expect(origenDeClave('clave-prueba-456', env)).toBe('prueba')
-  })
-  it('sin clave o con otra: null', () => {
-    expect(origenDeClave(null, env)).toBeNull()
-    expect(origenDeClave('', env)).toBeNull()
-    expect(origenDeClave('clave-real-12', env)).toBeNull()
-    expect(origenDeClave('clave-real-1234', env)).toBeNull()
-  })
-  it('sin ninguna clave en el servidor: la API está apagada', () => {
-    expect(origenDeClave('lo-que-sea', {})).toBe('sin-configurar')
-    // Solo con la de pruebas configurada, la real no entra
-    expect(origenDeClave('clave-real-123', { prueba: 'clave-prueba-456' })).toBeNull()
-  })
-})
 
 describe('validarEscaneo', () => {
   it('el ejemplo del contrato es válido', () => {
@@ -64,11 +45,11 @@ describe('bandeja de entrada', () => {
     const db = new Database(':memory:') as any
     db.exec(`CREATE TABLE integracion_mensajes (id INTEGER PRIMARY KEY AUTOINCREMENT, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
       tipo TEXT NOT NULL, origen TEXT NOT NULL, cuerpo TEXT NOT NULL, valido INTEGER NOT NULL, errores TEXT, id_externo TEXT, ip TEXT,
-      estado TEXT NOT NULL DEFAULT 'recibido')`)
+      estado TEXT NOT NULL DEFAULT 'recibido', clave_id INTEGER, clave_nombre TEXT)`)
     return db
   }
   const mensaje = (m: Partial<Parameters<typeof guardarMensaje>[1]> = {}) => ({
-    tipo: 'escaneo' as const, origen: 'real' as const, cuerpo: JSON.stringify(ESCANEO), valido: true, errores: null, idExterno: null, ip: '192.168.4.10', ...m,
+    tipo: 'escaneo' as const, origen: 'real' as const, cuerpo: JSON.stringify(ESCANEO), valido: true, errores: null, idExterno: null, ip: '192.168.4.10', clave: { id: 1, nombre: 'GoLive pruebas' }, ...m,
   })
 
   it('un reintento con el mismo id se reconoce, solo si el primero era válido y con la misma clave', () => {
@@ -90,5 +71,6 @@ describe('bandeja de entrada', () => {
     const rechazados = buscarMensajes(db, { valido: false })
     expect(rechazados.filas[0]).toMatchObject({ valido: false, errores: ['El cuerpo no es un JSON válido'], estado: 'recibido' })
     expect(buscarMensajes(db, { q: '384123450000000017' }).total).toBe(2)
+    expect(buscarMensajes(db, {}).filas[0].claveNombre).toBe('GoLive pruebas')
   })
 })

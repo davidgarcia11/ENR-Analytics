@@ -1,6 +1,6 @@
 "use client";
 
-// /admin → Datos › Integración: los mensajes recibidos de GoLive por la API de
+// /admin → Integración › Mensajes recibidos: los mensajes recibidos de GoLive por la API de
 // integración (POST /api/integracion/v1/escaneo), válidos o no, tal cual llegaron.
 // Solo lectura, con el permiso 'admin.integracion.ver'. Por ahora el panel no hace
 // nada con ellos. Datos: lib/integracion.ts.
@@ -102,11 +102,12 @@ export default function AdminIntegracion({ titulo, descripcion }: SeccionProps) 
                 <TableRow key={f.id} className="align-top">
                   <TableCell className="whitespace-nowrap text-sm">
                     {fechaLocal(f.fecha)}
-                    {f.ip && <span className="block text-xs text-muted-foreground">{f.ip}</span>}
+                    {f.ip && <span className="block text-xs text-muted-foreground" title="IP que declara la petición (x-forwarded-for): orientativa, no comprobada">{f.ip}</span>}
                   </TableCell>
                   <TableCell>
                     <span className="block text-sm font-medium text-foreground">{f.tipo}</span>
                     {f.origen === "prueba" && <Badge variant="outline" className="mt-1 font-normal">Prueba</Badge>}
+                    {f.claveNombre && <span className="mt-1 block text-xs text-muted-foreground" title="Clave con la que llegó">{f.claveNombre}</span>}
                   </TableCell>
                   <TableCell>
                     <div className="flex max-w-xl flex-wrap gap-x-3 gap-y-0.5 text-sm">

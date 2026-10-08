@@ -4,40 +4,19 @@
 // tipo se programará más adelante, con los mensajes reales ya guardados a la vista.
 // Ver docs/integracion-golive.md.
 //
-// Dos claves (cabecera x-api-key), como las de prueba y las reales de una pasarela
-// de pago: INTEGRACION_API_KEY_PRUEBAS e INTEGRACION_API_KEY en .env.local. Lo que
-// llega con la de pruebas se guarda marcado como prueba y nunca se procesará.
+// Se autentica con la cabecera x-api-key: claves creadas en /admin → Integración ›
+// Claves de API (lib/api-claves.ts). Cada clave es real o de prueba: lo que llega con
+// una de prueba se guarda marcado y nunca se procesará.
 //
 // Sin dependencias de servidor a propósito: las funciones reciben la conexión.
-import { timingSafeEqual } from 'crypto';
 import type Database from 'better-sqlite3';
 
 export type TipoMensaje = 'escaneo';
-/** Con qué clave llegó: la real o la de pruebas */
+/** Con qué clave llegó: real o de prueba (su entorno) */
 export type Origen = 'real' | 'prueba';
 
 /** Tamaño máximo del cuerpo (un escaneo ocupa unos 200 bytes) */
 export const MAX_CUERPO = 10_000;
-
-function igual(a: string, b: string): boolean {
-  const x = Buffer.from(a), y = Buffer.from(b);
-  return x.length === y.length && timingSafeEqual(x, y);
-}
-
-/**
- * Qué clave es la recibida. `null` si no coincide con ninguna; 'sin-configurar' si
- * el servidor no tiene ninguna en .env.local (la API está apagada).
- */
-export function origenDeClave(
-  clave: string | null,
-  env: { real?: string; prueba?: string } = { real: process.env.INTEGRACION_API_KEY, prueba: process.env.INTEGRACION_API_KEY_PRUEBAS },
-): Origen | null | 'sin-configurar' {
-  if (!env.real && !env.prueba) return 'sin-configurar';
-  if (!clave) return null;
-  if (env.real && igual(clave, env.real)) return 'real';
-  if (env.prueba && igual(clave, env.prueba)) return 'prueba';
-  return null;
-}
 
 export interface Escaneo {
   articulo: string;
@@ -103,13 +82,16 @@ export interface MensajeRecibido {
   errores: string[] | null;
   idExterno: string | null;
   ip: string | null;
+  /** La clave con la que llegó (su nombre se copia: sigue valiendo si se elimina) */
+  clave: { id: number; nombre: string };
 }
 
 export function guardarMensaje(db: Database.Database, m: MensajeRecibido): number {
   return Number(db.prepare(
-    `INSERT INTO integracion_mensajes (tipo, origen, cuerpo, valido, errores, id_externo, ip)
-     VALUES (?, ?, ?, ?, ?, ?, ?)`
-  ).run(m.tipo, m.origen, m.cuerpo, m.valido ? 1 : 0, m.errores ? JSON.stringify(m.errores) : null, m.idExterno, m.ip).lastInsertRowid);
+    `INSERT INTO integracion_mensajes (tipo, origen, cuerpo, valido, errores, id_externo, ip, clave_id, clave_nombre)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+  ).run(m.tipo, m.origen, m.cuerpo, m.valido ? 1 : 0, m.errores ? JSON.stringify(m.errores) : null, m.idExterno, m.ip,
+    m.clave.id, m.clave.nombre).lastInsertRowid);
 }
 
 /** ¿Ya se recibió (y era válido) un mensaje con este id? Para no duplicar reintentos. */
@@ -143,6 +125,8 @@ export interface FilaMensaje {
   errores: string[] | null;
   estado: string;
   ip: string | null;
+  /** Nombre de la clave con la que llegó (null en los de antes de las claves del panel) */
+  claveNombre: string | null;
 }
 
 export const POR_PAGINA = 50;
@@ -160,7 +144,7 @@ export function buscarMensajes(db: Database.Database, f: FiltrosMensajes): { fil
   const total = (db.prepare(`SELECT COUNT(*) AS n FROM integracion_mensajes ${where}`).get(...args) as { n: number }).n;
   const pagina = Math.max(1, f.pagina ?? 1);
   const filas = db.prepare(
-    `SELECT id, created_at AS fecha, tipo, origen, cuerpo, valido, errores, estado, ip
+    `SELECT id, created_at AS fecha, tipo, origen, cuerpo, valido, errores, estado, ip, clave_nombre AS claveNombre
      FROM integracion_mensajes ${where} ORDER BY id DESC LIMIT ? OFFSET ?`
   ).all(...args, POR_PAGINA, (pagina - 1) * POR_PAGINA) as (Omit<FilaMensaje, 'valido' | 'errores'> & { valido: number; errores: string | null })[];
   return {
