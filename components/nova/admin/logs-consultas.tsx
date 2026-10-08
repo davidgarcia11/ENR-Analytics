@@ -61,6 +61,7 @@ export const SOURCE_LABELS: Record<string, string> = {
   coste_a1: "Costes",
   muestras: "Muestras",
   "muestras-sync": "Muestras (sincronización)",
+  loteadora: "Loteadora",
 };
 
 const SYNC_TRIGGER_LABELS: Record<string, string> = {

@@ -157,6 +157,8 @@ ORACLE_PORT=1521
 ORACLE_SERVICE=<nombre_servicio_oracle>
 JWT_SECRET=<clave_secreta_para_firmar_jwt>
 SERES_API_KEY=<clave_para_endpoint_externo_jde_orders>
+INTEGRACION_API_KEY=<clave_real_api_integracion_golive>
+INTEGRACION_API_KEY_PRUEBAS=<clave_de_pruebas_api_integracion_golive>
 REFLEX_HOST=<ip_servidor_sql_server_reflex>
 REFLEX_PORT=1433
 REFLEX_DATABASE=<nombre_base_datos_reflex>
@@ -219,9 +221,10 @@ falta: cubre lo que el proxy no puede ver, que es la sesión caducándose con la
 pestaña ya abierta, sin ninguna petición de página de por medio.
 
 `SIN_SESION` = `/api/auth/login`, `/api/auth/logout`, `/api/auth/me`,
-`/api/screen-permissions`, `/api/jde-orders`. Los dos primeros se usan cuando
-no hay sesión; `me` y `screen-permissions` son el latido del `SessionProvider` y
-contestan solas; `jde-orders` se autentica con `x-api-key`, no con la cookie.
+`/api/screen-permissions`, `/api/jde-orders`, `/api/integracion/v1/escaneo`. Los
+dos primeros se usan cuando no hay sesión; `me` y `screen-permissions` son el
+latido del `SessionProvider` y contestan solas; `jde-orders` y la integración con
+GoLive se autentican con `x-api-key`, no con la cookie (solo esas rutas exactas).
 
 **Tres decisiones que conviene entender:**
 
@@ -592,6 +595,7 @@ sincronización, último error) y botón "Sincronizar ahora" — ver
 | GET / POST | `/api/admin/zonas` · PUT / DELETE `/api/admin/zonas/:id` | Zonas de las loteadoras y roles/usuarios que ven cada una (permisos de Zonas; `GET ?opciones=1` añade los roles y usuarios asignables, solo con `zonas.editar`; ver `docs/loteadora.md` §17) |
 | GET / POST | `/api/admin/loteadora-articulos/copia` | Exporta (ver) / importa (asociar) solo las asociaciones artículo → plantilla (sección Artículos) |
 | GET | `/api/admin/loteadoras/:id/historial-conexion` | Historial de conexión (ping cada 30 s en segundo plano, `instrumentation.ts` + `lib/loteadora-ping.ts`) de una loteadora, en CSV (ver `docs/loteadora.md` §20) |
+| GET | `/api/admin/integracion` | Mensajes recibidos por la API de integración con GoLive, con filtros y por páginas (permiso `admin.integracion.ver`, ver `docs/integracion-golive.md`) |
 | GET | `/api/admin/loteadora-registro` | Registro de envíos a las loteadoras, con filtros y por páginas (permiso `registro.ver`, ver `docs/loteadora.md` §19) |
 | GET / POST | `/api/admin/loteadora-copia` | Exporta / importa en JSON las plantillas de la loteadora y sus asociaciones de artículos (botones de `/admin` → Plantillas, ver `docs/loteadora.md` §13) |
 
@@ -698,7 +702,9 @@ artículos de `/muestras` o asignar artículos a plantillas de loteadora.
 - **Permisos actuales**: `muestras.config` (antes columna `users.can_configure_muestras`,
   migrada automáticamente a `user_permissions` — quien lo tenía lo conserva — y
   eliminada), `loteadora.limpiar-buffer` (botón "Limpiar buffer" de /loteadora, sin
-  sección de /admin) y los **permisos por acción de la loteadora** (sept. 2026):
+  sección de /admin), `admin.integracion.ver` (`/admin` → Integración: mensajes recibidos
+  de GoLive, ver `docs/integracion-golive.md`) y los **permisos por acción de la
+  loteadora** (sept. 2026):
 
   | Sección de `/admin` (Loteadora ›) | Ver | Crear y editar | Eliminar / desvincular | Otras |
   |---|---|---|---|---|
@@ -1186,6 +1192,7 @@ Cada panel tiene su documentación específica en la carpeta `docs/`:
 | Coste A1 y despiece recursivo de materiales (sistema Nova) | `/costes` | [docs/costes.md](docs/costes.md) |
 | Control de muestras (pendiente/enviado/completado) | `/muestras` | [docs/muestras.md](docs/muestras.md) |
 | Loteadora | `/loteadora` | [docs/loteadora.md](docs/loteadora.md) |
+| API de integración con GoLive (sin pantalla propia; lo recibido en `/admin` → Integración) | `POST /api/integracion/v1/escaneo` | [docs/integracion-golive.md](docs/integracion-golive.md) |
 
 ### API externa — `GET /api/jde-orders`
 

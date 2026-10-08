@@ -30,7 +30,7 @@ import NotificationDropdown from "@/components/shadcn-space/blocks/topbar-02/hea
 import ProfileDropdown, { iniciales } from "@/components/shadcn-space/blocks/topbar-02/header/dropdown-profile"
 import { getNavData } from "@/components/shadcn-space/blocks/topbar-02/data"
 import {
-  BellRing, ChevronsUpDown, FileCode, FileText, History, LayoutGrid, Link2, MapPin, Printer, Receipt, RefreshCw, ScanBarcode, Settings, ShieldCheck, Tag, Users,
+  BellRing, ChevronsUpDown, FileCode, FileText, History, Inbox, LayoutGrid, Link2, MapPin, Printer, Receipt, RefreshCw, ScanBarcode, Settings, ShieldCheck, Tag, Users,
   type LucideIcon,
 } from "lucide-react"
 import { puedeEntrarEnAdmin, seccionesAdminPorPermisos } from "@/lib/permisos"
@@ -47,6 +47,7 @@ import AdminRegistroLoteadora from "@/components/nova/admin/registro-loteadora"
 import AdminMuestrasSync from "@/components/nova/admin/muestras-sync"
 import AdminLogsConsultas from "@/components/nova/admin/logs-consultas"
 import AdminConfirmacionesPda from "@/components/nova/admin/confirmaciones-pda"
+import AdminIntegracion from "@/components/nova/admin/integracion"
 
 // ─── Navegación del panel (sidebar) ─────────────────────────────────────────────
 // Una sección nueva se añade aquí (y, si debe poder abrirla alguien que no es admin,
@@ -90,6 +91,7 @@ const GRUPOS_ADMIN: GrupoAdmin[] = [
       { key: "muestras", label: "Muestras", descripcion: "Caché de /muestras y sincronización manual", icon: RefreshCw, Componente: AdminMuestrasSync },
       { key: "logs", label: "Logs de consultas", descripcion: "Consultas ejecutadas por panel y usuario, y su rendimiento", icon: FileText, Componente: AdminLogsConsultas },
       { key: "confirmaciones-pda", label: "Confirmaciones PDA", descripcion: "Avisos de Consulta Stock PDA que aceptó cada operario al escanear", icon: ScanBarcode, Componente: AdminConfirmacionesPda },
+      { key: "integracion", label: "Integración", descripcion: "Mensajes recibidos de GoLive por la API de integración (por ahora solo se guardan)", icon: Inbox, Componente: AdminIntegracion },
     ],
   },
 ]
