@@ -139,8 +139,8 @@ dashboard/
         │       └── route.ts      ← GET /api/production/merma-breakdown (modos global/row/matrix)
         ├── production-lines/
         │   └── route.ts          ← GET /api/production-lines
-        └── jde-orders/
-            └── route.ts          ← GET /api/jde-orders?days=7 (API key, CORS abierto)
+        └── integracion/v1/escaneo/
+            └── route.ts          ← POST avisos de escaneo de GoLive (x-api-key, ver docs/integracion-golive.md)
 ```
 
 ---
@@ -156,9 +156,6 @@ ORACLE_HOST=<ip_servidor_oracle>
 ORACLE_PORT=1521
 ORACLE_SERVICE=<nombre_servicio_oracle>
 JWT_SECRET=<clave_secreta_para_firmar_jwt>
-SERES_API_KEY=<clave_para_endpoint_externo_jde_orders>
-INTEGRACION_API_KEY=<clave_real_api_integracion_golive>
-INTEGRACION_API_KEY_PRUEBAS=<clave_de_pruebas_api_integracion_golive>
 REFLEX_HOST=<ip_servidor_sql_server_reflex>
 REFLEX_PORT=1433
 REFLEX_DATABASE=<nombre_base_datos_reflex>
@@ -221,10 +218,11 @@ falta: cubre lo que el proxy no puede ver, que es la sesión caducándose con la
 pestaña ya abierta, sin ninguna petición de página de por medio.
 
 `SIN_SESION` = `/api/auth/login`, `/api/auth/logout`, `/api/auth/me`,
-`/api/screen-permissions`, `/api/jde-orders`, `/api/integracion/v1/escaneo`. Los
-dos primeros se usan cuando no hay sesión; `me` y `screen-permissions` son el
-latido del `SessionProvider` y contestan solas; `jde-orders` y la integración con
-GoLive se autentican con `x-api-key`, no con la cookie (solo esas rutas exactas).
+`/api/screen-permissions`, `/api/integracion/v1/escaneo`. Los dos primeros se usan
+cuando no hay sesión; `me` y `screen-permissions` son el latido del
+`SessionProvider` y contestan solas; la integración con GoLive se autentica con
+`x-api-key` (claves de `/admin` → Integración › Claves de API), no con la cookie
+(solo esa ruta exacta).
 
 **Tres decisiones que conviene entender:**
 
@@ -595,6 +593,7 @@ sincronización, último error) y botón "Sincronizar ahora" — ver
 | GET / POST | `/api/admin/zonas` · PUT / DELETE `/api/admin/zonas/:id` | Zonas de las loteadoras y roles/usuarios que ven cada una (permisos de Zonas; `GET ?opciones=1` añade los roles y usuarios asignables, solo con `zonas.editar`; ver `docs/loteadora.md` §17) |
 | GET / POST | `/api/admin/loteadora-articulos/copia` | Exporta (ver) / importa (asociar) solo las asociaciones artículo → plantilla (sección Artículos) |
 | GET | `/api/admin/loteadoras/:id/historial-conexion` | Historial de conexión (ping cada 30 s en segundo plano, `instrumentation.ts` + `lib/loteadora-ping.ts`) de una loteadora, en CSV (ver `docs/loteadora.md` §20) |
+| GET / POST | `/api/admin/api-claves` · PATCH / DELETE `/api/admin/api-claves/:id` · POST `/api/admin/api-claves/:id/rotar` | Claves de API de los sistemas externos: listar, crear (la clave completa solo en esa respuesta), editar, revocar (`PATCH {revocar: true}`), eliminar (solo revocadas o caducadas) y rotar. Solo admin (`lib/api-claves.ts`, ver `docs/integracion-golive.md`) |
 | GET | `/api/admin/integracion` | Mensajes recibidos por la API de integración con GoLive, con filtros y por páginas (permiso `admin.integracion.ver`, ver `docs/integracion-golive.md`) |
 | GET | `/api/admin/loteadora-registro` | Registro de envíos a las loteadoras, con filtros y por páginas (permiso `registro.ver`, ver `docs/loteadora.md` §19) |
 | GET / POST | `/api/admin/loteadora-copia` | Exporta / importa en JSON las plantillas de la loteadora y sus asociaciones de artículos (botones de `/admin` → Plantillas, ver `docs/loteadora.md` §13) |
@@ -1192,33 +1191,11 @@ Cada panel tiene su documentación específica en la carpeta `docs/`:
 | Coste A1 y despiece recursivo de materiales (sistema Nova) | `/costes` | [docs/costes.md](docs/costes.md) |
 | Control de muestras (pendiente/enviado/completado) | `/muestras` | [docs/muestras.md](docs/muestras.md) |
 | Loteadora | `/loteadora` | [docs/loteadora.md](docs/loteadora.md) |
-| API de integración con GoLive (sin pantalla propia; lo recibido en `/admin` → Integración) | `POST /api/integracion/v1/escaneo` | [docs/integracion-golive.md](docs/integracion-golive.md) |
+| API de integración con GoLive (sin pantalla propia; lo recibido y las claves en `/admin` → Integración) | `POST /api/integracion/v1/escaneo` | [docs/integracion-golive.md](docs/integracion-golive.md) |
 
-### API externa — `GET /api/jde-orders`
+### API externa `GET /api/jde-orders` (eliminada en oct. 2026)
 
-> **No confundir con `/api/orders`:** ese endpoint consulta `F4211` (pedidos de venta) y es el que usa el panel `/preparacion-pedidos` con sesión JWT. Este endpoint consulta `F47011` (pedidos EDI entrantes) y está pensado para herramientas externas.
-
-Endpoint diseñado para ser consumido desde herramientas externas (artefactos Claude, scripts) que no pueden usar cookies JWT. Devuelve pedidos recibidos vía EDI de la tabla **F47011** de JDE.
-
-**Autenticación:** Header `x-api-key` con el valor de `SERES_API_KEY` en `.env.local`.
-
-**CORS:** Abierto (`Access-Control-Allow-Origin: *`) para permitir llamadas desde artefactos que corren en el navegador del usuario.
-
-**Parámetros:**
-
-| Param | Tipo | Descripción |
-|---|---|---|
-| `days` | number | Días hacia atrás a consultar (por defecto: 7, máximo: 90) |
-
-**Respuesta:**
-```json
-[
-  { "referencia": "PED-001234", "fecha": "2025-04-28" },
-  { "referencia": "PED-001235", "fecha": "2025-04-29" }
-]
-```
-
-**Campos devueltos:** `referencia` (SYVR01 trimado) y `fecha` (SYUPMJ convertido de CYYDDD a ISO).
+Devolvía los pedidos EDI de la F47011 con una clave fija (`SERES_API_KEY`) y CORS abierto, para un artefacto de Claude de comparativa SERES. Quedó sin uso cuando el panel `/comparativa-seres` (con su propia ruta y sesión) lo sustituyó, y se quitó junto con `SERES_API_KEY`. Si vuelve a hacer falta una API para sistemas externos, se hace con las claves de `/admin` → Integración › Claves de API (ver `docs/integracion-golive.md`).
 
 ---
 
