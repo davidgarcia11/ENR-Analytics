@@ -159,10 +159,17 @@ describe('Middleware — resto de la API', () => {
     expect(res.status).toBe(200)
   })
 
-  it('login, logout, me, screen-permissions y jde-orders pasan aunque el token sea basura', async () => {
-    for (const ruta of ['/api/auth/login', '/api/auth/logout', '/api/auth/me', '/api/screen-permissions', '/api/jde-orders']) {
+  it('login, logout, me, screen-permissions, jde-orders e integración pasan aunque el token sea basura', async () => {
+    for (const ruta of ['/api/auth/login', '/api/auth/logout', '/api/auth/me', '/api/screen-permissions', '/api/jde-orders', '/api/integracion/v1/escaneo']) {
       const res = await middleware(req(ruta, 'basura'))
       expect(res.status).toBe(200)
+    }
+  })
+
+  it('solo se libra la ruta exacta de la integración, no lo que cuelgue de /api/integracion', async () => {
+    for (const ruta of ['/api/integracion/v1/otra', '/api/integracion/v1/escaneo/x', '/api/integracion']) {
+      const res = await middleware(req(ruta, 'basura'))
+      expect(res.status).toBe(401)
     }
   })
 })

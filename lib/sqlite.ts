@@ -233,6 +233,23 @@ export function getDb(): Database.Database {
     );
     CREATE INDEX IF NOT EXISTS idx_loteadora_ping_maquina ON loteadora_ping (loteadora_id, id);
 
+    -- Bandeja de entrada de la API de integración con GoLive (lib/integracion.ts):
+    -- cada mensaje recibido tal cual, válido o no. Por ahora no se procesa (estado
+    -- 'recibido'); qué hace el panel con cada tipo se programará más adelante.
+    CREATE TABLE IF NOT EXISTS integracion_mensajes (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      tipo TEXT NOT NULL,            -- 'escaneo'
+      origen TEXT NOT NULL,          -- 'real' | 'prueba' (con qué clave llegó)
+      cuerpo TEXT NOT NULL,          -- el cuerpo tal cual llegó
+      valido INTEGER NOT NULL,       -- 1 si cumplía el contrato
+      errores TEXT,                  -- JSON: por qué no era válido
+      id_externo TEXT,               -- "id" del mensaje (GoLive), para no duplicar reintentos
+      ip TEXT,
+      estado TEXT NOT NULL DEFAULT 'recibido'
+    );
+    CREATE INDEX IF NOT EXISTS idx_integracion_mensajes_id_externo ON integracion_mensajes (tipo, origen, id_externo);
+
     -- Último envío hecho desde /loteadora a cada máquina (se sobrescribe en cada
     -- envío correcto): se enseña en "Estado de las loteadoras". Es lo último que
     -- mandó el panel, no lo que tenga la máquina si se cambió a mano en ella.

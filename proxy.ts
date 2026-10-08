@@ -19,13 +19,14 @@ const COOKIE_NAME = 'session';
 // - login/logout: se usan justo cuando no la hay
 // - me y screen-permissions: son el latido del SessionProvider; contestan solas
 //   si no hay sesión, y no deben renovar la cookie (ver abajo)
-// - jde-orders: API externa autenticada con x-api-key, no con la cookie
+// - jde-orders e integracion: APIs externas autenticadas con x-api-key, no con la cookie
 const SIN_SESION = new Set([
   '/api/auth/login',
   '/api/auth/logout',
   '/api/auth/me',
   '/api/screen-permissions',
   '/api/jde-orders',
+  '/api/integracion/v1/escaneo',
 ]);
 
 // Páginas a las que se llega sin sesión o estando a medias de arreglarla.

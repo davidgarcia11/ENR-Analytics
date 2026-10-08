@@ -50,6 +50,7 @@ app/                          # Rutas Next.js (App Router)
     plants/                   # GET plantas dinámicas (usado en pedidos y caducados)
     caducados/                # GET palets caducados/obsoletos/bloqueados
     jde-orders/               # GET órdenes JDE (API externa, usada por herramientas externas)
+    integracion/v1/escaneo/   # POST avisos de escaneo de GoLive (x-api-key) — por ahora solo se guardan, ver docs/integracion-golive.md
     comparativa-seres/        # GET comparativa SERES vs JDE
     consulta-stock-pda/       # GET stock FEFO por EAN escaneado (Reflex/SQL Server)
     compras/                  # GET previsión (F3460) vs venta real (F4211), coste (F4105), gramaje (F554101) — jerárquico Familia>Canal>Artículo (Nova)
@@ -94,6 +95,7 @@ docs/                         # Documentación específica por panel
   costes.md                   # Panel de coste A1 y despiece recursivo de materiales (sistema Nova)
   mrp.md                      # Panel de explosión de compras / MRP (sistema Nova)
   muestras.md                 # App de control de muestras pendientes/enviadas/completadas (sistema Nova)
+  integracion-golive.md       # API de integración con GoLive: contrato, claves, bandeja de entrada
 ```
 
 ## Convenciones de código
@@ -226,6 +228,7 @@ Solo cuando se pida explícitamente usar Nova (no es el sistema por defecto toda
   - Cambios en el panel de costes (`/costes`, `api/costes`) → `docs/costes.md`
   - Cambios en el panel de MRP (`/mrp`, `api/mrp`) → `docs/mrp.md`
   - Cambios en el panel de muestras (`/muestras`, `api/muestras`) → `docs/muestras.md`
+  - Cambios en la API de integración con GoLive (`api/integracion`, `lib/integracion.ts`) → `docs/integracion-golive.md`
   - Nuevo panel → crear `docs/nombre-panel.md` y añadir referencia en `DOCUMENTACION.md` sección 9
 - Sugerir commit con mensaje siguiendo el estilo del proyecto (conventional + español)
 - Actualizar la tarea de ClickUp correspondiente (estado, comentario) según en qué paso del flujo Git se esté — ver `MANUAL_IA_ALIMENTAR_CLICKUP.md`

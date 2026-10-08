@@ -234,7 +234,7 @@ function LoteadoraPanel() {
   const [showSendErrorDetail, setShowSendErrorDetail] = useState(false);
 
   useEffect(() => {
-    fetchArticulos();
+    fetchArticulos(true); // al abrir el panel: queda en los logs de consulta
     fetchLoteadoras();
     fetchEstadoLoteadoras();
 
@@ -291,10 +291,10 @@ function LoteadoraPanel() {
   // También sirve como comprobación de vida de JDE (badge "JDE conectado"),
   // por eso se repite cada 60s junto al resto del estado en vivo — no toca la
   // selección de artículo ya hecha, solo refresca la lista disponible.
-  const fetchArticulos = async () => {
+  const fetchArticulos = async (registrar = false) => {
     setLoadingArticulos(true);
     try {
-      const res = await fetch("/api/loteadora/articulos");
+      const res = await fetch(`/api/loteadora/articulos${registrar ? "?registrar=1" : ""}`);
       if (!res.ok) throw new Error();
       setArticulos(await res.json());
       setJdeOnline(true);
