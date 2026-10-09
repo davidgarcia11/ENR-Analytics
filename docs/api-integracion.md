@@ -23,9 +23,9 @@ Archivos:
 
 ## 1. Contrato (lo que se entrega a quien integra)
 
-**Especificación OpenAPI 3: la fuente de verdad del contrato.** [`api-integracion.openapi.yaml`](api-integracion.openapi.yaml): campos, formatos, respuestas y ejemplos. Es lo que se entrega a quien integra. No lleva claves ni IPs reales (el servidor es una variable). Ver §6 para cómo se ve, se descarga y se mantiene al día.
+**Especificación OpenAPI 3: la fuente de verdad del contrato.** [`api-integracion.openapi.yaml`](api-integracion.openapi.yaml): campos, formatos, respuestas y ejemplos. Es lo que se entrega a quien integra. No lleva claves ni IPs reales (el servidor es una variable). Ver §6 para cómo se ve y se mantiene al día.
 
-**El `.yaml` se entrega tal cual a terceros:** va **sin comentarios** y sin referencias internas (rutas del código, `/admin`, «dashboard», «panel», loteadoras…), redactado para quien llama y **sin nombrar a ningún cliente**: la API es para cualquier sistema con una clave. Se descarga como `api-escaneo-palets.openapi.yaml`. Lo vigila el test de contrato. Las notas de mantenimiento van aquí, no en el archivo.
+**El `.yaml` se entrega tal cual a terceros:** va **sin comentarios** y sin referencias internas (rutas del código, `/admin`, «dashboard», «panel», loteadoras…), redactado para quien llama y **sin nombrar a ningún cliente**: la API es para cualquier sistema con una clave. Lo vigila el test de contrato. Las notas de mantenimiento van aquí, no en el archivo.
 
 **POST** `http://<servidor del dashboard>:3000/api/integracion/v1/escaneo`
 
@@ -129,12 +129,11 @@ Debe responder `202` y aparecer en `/admin` → Integración › Mensajes recibi
 
 ## 6. Documentación, contrato y versiones
 
-**Dónde se ve:** `/admin` → Integración › **Documentación de la API** (permiso «Integración: ver»), con Swagger UI.
-- Lee el `.yaml` **del código desplegado** (`GET /api/admin/integracion/openapi`): siempre coincide con la API que está corriendo, sin copias.
-- **Try it out** funciona contra este mismo servidor: *Authorize* con una clave de prueba y *Try it out*. Lo enviado aparece en Mensajes recibidos, marcado como prueba.
-- **Descargar openapi.yaml** (`?descargar=1`): para importarlo en Apidog, Postman o Insomnia (documentación, mock, pruebas), o pasárselo a quien integra.
-- **Cabeceras de seguridad del visor:** política de contenido estricta (solo scripts y estilos de este servidor, sin scripts en línea: el arranque va en `iniciar.js`; peticiones solo a este servidor), `frame-ancestors 'self'` (solo se puede incrustar en el propio dashboard), `nosniff` y `Referrer-Policy: no-referrer`. Comprobado que Swagger UI y «Try it out» funcionan con ella.
-- Swagger UI va **instalado en el proyecto** (`swagger-ui-dist`, versión fija en `package.json`) y lo sirve `app/api/admin/integracion/docs/[[...archivo]]/route.ts` (solo sus dos archivos, de una lista). No se carga de una web externa: en una página con sesión no se ejecuta código de terceros de Internet. Su telemetría de instalación (`@scarf/scarf`) está desactivada (`scarfSettings` en `package.json`; Bun además no ejecuta su script).
+**Regla: toda API para sistemas externos se documenta siempre aquí y en `api-integracion.openapi.yaml`, en el mismo PR que el código** (pasos en `CLAUDE.md`, «Añadir o cambiar una API para sistemas externos»). Las rutas internas que usan las pantallas del panel no: esas van en `DOCUMENTACION.md`.
+
+**Cómo verlo:** el `.yaml` se abre en IntelliJ (con soporte de OpenAPI) o VS Code con vista previa, o se importa en Postman, Apidog o Insomnia (documentación, mock, pruebas). Para entregarlo a quien integra, se manda el archivo tal cual (con el nombre `api-escaneo-palets.openapi.yaml`, por ejemplo).
+
+Hubo una sección **Documentación de la API** en `/admin` → Integración, con Swagger UI (`swagger-ui-dist`), «Try it out» y descarga del `.yaml` (v1.30.0 – v1.30.2). Se quitó en la v1.30.3 porque nadie la usaba (GoLive no necesita el archivo): una dependencia y dos rutas menos que mantener. Si vuelve a hacer falta, está en el historial de git.
 
 **Test de contrato** (`__tests__/openapi.test.ts`): falla si el `.yaml` y el código dejan de decir lo mismo. Comprueba que:
 - los ejemplos de envío los acepta la validación real;
