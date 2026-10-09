@@ -49,29 +49,33 @@ Cuerpo:
 
 | Campo | Obligatorio | Formato |
 |---|---|---|
-| `articulo` | Sí | Código largo de 10 cifras |
+| `articulo` | Sí | Código largo, exactamente 10 cifras |
 | `resultado` | Sí | `"OK"` (el artículo está en la orden) o `"NO_OK"` |
-| `linea` | Sí | Línea donde se ha escaneado (la misma que tiene cada loteadora en Máquinas) |
-| `lote` | Sí, puede ir `""` | Lote de la orden, tal cual en JDE (hasta 30 caracteres) |
-| `sscc` | Sí, puede ir `""` | 18 cifras del palet, sin el `(00)` |
-| `orden` | No | Nº de la orden de fabricación |
-| `motivo` | No | Texto, si es `NO_OK` (hasta 200) |
+| `linea` | Sí | Número de línea donde se ha escaneado, **solo cifras** (`18`), el mismo que tiene cada loteadora en Máquinas. Nada de códigos ni nombres |
+| `lote` | Sí, **nunca vacío** | Lote de la orden, tal cual en JDE (hasta 30 caracteres) |
+| `sscc` | Sí, **nunca vacío** | El palet escaneado: siempre 18 cifras, sin el `(00)`. Puede empezar por `0` o `00` (va como texto, no pierde los ceros). Si llegan 20 cifras empezando por `00` (con el identificador delante), se rechaza con un mensaje que lo explica; no se corrige solo |
+| `orden` | Sí, **nunca vacío** | Nº de la orden de fabricación, **solo cifras** |
 | `id` | No, recomendado | Identificador único del mensaje (hasta 64). Si se reintenta con el mismo `id`, no se guarda dos veces |
 
 - **Todo como texto, entre comillas.** El SSCC tiene 18 cifras y como número JSON pierde precisión, así que un número se rechaza.
-- Campos que no estén en la tabla se aceptan y se guardan (no se rompe nada si mañana mandan uno más).
+- **Estricta:** un campo que no esté en la tabla se rechaza (`400`, *«motivo: campo no admitido»*), también una errata como `Id` en vez de `id`. Así cualquier diferencia salta en sus pruebas. Si hace falta un campo nuevo, se añade antes al contrato (versión `1.x`) y a `CAMPOS_ESCANEO` (`lib/integracion.ts`); el test de contrato comprueba que la lista y el `.yaml` coinciden.
 
-Respuestas:
+Respuestas. Todos los errores tienen la misma forma, `{"ok": false, "codigo": "…", "errores": ["…"]}`: un **código fijo** (`CODIGOS_ERROR` en `lib/integracion.ts`) para que quien llama decida sin leer textos, y los textos de qué falla. Las comprobaciones van en este orden: clave → límite → tipo de contenido → tamaño → JSON y campos → `id` repetido. Todas las respuestas llevan `Cache-Control: no-store`.
 
-| HTTP | Cuerpo | Qué hacer |
-|---|---|---|
-| `202` | `{"ok": true, "id": "…", "estado": "recibido", "prueba": false}` | Nada: entregado |
-| `200` | `{"ok": true, "id": "…", "estado": "duplicado", …}` | Nada: ese `id` ya había llegado |
-| `400` | `{"ok": false, "errores": ["sscc: deben ser 18 cifras, sin el (00)"]}` | Corregir; **no reintentar** |
-| `401` | `{"ok": false, "error": "Clave no válida (cabecera x-api-key)"}` | Revisar la clave; no reintentar |
-| `413` | `{"ok": false, "errores": ["El cuerpo ocupa demasiado (máximo 10000 bytes)"]}` | Corregir lo que se envía; no reintentar |
-| `429` | `{"ok": false, "error": "Demasiadas peticiones: como mucho 120 por minuto con cada clave"}` + cabecera `Retry-After` | Esperar esos segundos y reintentar con el mismo `id` |
-| `500` o sin respuesta | — | Reintentar 2-3 veces con el mismo `id` |
+| HTTP | `codigo` | Cuándo | Qué hacer |
+|---|---|---|---|
+| `202` | — | Recibido y registrado: `{"ok": true, "id": "…", "estado": "recibido", "prueba": false}` | Nada |
+| `200` | — | Mismo `id` y **mismos datos** (un reintento): `"estado": "duplicado"`. No se registra otra vez | Nada |
+| `400` | `DATOS_INCORRECTOS` | No es JSON, falta un campo, mal formato o campo no admitido. Todos los problemas a la vez | Corregir; **no reintentar** |
+| `401` | `CLAVE_NO_VALIDA` | Sin clave o no vale. Lleva la cabecera `WWW-Authenticate` | Revisar la clave; no reintentar |
+| `409` | `ID_EN_CONFLICTO` | Mismo `id` con **otros datos**: un `id` reutilizado por error. Se rechaza en vez de descartarlo como duplicado, para que no se pierda un escaneo en silencio | Revisar cómo se generan los `id`; no reintentar |
+| `413` | `DEMASIADO_GRANDE` | Más de 10 000 bytes | Corregir; no reintentar |
+| `415` | `TIPO_NO_ADMITIDO` | Falta `Content-Type: application/json` (se admite `; charset=utf-8` detrás) | Poner la cabecera; no reintentar sin ella |
+| `429` | `DEMASIADAS_PETICIONES` | Más de 120 por minuto con la clave. Lleva `Retry-After` | Esperar y reintentar con el mismo `id` |
+| `500` | `ERROR_INTERNO` | Fallo interno (p. ej. la BD ocupada). Se apunta en el log del servidor | Reintentar 2-3 veces con el mismo `id` |
+| Sin respuesta | — | | Reintentar con el mismo `id` |
+
+Otros métodos (`GET`, `PUT`…) → `405` (lo da Next.js); `OPTIONS` → `204` con `Allow: OPTIONS, POST`.
 
 `prueba: true` en la respuesta quiere decir que llegó con una clave de prueba. El `401` no dice por qué falla la clave (no existe, revocada, caducada o sin acceso a esta API), para no dar pistas: se mira en el panel. La respuesta solo confirma que el mensaje ha llegado y es correcto, no lo que haga el panel después.
 
@@ -82,7 +86,8 @@ Respuestas:
 Se guarda **cada** llamada con clave válida, correcta o no: fecha, tipo (`escaneo`), origen (`real` / `prueba`, el entorno de la clave), **con qué clave llegó** (su nombre, copiado: sigue aunque se elimine la clave), el cuerpo **tal cual llegó**, si era válido y por qué no, el `id` de quien envía, la IP y un `estado` (por ahora siempre `recibido`). Las llamadas sin clave válida (`401`) no se guardan: no son de ningún sistema autorizado.
 
 - **Rechazados también:** si quien integra dice «os lo hemos mandado», en `/admin` → Integración se ve qué llegó y por qué se rechazó.
-- **Reintentos:** con el mismo `id`, mismo tipo y misma clave, y si el primero era válido, se responde `duplicado` sin guardar otra fila. Sin `id`, cada llamada es un mensaje.
+- **Reintentos:** con el mismo `id`, la misma clase de clave (prueba o real) y si el primero era válido, se comparan los datos ya validados (`escaneoRecibido` + `mismoEscaneo`): iguales → `200 duplicado`, sin guardar otra fila; distintos → `409`, y se guarda como rechazado. Sin `id`, cada llamada es un mensaje. Además, un **índice único** en la BD (`ux_integracion_mensajes_id_valido`: tipo, origen e `id` de los válidos) impide dos válidos con el mismo `id` aunque falle el código. Se crea protegido: si una BD vieja tuviera repetidos, se avisa en el log y la app arranca igual.
+- **Rechazos con clave válida** (`400`, `409`, `413`, `415`) se guardan para revisarlos con quien envía; en `413` y `415` sin cuerpo, porque no se llega a leer.
 - **Prueba frente a real:** lo que llega con una clave de prueba se guarda marcado y **nunca** se procesará. Quien integra puede probar contra producción sin riesgo, porque la API solo guarda.
 - **Tamaño:** 10.000 bytes como mucho (`MAX_CUERPO`). `leerCuerpo()` deja de leer al pasar del límite, aunque la cabecera `Content-Length` mienta o no venga: un cuerpo enorme no se carga en memoria (`413`).
 - **Límite de envíos:** 120 por minuto con cada clave (`LIMITE_POR_MINUTO`, `dentroDelLimite()` en `lib/api-claves.ts`), comprobado antes de leer el cuerpo; por encima, `429` con `Retry-After` y no se guarda nada. Contra una clave filtrada o un bucle en el programa que llama. En memoria del proceso: basta con un único servidor.
@@ -133,7 +138,7 @@ Debe responder `202` y aparecer en `/admin` → Integración › Mensajes recibi
 
 **Cómo verlo:** el `.yaml` se abre en IntelliJ (con soporte de OpenAPI) o VS Code con vista previa, o se importa en Postman, Apidog o Insomnia (documentación, mock, pruebas). Para entregarlo a quien integra, se manda el archivo tal cual (con el nombre `api-escaneo-palets.openapi.yaml`, por ejemplo).
 
-Hubo una sección **Documentación de la API** en `/admin` → Integración, con Swagger UI (`swagger-ui-dist`), «Try it out» y descarga del `.yaml` (v1.30.0 – v1.30.2). Se quitó en la v1.30.3 porque nadie la usaba (GoLive no necesita el archivo): una dependencia y dos rutas menos que mantener. Si vuelve a hacer falta, está en el historial de git.
+Hubo una sección **Documentación de la API** en `/admin` → Integración, con Swagger UI (`swagger-ui-dist`), «Try it out» y descarga del `.yaml` (v1.30.0 – v1.30.2). Se quitó en la v1.30.3 porque nadie la usaba (quien integra no necesitaba el archivo): una dependencia y dos rutas menos que mantener. Si vuelve a hacer falta, está en el historial de git.
 
 **Test de contrato** (`__tests__/openapi.test.ts`): falla si el `.yaml` y el código dejan de decir lo mismo. Comprueba que:
 - los ejemplos de envío los acepta la validación real;
@@ -152,6 +157,7 @@ Así que **cambiar la API obliga a cambiar el `.yaml`** (y al revés): `bun test
 
 | Versión | Fecha | Cambio |
 |---|---|---|
+| 1.2.0 | oct. 2026 | Formatos más estrictos: `linea` y `orden` solo cifras; `sscc` siempre 18 cifras; `lote`, `sscc` y `orden` obligatorios y nunca vacíos (antes el lote y el SSCC podían ir vacíos y la orden era opcional); fuera el campo opcional `motivo` (no hacía falta); la API pasa a **estricta**: un campo que no esté en el contrato se rechaza (antes se aceptaba y se guardaba). Además: **todos los errores con la misma forma** `{ok, codigo, errores}` (antes `401` y `429` devolvían `error` en vez de `errores`), **`409`** si un `id` llega con otros datos (antes se respondía `duplicado` y el escaneo nuevo se perdía), **`415`** sin `Content-Type: application/json`, **`500` en JSON**, `Cache-Control: no-store` y `WWW-Authenticate` en el `401`. Es más restrictivo, pero se deja en `/v1` porque aún no la usaba nadie (nadie había empezado a enviar) |
 | 1.1.1 | oct. 2026 | Solo textos: redactado para entregar a terceros (sin comentarios ni referencias internas); la línea, «solo el número». Sin cambios en el contrato |
 | 1.1.0 | oct. 2026 | Respuestas `413` (cuerpo de más de 10000 bytes) y `429` (más de 120 peticiones por minuto con una clave, con `Retry-After`). Compatible: no cambia nada de lo que ya funcionaba |
 | 1.0.0 | oct. 2026 | Primera versión: `POST /api/integracion/v1/escaneo` (`articulo`, `resultado`, `linea`, `lote`, `sscc`; `orden`, `motivo`, `id` opcionales). Claves de API desde el panel |

@@ -15,6 +15,21 @@ export type TipoMensaje = 'escaneo';
 /** Con qué clave llegó: real o de prueba (su entorno) */
 export type Origen = 'real' | 'prueba';
 
+/**
+ * Código de cada error, para que quien llama decida sin leer textos. Todas las
+ * respuestas de error tienen la misma forma: { ok: false, codigo, errores: [...] }.
+ */
+export const CODIGOS_ERROR = [
+  'CLAVE_NO_VALIDA',        // 401
+  'DEMASIADAS_PETICIONES',  // 429
+  'TIPO_NO_ADMITIDO',       // 415: el cuerpo no se envía como application/json
+  'DEMASIADO_GRANDE',       // 413
+  'DATOS_INCORRECTOS',      // 400
+  'ID_EN_CONFLICTO',        // 409: ese id ya llegó con otros datos
+  'ERROR_INTERNO',          // 500
+] as const;
+export type CodigoError = typeof CODIGOS_ERROR[number];
+
 /** Tamaño máximo del cuerpo (un escaneo ocupa unos 200 bytes) */
 export const MAX_CUERPO = 10_000;
 
@@ -24,16 +39,19 @@ export interface Escaneo {
   linea: string;
   lote: string;
   sscc: string;
-  orden?: string;
-  motivo?: string;
+  orden: string;
   /** Identificador único del mensaje, de quien lo envía: si se repite, no se guarda dos veces */
   id?: string;
 }
 
+/** Los campos del contrato del escaneo; cualquier otro se rechaza */
+export const CAMPOS_ESCANEO = ['articulo', 'resultado', 'linea', 'lote', 'sscc', 'orden', 'id'] as const;
+
 /**
- * Comprueba un escaneo. Solo los campos del contrato: los demás se aceptan y se
- * guardan tal cual (si mañana mandan uno nuevo, no se les rompe nada). Todos van
- * como texto: el SSCC tiene 18 cifras y como número perdería precisión.
+ * Comprueba un escaneo. Estricta: un campo que no esté en el contrato (CAMPOS_ESCANEO)
+ * se rechaza, para que una errata ("Id" en vez de "id") o un campo que no usamos salten
+ * en sus pruebas y no meses después; un campo nuevo se añade antes al contrato. Todos
+ * van como texto: el SSCC tiene 18 cifras y como número perdería precisión.
  */
 export function validarEscaneo(cuerpo: unknown): { valor: Escaneo } | { errores: string[] } {
   if (!cuerpo || typeof cuerpo !== 'object' || Array.isArray(cuerpo)) return { errores: ['El cuerpo debe ser un objeto JSON'] };
@@ -56,19 +74,26 @@ export function validarEscaneo(cuerpo: unknown): { valor: Escaneo } | { errores:
 
   const articulo = texto('articulo', 'si', 10, /^\d{10}$/, 'deben ser 10 cifras');
   const resultado = texto('resultado', 'si', 5, /^(OK|NO_OK)$/, 'debe ser "OK" o "NO_OK"');
-  const linea = texto('linea', 'si', 10);
-  // Lote y SSCC pueden ir vacíos ("") si en ese momento no los tienen (p. ej. NO_OK)
-  const lote = texto('lote', 'vacio', 30);
-  const sscc = texto('sscc', 'vacio', 18, /^\d{18}$/, 'deben ser 18 cifras, sin el (00)');
-  const orden = texto('orden', 'no', 20);
-  const motivo = texto('motivo', 'no', 200);
+  const linea = texto('linea', 'si', 10, /^\d+$/, 'solo cifras: el número de línea, sin códigos ni nombres');
+  const lote = texto('lote', 'si', 30);
+  // Con el identificador GS1 (00) delante son 20 cifras: se rechaza con un mensaje que lo
+  // diga, en vez de "como mucho 18". No se corrige solo: que lo arregle quien envía.
+  // (Un SSCC de 18 cifras que empiece por 00 es válido: se distingue por la longitud.)
+  const ssccConIdentificador = typeof c.sscc === 'string' && /^00\d{18}$/.test(c.sscc.trim());
+  if (ssccConIdentificador) errores.push('sscc: tiene 20 cifras y empieza por 00: quitad el (00) del principio, el SSCC son las 18 cifras siguientes');
+  const sscc = ssccConIdentificador ? undefined : texto('sscc', 'si', 18, /^\d{18}$/, 'deben ser 18 cifras, sin el (00)');
+  const orden = texto('orden', 'si', 20, /^\d+$/, 'solo cifras');
   const id = texto('id', 'no', 64);
+
+  for (const campo of Object.keys(c)) {
+    if (!(CAMPOS_ESCANEO as readonly string[]).includes(campo)) errores.push(`${campo.slice(0, 40)}: campo no admitido`);
+  }
 
   if (errores.length) return { errores };
   return {
     valor: {
       articulo: articulo!, resultado: resultado as Escaneo['resultado'], linea: linea!, lote: lote!, sscc: sscc!,
-      ...(orden ? { orden } : {}), ...(motivo ? { motivo } : {}), ...(id ? { id } : {}),
+      orden: orden!, ...(id ? { id } : {}),
     },
   };
 }
@@ -94,12 +119,22 @@ export function guardarMensaje(db: Database.Database, m: MensajeRecibido): numbe
     m.clave.id, m.clave.nombre).lastInsertRowid);
 }
 
-/** ¿Ya se recibió (y era válido) un mensaje con este id? Para no duplicar reintentos. */
-export function yaRecibido(db: Database.Database, tipo: TipoMensaje, origen: Origen, idExterno: string): boolean {
-  return !!db.prepare(
-    'SELECT 1 FROM integracion_mensajes WHERE tipo = ? AND origen = ? AND id_externo = ? AND valido = 1 LIMIT 1'
-  ).get(tipo, origen, idExterno);
+/**
+ * El escaneo válido que ya llegó antes con este id (mismo tipo y misma clase de clave),
+ * o null. Con él, un reintento se reconoce (mismos datos → duplicado) y se distingue
+ * de un id reutilizado por error (otros datos → conflicto, no se pierde en silencio).
+ */
+export function escaneoRecibido(db: Database.Database, origen: Origen, idExterno: string): Escaneo | null {
+  const fila = db.prepare(
+    "SELECT cuerpo FROM integracion_mensajes WHERE tipo = 'escaneo' AND origen = ? AND id_externo = ? AND valido = 1 LIMIT 1"
+  ).get(origen, idExterno) as { cuerpo: string } | undefined;
+  if (!fila) return null;
+  const v = validarEscaneo(JSON.parse(fila.cuerpo));
+  return 'valor' in v ? v.valor : null;
 }
+
+/** ¿Los dos escaneos dicen lo mismo? (ya validados: mismos campos, mismo orden, sin espacios) */
+export const mismoEscaneo = (a: Escaneo, b: Escaneo) => JSON.stringify(a) === JSON.stringify(b);
 
 export interface FiltrosMensajes {
   origen?: Origen;

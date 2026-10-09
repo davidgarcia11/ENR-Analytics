@@ -447,6 +447,15 @@ export function getDb(): Database.Database {
     _db.exec("ALTER TABLE integracion_mensajes ADD COLUMN clave_nombre TEXT");
   }
 
+  // Un id de mensaje válido solo una vez por tipo y clase de clave (lib/integracion.ts),
+  // garantizado también en la BD. Protegido: si una BD tuviera repetidos, se avisa y arranca.
+  try {
+    _db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS ux_integracion_mensajes_id_valido
+      ON integracion_mensajes (tipo, origen, id_externo) WHERE valido = 1 AND id_externo IS NOT NULL`);
+  } catch (e) {
+    console.error('[integración] no se pudo crear el índice único de mensajes (¿ids repetidos?):', e);
+  }
+
   // Migración: añadir columna screen a presets si no existe
   const presetColumns = _db.prepare("PRAGMA table_info(presets)").all() as { name: string }[];
   if (!presetColumns.some(c => c.name === 'screen')) {
