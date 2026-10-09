@@ -98,7 +98,7 @@ Se gestionan en **`/admin` → Integración › Claves de API**, **solo el admin
 
 | Acción | Qué hace |
 |---|---|
-| **Nueva clave** | Nombre del sistema y entorno (*«ERP pruebas»*), entorno (**prueba** → `enr_test_…`, **real** → `enr_live_…`), a qué APIs da acceso (`AMBITOS`; hoy solo «Aviso de escaneo de palet»), caducidad opcional y notas. La clave completa se enseña **una sola vez**, con botón de copiar |
+| **Nueva clave** | Nombre del sistema y entorno (*«ERP pruebas»*), entorno (**prueba** → `enr_test_…`, **real** → `enr_live_…`), a qué APIs da acceso (`AMBITOS`; hoy solo «Aviso de escaneo de palet»), caducidad opcional y notas. La clave completa se enseña **una sola vez**, con botón de copiar (por `http://` el navegador no da el portapapeles moderno, que exige `https` o `localhost`: se copia seleccionando el campo, el método clásico) |
 | **Editar** | Nombre, APIs, caducidad y notas. La clave no cambia |
 | **Rotar…** | Crea otra con la misma configuración y pone fin a la vieja: ya (se revoca) o dentro de 1 o 7 días. Mientras tanto valen las dos, para cambiarla sin cortes. Si la vieja ya caducaba antes, se respeta |
 | **Revocar** | Deja de valer al momento. No se puede deshacer |
