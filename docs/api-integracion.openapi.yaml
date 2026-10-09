@@ -1,27 +1,19 @@
-# Especificación OpenAPI de la API de integración con GoLive.
-# Se mantiene a mano junto al código: si cambia app/api/integracion/** o
-# lib/integracion.ts, se cambia aquí en el mismo PR. Ver docs/integracion-golive.md.
-# Se importa tal cual en Apidog, Postman, Swagger UI, Insomnia...
-# Sin claves ni IPs reales: el servidor va como variable.
 openapi: 3.0.3
 info:
-  title: Dashboard de producción ENR — Integración GoLive
-  version: 1.1.0
+  title: Elaborados Naturales — API de escaneo de palets
+  version: 1.1.1
   description: |
-    API para que GoLive (JDE) avise al dashboard de producción de cada palet
-    escaneado contra una orden de fabricación.
+    API para avisar a Elaborados Naturales de cada palet escaneado contra una orden
+    de fabricación. Una respuesta correcta confirma que el mensaje ha llegado y
+    cumple el contrato.
 
-    **Estado actual:** el dashboard comprueba cada mensaje y lo **guarda**; todavía
-    no actúa con él. Una respuesta correcta confirma que el mensaje ha llegado y
-    cumple el contrato, no lo que haga el panel después.
-
-    **Autenticación:** cabecera `x-api-key` con una clave que facilita el equipo del
-    dashboard. Las claves de **prueba** (`enr_test_…`) solo guardan lo recibido,
-    marcado como prueba, y nunca se procesará; las **reales** (`enr_live_…`) se dan
-    al pasar a producción.
+    **Autenticación:** cabecera `x-api-key` con la clave que facilita Elaborados
+    Naturales. Las claves de **prueba** (`enr_test_…`) sirven para desarrollar y
+    probar: lo enviado con ellas se registra, pero no tiene ningún efecto. Las
+    **reales** (`enr_live_…`) se facilitan al pasar a producción.
 
     **Reintentos:** si no hay respuesta o llega un `500`, reintentar 2-3 veces con
-    el **mismo `id`**: el dashboard reconoce el reintento y no lo guarda dos veces.
+    el **mismo `id`**: el reintento se reconoce y no se registra dos veces.
     Un `400` o un `401` no se reintentan (hay que corregir algo).
 
     **Todos los valores van como texto, entre comillas.** El SSCC tiene 18 cifras
@@ -32,18 +24,18 @@ info:
     escaneo ocupa unos 200 bytes.
 servers:
   - url: http://{servidor}:{puerto}
-    description: Dashboard de producción (red interna de la empresa)
+    description: Servidor de Elaborados Naturales (red interna)
     variables:
       servidor:
         default: localhost
-        description: IP o nombre del servidor del dashboard (la facilita el equipo del dashboard)
+        description: IP o nombre del servidor (lo facilita Elaborados Naturales)
       puerto:
         default: '3000'
 security:
   - claveApi: []
 tags:
   - name: Integración
-    description: Avisos de GoLive al dashboard
+    description: Avisos de palets escaneados
 paths:
   /api/integracion/v1/escaneo:
     post:
@@ -101,7 +93,7 @@ paths:
                 recibido:
                   value: { ok: true, id: 3f2b8c1e-7a4d-4e9b-9c11-2d5e6f7a8b90, estado: recibido, prueba: true }
                 sinId:
-                  summary: Sin id en el mensaje, el dashboard devuelve el suyo
+                  summary: Sin id en el mensaje, se devuelve uno propio
                   value: { ok: true, id: '1542', estado: recibido, prueba: false }
         '200':
           description: Ese `id` ya se había recibido (un reintento). No se guarda otra vez.
@@ -143,7 +135,7 @@ paths:
           description: |
             Sin clave, o la clave no vale (no existe, está revocada o caducada, o no
             da acceso a esta API). No se dice el motivo. No reintentar: revisar la
-            clave con el equipo del dashboard. No se guarda nada.
+            clave con Elaborados Naturales. No se registra nada.
           content:
             application/json:
               schema:
@@ -180,14 +172,14 @@ paths:
                 limite:
                   value: { ok: false, error: 'Demasiadas peticiones: como mucho 120 por minuto con cada clave' }
         '500':
-          description: Error del dashboard. Reintentar 2-3 veces con el mismo `id`.
+          description: Error del servidor. Reintentar 2-3 veces con el mismo `id`.
 components:
   securitySchemes:
     claveApi:
       type: apiKey
       in: header
       name: x-api-key
-      description: Clave de prueba (`enr_test_…`) o real (`enr_live_…`), facilitada por el equipo del dashboard.
+      description: Clave de prueba (`enr_test_…`) o real (`enr_live_…`), facilitada por Elaborados Naturales.
   schemas:
     Escaneo:
       type: object
@@ -208,7 +200,7 @@ components:
           type: string
           minLength: 1
           maxLength: 10
-          description: Línea donde se ha escaneado (la misma que tiene cada loteadora en el dashboard).
+          description: Número de la línea donde se ha escaneado, solo el número (p. ej. `18`), sin códigos ni nombres.
           example: '18'
         lote:
           type: string
@@ -234,7 +226,7 @@ components:
           type: string
           maxLength: 64
           description: |
-            Identificador único del mensaje, generado por GoLive (p. ej. un UUID).
+            Identificador único del mensaje, generado por quien envía (p. ej. un UUID).
             Opcional pero recomendado: con él, un reintento no se guarda dos veces.
           example: 3f2b8c1e-7a4d-4e9b-9c11-2d5e6f7a8b90
     Recibido:
@@ -246,7 +238,7 @@ components:
           enum: [true]
         id:
           type: string
-          description: El `id` del mensaje o, si no lo traía, el del dashboard.
+          description: El `id` del mensaje o, si no lo traía, uno asignado al registrarlo.
         estado:
           type: string
           enum: [recibido, duplicado]

@@ -15,7 +15,7 @@ const nuevaDb = () => {
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, revocada_por TEXT, revocada_at TEXT, ultimo_uso_at TEXT, ultimo_uso_ip TEXT)`)
   return db
 }
-const DATOS: DatosClave = { nombre: 'GoLive pruebas', ambitos: ['escaneo'], caducaEl: null, notas: null }
+const DATOS: DatosClave = { nombre: 'ERP pruebas', ambitos: ['escaneo'], caducaEl: null, notas: null }
 const manana = () => hoyLocal(new Date(Date.now() + 86_400_000))
 const ayer = () => hoyLocal(new Date(Date.now() - 86_400_000))
 
@@ -58,7 +58,7 @@ describe('verificarClave', () => {
     const db = nuevaDb()
     const { clave, fila } = crearClave(db, 'prueba', DATOS, 'admin')
     expect(JSON.stringify(db.prepare('SELECT * FROM api_claves').all())).not.toContain(clave)
-    expect(fila).toMatchObject({ nombre: 'GoLive pruebas', entorno: 'prueba', ambitos: ['escaneo'], creadaPor: 'admin', ultimoUsoAt: null })
+    expect(fila).toMatchObject({ nombre: 'ERP pruebas', entorno: 'prueba', ambitos: ['escaneo'], creadaPor: 'admin', ultimoUsoAt: null })
     expect(verificarClave(db, clave, 'escaneo', '192.168.4.10')?.id).toBe(fila.id)
     expect(leerClave(db, fila.id)!.ultimoUsoIp).toBe('192.168.4.10')
   })
@@ -90,8 +90,8 @@ describe('gestión', () => {
   it('editar cambia la configuración, no la clave', () => {
     const db = nuevaDb()
     const { clave, fila } = crearClave(db, 'prueba', DATOS, null)
-    editarClave(db, fila.id, { ...DATOS, nombre: 'GoLive QA', caducaEl: manana(), notas: 'Eduardo' })
-    expect(leerClave(db, fila.id)).toMatchObject({ nombre: 'GoLive QA', caducaEl: manana(), notas: 'Eduardo', prefijo: fila.prefijo })
+    editarClave(db, fila.id, { ...DATOS, nombre: 'ERP QA', caducaEl: manana(), notas: 'Contacto: sistemas' })
+    expect(leerClave(db, fila.id)).toMatchObject({ nombre: 'ERP QA', caducaEl: manana(), notas: 'Contacto: sistemas', prefijo: fila.prefijo })
     expect(verificarClave(db, clave, 'escaneo', null)).not.toBeNull()
   })
 
@@ -107,11 +107,11 @@ describe('gestión', () => {
   it('rotar: clave nueva con la misma configuración; la vieja vale N días más o se revoca ya', () => {
     const db = nuevaDb()
     const ahora = new Date()
-    const vieja = crearClave(db, 'real', { ...DATOS, notas: 'GoLive' }, null)
+    const vieja = crearClave(db, 'real', { ...DATOS, notas: 'ERP' }, null)
     const r = rotarClave(db, vieja.fila.id, '7', 'admin', ahora)
     if ('error' in r) throw new Error(r.error)
     expect(r.clave).not.toBe(vieja.clave)
-    expect(r.fila).toMatchObject({ nombre: 'GoLive pruebas', entorno: 'real', ambitos: ['escaneo'], notas: 'GoLive' })
+    expect(r.fila).toMatchObject({ nombre: 'ERP pruebas', entorno: 'real', ambitos: ['escaneo'], notas: 'ERP' })
     expect(leerClave(db, vieja.fila.id)!.caducaEl).toBe(hoyLocal(new Date(ahora.getTime() + 7 * 86_400_000)))
     // Durante el cambio valen las dos
     expect(verificarClave(db, vieja.clave, 'escaneo', null)).not.toBeNull()

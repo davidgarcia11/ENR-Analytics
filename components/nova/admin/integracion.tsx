@@ -1,6 +1,6 @@
 "use client";
 
-// /admin → Integración › Mensajes recibidos: los mensajes recibidos de GoLive por la API de
+// /admin → Integración › Mensajes recibidos: los mensajes recibidos por la API de
 // integración (POST /api/integracion/v1/escaneo), válidos o no, tal cual llegaron.
 // Solo lectura, con el permiso 'admin.integracion.ver'. Por ahora el panel no hace
 // nada con ellos. Datos: lib/integracion.ts.
@@ -115,7 +115,7 @@ export default function AdminIntegracion({ titulo, descripcion }: SeccionProps) 
                         <span key={d.clave}><span className="text-muted-foreground">{d.clave}:</span> <span className="font-mono text-foreground">{d.valor}</span></span>
                       ))}
                     </div>
-                    {/* Lo recibido tal cual, para revisar con GoLive */}
+                    {/* Lo recibido tal cual, para revisarlo con quien lo envió */}
                     <details className="mt-1">
                       <summary className="cursor-pointer text-xs text-muted-foreground">JSON recibido</summary>
                       <pre className="mt-1 max-w-xl overflow-x-auto rounded-md bg-muted p-2 text-xs whitespace-pre-wrap break-all">{f.cuerpo}</pre>

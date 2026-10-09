@@ -1,5 +1,5 @@
 /**
- * Test de contrato: docs/integracion-golive.openapi.yaml (lo que se le da a GoLive)
+ * Test de contrato: docs/api-integracion.openapi.yaml (lo que se entrega a terceros)
  * tiene que decir lo mismo que el código (lib/integracion.ts y la ruta del escaneo).
  * Si alguien cambia uno y no el otro, este test falla.
  */
@@ -7,7 +7,7 @@ import { describe, it, expect } from 'bun:test'
 import { MAX_CUERPO, validarEscaneo } from '@/lib/integracion'
 import { LIMITE_POR_MINUTO } from '@/lib/api-claves'
 
-const spec: any = Bun.YAML.parse(await Bun.file('docs/integracion-golive.openapi.yaml').text())
+const spec: any = Bun.YAML.parse(await Bun.file('docs/api-integracion.openapi.yaml').text())
 const ruta = await Bun.file('app/api/integracion/v1/escaneo/route.ts').text()
 const op = spec.paths['/api/integracion/v1/escaneo'].post
 const esquema = spec.components.schemas.Escaneo
@@ -28,6 +28,12 @@ describe('especificación', () => {
   it('se autentica con la cabecera x-api-key, la misma que lee la ruta', () => {
     expect(spec.components.securitySchemes.claveApi).toMatchObject({ type: 'apiKey', in: 'header', name: 'x-api-key' })
     expect(ruta).toContain("req.headers.get('x-api-key')")
+  })
+
+  it('se entrega a terceros: sin comentarios ni referencias internas', async () => {
+    const crudo = await Bun.file('docs/api-integracion.openapi.yaml').text()
+    expect(crudo.split('\n').filter((l) => l.trimStart().startsWith('#'))).toEqual([])
+    expect(crudo).not.toMatch(/\b(app|lib|docs)\/|components\/nova|\/admin|\bdashboard\b|\bpanel\b|loteadora|golive/i)
   })
 
   it('no lleva claves ni IPs reales', () => {
