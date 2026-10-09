@@ -3,7 +3,7 @@ import { getDb } from '@/lib/sqlite';
 import { requireAccess } from '@/lib/permissions';
 import { POR_PAGINA, buscarMensajes } from '@/lib/integracion';
 
-// Mensajes recibidos por la API de integración con GoLive (/admin → Integración).
+// Mensajes recibidos por la API de integración (/admin → Integración).
 // Solo lectura. GET ?origen=real|prueba&valido=1|0&desde=AAAA-MM-DD&hasta=AAAA-MM-DD&q=&pagina=
 // → { filas, total, porPagina }
 export async function GET(req: NextRequest) {

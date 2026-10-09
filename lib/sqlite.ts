@@ -233,7 +233,7 @@ export function getDb(): Database.Database {
     );
     CREATE INDEX IF NOT EXISTS idx_loteadora_ping_maquina ON loteadora_ping (loteadora_id, id);
 
-    -- Bandeja de entrada de la API de integración con GoLive (lib/integracion.ts):
+    -- Bandeja de entrada de la API de integración (lib/integracion.ts):
     -- cada mensaje recibido tal cual, válido o no. Por ahora no se procesa (estado
     -- 'recibido'); qué hace el panel con cada tipo se programará más adelante.
     CREATE TABLE IF NOT EXISTS integracion_mensajes (
@@ -244,7 +244,7 @@ export function getDb(): Database.Database {
       cuerpo TEXT NOT NULL,          -- el cuerpo tal cual llegó
       valido INTEGER NOT NULL,       -- 1 si cumplía el contrato
       errores TEXT,                  -- JSON: por qué no era válido
-      id_externo TEXT,               -- "id" del mensaje (GoLive), para no duplicar reintentos
+      id_externo TEXT,               -- "id" del mensaje (de quien envía), para no duplicar reintentos
       ip TEXT,
       estado TEXT NOT NULL DEFAULT 'recibido',
       clave_id INTEGER,              -- con qué clave llegó (api_claves.id)

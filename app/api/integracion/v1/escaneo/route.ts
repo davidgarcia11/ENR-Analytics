@@ -3,18 +3,18 @@ import { getDb } from '@/lib/sqlite';
 import { LIMITE_POR_MINUTO, dentroDelLimite, verificarClave } from '@/lib/api-claves';
 import { MAX_CUERPO, guardarMensaje, leerCuerpo, validarEscaneo, yaRecibido } from '@/lib/integracion';
 
-// POST /api/integracion/v1/escaneo — GoLive avisa de cada palet escaneado contra una
+// POST /api/integracion/v1/escaneo — un sistema externo avisa de cada palet escaneado contra una
 // orden de fabricación. Sin sesión de usuario: se autentica con la cabecera x-api-key,
 // con una clave de /admin → Integración › Claves de API que dé acceso a 'escaneo'
 // (proxy.ts deja pasar la ruta). Por ahora solo comprueba y guarda el mensaje
 // (lib/integracion.ts): el panel no hace nada con él. Contrato y respuestas en
-// docs/integracion-golive.openapi.yaml (y docs/integracion-golive.md).
+// docs/api-integracion.openapi.yaml (y docs/api-integracion.md).
 export async function POST(req: NextRequest) {
   // Orientativa: Next solo rellena x-forwarded-for si no viene, así que quien llama
   // puede poner la que quiera. No sirve para restringir por IP (ver docs §3).
   const ip = req.headers.get('x-forwarded-for')?.split(',')[0].trim() ?? null;
   const db = getDb();
-  // Las llamadas sin clave válida no se guardan (no son de GoLive) ni se dice por qué
+  // Las llamadas sin clave válida no se guardan (no son de ningún sistema autorizado) ni se dice por qué
   const clave = verificarClave(db, req.headers.get('x-api-key'), 'escaneo', ip);
   if (!clave) return NextResponse.json({ ok: false, error: 'Clave no válida (cabecera x-api-key)' }, { status: 401 });
 

@@ -1,6 +1,6 @@
-// Claves de API para los sistemas externos que llaman al dashboard (hoy, GoLive).
+// Claves de API para los sistemas externos que llaman al dashboard.
 // Se gestionan desde /admin → Integración › Claves de API (solo admin): crear,
-// editar, rotar, revocar y eliminar, con caducidad opcional. Ver docs/integracion-golive.md.
+// editar, rotar, revocar y eliminar, con caducidad opcional. Ver docs/api-integracion.md.
 //
 // Como las contraseñas: la clave completa solo se enseña al crearla. En la BD queda
 // su huella SHA-256 (si alguien copia la BD, no saca las claves) y un prefijo

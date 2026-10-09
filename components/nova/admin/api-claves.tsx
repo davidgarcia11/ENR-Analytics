@@ -1,10 +1,10 @@
 "use client";
 
 // /admin → Integración › Claves de API: las claves con las que llaman al dashboard
-// los sistemas externos (hoy, GoLive). Crear, editar, rotar, revocar y eliminar, con
+// los sistemas externos. Crear, editar, rotar, revocar y eliminar, con
 // caducidad opcional. Solo admin. La clave completa se enseña una sola vez, al
 // crearla o rotarla; después solo su prefijo. Lógica en lib/api-claves.ts; ver
-// docs/integracion-golive.md.
+// docs/api-integracion.md.
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { Ban, Check, Copy, KeyRound, Loader2, MoreHorizontal, Pencil, Plus, RefreshCw, Trash2 } from "lucide-react";
@@ -244,7 +244,7 @@ export default function AdminApiClaves({ titulo, descripcion }: SeccionProps) {
             </DialogHeader>
             <div className="grid gap-2">
               <Label htmlFor="k-nombre">Nombre</Label>
-              <Input id="k-nombre" value={nombre} onChange={(e) => setNombre(e.target.value)} placeholder="GoLive pruebas" maxLength={60} autoFocus />
+              <Input id="k-nombre" value={nombre} onChange={(e) => setNombre(e.target.value)} placeholder="ERP pruebas" maxLength={60} autoFocus />
             </div>
             {formulario === "nueva" && (
               <div className="grid gap-2">
