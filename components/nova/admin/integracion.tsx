@@ -27,7 +27,7 @@ const VALIDO_ITEMS = [{ value: "", label: "Todos" }, { value: "1", label: "Corre
 function resumen(cuerpo: string): { clave: string; valor: string }[] {
   try {
     const d = JSON.parse(cuerpo);
-    return ["articulo", "resultado", "linea", "lote", "sscc", "orden", "motivo"]
+    return ["articulo", "resultado", "linea", "lote", "sscc", "orden"]
       .filter((k) => d?.[k] !== undefined && d[k] !== "")
       .map((k) => ({ clave: k, valor: String(d[k]) }));
   } catch { return []; }

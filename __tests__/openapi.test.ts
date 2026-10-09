@@ -4,7 +4,7 @@
  * Si alguien cambia uno y no el otro, este test falla.
  */
 import { describe, it, expect } from 'bun:test'
-import { MAX_CUERPO, validarEscaneo } from '@/lib/integracion'
+import { CAMPOS_ESCANEO, CODIGOS_ERROR, MAX_CUERPO, validarEscaneo } from '@/lib/integracion'
 import { LIMITE_POR_MINUTO } from '@/lib/api-claves'
 
 const spec: any = Bun.YAML.parse(await Bun.file('docs/api-integracion.openapi.yaml').text())
@@ -56,6 +56,12 @@ describe('el contrato coincide con la validación', () => {
     }
   })
 
+  it('los campos admitidos son los mismos, y los demás se rechazan en los dos', () => {
+    expect(Object.keys(props).sort()).toEqual([...CAMPOS_ESCANEO].sort())
+    expect(esquema.additionalProperties).toBe(false)
+    expect(errores({ ...completo, extra: 'x' })).toEqual(['extra: campo no admitido'])
+  })
+
   it('todos los campos de la especificación los conoce el código (y van como texto)', () => {
     for (const campo of Object.keys(props)) {
       expect(errores({ ...completo, [campo]: 12 })).toContain(`${campo}: debe ir como texto, entre comillas`)
@@ -73,7 +79,9 @@ describe('el contrato coincide con la validación', () => {
   it('los formatos (pattern) aceptan y rechazan lo mismo que el código', () => {
     const casos: Record<string, string[]> = {
       articulo: ['1210500019', '121050001', '12105000190', 'A210500019'],
-      sscc: ['', '384123450000000017', '38412345000000001', 'A84123450000000017'],
+      sscc: ['384123450000000017', '38412345000000001', 'A84123450000000017'],
+      linea: ['18', '5', 'L18', '18A', '1 8'],
+      orden: ['490387', 'OF490387', '49-0387'],
     }
     for (const [campo, valores] of Object.entries(casos)) {
       const patron = new RegExp(props[campo].pattern)
@@ -99,6 +107,8 @@ describe('las respuestas de ejemplo son las reales', () => {
     }
   }
   for (const e of errores({ ...completo, resultado: 'ok' })) reales.add(e)
+  for (const e of errores({ ...completo, sscc: '00' + completo.sscc })) reales.add(e)
+  for (const e of errores({ ...completo, motivo: 'x' })) reales.add(e)
 
   it('los errores de los ejemplos de 400 existen (o los da la ruta)', () => {
     for (const ej of Object.values<any>(op.responses['400'].content['application/json'].examples)) {
@@ -111,15 +121,45 @@ describe('las respuestas de ejemplo son las reales', () => {
     expect(spec.info.description).toContain(`${LIMITE_POR_MINUTO} peticiones por minuto`)
     expect(spec.info.description).toContain(`${MAX_CUERPO} bytes`)
     expect(r['413'].content['application/json'].examples.grande.value.errores).toEqual([`El cuerpo ocupa demasiado (máximo ${MAX_CUERPO} bytes)`])
-    expect(r['429'].content['application/json'].examples.limite.value.error).toBe(`Demasiadas peticiones: como mucho ${LIMITE_POR_MINUTO} por minuto con cada clave`)
+    expect(r['429'].content['application/json'].examples.limite.value.errores).toEqual([`Demasiadas peticiones: como mucho ${LIMITE_POR_MINUTO} por minuto con cada clave`])
     expect(r['429'].headers['Retry-After']).toBeDefined()
-    expect(ruta).toContain('bytes)`], 413)')
-    expect(ruta).toContain('status: 429')
+    expect(ruta).toContain('rechazar(413, ')
+    expect(ruta).toContain('error(429, ')
     expect(ruta).toContain("'Retry-After'")
   })
 
-  it('el 401 y los estados de 202/200 son los de la ruta', () => {
-    expect(ruta).toContain(op.responses['401'].content['application/json'].examples.clave.value.error)
+  it('todos los errores con la misma forma y un código que existe y usa la ruta con su estado', () => {
+    expect(spec.components.schemas.Error.properties.codigo.enum).toEqual([...CODIGOS_ERROR])
+    const estadoDe: Record<string, string> = {
+      CLAVE_NO_VALIDA: '401', DEMASIADAS_PETICIONES: '429', TIPO_NO_ADMITIDO: '415', DEMASIADO_GRANDE: '413',
+      DATOS_INCORRECTOS: '400', ID_EN_CONFLICTO: '409', ERROR_INTERNO: '500',
+    }
+    expect(Object.keys(estadoDe).sort()).toEqual([...CODIGOS_ERROR].sort())
+    for (const [estado, resp] of Object.entries<any>(op.responses)) {
+      if (Number(estado) < 400) continue
+      expect([estado, resp.content['application/json'].schema.$ref]).toEqual([estado, '#/components/schemas/Error'])
+      for (const ej of Object.values<any>(resp.content['application/json'].examples)) {
+        expect(Object.keys(ej.value).sort()).toEqual(['codigo', 'errores', 'ok'])
+        expect([estado, estadoDe[ej.value.codigo]]).toEqual([estado, estado])
+        // La ruta responde ese código con ese estado
+        expect(ruta).toMatch(new RegExp(`(error|rechazar)\\(${estado}, '${ej.value.codigo}'`))
+      }
+    }
+  })
+
+  it('los textos de 401, 409, 415 y 500 son los de la ruta', () => {
+    const ej = (estado: string, nombre: string) => op.responses[estado].content['application/json'].examples[nombre].value.errores[0] as string
+    expect(ruta).toContain(ej('401', 'clave'))
+    expect(ruta).toContain(ej('500', 'interno'))
+    expect(ej('409', 'conflicto')).toMatch(/ya se recibió con otros datos; cada mensaje necesita un id distinto$/)
+    expect(ruta).toContain('ya se recibió con otros datos; cada mensaje necesita un id distinto')
+    expect(ej('415', 'tipo')).toStartWith('El cuerpo tiene que enviarse como JSON (cabecera Content-Type: application/json')
+    expect(ruta).toContain('El cuerpo tiene que enviarse como JSON (cabecera Content-Type: application/json')
+    expect(op.responses['401'].headers['WWW-Authenticate']).toBeDefined()
+    expect(ruta).toContain("'WWW-Authenticate'")
+  })
+
+  it('los estados de 202/200 son los de la ruta', () => {
     expect(ruta).toContain("estado: 'recibido'")
     expect(ruta).toContain("estado: 'duplicado'")
     expect(ruta).toContain('status: 202')
