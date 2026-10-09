@@ -30,7 +30,7 @@ import NotificationDropdown from "@/components/shadcn-space/blocks/topbar-02/hea
 import ProfileDropdown, { iniciales } from "@/components/shadcn-space/blocks/topbar-02/header/dropdown-profile"
 import { getNavData } from "@/components/shadcn-space/blocks/topbar-02/data"
 import {
-  BellRing, BookOpen, ChevronsUpDown, FileCode, FileText, History, Inbox, KeyRound, LayoutGrid, Link2, MapPin, Printer, Receipt, RefreshCw, ScanBarcode, Settings, ShieldCheck, Tag, Users,
+  BellRing, ChevronsUpDown, FileCode, FileText, History, Inbox, KeyRound, LayoutGrid, Link2, MapPin, Printer, Receipt, RefreshCw, ScanBarcode, Settings, ShieldCheck, Tag, Users,
   type LucideIcon,
 } from "lucide-react"
 import { puedeEntrarEnAdmin, seccionesAdminPorPermisos } from "@/lib/permisos"
@@ -49,7 +49,6 @@ import AdminLogsConsultas from "@/components/nova/admin/logs-consultas"
 import AdminConfirmacionesPda from "@/components/nova/admin/confirmaciones-pda"
 import AdminIntegracion from "@/components/nova/admin/integracion"
 import AdminApiClaves from "@/components/nova/admin/api-claves"
-import AdminDocumentacionApi from "@/components/nova/admin/documentacion-api"
 
 // ─── Navegación del panel (sidebar) ─────────────────────────────────────────────
 // Una sección nueva se añade aquí (y, si debe poder abrirla alguien que no es admin,
@@ -100,7 +99,6 @@ const GRUPOS_ADMIN: GrupoAdmin[] = [
     secciones: [
       { key: "integracion", label: "Mensajes recibidos", descripcion: "Mensajes recibidos por la API de integración (por ahora solo se guardan)", icon: Inbox, Componente: AdminIntegracion },
       // Sin permiso en lib/permisos.ts: solo admin
-      { key: "documentacion-api", label: "Documentación de la API", descripcion: "Contrato de la API de integración (OpenAPI): campos, respuestas, ejemplos y pruebas", icon: BookOpen, Componente: AdminDocumentacionApi },
       { key: "api-claves", label: "Claves de API", descripcion: "Claves con las que llaman al dashboard los sistemas externos: crear, rotar, revocar y caducidad", icon: KeyRound, Componente: AdminApiClaves },
     ],
   },

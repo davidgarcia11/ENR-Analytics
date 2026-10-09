@@ -13,7 +13,7 @@ Dashboard de producción para Elaborados Naturales. Conecta con Oracle JDE y mue
 - **Auth:** JWT (jose) + bcryptjs, cookie httpOnly
 - **Excel:** xlsx 0.18
 - **Gráficos:** recharts
-- **Documentación de API:** OpenAPI 3 (`docs/api-integracion.openapi.yaml`) + swagger-ui-dist (visor instalado, versión fija)
+- **Documentación de API:** OpenAPI 3 (`docs/api-integracion.openapi.yaml`), atada al código por `__tests__/openapi.test.ts`
 - **Iconos:** lucide-react
 - **Componentes UI:** Radix UI (solo Slot), class-variance-authority, clsx, tailwind-merge
 
@@ -178,6 +178,13 @@ Solo cuando se pida explícitamente usar Nova (no es el sistema por defecto toda
 4. `app/produccion/page.tsx` → añadir el nuevo campo al `URLSearchParams` en `fetchData`
 5. Ver guía completa en `docs/produccion.md` sección 13
 
+### Añadir o cambiar una API para sistemas externos (con clave de API)
+Toda API que llame un sistema de fuera (no las rutas internas que usan las pantallas del panel) **se documenta siempre en los dos sitios, en el mismo PR que el código**:
+1. **`docs/api-integracion.openapi.yaml`**: la ruta, el esquema del cuerpo, las respuestas y ejemplos. Es lo que se entrega a terceros: sin comentarios, sin rutas del código, sin «dashboard»/«panel» y sin nombrar a ningún cliente (lo vigila el test). Subir `info.version` (compatible → `1.x`; incompatible → ruta nueva `/v2`, manteniendo la `/v1`)
+2. **`docs/api-integracion.md`**: cómo funciona por dentro, decisiones y la fila nueva en el **historial de cambios de la API** (§6)
+3. **`__tests__/openapi.test.ts`**: comprobar que la especificación de la API nueva coincide con su validación, como se hace con el escaneo
+4. En el código: ruta bajo `/api/integracion/v1/`, entrada en `AMBITOS` (`lib/api-claves.ts`, con una etiqueta que diga qué hace la API), `verificarClave` + `dentroDelLimite` + `leerCuerpo` en la ruta, y la ruta exacta en `SIN_SESION` de `proxy.ts` (con test en `middleware.test.ts`)
+
 ### Añadir nuevo panel/fuente de logs
 1. Añadir INSERT en la ruta API con `source: 'nombre_panel'`
 2. Añadir etiqueta en `SOURCE_LABELS` en `components/nova/admin/logs-consultas.tsx`
@@ -230,7 +237,7 @@ Solo cuando se pida explícitamente usar Nova (no es el sistema por defecto toda
   - Cambios en el panel de costes (`/costes`, `api/costes`) → `docs/costes.md`
   - Cambios en el panel de MRP (`/mrp`, `api/mrp`) → `docs/mrp.md`
   - Cambios en el panel de muestras (`/muestras`, `api/muestras`) → `docs/muestras.md`
-  - Cambios en la API de integración o en las claves de API (`api/integracion`, `api/admin/api-claves`, `lib/integracion.ts`, `lib/api-claves.ts`) → `docs/api-integracion.md` (y, si cambia el contrato, `docs/api-integracion.openapi.yaml` — lo exige `__tests__/openapi.test.ts`)
+  - Cualquier API para sistemas externos, nueva o cambiada (`api/integracion`, `api/admin/api-claves`, `lib/integracion.ts`, `lib/api-claves.ts`) → **siempre** `docs/api-integracion.md` **y** `docs/api-integracion.openapi.yaml` (ver «Añadir o cambiar una API para sistemas externos»; el `.yaml` lo exige `__tests__/openapi.test.ts`)
   - Nuevo panel → crear `docs/nombre-panel.md` y añadir referencia en `DOCUMENTACION.md` sección 9
 - Sugerir commit con mensaje siguiendo el estilo del proyecto (conventional + español)
 - Actualizar la tarea de ClickUp correspondiente (estado, comentario) según en qué paso del flujo Git se esté — ver `MANUAL_IA_ALIMENTAR_CLICKUP.md`
