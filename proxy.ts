@@ -19,7 +19,7 @@ const COOKIE_NAME = 'session';
 // - login/logout: se usan justo cuando no la hay
 // - me y screen-permissions: son el latido del SessionProvider; contestan solas
 //   si no hay sesión, y no deben renovar la cookie (ver abajo)
-// - integración (GoLive): API externa autenticada con x-api-key (claves de
+// - integración: API para sistemas externos autenticada con x-api-key (claves de
 //   /admin → Integración › Claves de API), no con la cookie
 const SIN_SESION = new Set([
   '/api/auth/login',

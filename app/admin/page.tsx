@@ -98,7 +98,7 @@ const GRUPOS_ADMIN: GrupoAdmin[] = [
   {
     label: "Integración",
     secciones: [
-      { key: "integracion", label: "Mensajes recibidos", descripcion: "Mensajes recibidos de GoLive por la API de integración (por ahora solo se guardan)", icon: Inbox, Componente: AdminIntegracion },
+      { key: "integracion", label: "Mensajes recibidos", descripcion: "Mensajes recibidos por la API de integración (por ahora solo se guardan)", icon: Inbox, Componente: AdminIntegracion },
       // Sin permiso en lib/permisos.ts: solo admin
       { key: "documentacion-api", label: "Documentación de la API", descripcion: "Contrato de la API de integración (OpenAPI): campos, respuestas, ejemplos y pruebas", icon: BookOpen, Componente: AdminDocumentacionApi },
       { key: "api-claves", label: "Claves de API", descripcion: "Claves con las que llaman al dashboard los sistemas externos: crear, rotar, revocar y caducidad", icon: KeyRound, Componente: AdminApiClaves },

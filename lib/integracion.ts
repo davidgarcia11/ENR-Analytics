@@ -1,8 +1,8 @@
-// API de integración con GoLive (sistemas externos que avisan al dashboard). Por
+// API de integración (sistemas externos que avisan al dashboard). Por
 // ahora es solo una "bandeja de entrada": cada mensaje se comprueba y se guarda en
 // integracion_mensajes, y el panel NO hace nada con él. Qué hace el panel con cada
 // tipo se programará más adelante, con los mensajes reales ya guardados a la vista.
-// Ver docs/integracion-golive.md.
+// Ver docs/api-integracion.md.
 //
 // Se autentica con la cabecera x-api-key: claves creadas en /admin → Integración ›
 // Claves de API (lib/api-claves.ts). Cada clave es real o de prueba: lo que llega con
@@ -26,7 +26,7 @@ export interface Escaneo {
   sscc: string;
   orden?: string;
   motivo?: string;
-  /** Identificador único del mensaje, de GoLive: si se repite, no se guarda dos veces */
+  /** Identificador único del mensaje, de quien lo envía: si se repite, no se guarda dos veces */
   id?: string;
 }
 

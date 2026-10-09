@@ -45,8 +45,8 @@ export const PERMISOS = {
   'admin.loteadora.datos-fijos.ver': { label: 'Ver los datos fijos de las plantillas', corto: 'Datos fijos: ver', grupo: 'Loteadora · Datos fijos', accion: 'Ver', seccionAdmin: 'datos-fijos' },
   'admin.loteadora.datos-fijos.editar': { label: 'Cambiar los datos fijos (precios, nº de certificado...)', corto: 'Datos fijos: editar', grupo: 'Loteadora · Datos fijos', accion: 'Cambiar valores', seccionAdmin: 'datos-fijos' },
   'admin.loteadora.registro.ver': { label: 'Ver el registro de envíos de la loteadora (qué se mandó, a qué máquina, cuándo y quién)', corto: 'Registro: ver', grupo: 'Loteadora · Registro', accion: 'Ver', seccionAdmin: 'registro-loteadora' },
-  // Mensajes recibidos por la API de integración con GoLive (lib/integracion.ts)
-  'admin.integracion.ver': { label: 'Ver los mensajes recibidos de GoLive y la documentación de la API de integración', corto: 'Integración: ver', grupo: 'Integración', accion: 'Ver', seccionAdmin: ['integracion', 'documentacion-api'] },
+  // Mensajes recibidos por la API de integración (lib/integracion.ts)
+  'admin.integracion.ver': { label: 'Ver los mensajes recibidos por la API de integración y su documentación', corto: 'Integración: ver', grupo: 'Integración', accion: 'Ver', seccionAdmin: ['integracion', 'documentacion-api'] },
   // En /loteadora (sin sección de /admin): vaciar la cola de envíos pendientes de una máquina.
   'loteadora.limpiar-buffer': { label: 'Limpiar el buffer de la loteadora (descarta los envíos pendientes)', corto: 'Limpiar buffer', grupo: 'Loteadora · Uso diario', accion: 'Limpiar buffer' },
 } as const satisfies Record<string, DefinicionPermiso>;
@@ -115,7 +115,7 @@ export const RUTAS_ADMIN_POR_PERMISO: { prefijo: string | RegExp; metodos?: stri
   { prefijo: '/api/admin/loteadoras', metodos: ['GET'], permiso: [...L('maquinas'), ...L('plantillas', 'ver', 'editar', 'crear-en-maquina')] },
   { prefijo: '/api/admin/loteadoras', metodos: ['POST', 'PUT'], permiso: L('maquinas', 'editar') },
   { prefijo: '/api/admin/loteadoras', metodos: ['DELETE'], permiso: L('maquinas', 'eliminar') },
-  // Mensajes recibidos de GoLive y documentación de la API (solo lectura: incluye
+  // Mensajes recibidos por la API de integración y su documentación (solo lectura: incluye
   // /api/admin/integracion/openapi y /api/admin/integracion/docs)
   { prefijo: '/api/admin/integracion', metodos: ['GET'], permiso: 'admin.integracion.ver' },
   // Registro de envíos (solo lectura)

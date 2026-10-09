@@ -13,7 +13,7 @@ Dashboard de producción para Elaborados Naturales. Conecta con Oracle JDE y mue
 - **Auth:** JWT (jose) + bcryptjs, cookie httpOnly
 - **Excel:** xlsx 0.18
 - **Gráficos:** recharts
-- **Documentación de API:** OpenAPI 3 (`docs/integracion-golive.openapi.yaml`) + swagger-ui-dist (visor instalado, versión fija)
+- **Documentación de API:** OpenAPI 3 (`docs/api-integracion.openapi.yaml`) + swagger-ui-dist (visor instalado, versión fija)
 - **Iconos:** lucide-react
 - **Componentes UI:** Radix UI (solo Slot), class-variance-authority, clsx, tailwind-merge
 
@@ -50,7 +50,7 @@ app/                          # Rutas Next.js (App Router)
     orders/                   # GET control de pedidos
     plants/                   # GET plantas dinámicas (usado en pedidos y caducados)
     caducados/                # GET palets caducados/obsoletos/bloqueados
-    integracion/v1/escaneo/   # POST avisos de escaneo de GoLive (x-api-key, claves de /admin) — por ahora solo se guardan, ver docs/integracion-golive.md
+    integracion/v1/escaneo/   # POST avisos de escaneo de palets de sistemas externos (x-api-key, claves de /admin) — por ahora solo se guardan, ver docs/api-integracion.md
     comparativa-seres/        # GET comparativa SERES vs JDE
     consulta-stock-pda/       # GET stock FEFO por EAN escaneado (Reflex/SQL Server)
     compras/                  # GET previsión (F3460) vs venta real (F4211), coste (F4105), gramaje (F554101) — jerárquico Familia>Canal>Artículo (Nova)
@@ -96,8 +96,8 @@ docs/                         # Documentación específica por panel
   costes.md                   # Panel de coste A1 y despiece recursivo de materiales (sistema Nova)
   mrp.md                      # Panel de explosión de compras / MRP (sistema Nova)
   muestras.md                 # App de control de muestras pendientes/enviadas/completadas (sistema Nova)
-  integracion-golive.md       # API de integración con GoLive: contrato, claves, bandeja de entrada
-  integracion-golive.openapi.yaml # Especificación OpenAPI 3 de esa API (Apidog/Postman/Swagger)
+  api-integracion.md          # API de integración para sistemas externos: contrato, claves, bandeja de entrada
+  api-integracion.openapi.yaml # Especificación OpenAPI 3 de esa API (se entrega a terceros: sin referencias internas)
 ```
 
 ## Convenciones de código
@@ -230,7 +230,7 @@ Solo cuando se pida explícitamente usar Nova (no es el sistema por defecto toda
   - Cambios en el panel de costes (`/costes`, `api/costes`) → `docs/costes.md`
   - Cambios en el panel de MRP (`/mrp`, `api/mrp`) → `docs/mrp.md`
   - Cambios en el panel de muestras (`/muestras`, `api/muestras`) → `docs/muestras.md`
-  - Cambios en la API de integración con GoLive o en las claves de API (`api/integracion`, `api/admin/api-claves`, `lib/integracion.ts`, `lib/api-claves.ts`) → `docs/integracion-golive.md` (y, si cambia el contrato, `docs/integracion-golive.openapi.yaml` — lo exige `__tests__/openapi.test.ts`)
+  - Cambios en la API de integración o en las claves de API (`api/integracion`, `api/admin/api-claves`, `lib/integracion.ts`, `lib/api-claves.ts`) → `docs/api-integracion.md` (y, si cambia el contrato, `docs/api-integracion.openapi.yaml` — lo exige `__tests__/openapi.test.ts`)
   - Nuevo panel → crear `docs/nombre-panel.md` y añadir referencia en `DOCUMENTACION.md` sección 9
 - Sugerir commit con mensaje siguiendo el estilo del proyecto (conventional + español)
 - Actualizar la tarea de ClickUp correspondiente (estado, comentario) según en qué paso del flujo Git se esté — ver `MANUAL_IA_ALIMENTAR_CLICKUP.md`

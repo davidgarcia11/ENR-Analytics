@@ -140,7 +140,7 @@ dashboard/
         ├── production-lines/
         │   └── route.ts          ← GET /api/production-lines
         └── integracion/v1/escaneo/
-            └── route.ts          ← POST avisos de escaneo de GoLive (x-api-key, ver docs/integracion-golive.md)
+            └── route.ts          ← POST avisos de escaneo de palets de sistemas externos (x-api-key, ver docs/api-integracion.md)
 ```
 
 ---
@@ -220,7 +220,7 @@ pestaña ya abierta, sin ninguna petición de página de por medio.
 `SIN_SESION` = `/api/auth/login`, `/api/auth/logout`, `/api/auth/me`,
 `/api/screen-permissions`, `/api/integracion/v1/escaneo`. Los dos primeros se usan
 cuando no hay sesión; `me` y `screen-permissions` son el latido del
-`SessionProvider` y contestan solas; la integración con GoLive se autentica con
+`SessionProvider` y contestan solas; la API de integración se autentica con
 `x-api-key` (claves de `/admin` → Integración › Claves de API), no con la cookie
 (solo esa ruta exacta).
 
@@ -593,9 +593,9 @@ sincronización, último error) y botón "Sincronizar ahora" — ver
 | GET / POST | `/api/admin/zonas` · PUT / DELETE `/api/admin/zonas/:id` | Zonas de las loteadoras y roles/usuarios que ven cada una (permisos de Zonas; `GET ?opciones=1` añade los roles y usuarios asignables, solo con `zonas.editar`; ver `docs/loteadora.md` §17) |
 | GET / POST | `/api/admin/loteadora-articulos/copia` | Exporta (ver) / importa (asociar) solo las asociaciones artículo → plantilla (sección Artículos) |
 | GET | `/api/admin/loteadoras/:id/historial-conexion` | Historial de conexión (ping cada 30 s en segundo plano, `instrumentation.ts` + `lib/loteadora-ping.ts`) de una loteadora, en CSV (ver `docs/loteadora.md` §20) |
-| GET / POST | `/api/admin/api-claves` · PATCH / DELETE `/api/admin/api-claves/:id` · POST `/api/admin/api-claves/:id/rotar` | Claves de API de los sistemas externos: listar, crear (la clave completa solo en esa respuesta), editar, revocar (`PATCH {revocar: true}`), eliminar (solo revocadas o caducadas) y rotar. Solo admin (`lib/api-claves.ts`, ver `docs/integracion-golive.md`) |
-| GET | `/api/admin/integracion/openapi` · `/api/admin/integracion/docs` | Especificación OpenAPI de la API de integración (`?descargar=1` la descarga) y su visor Swagger UI (`swagger-ui-dist`, instalado en el proyecto). Permiso `admin.integracion.ver`, ver `docs/integracion-golive.md` §6 |
-| GET | `/api/admin/integracion` | Mensajes recibidos por la API de integración con GoLive, con filtros y por páginas (permiso `admin.integracion.ver`, ver `docs/integracion-golive.md`) |
+| GET / POST | `/api/admin/api-claves` · PATCH / DELETE `/api/admin/api-claves/:id` · POST `/api/admin/api-claves/:id/rotar` | Claves de API de los sistemas externos: listar, crear (la clave completa solo en esa respuesta), editar, revocar (`PATCH {revocar: true}`), eliminar (solo revocadas o caducadas) y rotar. Solo admin (`lib/api-claves.ts`, ver `docs/api-integracion.md`) |
+| GET | `/api/admin/integracion/openapi` · `/api/admin/integracion/docs` | Especificación OpenAPI de la API de integración (`?descargar=1` la descarga) y su visor Swagger UI (`swagger-ui-dist`, instalado en el proyecto). Permiso `admin.integracion.ver`, ver `docs/api-integracion.md` §6 |
+| GET | `/api/admin/integracion` | Mensajes recibidos por la API de integración, con filtros y por páginas (permiso `admin.integracion.ver`, ver `docs/api-integracion.md`) |
 | GET | `/api/admin/loteadora-registro` | Registro de envíos a las loteadoras, con filtros y por páginas (permiso `registro.ver`, ver `docs/loteadora.md` §19) |
 | GET / POST | `/api/admin/loteadora-copia` | Exporta / importa en JSON las plantillas de la loteadora y sus asociaciones de artículos (botones de `/admin` → Plantillas, ver `docs/loteadora.md` §13) |
 
@@ -703,7 +703,7 @@ artículos de `/muestras` o asignar artículos a plantillas de loteadora.
   migrada automáticamente a `user_permissions` — quien lo tenía lo conserva — y
   eliminada), `loteadora.limpiar-buffer` (botón "Limpiar buffer" de /loteadora, sin
   sección de /admin), `admin.integracion.ver` (`/admin` → Integración: mensajes recibidos
-  de GoLive y documentación de la API, ver `docs/integracion-golive.md`; abre dos secciones:
+  y documentación de la API, ver `docs/api-integracion.md`; abre dos secciones:
   `seccionAdmin` puede ser una lista) y los **permisos por acción de la
   loteadora** (sept. 2026):
 
@@ -1193,11 +1193,11 @@ Cada panel tiene su documentación específica en la carpeta `docs/`:
 | Coste A1 y despiece recursivo de materiales (sistema Nova) | `/costes` | [docs/costes.md](docs/costes.md) |
 | Control de muestras (pendiente/enviado/completado) | `/muestras` | [docs/muestras.md](docs/muestras.md) |
 | Loteadora | `/loteadora` | [docs/loteadora.md](docs/loteadora.md) |
-| API de integración con GoLive (sin pantalla propia; lo recibido y las claves en `/admin` → Integración) | `POST /api/integracion/v1/escaneo` | [docs/integracion-golive.md](docs/integracion-golive.md) |
+| API de integración para sistemas externos (sin pantalla propia; lo recibido y las claves en `/admin` → Integración) | `POST /api/integracion/v1/escaneo` | [docs/api-integracion.md](docs/api-integracion.md) |
 
 ### API externa `GET /api/jde-orders` (eliminada en oct. 2026)
 
-Devolvía los pedidos EDI de la F47011 con una clave fija (`SERES_API_KEY`) y CORS abierto, para un artefacto de Claude de comparativa SERES. Quedó sin uso cuando el panel `/comparativa-seres` (con su propia ruta y sesión) lo sustituyó, y se quitó junto con `SERES_API_KEY`. Si vuelve a hacer falta una API para sistemas externos, se hace con las claves de `/admin` → Integración › Claves de API (ver `docs/integracion-golive.md`).
+Devolvía los pedidos EDI de la F47011 con una clave fija (`SERES_API_KEY`) y CORS abierto, para un artefacto de Claude de comparativa SERES. Quedó sin uso cuando el panel `/comparativa-seres` (con su propia ruta y sesión) lo sustituyó, y se quitó junto con `SERES_API_KEY`. Si vuelve a hacer falta una API para sistemas externos, se hace con las claves de `/admin` → Integración › Claves de API (ver `docs/api-integracion.md`).
 
 ---
 

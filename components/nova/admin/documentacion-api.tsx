@@ -1,10 +1,10 @@
 "use client";
 
 // /admin → Integración › Documentación de la API: la especificación OpenAPI de la API de
-// integración (docs/integracion-golive.openapi.yaml) en Swagger UI, leída del código
+// integración (docs/api-integracion.openapi.yaml) en Swagger UI, leída del código
 // desplegado, con "Try it out" contra este servidor y descarga del .yaml para Apidog o
 // Postman. Permiso 'admin.integracion.ver'. El visor lo sirve
-// app/api/admin/integracion/docs; ver docs/integracion-golive.md.
+// app/api/admin/integracion/docs; ver docs/api-integracion.md.
 import { Download, ExternalLink } from "lucide-react";
 import { buttonVariants } from "@/components/nova/ui/button";
 import { CabeceraSeccion, type SeccionProps } from "./comun";

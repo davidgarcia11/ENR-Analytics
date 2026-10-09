@@ -1,5 +1,5 @@
 /**
- * Test de lib/integracion.ts — API de integración con GoLive (bandeja de entrada).
+ * Test de lib/integracion.ts — API de integración (bandeja de entrada).
  */
 import { describe, it, expect } from 'bun:test'
 import { Database } from 'bun:sqlite'
@@ -49,7 +49,7 @@ describe('bandeja de entrada', () => {
     return db
   }
   const mensaje = (m: Partial<Parameters<typeof guardarMensaje>[1]> = {}) => ({
-    tipo: 'escaneo' as const, origen: 'real' as const, cuerpo: JSON.stringify(ESCANEO), valido: true, errores: null, idExterno: null, ip: '192.168.4.10', clave: { id: 1, nombre: 'GoLive pruebas' }, ...m,
+    tipo: 'escaneo' as const, origen: 'real' as const, cuerpo: JSON.stringify(ESCANEO), valido: true, errores: null, idExterno: null, ip: '192.168.4.10', clave: { id: 1, nombre: 'ERP pruebas' }, ...m,
   })
 
   it('un reintento con el mismo id se reconoce, solo si el primero era válido y con la misma clave', () => {
@@ -71,7 +71,7 @@ describe('bandeja de entrada', () => {
     const rechazados = buscarMensajes(db, { valido: false })
     expect(rechazados.filas[0]).toMatchObject({ valido: false, errores: ['El cuerpo no es un JSON válido'], estado: 'recibido' })
     expect(buscarMensajes(db, { q: '384123450000000017' }).total).toBe(2)
-    expect(buscarMensajes(db, {}).filas[0].claveNombre).toBe('GoLive pruebas')
+    expect(buscarMensajes(db, {}).filas[0].claveNombre).toBe('ERP pruebas')
   })
 })
 

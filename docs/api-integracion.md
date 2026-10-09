@@ -1,8 +1,8 @@
-# Documentación — API de integración con GoLive
+# Documentación — API de integración
 
-GoLive (JDE) avisa al dashboard de cada palet escaneado contra una orden de fabricación. La idea a futuro es que, con esos avisos, `/loteadora` se prepare sola (elegir el artículo en la loteadora de esa línea, sacar la cocida del lote…).
+API para que **sistemas externos** avisen al dashboard. Hoy tiene una: el aviso de cada palet escaneado contra una orden de fabricación (`POST /api/integracion/v1/escaneo`). La idea a futuro es que, con esos avisos, `/loteadora` se prepare sola (elegir el artículo en la loteadora de esa línea, sacar la cocida del lote…).
 
-**Estado actual (oct. 2026): bandeja de entrada.** La API comprueba cada mensaje y lo **guarda**, pero el panel **no hace nada** con él. Así GoLive puede programar y probar desde ya. Qué hace el panel con cada caso se programará después, con los mensajes reales a la vista en `/admin` → Integración.
+**Estado actual (oct. 2026): bandeja de entrada.** La API comprueba cada mensaje y lo **guarda**, pero el panel **no hace nada** con él. Así quien la integra puede programar y probar desde ya. Qué hace el panel con cada caso se programará después, con los mensajes reales a la vista en `/admin` → Integración.
 
 Archivos:
 
@@ -17,11 +17,15 @@ Archivos:
 | `components/nova/admin/api-claves.tsx` | `/admin` → Integración › **Claves de API** |
 | `proxy.ts` | `/api/integracion/v1/escaneo` está en `SIN_SESION`: se autentica con `x-api-key`, no con la cookie. Solo esa ruta exacta |
 
+**Quién la usa hoy (oct. 2026):** GoLive, el equipo que integra el escaneo de palets en JDE (contacto: Eduardo). El contrato se acordó con ellos, y su clave se llama «GoLive pruebas» (y «GoLive» la real, cuando pasen a producción). Es **el único sitio** donde se les nombra: el resto de la app, el código y lo que se entrega hablan de «sistemas externos», porque la API vale para cualquiera con una clave.
+
 ---
 
-## 1. Contrato (lo que se le pasa a GoLive)
+## 1. Contrato (lo que se entrega a quien integra)
 
-**Especificación OpenAPI 3: la fuente de verdad del contrato.** [`integracion-golive.openapi.yaml`](integracion-golive.openapi.yaml): campos, formatos, respuestas y ejemplos. Es lo que se le da a GoLive. No lleva claves ni IPs reales (el servidor es una variable). Ver §6 para cómo se ve, se descarga y se mantiene al día.
+**Especificación OpenAPI 3: la fuente de verdad del contrato.** [`api-integracion.openapi.yaml`](api-integracion.openapi.yaml): campos, formatos, respuestas y ejemplos. Es lo que se entrega a quien integra. No lleva claves ni IPs reales (el servidor es una variable). Ver §6 para cómo se ve, se descarga y se mantiene al día.
+
+**El `.yaml` se entrega tal cual a terceros:** va **sin comentarios** y sin referencias internas (rutas del código, `/admin`, «dashboard», «panel», loteadoras…), redactado para quien llama y **sin nombrar a ningún cliente**: la API es para cualquier sistema con una clave. Se descarga como `api-escaneo-palets.openapi.yaml`. Lo vigila el test de contrato. Las notas de mantenimiento van aquí, no en el archivo.
 
 **POST** `http://<servidor del dashboard>:3000/api/integracion/v1/escaneo`
 
@@ -75,11 +79,11 @@ Respuestas:
 
 ## 2. La bandeja de entrada (`integracion_mensajes`)
 
-Se guarda **cada** llamada con clave válida, correcta o no: fecha, tipo (`escaneo`), origen (`real` / `prueba`, el entorno de la clave), **con qué clave llegó** (su nombre, copiado: sigue aunque se elimine la clave), el cuerpo **tal cual llegó**, si era válido y por qué no, el `id` de GoLive, la IP y un `estado` (por ahora siempre `recibido`). Las llamadas sin clave válida (`401`) no se guardan: no son de GoLive.
+Se guarda **cada** llamada con clave válida, correcta o no: fecha, tipo (`escaneo`), origen (`real` / `prueba`, el entorno de la clave), **con qué clave llegó** (su nombre, copiado: sigue aunque se elimine la clave), el cuerpo **tal cual llegó**, si era válido y por qué no, el `id` de quien envía, la IP y un `estado` (por ahora siempre `recibido`). Las llamadas sin clave válida (`401`) no se guardan: no son de ningún sistema autorizado.
 
-- **Rechazados también:** si GoLive dice «os lo hemos mandado», en `/admin` → Integración se ve qué llegó y por qué se rechazó.
+- **Rechazados también:** si quien integra dice «os lo hemos mandado», en `/admin` → Integración se ve qué llegó y por qué se rechazó.
 - **Reintentos:** con el mismo `id`, mismo tipo y misma clave, y si el primero era válido, se responde `duplicado` sin guardar otra fila. Sin `id`, cada llamada es un mensaje.
-- **Prueba frente a real:** lo que llega con una clave de prueba se guarda marcado y **nunca** se procesará. GoLive puede probar contra producción sin riesgo, porque la API solo guarda.
+- **Prueba frente a real:** lo que llega con una clave de prueba se guarda marcado y **nunca** se procesará. Quien integra puede probar contra producción sin riesgo, porque la API solo guarda.
 - **Tamaño:** 10.000 bytes como mucho (`MAX_CUERPO`). `leerCuerpo()` deja de leer al pasar del límite, aunque la cabecera `Content-Length` mienta o no venga: un cuerpo enorme no se carga en memoria (`413`).
 - **Límite de envíos:** 120 por minuto con cada clave (`LIMITE_POR_MINUTO`, `dentroDelLimite()` en `lib/api-claves.ts`), comprobado antes de leer el cuerpo; por encima, `429` con `Retry-After` y no se guarda nada. Contra una clave filtrada o un bucle en el programa que llama. En memoria del proceso: basta con un único servidor.
 - **Conservación:** los mensajes **reales se guardan siempre** (trazabilidad); los **de prueba se borran a los 90 días** (`DIAS_MENSAJES_PRUEBA`, `limpiarPruebasAntiguas()`), al arrancar el servidor y luego una vez al día (`arrancarLimpieza()`, desde `instrumentation.ts`).
@@ -94,7 +98,7 @@ Se gestionan en **`/admin` → Integración › Claves de API**, **solo el admin
 
 | Acción | Qué hace |
 |---|---|
-| **Nueva clave** | Nombre (*«GoLive pruebas»*), entorno (**prueba** → `enr_test_…`, **real** → `enr_live_…`), a qué APIs da acceso (`AMBITOS`; hoy solo «Aviso de escaneo de palet»), caducidad opcional y notas. La clave completa se enseña **una sola vez**, con botón de copiar |
+| **Nueva clave** | Nombre del sistema y entorno (*«ERP pruebas»*), entorno (**prueba** → `enr_test_…`, **real** → `enr_live_…`), a qué APIs da acceso (`AMBITOS`; hoy solo «Aviso de escaneo de palet»), caducidad opcional y notas. La clave completa se enseña **una sola vez**, con botón de copiar |
 | **Editar** | Nombre, APIs, caducidad y notas. La clave no cambia |
 | **Rotar…** | Crea otra con la misma configuración y pone fin a la vieja: ya (se revoca) o dentro de 1 o 7 días. Mientras tanto valen las dos, para cambiarla sin cortes. Si la vieja ya caducaba antes, se respeta |
 | **Revocar** | Deja de valer al momento. No se puede deshacer |
@@ -104,9 +108,9 @@ Se gestionan en **`/admin` → Integración › Claves de API**, **solo el admin
 - **Estado y uso:** Activa / Caducada / Revocada; quién la creó o revocó y cuándo; último uso (fecha e IP).
 - **En la BD solo la huella SHA-256** (tabla `api_claves`) y el prefijo visible (`enr_test_3f9a…`): aunque alguien copie la BD, no saca las claves. Son 192 bits al azar.
 - **Comprobación** (`verificarClave`): existe, no está revocada ni caducada y da acceso a esa API. Si vale, apunta el último uso.
-- Pasárselas a GoLive **por un canal privado** (no en un correo con más destinatarios, no en ClickUp). Empezar con **una de prueba**; la real, el día que pasen a producción.
+- Pasárselas a quien integra **por un canal privado** (no en un correo con más destinatarios, no en ClickUp). Empezar con **una de prueba**; la real, el día que pasen a producción.
 - Solo dentro de la red de la empresa: va por `http://`, sin cifrar. Si algún día llaman desde fuera, hace falta HTTPS antes de abrirlo.
-- **La IP que se ve (mensajes y «Último uso») es orientativa, no comprobada.** Sale de `x-forwarded-for`, que Next.js solo rellena si no viene en la petición: quien llama puede poner la que quiera (probado: con `x-forwarded-for: 10.99.99.99` se apunta esa). Por eso **no hay restricción por IP en la app**: sería falsa. Si hace falta de verdad (p. ej. cuando el panel actúe con los mensajes), la forma es que la integración escuche en **otro puerto** y abrir ese puerto en el **cortafuegos de Windows** solo a la IP de GoLive: ahí la IP la comprueba el sistema operativo.
+- **La IP que se ve (mensajes y «Último uso») es orientativa, no comprobada.** Sale de `x-forwarded-for`, que Next.js solo rellena si no viene en la petición: quien llama puede poner la que quiera (probado: con `x-forwarded-for: 10.99.99.99` se apunta esa). Por eso **no hay restricción por IP en la app**: sería falsa. Si hace falta de verdad (p. ej. cuando el panel actúe con los mensajes), la forma es que la integración escuche en **otro puerto** y abrir ese puerto en el **cortafuegos de Windows** solo a la IP del sistema que llama: ahí la IP la comprueba el sistema operativo.
 - **Una API nueva con clave:** una entrada en `AMBITOS` (`lib/api-claves.ts`), con una etiqueta que diga qué hace la API, no quién la usa (eso va en el nombre de cada clave), y `verificarClave(db, clave, '<ámbito>', ip)` en su ruta (y la ruta en `SIN_SESION` de `proxy.ts`).
 
 Historia: en la v1.28.0 había dos claves fijas en `.env.local` (`INTEGRACION_API_KEY` / `_PRUEBAS`); desde la v1.29.0 se gestionan en el panel y esas variables ya no se usan (se pueden borrar). En la misma versión se quitó `/api/jde-orders` (y su `SERES_API_KEY`), que no usaba nadie.
@@ -128,7 +132,7 @@ Debe responder `202` y aparecer en `/admin` → Integración › Mensajes recibi
 **Dónde se ve:** `/admin` → Integración › **Documentación de la API** (permiso «Integración: ver»), con Swagger UI.
 - Lee el `.yaml` **del código desplegado** (`GET /api/admin/integracion/openapi`): siempre coincide con la API que está corriendo, sin copias.
 - **Try it out** funciona contra este mismo servidor: *Authorize* con una clave de prueba y *Try it out*. Lo enviado aparece en Mensajes recibidos, marcado como prueba.
-- **Descargar openapi.yaml** (`?descargar=1`): para importarlo en Apidog, Postman o Insomnia (documentación, mock, pruebas), o pasárselo a GoLive.
+- **Descargar openapi.yaml** (`?descargar=1`): para importarlo en Apidog, Postman o Insomnia (documentación, mock, pruebas), o pasárselo a quien integra.
 - **Cabeceras de seguridad del visor:** política de contenido estricta (solo scripts y estilos de este servidor, sin scripts en línea: el arranque va en `iniciar.js`; peticiones solo a este servidor), `frame-ancestors 'self'` (solo se puede incrustar en el propio dashboard), `nosniff` y `Referrer-Policy: no-referrer`. Comprobado que Swagger UI y «Try it out» funcionan con ella.
 - Swagger UI va **instalado en el proyecto** (`swagger-ui-dist`, versión fija en `package.json`) y lo sirve `app/api/admin/integracion/docs/[[...archivo]]/route.ts` (solo sus dos archivos, de una lista). No se carga de una web externa: en una página con sesión no se ejecuta código de terceros de Internet. Su telemetría de instalación (`@scarf/scarf`) está desactivada (`scarfSettings` en `package.json`; Bun además no ejecuta su script).
 
@@ -142,13 +146,14 @@ Así que **cambiar la API obliga a cambiar el `.yaml`** (y al revés): `bun test
 
 **Versiones** (`info.version` en el `.yaml`, versionado semántico):
 - **Compatible** (añadir un campo opcional, una respuesta nueva, mejorar textos): sube la versión menor o el parche (`1.1.0`, `1.0.1`). La dirección sigue siendo `/v1`.
-- **Incompatible** (quitar o renombrar un campo, hacer obligatorio uno opcional, cambiar un formato o el significado de una respuesta): **ruta nueva `/v2`**, con su propio `.yaml` o sección. La `/v1` sigue funcionando hasta que GoLive migre, y se avisa con tiempo.
+- **Incompatible** (quitar o renombrar un campo, hacer obligatorio uno opcional, cambiar un formato o el significado de una respuesta): **ruta nueva `/v2`**, con su propio `.yaml` o sección. La `/v1` sigue funcionando hasta que quien la usa migre, y se avisa con tiempo.
 - Cada cambio se apunta en el historial.
 
 **Historial de cambios de la API:**
 
 | Versión | Fecha | Cambio |
 |---|---|---|
+| 1.1.1 | oct. 2026 | Solo textos: redactado para entregar a terceros (sin comentarios ni referencias internas); la línea, «solo el número». Sin cambios en el contrato |
 | 1.1.0 | oct. 2026 | Respuestas `413` (cuerpo de más de 10000 bytes) y `429` (más de 120 peticiones por minuto con una clave, con `Retry-After`). Compatible: no cambia nada de lo que ya funcionaba |
 | 1.0.0 | oct. 2026 | Primera versión: `POST /api/integracion/v1/escaneo` (`articulo`, `resultado`, `linea`, `lote`, `sscc`; `orden`, `motivo`, `id` opcionales). Claves de API desde el panel |
 
