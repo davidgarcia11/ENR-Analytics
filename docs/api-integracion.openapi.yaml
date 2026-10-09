@@ -1,7 +1,7 @@
 openapi: 3.0.3
 info:
   title: Elaborados Naturales — API de escaneo de palets
-  version: 1.1.1
+  version: 1.2.0
   description: |
     API para avisar a Elaborados Naturales de cada palet escaneado contra una orden
     de fabricación. Una respuesta correcta confirma que el mensaje ha llegado y
@@ -12,12 +12,19 @@ info:
     probar: lo enviado con ellas se registra, pero no tiene ningún efecto. Las
     **reales** (`enr_live_…`) se facilitan al pasar a producción.
 
-    **Reintentos:** si no hay respuesta o llega un `500`, reintentar 2-3 veces con
-    el **mismo `id`**: el reintento se reconoce y no se registra dos veces.
-    Un `400` o un `401` no se reintentan (hay que corregir algo).
+    **Formato:** cuerpo JSON con la cabecera `Content-Type: application/json`. **Todos
+    los valores van como texto, entre comillas.** El SSCC tiene 18 cifras y como
+    número JSON perdería precisión, así que un número se rechaza. Solo se admiten
+    los campos del esquema.
 
-    **Todos los valores van como texto, entre comillas.** El SSCC tiene 18 cifras
-    y como número JSON perdería precisión, así que un número se rechaza.
+    **Errores:** siempre con la misma forma, `{ "ok": false, "codigo": "…", "errores":
+    ["…"] }`. El `codigo` es fijo (para decidir qué hacer sin leer textos) y
+    `errores` explica qué falla, uno por línea.
+
+    **Reintentos:** si no hay respuesta, llega un `500` o un `429` (tras esperar
+    `Retry-After`), reintentar con el **mismo `id`**: el reintento se reconoce y no
+    se registra dos veces. Un `400`, `401`, `409`, `413` o `415` no se reintentan:
+    hay que corregir algo.
 
     **Límites:** como mucho **120 peticiones por minuto con cada clave** (por encima,
     `429` con `Retry-After`) y **10000 bytes** por mensaje (por encima, `413`). Un
@@ -45,7 +52,7 @@ paths:
       description: |
         Un mensaje por cada palet escaneado contra una orden de fabricación, con el
         resultado de la comprobación (`OK` si el artículo está en la orden, `NO_OK`
-        si no). Los campos que no estén en el esquema se aceptan y se guardan.
+        si no). Solo se admiten los campos del esquema: cualquier otro se rechaza con un `400`.
       requestBody:
         required: true
         content:
@@ -64,16 +71,15 @@ paths:
                   sscc: '384123450000000017'
                   orden: '490387'
               noOk:
-                summary: Artículo fuera de la orden, sin lote ni SSCC
+                summary: Artículo fuera de la orden
                 value:
                   id: 7c9d0e1f-2a3b-4c5d-8e6f-9a0b1c2d3e4f
                   articulo: '1210500019'
                   resultado: NO_OK
                   linea: '18'
-                  lote: ''
-                  sscc: ''
+                  lote: '263221'
+                  sscc: '384123450000000024'
                   orden: '490387'
-                  motivo: El artículo no está en la orden
               minimo:
                 summary: Solo los campos obligatorios
                 value:
@@ -82,9 +88,10 @@ paths:
                   linea: '18'
                   lote: '263221'
                   sscc: '384123450000000017'
+                  orden: '490387'
       responses:
         '202':
-          description: Recibido y guardado.
+          description: Recibido y registrado.
           content:
             application/json:
               schema:
@@ -96,7 +103,7 @@ paths:
                   summary: Sin id en el mensaje, se devuelve uno propio
                   value: { ok: true, id: '1542', estado: recibido, prueba: false }
         '200':
-          description: Ese `id` ya se había recibido (un reintento). No se guarda otra vez.
+          description: Ese `id` ya se había recibido con los mismos datos (un reintento). No se registra otra vez.
           content:
             application/json:
               schema:
@@ -106,43 +113,67 @@ paths:
                   value: { ok: true, id: 3f2b8c1e-7a4d-4e9b-9c11-2d5e6f7a8b90, estado: duplicado, prueba: true }
         '400':
           description: |
-            Datos incorrectos: el cuerpo no es JSON, falta un campo o tiene mal
-            formato. `errores` dice cuál y por qué, uno por línea. No reintentar:
-            corregir el mensaje. El mensaje rechazado también queda guardado.
+            Datos incorrectos: el cuerpo no es JSON, falta un campo, tiene mal formato
+            o hay un campo que no está en el contrato. `errores` dice cuáles y por qué,
+            todos a la vez. No reintentar: corregir el mensaje.
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/DatosIncorrectos'
+                $ref: '#/components/schemas/Error'
               examples:
                 campos:
                   summary: Varios campos mal
                   value:
                     ok: false
+                    codigo: DATOS_INCORRECTOS
                     errores:
                       - 'articulo: deben ser 10 cifras'
                       - 'resultado: debe ser "OK" o "NO_OK"'
                       - 'sscc: deben ser 18 cifras, sin el (00)'
                 falta:
                   summary: Falta un obligatorio
-                  value: { ok: false, errores: ['linea: es obligatorio'] }
+                  value: { ok: false, codigo: DATOS_INCORRECTOS, errores: ['linea: es obligatorio'] }
+                conIdentificador:
+                  summary: SSCC con el (00) delante (20 cifras)
+                  value: { ok: false, codigo: DATOS_INCORRECTOS, errores: ['sscc: tiene 20 cifras y empieza por 00: quitad el (00) del principio, el SSCC son las 18 cifras siguientes'] }
+                campoDeMas:
+                  summary: Un campo que no está en el contrato
+                  value: { ok: false, codigo: DATOS_INCORRECTOS, errores: ['motivo: campo no admitido'] }
                 numero:
                   summary: Un valor como número en vez de texto
-                  value: { ok: false, errores: ['sscc: debe ir como texto, entre comillas'] }
+                  value: { ok: false, codigo: DATOS_INCORRECTOS, errores: ['sscc: debe ir como texto, entre comillas'] }
                 json:
                   summary: El cuerpo no es JSON válido
-                  value: { ok: false, errores: ['El cuerpo no es un JSON válido'] }
+                  value: { ok: false, codigo: DATOS_INCORRECTOS, errores: ['El cuerpo no es un JSON válido'] }
         '401':
           description: |
             Sin clave, o la clave no vale (no existe, está revocada o caducada, o no
             da acceso a esta API). No se dice el motivo. No reintentar: revisar la
             clave con Elaborados Naturales. No se registra nada.
+          headers:
+            WWW-Authenticate:
+              description: 'Cómo autenticarse: `ApiKey realm="integracion", header="x-api-key"`.'
+              schema:
+                type: string
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ClaveNoValida'
+                $ref: '#/components/schemas/Error'
               examples:
                 clave:
-                  value: { ok: false, error: Clave no válida (cabecera x-api-key) }
+                  value: { ok: false, codigo: CLAVE_NO_VALIDA, errores: ['Clave no válida (cabecera x-api-key)'] }
+        '409':
+          description: |
+            Ese `id` ya se había recibido, pero con **otros datos**. Cada mensaje
+            necesita un `id` distinto; un reintento lleva el mismo `id` y los mismos
+            datos. No reintentar: revisar cómo se generan los `id`.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              examples:
+                conflicto:
+                  value: { ok: false, codigo: ID_EN_CONFLICTO, errores: ['id: «3f2b8c1e-7a4d-4e9b-9c11-2d5e6f7a8b90» ya se recibió con otros datos; cada mensaje necesita un id distinto'] }
         '413':
           description: |
             El cuerpo pasa de 10000 bytes. No se lee entero ni se reintenta: un escaneo
@@ -150,14 +181,25 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/DatosIncorrectos'
+                $ref: '#/components/schemas/Error'
               examples:
                 grande:
-                  value: { ok: false, errores: ['El cuerpo ocupa demasiado (máximo 10000 bytes)'] }
+                  value: { ok: false, codigo: DEMASIADO_GRANDE, errores: ['El cuerpo ocupa demasiado (máximo 10000 bytes)'] }
+        '415':
+          description: |
+            Falta la cabecera `Content-Type: application/json` o tiene otro tipo. No
+            reintentar sin corregirla.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              examples:
+                tipo:
+                  value: { ok: false, codigo: TIPO_NO_ADMITIDO, errores: ['El cuerpo tiene que enviarse como JSON (cabecera Content-Type: application/json, no text/plain)'] }
         '429':
           description: |
             Más de 120 peticiones en un minuto con la misma clave. Esperar los segundos
-            de `Retry-After` y reintentar con el mismo `id`. No se guarda nada.
+            de `Retry-After` y reintentar con el mismo `id`. No se registra nada.
           headers:
             Retry-After:
               description: Segundos que faltan para poder volver a enviar.
@@ -167,12 +209,19 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ClaveNoValida'
+                $ref: '#/components/schemas/Error'
               examples:
                 limite:
-                  value: { ok: false, error: 'Demasiadas peticiones: como mucho 120 por minuto con cada clave' }
+                  value: { ok: false, codigo: DEMASIADAS_PETICIONES, errores: ['Demasiadas peticiones: como mucho 120 por minuto con cada clave'] }
         '500':
-          description: Error del servidor. Reintentar 2-3 veces con el mismo `id`.
+          description: Error interno. Reintentar 2-3 veces con el mismo `id`.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              examples:
+                interno:
+                  value: { ok: false, codigo: ERROR_INTERNO, errores: ['Error interno del servidor; reintentad con el mismo id'] }
 components:
   securitySchemes:
     claveApi:
@@ -183,8 +232,8 @@ components:
   schemas:
     Escaneo:
       type: object
-      required: [articulo, resultado, linea, lote, sscc]
-      additionalProperties: true
+      required: [articulo, resultado, linea, lote, sscc, orden]
+      additionalProperties: false
       properties:
         articulo:
           type: string
@@ -198,36 +247,37 @@ components:
           example: OK
         linea:
           type: string
-          minLength: 1
+          pattern: '^\d+$'
           maxLength: 10
-          description: Número de la línea donde se ha escaneado, solo el número (p. ej. `18`), sin códigos ni nombres.
+          description: Número de la línea donde se ha escaneado, solo cifras (p. ej. `18`), sin códigos ni nombres.
           example: '18'
         lote:
           type: string
+          minLength: 1
           maxLength: 30
-          description: Lote de la orden, tal cual en JDE. Puede ir vacío (`""`) si no se tiene, p. ej. en un `NO_OK`.
+          description: Lote de la orden, tal cual en JDE.
           example: '263221'
         sscc:
           type: string
-          pattern: '^(\d{18})?$'
-          description: SSCC del palet, 18 cifras sin el `(00)`. Puede ir vacío (`""`).
+          pattern: '^\d{18}$'
+          description: |
+            SSCC del palet escaneado, siempre 18 cifras, sin el identificador `(00)`.
+            Puede empezar por 0 o por 00 (por eso va como texto: como número perdería
+            esos ceros). Con el `00` delante serían 20 cifras y se rechaza.
           example: '384123450000000017'
         orden:
           type: string
+          pattern: '^\d+$'
           maxLength: 20
-          description: Nº de la orden de fabricación.
+          description: Nº de la orden de fabricación, solo cifras.
           example: '490387'
-        motivo:
-          type: string
-          maxLength: 200
-          description: Por qué es `NO_OK`.
-          example: El artículo no está en la orden
         id:
           type: string
           maxLength: 64
           description: |
             Identificador único del mensaje, generado por quien envía (p. ej. un UUID).
-            Opcional pero recomendado: con él, un reintento no se guarda dos veces.
+            Opcional pero recomendado: con él, un reintento (mismo `id`, mismos datos)
+            no se registra dos veces; el mismo `id` con otros datos da `409`.
           example: 3f2b8c1e-7a4d-4e9b-9c11-2d5e6f7a8b90
     Recibido:
       type: object
@@ -245,24 +295,19 @@ components:
         prueba:
           type: boolean
           description: '`true` si llegó con una clave de prueba.'
-    DatosIncorrectos:
+    Error:
       type: object
-      required: [ok, errores]
+      required: [ok, codigo, errores]
       properties:
         ok:
           type: boolean
           enum: [false]
+        codigo:
+          type: string
+          enum: [CLAVE_NO_VALIDA, DEMASIADAS_PETICIONES, TIPO_NO_ADMITIDO, DEMASIADO_GRANDE, DATOS_INCORRECTOS, ID_EN_CONFLICTO, ERROR_INTERNO]
+          description: Código fijo del error, para decidir qué hacer sin leer los textos.
         errores:
           type: array
           items:
             type: string
-          description: 'Un texto por problema: «campo: qué falla».'
-    ClaveNoValida:
-      type: object
-      required: [ok, error]
-      properties:
-        ok:
-          type: boolean
-          enum: [false]
-        error:
-          type: string
+          description: 'Qué falla, un texto por problema (en los datos: «campo: qué falla»).'
