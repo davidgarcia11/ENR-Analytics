@@ -41,6 +41,9 @@ import { verifySession } from '@/lib/auth';
 const PLANTA_PRESUPUESTOS = 10999;
 const TIPO_DOC_EXCLUIDO = 'ST';
 const UMBRAL_DEFAULT_PCT = 10;
+const TIPOS_PREVISION = ['PN', 'PM'] as const;
+const TIPO_PREVISION_DEFAULT = 'PM';
+const SIN_SABOR = 'Sin sabor';
 // ponytail: tipo de coste vigente en F4105 (COLEDG). JDE lo cambia cada año (P6=2026)
 // y no hay un patrón año->código confirmado. Actualizar a mano cada enero — mismo
 // mecanismo que api/compras/route.ts (v1), ver docs/compras.md §3.4.
@@ -367,9 +370,13 @@ export async function GET(req: NextRequest) {
 
   const { searchParams } = new URL(req.url);
   const umbralPct = Number(searchParams.get('umbral')) || UMBRAL_DEFAULT_PCT;
+  // Lista cerrada: cualquier otro valor cae al por defecto (nunca llega a la query).
+  const tipoParam = searchParams.get('tipoPrevision');
+  const tipoPrev = TIPOS_PREVISION.find((t) => t === tipoParam) ?? TIPO_PREVISION_DEFAULT;
+  const sabor = (searchParams.get('sabor') || '').trim().slice(0, 100); // '' = todos
 
   if (searchParams.get('mock') === '1') {
-    return NextResponse.json({ mock: true, ...aggregate(getMockArticulos(), umbralPct, MOCK_CANAL_LABELS) });
+    return NextResponse.json({ mock: true, ...aggregate(getMockArticulos(), umbralPct, MOCK_CANAL_LABELS), sabores: [] });
   }
 
   const now = new Date();
@@ -385,10 +392,12 @@ export async function GET(req: NextRequest) {
     conn = await getDbConnection();
 
     // A) Previsión (F3460) — artículo largo (MFLITM) x mes, planta de presupuestos.
+    // MFTYPF: PN = previsión original, PM = modificada — nunca se suman (serían dos
+    // versiones de la misma previsión).
     const forecastSql = `
       SELECT TRIM(MFLITM) AS ITEM, TRIM(MFITM) AS ITEM_CORTO, MFDRQJ AS FECHA_JDE, MFFQT AS CANT_PREV_RAW
       FROM F3460
-      WHERE MFMCU = :planta AND MFDRQJ BETWEEN :startJde AND :endJde
+      WHERE MFMCU = :planta AND MFDRQJ BETWEEN :startJde AND :endJde AND TRIM(MFTYPF) = :tipoPrev
     `;
     // B) Venta real (F4211) — mismo filtro que la v1 del panel. SDUPRC = precio unitario
     // de la línea (para importe real, NUNCA cantidad × coste presupuestado). Cantidad:
@@ -402,7 +411,7 @@ export async function GET(req: NextRequest) {
     `;
 
     const [forecastResult, salesResult] = await Promise.all([
-      conn.execute(forecastSql, { planta: PLANTA_PRESUPUESTOS, startJde, endJde }),
+      conn.execute(forecastSql, { planta: PLANTA_PRESUPUESTOS, startJde, endJde, tipoPrev }),
       conn.execute(salesSql, { tipoDocExcluido: TIPO_DOC_EXCLUIDO, startJde, endJde }),
     ]);
 
@@ -425,7 +434,7 @@ export async function GET(req: NextRequest) {
     const longItemIds = Array.from(shortItemMap.keys());
     const itemIds = Array.from(new Set(Array.from(shortItemMap.values()))).filter(Boolean);
     if (itemIds.length === 0) {
-      return NextResponse.json({ mock: false, ...aggregate([], umbralPct, new Map()) });
+      return NextResponse.json({ mock: false, ...aggregate([], umbralPct, new Map()), sabores: [] });
     }
 
     const idBinds: any = {};
@@ -440,7 +449,8 @@ export async function GET(req: NextRequest) {
     // un CÓDIGO (ej. "101"), no la descripción — mismo error que se cometió con canal,
     // hace falta resolverlo contra el catálogo (bug real, solo visible con datos reales:
     // el mock tenía los nombres ya escritos a mano, nunca pasó por esta ruta).
-    const metaSql = `SELECT TRIM(IMITM) AS ITEM, TRIM(IMDSC1) AS DESCRIPCION, TRIM(IMSRP2) AS FAMILIA FROM F4101 WHERE IMITM IN (${idPlaceholders})`;
+    // Sabor = IMSRP5 (UDC 41/S5), mismo campo que el filtro "Sabor" de /produccion.
+    const metaSql = `SELECT TRIM(IMITM) AS ITEM, TRIM(IMDSC1) AS DESCRIPCION, TRIM(IMSRP2) AS FAMILIA, TRIM(IMSRP5) AS SABOR FROM F4101 WHERE IMITM IN (${idPlaceholders})`;
     // D) Canal (F554101.AAZE06, UDC 17/B6) + gramaje (F554101.AAZE03)
     const extSql = `SELECT TRIM(AAITM) AS ITEM, TRIM(AAZE06) AS CANAL, TRIM(AAZE03) AS GRAMOS_RAW FROM F554101 WHERE AAITM IN (${idPlaceholders})`;
     // E) Catálogo de canal (UDC 17/B6) — descripción real, nunca el código.
@@ -455,6 +465,12 @@ export async function GET(req: NextRequest) {
       FROM prodctl.f0005
       WHERE TRIM(DRSY) = '41' AND TRIM(DRRT) = 'S2' AND TRIM(DRKY) IS NOT NULL
     `;
+    // F2) Catálogo de sabor (UDC 41/S5).
+    const saborCatalogSql = `
+      SELECT TRIM(DRKY) AS CODE, TRIM(DRDL01) AS DESCRIPCION
+      FROM prodctl.f0005
+      WHERE TRIM(DRSY) = '41' AND TRIM(DRRT) = 'S5' AND TRIM(DRKY) IS NOT NULL
+    `;
     // G) Coste unitario vigente (F4105) — no tiene granularidad mensual. COLITM es el
     // artículo LARGO (mismo espacio que MFLITM/SDAITM), no requiere traducción a corto
     // (mismo patrón que api/compras/route.ts v1).
@@ -464,11 +480,12 @@ export async function GET(req: NextRequest) {
       WHERE COMCU = :planta AND COLEDG = :coledg AND TRIM(COLITM) IN (${longIdPlaceholders})
     `;
 
-    const [metaResult, extResult, canalCatalogResult, familiaCatalogResult, costResult] = await Promise.all([
+    const [metaResult, extResult, canalCatalogResult, familiaCatalogResult, saborCatalogResult, costResult] = await Promise.all([
       conn.execute(metaSql, idBinds),
       conn.execute(extSql, idBinds),
       conn.execute(canalCatalogSql),
       conn.execute(familiaCatalogSql),
+      conn.execute(saborCatalogSql),
       conn.execute(costSql, { planta: PLANTA_PRESUPUESTOS, coledg: COLEDG_VIGENTE, ...longIdBinds }),
     ]);
 
@@ -488,12 +505,19 @@ export async function GET(req: NextRequest) {
       familiaLabels.set(String(r.CODE).trim(), capitalizarFrase(String(r.DESCRIPCION || '').trim()));
     });
 
-    const metaMap = new Map<string, { descripcion: string; familia: string }>();
+    const saborLabels = new Map<string, string>();
+    (saborCatalogResult.rows as any[]).forEach((r) => {
+      saborLabels.set(String(r.CODE).trim(), capitalizarFrase(String(r.DESCRIPCION || '').trim()));
+    });
+
+    const metaMap = new Map<string, { descripcion: string; familia: string; sabor: string }>();
     (metaResult.rows as any[]).forEach((r) => {
       const codigoFamilia = String(r.FAMILIA || '').trim();
+      const codigoSabor = String(r.SABOR || '').trim();
       metaMap.set(String(r.ITEM).trim(), {
         descripcion: String(r.DESCRIPCION || '').trim(),
         familia: codigoFamilia ? (familiaLabels.get(codigoFamilia) ?? codigoFamilia) : 'Sin familia',
+        sabor: codigoSabor ? (saborLabels.get(codigoSabor) ?? codigoSabor) : SIN_SABOR,
       });
     });
 
@@ -540,9 +564,11 @@ export async function GET(req: NextRequest) {
       }
     });
 
-    const articulos: ArticuloAgg[] = Array.from(porArticulo.entries()).map(([item, mesesMap]) => {
+    const saborDe = new Map<string, string>();
+    const todos: ArticuloAgg[] = Array.from(porArticulo.entries()).map(([item, mesesMap]) => {
       const corto = shortItemMap.get(item) || '';
       const meta = metaMap.get(corto);
+      saborDe.set(item, meta?.sabor ?? SIN_SABOR);
       const meses: MesPunto[] = Array.from(mesesMap.entries())
         .sort(([a], [b]) => a.localeCompare(b))
         .map(([sortKey, v]) => ({ sortKey, mes: MES_LABEL[Number(sortKey.split('-')[1]) - 1], ...v }));
@@ -557,14 +583,20 @@ export async function GET(req: NextRequest) {
       };
     });
 
-    const resultado = aggregate(articulos, umbralPct, canalLabels);
+    // Filtro por sabor: tras armar los artículos (el sabor sale de F4101, que ya se lee
+    // para la familia), así las opciones del desplegable salen de TODOS los del periodo
+    // y no desaparecen al filtrar. La comparación es en memoria: nunca llega a la query.
+    const sabores = Array.from(new Set(saborDe.values())).sort((a, b) => a.localeCompare(b));
+    const articulos = sabor ? todos.filter((a) => saborDe.get(a.item) === sabor) : todos;
+
+    const resultado = { ...aggregate(articulos, umbralPct, canalLabels), sabores };
 
     // Registrar consulta en logs (nunca bloquea la respuesta) — mismo source 'compras'
     // que la versión anterior, para que /admin/logs muestre continuidad, no un panel
     // nuevo. result_count = artículos hoja del árbol (equivalente a las filas de la v1).
     try {
       const user = await verifySession().catch(() => null);
-      const filters = { startDate: startDateStr, endDate: endDateStr, umbralPct };
+      const filters = { startDate: startDateStr, endDate: endDateStr, umbralPct, tipoPrevision: tipoPrev, sabor: sabor || null };
       const resultCount = resultado.familias.reduce(
         (s, f) => s + f.canales.reduce((s2, c) => s2 + c.articulos.length, 0),
         0
@@ -579,7 +611,7 @@ export async function GET(req: NextRequest) {
 
     return NextResponse.json({
       mock: false,
-      filters: { startDate: startDateStr, endDate: endDateStr, umbralPct },
+      filters: { startDate: startDateStr, endDate: endDateStr, umbralPct, tipoPrevision: tipoPrev, sabor: sabor || null },
       ...resultado,
     });
   } catch (err: any) {
