@@ -5,7 +5,7 @@
 // caducidad opcional. Solo admin. La clave completa se enseña una sola vez, al
 // crearla o rotarla; después solo su prefijo. Lógica en lib/api-claves.ts; ver
 // docs/api-integracion.md.
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { Ban, Check, Copy, KeyRound, Loader2, MoreHorizontal, Pencil, Plus, RefreshCw, Trash2 } from "lucide-react";
 import { useApiFetch } from "@/components/SessionProvider";
@@ -65,6 +65,7 @@ export default function AdminApiClaves({ titulo, descripcion }: SeccionProps) {
   // Clave recién creada o rotada: se enseña una sola vez
   const [nuevaClave, setNuevaClave] = useState<{ clave: string; nombre: string } | null>(null);
   const [copiada, setCopiada] = useState(false);
+  const campoClave = useRef<HTMLInputElement>(null);
   const [rotando, setRotando] = useState<ClaveApi | null>(null);
   const [finVieja, setFinVieja] = useState<FinVieja>("7");
   const [revocando, setRevocando] = useState<ClaveApi | null>(null);
@@ -141,10 +142,22 @@ export default function AdminApiClaves({ titulo, descripcion }: SeccionProps) {
     cerrar(); cargar();
   };
 
+  // El portapapeles moderno (navigator.clipboard) solo existe en páginas seguras (https o
+  // localhost). Por http en la red interna se usa el método clásico: seleccionar el campo
+  // y copiar (execCommand, obsoleto pero el único que funciona sin https).
   const copiar = async () => {
     if (!nuevaClave) return;
-    try { await navigator.clipboard.writeText(nuevaClave.clave); setCopiada(true); }
-    catch { toast.error("No se pudo copiar: selecciónala y cópiala a mano"); }
+    try {
+      if (window.isSecureContext && navigator.clipboard) {
+        await navigator.clipboard.writeText(nuevaClave.clave);
+      } else {
+        const campo = campoClave.current;
+        campo?.focus();
+        campo?.select();
+        if (!campo || !document.execCommand("copy")) throw new Error();
+      }
+      setCopiada(true);
+    } catch { toast.error("No se pudo copiar: selecciónala y cópiala a mano"); }
   };
 
   return (
@@ -302,7 +315,7 @@ export default function AdminApiClaves({ titulo, descripcion }: SeccionProps) {
             <DialogDescription>Cópiala ahora y pásala por un canal privado. Al cerrar esta ventana no se podrá volver a ver.</DialogDescription>
           </DialogHeader>
           <div className="flex items-center gap-2">
-            <Input readOnly value={nuevaClave?.clave ?? ""} className="font-mono text-xs" onFocus={(e) => e.target.select()} aria-label="Clave de API" />
+            <Input ref={campoClave} readOnly value={nuevaClave?.clave ?? ""} className="font-mono text-xs" onFocus={(e) => e.target.select()} aria-label="Clave de API" />
             <Button type="button" variant="outline" onClick={copiar}>{copiada ? <Check /> : <Copy />}{copiada ? "Copiada" : "Copiar"}</Button>
           </div>
           <DialogFooter>
