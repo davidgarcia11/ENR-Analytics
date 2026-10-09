@@ -18,10 +18,14 @@ import HierarchicalTable, { type DrillState, type FamiliaRow, type Unit } from "
 import MonthRangePicker, { type MonthRange } from "@/components/nova/month-range-picker";
 import { Button } from "@/components/nova/ui/button";
 import { Tabs, TabsList, TabsTrigger } from "@/components/nova/ui/tabs";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/nova/ui/select";
 import { Toaster } from "@/components/nova/ui/sonner";
 
 // Mes en curso (primer día -> último día) — mismo default que api/compras/route.ts
 // cuando se llama sin startDate/endDate.
+type TipoPrevision = "PN" | "PM";
+const TODOS_SABORES = "__todos__";
+
 function currentMonthRange(): MonthRange {
   const now = new Date();
   const y = now.getFullYear();
@@ -51,6 +55,7 @@ interface MesPunto {
 interface ApiResponse {
   mock: boolean;
   familias: FamiliaRow[];
+  sabores: string[];
   resumen: {
     unidades: Metric;
     kg: Metric | null;
@@ -107,6 +112,10 @@ function setColNumFmt(ws: XLSX.WorkSheet, colIdx: number, rowCount: number, fmt:
 function ComprasV2PagePanel() {
   const [drill, setDrill] = useState<DrillState>({ familia: null, canal: null, canalLabel: null });
   const [unit, setUnit] = useState<Unit>("unidades");
+  // PN = previsión original, PM = modificada (F3460.MFTYPF). Por defecto la vigente (PM).
+  const [tipo, setTipo] = useState<TipoPrevision>("PM");
+  // Sabor (F4101.IMSRP5): "" = todos. Las opciones vienen de la API (`sabores`).
+  const [sabor, setSabor] = useState("");
   // Por defecto, el mes en curso — el rango se aplica solo al pulsar "Filtrar", no en
   // cada cambio del selector (evita una consulta a Oracle por cada clic).
   const [range, setRange] = useState<MonthRange>(currentMonthRange());
@@ -128,12 +137,14 @@ function ComprasV2PagePanel() {
   }, []);
   const effectiveTheme = mode === "system" ? (systemPrefersDark ? "dark" : "light") : mode;
 
-  const fetchData = (r: MonthRange) => {
+  const fetchData = (r: MonthRange, t: TipoPrevision = tipo, s: string = sabor) => {
     setFetching(true);
     const toastId = toast.loading("Cargando datos de compras…");
     const params = new URLSearchParams();
     params.set("startDate", r.startDate);
     params.set("endDate", r.endDate);
+    params.set("tipoPrevision", t);
+    if (s) params.set("sabor", s);
     apiFetch(`/api/compras?${params.toString()}`)
       // El 401 lo resuelve useApiFetch (manda al login); el 403 no puede darse
       // dentro de <RequireAccess screen="compras">.
@@ -165,7 +176,7 @@ function ComprasV2PagePanel() {
       {
         title: "Previsión",
         value: formatNum(m.previsto, unit),
-        subValue: "Plan comercial aprobado",
+        subValue: tipo === "PN" ? "Previsión original (PN)" : "Previsión modificada (PM)",
         badgeColor: "bg-muted",
         badgeValue: UNIT_LABEL[unit],
       },
@@ -189,7 +200,7 @@ function ComprasV2PagePanel() {
         subValue: `Tolerancia ±${data.resumen.umbralPct}%`,
       },
     ];
-  }, [data, unit]);
+  }, [data, unit, tipo]);
 
   const deviationChartData = useMemo(() => {
     if (!data) return undefined;
@@ -310,7 +321,7 @@ function ComprasV2PagePanel() {
     setColNumFmt(wsDetalle, 9, n, XLS_FMT_EUR); setColNumFmt(wsDetalle, 10, n, XLS_FMT_EUR);
     XLSX.utils.book_append_sheet(wb, wsDetalle, "Detalle");
 
-    XLSX.writeFile(wb, `Compras_${range.startDate}_${range.endDate}.xlsx`);
+    XLSX.writeFile(wb, `Compras_${tipo}${sabor ? `_${sabor}` : ""}_${range.startDate}_${range.endDate}.xlsx`);
   };
 
   return (
@@ -321,12 +332,36 @@ function ComprasV2PagePanel() {
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div className="flex items-center gap-2">
               <MonthRangePicker value={range} onChange={setRange} />
+              {/* Como el rango: se aplica al pulsar "Filtrar", no al elegir */}
+              <Select
+                items={[{ value: TODOS_SABORES, label: "Todos los sabores" }, ...(data?.sabores ?? []).map((s) => ({ value: s, label: s }))]}
+                value={sabor || TODOS_SABORES}
+                onValueChange={(v) => setSabor(v === TODOS_SABORES ? "" : (v as string))}
+                disabled={!data}
+              >
+                <SelectTrigger className="w-48">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent align="start" alignItemWithTrigger={false}>
+                  <SelectItem value={TODOS_SABORES}>Todos los sabores</SelectItem>
+                  {(data?.sabores ?? []).map((s) => (
+                    <SelectItem key={s} value={s}>{s}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
               <Button size="sm" className="gap-1.5" onClick={() => fetchData(range)} disabled={fetching}>
                 {fetching ? <Loader2 size={14} className="animate-spin" /> : <Filter size={14} />}
                 Filtrar
               </Button>
             </div>
             <div className="flex items-center gap-3">
+              {/* Cambiar el tipo recarga al instante con el rango del selector */}
+              <Tabs value={tipo} onValueChange={(v) => { setTipo(v as TipoPrevision); fetchData(range, v as TipoPrevision); }}>
+                <TabsList>
+                  <TabsTrigger value="PM" disabled={fetching}>Modificada (PM)</TabsTrigger>
+                  <TabsTrigger value="PN" disabled={fetching}>Original (PN)</TabsTrigger>
+                </TabsList>
+              </Tabs>
               <Tabs value={unit} onValueChange={(v) => setUnit(v as Unit)}>
                 <TabsList>
                   <TabsTrigger value="unidades">Unidades</TabsTrigger>

@@ -65,6 +65,15 @@ resolver códigos a descripciones:
 | `F554101` | Canal (`AAZE06`) + gramaje (`AAZE03`) | Antes no había canal — se usaba **Marca** (`F4101.IMSRP4`) como segunda dimensión. Ahora se usa **Canal**, un campo distinto (ver §3.1) |
 | `prodctl.f0005` | Catálogo UDC — `41/S2` (familia), `17/B6` (canal) | Nuevo. Resuelve código → descripción legible, nunca se muestra el código crudo |
 
+### 3.5 Previsión original (PN) vs. modificada (PM)
+
+`F3460.MFTYPF` distingue la previsión original (`PN`) de la modificada (`PM`). La
+consulta filtra siempre por uno solo (`TRIM(MFTYPF) = :tipoPrev`, bind variable) y
+**nunca los suma**: son dos versiones de la misma previsión. El panel tiene un
+selector PM/PN (default PM) que recarga los datos; el tipo va en el nombre del Excel
+exportado. Antes de esta rama la consulta no filtraba por `MFTYPF`, así que "previsto"
+sumaba ambos tipos si coexistían para un mismo artículo y mes.
+
 ### 3.1 Canal (actual) no es Marca (versión anterior) — son campos distintos
 
 **Importante para quien compare contra la versión anterior**: aquella agrupaba/filtraba
@@ -217,6 +226,8 @@ garantía de "misma función para ambos caminos". **No genera entrada en `query_
 | `endDate` | string `YYYY-MM-DD`, opcional | Default: último día del mes en curso |
 | `mock` | `"1"`, opcional | Devuelve `aggregate()` sobre datos de ejemplo, ignora Oracle. Solo por URL, sin botón en la UI (ver §5) |
 | `umbral` | number, opcional | % de desviación para `resumen.familiasFueraDeUmbral`. Default `10` |
+| `sabor` | string, opcional | Descripción del sabor (F4101.`IMSRP5`, UDC `41`/`S5`) tal como la devuelve `sabores`; vacío = todos. Filtra en memoria tras armar los artículos, nunca llega a una query. Artículos sin sabor → `"Sin sabor"`. La respuesta trae `sabores` (todos los del periodo, antes de filtrar, para poblar el desplegable). Ignorado con `mock=1` |
+| `tipoPrevision` | `"PN"` \| `"PM"`, opcional | Filtra `F3460.MFTYPF`: `PN` = previsión original, `PM` = modificada. Default `PM`. Cualquier otro valor cae al default. Se ignora con `mock=1` (ver §3.5) |
 
 Respuesta (resumida — ver `app/api/compras/route.ts` para el detalle completo de
 `mensual.*`):
