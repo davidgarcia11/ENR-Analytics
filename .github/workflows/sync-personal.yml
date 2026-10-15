@@ -1,0 +1,48 @@
+
+name: Sync personal repository
+
+on:
+  push:
+    branches:
+      - "**"
+    tags:
+      - "**"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: sync-personal-repository
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout source repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+          persist-credentials: false
+
+      - name: Configure Git
+        run: |
+          git config user.name "GitHub Actions"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Push branches and tags to personal repository
+        env:
+          PERSONAL_REPO_TOKEN: ${{ secrets.PERSONAL_REPO_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          git remote add personal \
+            "https://x-access-token:${PERSONAL_REPO_TOKEN}@github.com/davidgarcia11/ENR-Analytics.git"
+
+          git push personal \
+            'refs/heads/*:refs/heads/*'
+
+          git push personal \
+            'refs/tags/*:refs/tags/*'
