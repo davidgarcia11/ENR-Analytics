@@ -399,15 +399,20 @@ export async function GET(req: NextRequest) {
       FROM F3460
       WHERE MFMCU = :planta AND MFDRQJ BETWEEN :startJde AND :endJde AND TRIM(MFTYPF) = :tipoPrev
     `;
-    // B) Venta real (F4211) — mismo filtro que la v1 del panel. SDUPRC = precio unitario
-    // de la línea (para importe real, NUNCA cantidad × coste presupuestado). Cantidad:
-    // SDSOQS (antes se usaba SDUORG, que era el campo de cantidad que usábamos antes).
+    // B) Venta real (F4211) — mismo filtro que la v1 del panel. Se AGREGA EN ORACLE por
+    // artículo x mes (antes se traía una fila por línea de pedido y se sumaba en JS: era lo
+    // que hacía lenta la carga en rangos amplios). SDSOQS = cantidad (×100); el importe es
+    // SUM(SDSOQS × SDUPRC) línea a línea (SDUPRC = precio unitario ×10000, NUNCA cantidad ×
+    // coste presupuestado), así que IMPORTE_RAW viene ×1.000.000. El mes sale de la fecha
+    // JDE (CYYDDD): 1900000 + CYYDDD = YYYYDDD, que TO_DATE entiende sin depender del NLS.
+    const mesVentaSql = `TO_CHAR(TO_DATE(TO_CHAR(A.SDADDJ + 1900000), 'YYYYDDD'), 'YYYYMM')`;
     const salesSql = `
-      SELECT TRIM(A.SDAITM) AS ITEM, TRIM(A.SDITM) AS ITEM_CORTO, A.SDADDJ AS FECHA_JDE,
-             A.SDSOQS AS CANT_REAL_RAW, A.SDUPRC AS PRECIO_RAW
+      SELECT TRIM(A.SDAITM) AS ITEM, TRIM(A.SDITM) AS ITEM_CORTO, ${mesVentaSql} AS MES,
+             SUM(A.SDSOQS) AS CANT_REAL_RAW, SUM(A.SDSOQS * A.SDUPRC) AS IMPORTE_RAW
       FROM F4211 A
       WHERE TRIM(A.SDDCTO) != :tipoDocExcluido AND A.SDADDJ != 0
         AND A.SDADDJ BETWEEN :startJde AND :endJde
+      GROUP BY TRIM(A.SDAITM), TRIM(A.SDITM), ${mesVentaSql}
     `;
 
     const [forecastResult, salesResult] = await Promise.all([
@@ -539,14 +544,16 @@ export async function GET(req: NextRequest) {
 
     // Acumulador por artículo largo x mes (parseJdeDate ya resuelve el año/mes real).
     const porArticulo = new Map<string, Map<string, { previsto: number; real: number; importeReal: number }>>();
-    const getBucket = (item: string, fechaJde: number) => {
-      const parsed = parseJdeDate(fechaJde);
-      if (!parsed) return null;
-      const sortKey = `${parsed.date.getFullYear()}-${String(parsed.date.getMonth() + 1).padStart(2, '0')}`;
+    const getBucketMes = (item: string, sortKey: string) => {
       if (!porArticulo.has(item)) porArticulo.set(item, new Map());
       const meses = porArticulo.get(item)!;
       if (!meses.has(sortKey)) meses.set(sortKey, { previsto: 0, real: 0, importeReal: 0 });
       return meses.get(sortKey)!;
+    };
+    const getBucket = (item: string, fechaJde: number) => {
+      const parsed = parseJdeDate(fechaJde);
+      if (!parsed) return null;
+      return getBucketMes(item, `${parsed.date.getFullYear()}-${String(parsed.date.getMonth() + 1).padStart(2, '0')}`);
     };
     forecastRows.forEach((r) => {
       const item = String(r.ITEM).trim();
@@ -555,13 +562,11 @@ export async function GET(req: NextRequest) {
     });
     salesRows.forEach((r) => {
       const item = String(r.ITEM).trim();
-      const b = getBucket(item, r.FECHA_JDE);
-      if (b) {
-        const qty = (r.CANT_REAL_RAW || 0) / 100;
-        const precio = (r.PRECIO_RAW || 0) / 10000;
-        b.real += qty;
-        b.importeReal += qty * precio;
-      }
+      const mes = String(r.MES || '');
+      if (!/^[0-9]{6}$/.test(mes)) return;
+      const b = getBucketMes(item, `${mes.slice(0, 4)}-${mes.slice(4)}`);
+      b.real += (r.CANT_REAL_RAW || 0) / 100;
+      b.importeReal += (r.IMPORTE_RAW || 0) / 1000000;
     });
 
     const saborDe = new Map<string, string>();

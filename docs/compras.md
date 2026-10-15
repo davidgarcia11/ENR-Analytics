@@ -101,6 +101,11 @@ previsto = unidades_previstas × coste_unitario_fijo   (F4105.COUNCS, foto sin m
 real     = Σ (SDSOQS/100 × SDUPRC/10000)              (línea a línea, NUNCA unidades_reales × coste)
 ```
 
+### 3.4 Venta real agregada en Oracle
+
+`GET /api/compras` no trae una fila por línea de F4211: la consulta hace `GROUP BY` artículo (largo y corto) × mes y devuelve `SUM(SDSOQS)` (×100) y `SUM(SDSOQS × SDUPRC)` (×1.000.000, porque cantidad ×100 y precio ×10.000). El mes sale de `TO_CHAR(TO_DATE(TO_CHAR(SDADDJ + 1900000), 'YYYYDDD'), 'YYYYMM')`. Es equivalente a sumar línea a línea en JS (el importe sigue siendo línea a línea, nunca unidades × coste), pero mueve muchas menos filas. **Validar contra producción** que los totales coinciden con los de antes de este cambio (misma consulta, mismo rango).
+
+
 Igual que antes (§4 de `docs/compras-v1-historico.md`): el precio de venta real no es el
 coste presupuestado, así que el importe real nunca sale de multiplicar cantidad×coste.
 
@@ -176,6 +181,8 @@ garantía de "misma función para ambos caminos". **No genera entrada en `query_
   pulsa el botón **"Filtrar"** (al lado del selector, mismo estilo que "Exportar"). Evita
   una consulta por cada clic en el popover. Por defecto se carga el **mes en curso** (mismo
   default que `api/compras/route.ts` sin `startDate`/`endDate`).
+  El **sabor** y el **tipo de previsión (PN/PM)** sí se aplican al elegirlos (reutilizan el
+  `range` del selector), sin pulsar "Filtrar".
 - **Recarga sin vaciar la pantalla**: al filtrar, `data` nunca se pone a `null` — se sigue
   viendo el desglose anterior mientras llega la respuesta nueva. El feedback de "cargando"
   es un toast (`sonner`, `components/nova/ui/sonner.tsx` + `<Toaster />` montado en la
