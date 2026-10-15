@@ -1,4 +1,4 @@
-import { Factory, Package, AlertTriangle, ArrowLeftRight, ScanBarcode, ShoppingCart, Boxes, Layers, FlaskConical, Tag } from "lucide-react"
+import { Factory, Package, AlertTriangle, ArrowLeftRight, ScanBarcode, ShoppingCart, Boxes, Layers, FlaskConical, Tag, Truck } from "lucide-react"
 
 // Fuente única de la verdad de los paneles reales de la app (no incluye /admin,
 // que se gestiona aparte por rol). La usan Navbar, la portada (/), el login
@@ -25,9 +25,20 @@ export const PANELS = [
     { key: 'mrp', label: 'Explosión de compras', href: '/mrp', Icon: Boxes, description: 'Previsión × lista de materiales → qué comprar de cada material' },
     { key: 'costes', label: 'Costes', href: '/costes', Icon: Layers, description: 'Coste de producto terminado y despiece recursivo de materiales' },
     { key: 'muestras', label: 'Muestras', href: '/muestras', Icon: FlaskConical, description: 'Control de muestras de producto terminado: pendientes, enviadas y completadas' },
+    { key: 'servicio', label: 'Nivel de servicio', href: '/servicio', Icon: Truck, description: 'OTIF de pedidos: entregas a tiempo y completas por albarán' },
     // privado por defecto: dispara impresiones físicas reales, no tiene sentido
     // que sea accesible sin sesión como el resto (ver docs/loteadora.md §16)
     { key: 'loteadora', label: 'Loteadora', href: '/loteadora', Icon: Tag, description: 'Impresión de lote y fecha de caducidad en las loteadoras', privado: true },
 ] as const
 
 export type PanelKey = typeof PANELS[number]['key']
+
+// Subsecciones de los paneles que las tienen (aparecen como submenú en la barra lateral de todos los
+// paneles Nova, con su flecha, y se eligen con ?seccion=<key>). Va aparte de PANELS para no
+// ensuciar el tipo de esa lista, que es `as const`.
+export const SECCIONES_PANEL: Record<string, readonly { key: string; label: string }[]> = {
+    servicio: [
+        { key: 'seguimiento', label: 'Seguimiento' },
+        { key: 'indicadores', label: 'Indicadores' },
+    ],
+}

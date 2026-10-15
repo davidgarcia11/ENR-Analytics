@@ -4,19 +4,16 @@
 // vigencia del BOM evaluada por mes de previsión, no por "hoy").
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
-import { RequireAccess, useApiFetch, useSession } from "@/components/SessionProvider";
+import { useCallback, useEffect, useState } from "react";
+import { RequireAccess, useApiFetch } from "@/components/SessionProvider";
 import { toast } from "sonner";
 import { Download, Filter, Loader2 } from "lucide-react";
 import * as XLSX from "xlsx";
-import Header from "@/components/shadcn-space/blocks/topbar-02/header";
-import { type ThemeMode } from "@/components/nova/mode-toggle";
-import { NovaPortalProvider } from "@/components/nova/portal-container";
+import NovaPanelShell from "@/components/nova/panel-shell";
 import Statistics from "@/components/shadcn-space/blocks/statistics-04/statistics";
 import MonthRangePicker, { type MonthRange } from "@/components/nova/month-range-picker";
 import MrpMaterialsTable, { agregarPorMes, type Material } from "@/components/nova/mrp-materials-table";
 import { Button } from "@/components/nova/ui/button";
-import { Toaster } from "@/components/nova/ui/sonner";
 
 
 function currentMonthRange(): MonthRange {
@@ -36,19 +33,8 @@ interface MrpResponse {
 }
 
 function MrpPagePanel() {
-  const { user: sessionUser, logout } = useSession();
   const apiFetch = useApiFetch();
 
-  const [mode, setMode] = useState<ThemeMode>("system");
-  const [systemPrefersDark, setSystemPrefersDark] = useState(false);
-  useEffect(() => {
-    const mq = window.matchMedia("(prefers-color-scheme: dark)");
-    setSystemPrefersDark(mq.matches);
-    const handler = (e: MediaQueryListEvent) => setSystemPrefersDark(e.matches);
-    mq.addEventListener("change", handler);
-    return () => mq.removeEventListener("change", handler);
-  }, []);
-  const effectiveTheme = mode === "system" ? (systemPrefersDark ? "dark" : "light") : mode;
 
 
 
@@ -114,7 +100,6 @@ function MrpPagePanel() {
     XLSX.writeFile(wb, `MRP_${range.startDate}_${range.endDate}.xlsx`);
   };
 
-  const portalContainerRef = useRef<HTMLDivElement>(null);
 
   const stats = data
     ? [
@@ -125,38 +110,30 @@ function MrpPagePanel() {
     : [];
 
   return (
-    <div data-nova-theme={effectiveTheme} ref={portalContainerRef} className="min-h-screen bg-sidebar text-foreground">
-      <NovaPortalProvider container={portalContainerRef}>
-        <div className="md:m-2 md:rounded-xl md:outline md:outline-border md:shadow-sm md:overflow-hidden bg-background">
-          <Header user={sessionUser} onLogout={logout} mode={mode} onModeChange={setMode} />
-          <main className="mx-auto max-w-7xl space-y-4 p-4 md:p-6">
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <div className="flex flex-wrap items-center gap-2">
-                <MonthRangePicker value={range} onChange={setRange} />
-                <Button size="sm" className="gap-1.5" onClick={() => fetchData(range)} disabled={loading}>
-                  {loading ? <Loader2 size={14} className="animate-spin" /> : <Filter size={14} />}
-                  Filtrar
-                </Button>
-              </div>
-              <Button size="sm" className="gap-1.5" onClick={exportToExcel} disabled={!data || data.materiales.length === 0}>
-                <Download size={14} />
-                Exportar
-              </Button>
-            </div>
-
-            {!data ? (
-              <p className="text-muted-foreground">Cargando…</p>
-            ) : (
-              <>
-                <Statistics data={stats} columns={3} />
-                <MrpMaterialsTable data={data.materiales} />
-              </>
-            )}
-          </main>
+    <NovaPanelShell title="Explosión de compras" grupo="Dashboards">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="flex flex-wrap items-center gap-2">
+          <MonthRangePicker value={range} onChange={setRange} />
+          <Button size="sm" className="gap-1.5" onClick={() => fetchData(range)} disabled={loading}>
+            {loading ? <Loader2 size={14} className="animate-spin" /> : <Filter size={14} />}
+            Filtrar
+          </Button>
         </div>
-        <Toaster />
-      </NovaPortalProvider>
-    </div>
+        <Button size="sm" className="gap-1.5" onClick={exportToExcel} disabled={!data || data.materiales.length === 0}>
+          <Download size={14} />
+          Exportar
+        </Button>
+      </div>
+
+      {!data ? (
+        <p className="text-muted-foreground">Cargando…</p>
+      ) : (
+        <>
+          <Statistics data={stats} columns={3} />
+          <MrpMaterialsTable data={data.materiales} />
+        </>
+      )}
+    </NovaPanelShell>
   );
 }
 
