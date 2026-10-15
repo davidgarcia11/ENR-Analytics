@@ -1,4 +1,5 @@
 import Database from 'better-sqlite3';
+import { MOTIVOS, RESPONSABLES } from './servicio';
 import path from 'path';
 import fs from 'fs';
 import { hashSync } from 'bcryptjs';
@@ -351,6 +352,24 @@ export function getDb(): Database.Database {
       PRIMARY KEY (articulo, lote)
     );
 
+    -- Datos manuales de /servicio (nivel de servicio): lo que JDE no sabe de cada envío
+    -- (pedido + albarán SDDELN; albaran 0 = aún sin albarán). Capa propia sobre F4211,
+    -- mismo patrón que sample_tracking: clave natural + upsert. ver docs/servicio.md
+    CREATE TABLE IF NOT EXISTS order_service_tracking (
+      pedido INTEGER NOT NULL,
+      albaran INTEGER NOT NULL DEFAULT 0,
+      transportista TEXT NOT NULL DEFAULT '',
+      fecha_entrega_real TEXT,
+      responsable TEXT NOT NULL DEFAULT '',
+      motivo TEXT NOT NULL DEFAULT '',
+      incidencia TEXT NOT NULL DEFAULT '',
+      uds_afectadas INTEGER NOT NULL DEFAULT 0,
+      cajas_afectadas REAL NOT NULL DEFAULT 0,
+      updated_by TEXT,
+      updated_at TEXT DEFAULT (datetime('now')),
+      PRIMARY KEY (pedido, albaran)
+    );
+
     -- Lista global de artículos visibles en /muestras (si está vacía, se ven todos —
     -- comportamiento abierto por defecto hasta que admin/responsable la configuran).
     -- NO es por usuario: es una única lista compartida, editable por admin y por
@@ -402,6 +421,36 @@ export function getDb(): Database.Database {
 
   // Migración: BDs creadas con el esquema anterior (backfill por tramos) no tienen
   // last_synced_at/last_error todavía.
+  // Listas desplegables de /servicio (/admin → Listas de servicio). Se crea aquí y no en el
+  // bloque de CREATE de arriba para cargar los motivos y responsables iniciales SOLO la
+  // primera vez (si se vaciara la lista a propósito, no debe volver a rellenarse al arrancar).
+  if (!_db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'servicio_catalogo'").get()) {
+    _db.exec(`
+      CREATE TABLE servicio_catalogo (
+        tipo TEXT NOT NULL,
+        nombre TEXT NOT NULL,
+        activo INTEGER NOT NULL DEFAULT 1,
+        orden INTEGER NOT NULL DEFAULT 0,
+        created_at TEXT DEFAULT (datetime('now')),
+        PRIMARY KEY (tipo, nombre)
+      );
+    `);
+    const alta = _db.prepare('INSERT INTO servicio_catalogo (tipo, nombre, orden) VALUES (?, ?, ?)');
+    MOTIVOS.forEach((n, i) => alta.run('motivo', n, i));
+    RESPONSABLES.forEach((n, i) => alta.run('responsable', n, i));
+  }
+
+  // Migración: los datos manuales de /servicio se indexaban por camión; ahora por albarán.
+  // La rama aún no se había publicado, así que no hay filas reales que convertir.
+  const servicioCols = _db.prepare("PRAGMA table_info(order_service_tracking)").all() as { name: string }[];
+  if (servicioCols.some(c => c.name === 'camion')) {
+    _db.exec("ALTER TABLE order_service_tracking RENAME COLUMN camion TO albaran");
+  }
+  // Las afectadas se pueden anotar en unidades o en cajas: se guardan las dos (ver docs/servicio.md §16)
+  if (!servicioCols.some(c => c.name === 'cajas_afectadas')) {
+    _db.exec("ALTER TABLE order_service_tracking ADD COLUMN cajas_afectadas REAL NOT NULL DEFAULT 0");
+  }
+
   const syncStateCols = _db.prepare("PRAGMA table_info(sample_sync_state)").all() as { name: string }[];
   if (!syncStateCols.some(c => c.name === 'last_synced_at')) {
     _db.exec("ALTER TABLE sample_sync_state ADD COLUMN last_synced_at TEXT");

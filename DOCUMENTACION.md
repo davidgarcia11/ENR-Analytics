@@ -594,6 +594,7 @@ sincronización, último error) y botón "Sincronizar ahora" — ver
 | GET / POST | `/api/admin/loteadora-articulos/copia` | Exporta (ver) / importa (asociar) solo las asociaciones artículo → plantilla (sección Artículos) |
 | GET | `/api/admin/loteadoras/:id/historial-conexion` | Historial de conexión (ping cada 30 s en segundo plano, `instrumentation.ts` + `lib/loteadora-ping.ts`) de una loteadora, en CSV (ver `docs/loteadora.md` §20) |
 | GET / POST | `/api/admin/api-claves` · PATCH / DELETE `/api/admin/api-claves/:id` · POST `/api/admin/api-claves/:id/rotar` | Claves de API de los sistemas externos: listar, crear (la clave completa solo en esa respuesta), editar, revocar (`PATCH {revocar: true}`), eliminar (solo revocadas o caducadas) y rotar. Solo admin (`lib/api-claves.ts`, ver `docs/api-integracion.md`) |
+| GET / POST / PATCH / DELETE | `/api/admin/servicio-catalogos` | Listas de los desplegables de Nivel de servicio (motivos, responsables, transportistas): alta, activar/desactivar y borrado (solo si no está en uso). Permiso `admin.servicio.catalogos` (ver `docs/servicio.md` §13) |
 | GET | `/api/admin/integracion` | Mensajes recibidos por la API de integración, con filtros y por páginas (permiso `admin.integracion.ver`, ver `docs/api-integracion.md`) |
 | GET | `/api/admin/loteadora-registro` | Registro de envíos a las loteadoras, con filtros y por páginas (permiso `registro.ver`, ver `docs/loteadora.md` §19) |
 | GET / POST | `/api/admin/loteadora-copia` | Exporta / importa en JSON las plantillas de la loteadora y sus asociaciones de artículos (botones de `/admin` → Plantillas, ver `docs/loteadora.md` §13) |
@@ -702,7 +703,8 @@ artículos de `/muestras` o asignar artículos a plantillas de loteadora.
   migrada automáticamente a `user_permissions` — quien lo tenía lo conserva — y
   eliminada), `loteadora.limpiar-buffer` (botón "Limpiar buffer" de /loteadora, sin
   sección de /admin), `admin.integracion.ver` (`/admin` → Integración › Mensajes recibidos,
-  ver `docs/api-integracion.md`) y los **permisos por acción de la
+  ver `docs/api-integracion.md`), `admin.servicio.catalogos` (`/admin` → Datos › Listas de
+  servicio, ver `docs/servicio.md` §13) y los **permisos por acción de la
   loteadora** (sept. 2026):
 
   | Sección de `/admin` (Loteadora ›) | Ver | Crear y editar | Eliminar / desvincular | Otras |
@@ -1190,6 +1192,7 @@ Cada panel tiene su documentación específica en la carpeta `docs/`:
 | Explosión de compras (MRP) | `/mrp` | [docs/mrp.md](docs/mrp.md) |
 | Coste A1 y despiece recursivo de materiales (sistema Nova) | `/costes` | [docs/costes.md](docs/costes.md) |
 | Control de muestras (pendiente/enviado/completado) | `/muestras` | [docs/muestras.md](docs/muestras.md) |
+| Nivel de servicio / OTIF de pedidos (sistema Nova) | `/servicio` | [docs/servicio.md](docs/servicio.md) |
 | Loteadora | `/loteadora` | [docs/loteadora.md](docs/loteadora.md) |
 | API de integración para sistemas externos (sin pantalla propia; lo recibido y las claves en `/admin` → Integración) | `POST /api/integracion/v1/escaneo` | [docs/api-integracion.md](docs/api-integracion.md) |
 

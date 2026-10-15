@@ -30,7 +30,7 @@ import NotificationDropdown from "@/components/shadcn-space/blocks/topbar-02/hea
 import ProfileDropdown, { iniciales } from "@/components/shadcn-space/blocks/topbar-02/header/dropdown-profile"
 import { getNavData } from "@/components/shadcn-space/blocks/topbar-02/data"
 import {
-  BellRing, ChevronsUpDown, FileCode, FileText, History, Inbox, KeyRound, LayoutGrid, Link2, MapPin, Printer, Receipt, RefreshCw, ScanBarcode, Settings, ShieldCheck, Tag, Users,
+  BellRing, ChevronsUpDown, FileCode, FileText, History, Inbox, KeyRound, LayoutGrid, Link2, ListChecks, MapPin, Printer, Receipt, RefreshCw, ScanBarcode, Settings, ShieldCheck, Tag, Users,
   type LucideIcon,
 } from "lucide-react"
 import { puedeEntrarEnAdmin, seccionesAdminPorPermisos } from "@/lib/permisos"
@@ -45,6 +45,7 @@ import AdminDatosFijos from "@/components/nova/admin/datos-fijos"
 import AdminZonas from "@/components/nova/admin/zonas"
 import AdminRegistroLoteadora from "@/components/nova/admin/registro-loteadora"
 import AdminMuestrasSync from "@/components/nova/admin/muestras-sync"
+import AdminServicioCatalogos from "@/components/nova/admin/servicio-catalogos"
 import AdminLogsConsultas from "@/components/nova/admin/logs-consultas"
 import AdminConfirmacionesPda from "@/components/nova/admin/confirmaciones-pda"
 import AdminIntegracion from "@/components/nova/admin/integracion"
@@ -90,6 +91,7 @@ const GRUPOS_ADMIN: GrupoAdmin[] = [
     secciones: [
       { key: "estados-jde", label: "Estados JDE", descripcion: "Descripciones de los estados de pedido de Comparativa SERES", icon: Tag, Componente: AdminEstadosJde },
       { key: "muestras", label: "Muestras", descripcion: "Caché de /muestras y sincronización manual", icon: RefreshCw, Componente: AdminMuestrasSync },
+      { key: "servicio-catalogos", label: "Listas de servicio", descripcion: "Motivos, responsables y transportistas de los desplegables de Nivel de servicio", icon: ListChecks, Componente: AdminServicioCatalogos },
       { key: "logs", label: "Logs de consultas", descripcion: "Consultas ejecutadas por panel y usuario, y su rendimiento", icon: FileText, Componente: AdminLogsConsultas },
       { key: "confirmaciones-pda", label: "Confirmaciones PDA", descripcion: "Avisos de Consulta Stock PDA que aceptó cada operario al escanear", icon: ScanBarcode, Componente: AdminConfirmacionesPda },
     ],
