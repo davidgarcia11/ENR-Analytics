@@ -5,12 +5,11 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { RequireAccess, useApiFetch, useSession } from "@/components/SessionProvider";
+import { RequireAccess, useApiFetch } from "@/components/SessionProvider";
 import * as XLSX from "xlsx";
 import { toast } from "sonner";
 import { Download, Filter, Loader2 } from "lucide-react";
-import Header from "@/components/shadcn-space/blocks/topbar-02/header";
-import { type ThemeMode } from "@/components/nova/mode-toggle";
+import NovaPanelShell from "@/components/nova/panel-shell";
 import Statistics from "@/components/shadcn-space/blocks/statistics-04/statistics";
 import Charts15 from "@/components/shadcn-space/blocks/chart-15/charts-15";
 import DeviationByFamilyChart from "@/components/nova/deviation-by-family-chart";
@@ -19,7 +18,6 @@ import MonthRangePicker, { type MonthRange } from "@/components/nova/month-range
 import { Button } from "@/components/nova/ui/button";
 import { Tabs, TabsList, TabsTrigger } from "@/components/nova/ui/tabs";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/nova/ui/select";
-import { Toaster } from "@/components/nova/ui/sonner";
 
 // Mes en curso (primer día -> último día) — mismo default que api/compras/route.ts
 // cuando se llama sin startDate/endDate.
@@ -121,21 +119,8 @@ function ComprasV2PagePanel() {
   const [range, setRange] = useState<MonthRange>(currentMonthRange());
   const [data, setData] = useState<ApiResponse | null>(null);
   const [fetching, setFetching] = useState(false);
-  const { user: sessionUser, logout } = useSession();
   const apiFetch = useApiFetch();
 
-  // Claro/Oscuro/Sistema — no persiste entre recargas (sin localStorage/sessionStorage,
-  // según las reglas del proyecto): siempre empieza en "system".
-  const [mode, setMode] = useState<ThemeMode>("system");
-  const [systemPrefersDark, setSystemPrefersDark] = useState(false);
-  useEffect(() => {
-    const mq = window.matchMedia("(prefers-color-scheme: dark)");
-    setSystemPrefersDark(mq.matches);
-    const handler = (e: MediaQueryListEvent) => setSystemPrefersDark(e.matches);
-    mq.addEventListener("change", handler);
-    return () => mq.removeEventListener("change", handler);
-  }, []);
-  const effectiveTheme = mode === "system" ? (systemPrefersDark ? "dark" : "light") : mode;
 
   const fetchData = (r: MonthRange, t: TipoPrevision = tipo, s: string = sabor) => {
     setFetching(true);
@@ -325,100 +310,94 @@ function ComprasV2PagePanel() {
   };
 
   return (
-    <div data-nova-theme={effectiveTheme} className="min-h-screen bg-sidebar text-foreground">
-      <div className="md:m-2 md:rounded-xl md:outline md:outline-border md:shadow-sm md:overflow-hidden bg-background">
-        <Header user={sessionUser} onLogout={logout} mode={mode} onModeChange={setMode} />
-        <main className="mx-auto max-w-7xl space-y-4 p-4 md:p-6">
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <div className="flex items-center gap-2">
-              <MonthRangePicker value={range} onChange={setRange} />
-              {/* Como el rango: se aplica al pulsar "Filtrar", no al elegir */}
-              <Select
-                items={[{ value: TODOS_SABORES, label: "Todos los sabores" }, ...(data?.sabores ?? []).map((s) => ({ value: s, label: s }))]}
-                value={sabor || TODOS_SABORES}
-                onValueChange={(v) => setSabor(v === TODOS_SABORES ? "" : (v as string))}
-                disabled={!data}
-              >
-                <SelectTrigger className="w-48">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent align="start" alignItemWithTrigger={false}>
-                  <SelectItem value={TODOS_SABORES}>Todos los sabores</SelectItem>
-                  {(data?.sabores ?? []).map((s) => (
-                    <SelectItem key={s} value={s}>{s}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              <Button size="sm" className="gap-1.5" onClick={() => fetchData(range)} disabled={fetching}>
-                {fetching ? <Loader2 size={14} className="animate-spin" /> : <Filter size={14} />}
-                Filtrar
-              </Button>
-            </div>
-            <div className="flex items-center gap-3">
-              {/* Cambiar el tipo recarga al instante con el rango del selector */}
-              <Tabs value={tipo} onValueChange={(v) => { setTipo(v as TipoPrevision); fetchData(range, v as TipoPrevision); }}>
-                <TabsList>
-                  <TabsTrigger value="PM" disabled={fetching}>Modificada (PM)</TabsTrigger>
-                  <TabsTrigger value="PN" disabled={fetching}>Original (PN)</TabsTrigger>
-                </TabsList>
-              </Tabs>
-              <Tabs value={unit} onValueChange={(v) => setUnit(v as Unit)}>
-                <TabsList>
-                  <TabsTrigger value="unidades">Unidades</TabsTrigger>
-                  <TabsTrigger value="kg">Kg</TabsTrigger>
-                  <TabsTrigger value="importe">Importe</TabsTrigger>
-                </TabsList>
-              </Tabs>
-              <Button size="sm" className="gap-1.5" onClick={exportToExcel} disabled={!data}>
-                <Download size={14} />
-                Exportar
-              </Button>
-            </div>
+    <NovaPanelShell title="Compras" grupo="Dashboards">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="flex items-center gap-2">
+          <MonthRangePicker value={range} onChange={setRange} />
+          {/* Como el rango: se aplica al pulsar "Filtrar", no al elegir */}
+          <Select
+            items={[{ value: TODOS_SABORES, label: "Todos los sabores" }, ...(data?.sabores ?? []).map((s) => ({ value: s, label: s }))]}
+            value={sabor || TODOS_SABORES}
+            onValueChange={(v) => setSabor(v === TODOS_SABORES ? "" : (v as string))}
+            disabled={!data}
+          >
+            <SelectTrigger className="w-48">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent align="start" alignItemWithTrigger={false}>
+              <SelectItem value={TODOS_SABORES}>Todos los sabores</SelectItem>
+              {(data?.sabores ?? []).map((s) => (
+                <SelectItem key={s} value={s}>{s}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <Button size="sm" className="gap-1.5" onClick={() => fetchData(range)} disabled={fetching}>
+            {fetching ? <Loader2 size={14} className="animate-spin" /> : <Filter size={14} />}
+            Filtrar
+          </Button>
+        </div>
+        <div className="flex items-center gap-3">
+          {/* Cambiar el tipo recarga al instante con el rango del selector */}
+          <Tabs value={tipo} onValueChange={(v) => { setTipo(v as TipoPrevision); fetchData(range, v as TipoPrevision); }}>
+            <TabsList>
+              <TabsTrigger value="PM" disabled={fetching}>Modificada (PM)</TabsTrigger>
+              <TabsTrigger value="PN" disabled={fetching}>Original (PN)</TabsTrigger>
+            </TabsList>
+          </Tabs>
+          <Tabs value={unit} onValueChange={(v) => setUnit(v as Unit)}>
+            <TabsList>
+              <TabsTrigger value="unidades">Unidades</TabsTrigger>
+              <TabsTrigger value="kg">Kg</TabsTrigger>
+              <TabsTrigger value="importe">Importe</TabsTrigger>
+            </TabsList>
+          </Tabs>
+          <Button size="sm" className="gap-1.5" onClick={exportToExcel} disabled={!data}>
+            <Download size={14} />
+            Exportar
+          </Button>
+        </div>
+      </div>
+
+      {!data ? (
+        <p className="text-muted-foreground">Cargando…</p>
+      ) : (
+        <>
+          {statisticsData && <Statistics data={statisticsData} />}
+
+          <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
+            <Charts15
+              className="lg:col-span-2"
+              scope={drill.canal ? `${drill.familia} · ${drill.canalLabel ?? drill.canal}` : drill.familia ?? "Todas las familias"}
+              unit={UNIT_LABEL[unit]}
+              data={monthlyChartData}
+            />
+            <DeviationByFamilyChart className="lg:col-span-1" unit={UNIT_LABEL[unit]} data={deviationChartData} />
           </div>
 
-          {!data ? (
-            <p className="text-muted-foreground">Cargando…</p>
-          ) : (
-            <>
-              {statisticsData && <Statistics data={statisticsData} />}
+          <HierarchicalTable
+            familias={data.familias}
+            unit={unit}
+            drill={drill}
+            onDrillChange={setDrill}
+            total={{ unidades: data.resumen.unidades, kg: data.resumen.kg, importe: data.resumen.importe }}
+          />
 
-              <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
-                <Charts15
-                  className="lg:col-span-2"
-                  scope={drill.canal ? `${drill.familia} · ${drill.canalLabel ?? drill.canal}` : drill.familia ?? "Todas las familias"}
-                  unit={UNIT_LABEL[unit]}
-                  data={monthlyChartData}
-                />
-                <DeviationByFamilyChart className="lg:col-span-1" unit={UNIT_LABEL[unit]} data={deviationChartData} />
-              </div>
-
-              <HierarchicalTable
-                familias={data.familias}
-                unit={unit}
-                drill={drill}
-                onDrillChange={setDrill}
-                total={{ unidades: data.resumen.unidades, kg: data.resumen.kg, importe: data.resumen.importe }}
-              />
-
-              {data.resumen.articulosSinGramaje.length > 0 && (
-                <p className="text-sm text-muted-foreground">
-                  {data.resumen.articulosSinGramaje.length} artículo(s) sin gramaje (F554101) — no entran en los
-                  totales de Kg: {data.resumen.articulosSinGramaje.join(", ")}
-                </p>
-              )}
-              {data.resumen.articulosSinCoste.length > 0 && (
-                <p className="text-sm text-muted-foreground">
-                  {data.resumen.articulosSinCoste.length} artículo(s) sin coste (F4105) — su importe previsto
-                  no se puede calcular (queda en 0); su importe real sí se cuenta con normalidad:{" "}
-                  {data.resumen.articulosSinCoste.join(", ")}
-                </p>
-              )}
-            </>
+          {data.resumen.articulosSinGramaje.length > 0 && (
+            <p className="text-sm text-muted-foreground">
+              {data.resumen.articulosSinGramaje.length} artículo(s) sin gramaje (F554101) — no entran en los
+              totales de Kg: {data.resumen.articulosSinGramaje.join(", ")}
+            </p>
           )}
-        </main>
-      </div>
-      <Toaster />
-    </div>
+          {data.resumen.articulosSinCoste.length > 0 && (
+            <p className="text-sm text-muted-foreground">
+              {data.resumen.articulosSinCoste.length} artículo(s) sin coste (F4105) — su importe previsto
+              no se puede calcular (queda en 0); su importe real sí se cuenta con normalidad:{" "}
+              {data.resumen.articulosSinCoste.join(", ")}
+            </p>
+          )}
+        </>
+      )}
+    </NovaPanelShell>
   );
 }
 

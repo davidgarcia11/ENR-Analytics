@@ -3,20 +3,17 @@
 // y docs/muestras.md.
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { RequireAccess, useApiFetch, useSession } from "@/components/SessionProvider";
 import { tienePermiso } from "@/lib/permisos";
 import { toast } from "sonner";
 import { Filter, Loader2 } from "lucide-react";
-import Header from "@/components/shadcn-space/blocks/topbar-02/header";
-import { type ThemeMode } from "@/components/nova/mode-toggle";
-import { NovaPortalProvider } from "@/components/nova/portal-container";
+import NovaPanelShell from "@/components/nova/panel-shell";
 import Statistics from "@/components/shadcn-space/blocks/statistics-04/statistics";
 import MuestrasTable, { type Muestra, type Estado, ESTADO_LABEL, ESTADO_TEXT_COLOR } from "@/components/nova/muestras-table";
 import MuestrasArticleConfig from "@/components/nova/muestras-article-config";
 import DateRangePicker, { type DateRange } from "@/components/nova/date-range-picker";
 import { Button } from "@/components/nova/ui/button";
-import { Toaster } from "@/components/nova/ui/sonner";
 
 interface MuestrasResponse {
   muestras: Muestra[];
@@ -25,19 +22,9 @@ interface MuestrasResponse {
 }
 
 function MuestrasPagePanel() {
-  const { user: sessionUser, logout } = useSession();
+  const { user: sessionUser } = useSession();
   const apiFetch = useApiFetch();
 
-  const [mode, setMode] = useState<ThemeMode>("system");
-  const [systemPrefersDark, setSystemPrefersDark] = useState(false);
-  useEffect(() => {
-    const mq = window.matchMedia("(prefers-color-scheme: dark)");
-    setSystemPrefersDark(mq.matches);
-    const handler = (e: MediaQueryListEvent) => setSystemPrefersDark(e.matches);
-    mq.addEventListener("change", handler);
-    return () => mq.removeEventListener("change", handler);
-  }, []);
-  const effectiveTheme = mode === "system" ? (systemPrefersDark ? "dark" : "light") : mode;
 
 
 
@@ -122,7 +109,6 @@ function MuestrasPagePanel() {
     }
   }, [fetchData, range]);
 
-  const portalContainerRef = useRef<HTMLDivElement>(null);
   const puedeConfigurar = tienePermiso(sessionUser, "muestras.config");
 
   const stats = data
@@ -135,42 +121,34 @@ function MuestrasPagePanel() {
     : [];
 
   return (
-    <div data-nova-theme={effectiveTheme} ref={portalContainerRef} className="min-h-screen bg-sidebar text-foreground">
-      <NovaPortalProvider container={portalContainerRef}>
-        <div className="md:m-2 md:rounded-xl md:outline md:outline-border md:shadow-sm md:overflow-hidden bg-background">
-          <Header user={sessionUser} onLogout={logout} mode={mode} onModeChange={setMode} />
-          <main className="mx-auto max-w-7xl space-y-4 p-4 md:p-6">
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <div className="flex flex-wrap items-center gap-2">
-                <DateRangePicker value={range} onChange={setRange} />
-                <Button size="sm" className="gap-1.5" onClick={() => fetchData(range)} disabled={loading}>
-                  {loading ? <Loader2 size={14} className="animate-spin" /> : <Filter size={14} />}
-                  Filtrar
-                </Button>
-              </div>
-              {puedeConfigurar && <MuestrasArticleConfig />}
-            </div>
-
-            {!data ? (
-              <p className="text-muted-foreground">Cargando…</p>
-            ) : data.sinConfigurar ? (
-              <div className="flex flex-col items-center gap-2 py-16 text-center text-muted-foreground">
-                <p className="text-sm">
-                  Todavía no hay artículos configurados para este panel.
-                  {puedeConfigurar ? " Añade al menos uno con el botón \"Artículos visibles\" de arriba." : " Pide a un responsable que configure la lista."}
-                </p>
-              </div>
-            ) : (
-              <>
-                <Statistics data={stats} columns={4} />
-                <MuestrasTable data={data.muestras} onUpdate={handleUpdate} onBulkUpdate={handleBulkUpdate} />
-              </>
-            )}
-          </main>
+    <NovaPanelShell title="Muestras" grupo="Apps">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="flex flex-wrap items-center gap-2">
+          <DateRangePicker value={range} onChange={setRange} />
+          <Button size="sm" className="gap-1.5" onClick={() => fetchData(range)} disabled={loading}>
+            {loading ? <Loader2 size={14} className="animate-spin" /> : <Filter size={14} />}
+            Filtrar
+          </Button>
         </div>
-        <Toaster />
-      </NovaPortalProvider>
-    </div>
+        {puedeConfigurar && <MuestrasArticleConfig />}
+      </div>
+
+      {!data ? (
+        <p className="text-muted-foreground">Cargando…</p>
+      ) : data.sinConfigurar ? (
+        <div className="flex flex-col items-center gap-2 py-16 text-center text-muted-foreground">
+          <p className="text-sm">
+            Todavía no hay artículos configurados para este panel.
+            {puedeConfigurar ? " Añade al menos uno con el botón \"Artículos visibles\" de arriba." : " Pide a un responsable que configure la lista."}
+          </p>
+        </div>
+      ) : (
+        <>
+          <Statistics data={stats} columns={4} />
+          <MuestrasTable data={data.muestras} onUpdate={handleUpdate} onBulkUpdate={handleBulkUpdate} />
+        </>
+      )}
+    </NovaPanelShell>
   );
 }
 

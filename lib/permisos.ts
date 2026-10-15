@@ -47,6 +47,8 @@ export const PERMISOS = {
   'admin.loteadora.registro.ver': { label: 'Ver el registro de envíos de la loteadora (qué se mandó, a qué máquina, cuándo y quién)', corto: 'Registro: ver', grupo: 'Loteadora · Registro', accion: 'Ver', seccionAdmin: 'registro-loteadora' },
   // Mensajes recibidos por la API de integración (lib/integracion.ts)
   'admin.integracion.ver': { label: 'Ver los mensajes recibidos por la API de integración', corto: 'Integración: ver', grupo: 'Integración', accion: 'Ver', seccionAdmin: 'integracion' },
+  // Listas desplegables de /servicio (motivos, responsables, transportistas)
+  'admin.servicio.catalogos': { label: 'Gestionar los motivos, responsables y transportistas de Nivel de servicio', corto: 'Listas de servicio', grupo: 'Nivel de servicio', accion: 'Gestionar', seccionAdmin: 'servicio-catalogos' },
   // En /loteadora (sin sección de /admin): vaciar la cola de envíos pendientes de una máquina.
   'loteadora.limpiar-buffer': { label: 'Limpiar el buffer de la loteadora (descarta los envíos pendientes)', corto: 'Limpiar buffer', grupo: 'Loteadora · Uso diario', accion: 'Limpiar buffer' },
 } as const satisfies Record<string, DefinicionPermiso>;
@@ -118,6 +120,8 @@ export const RUTAS_ADMIN_POR_PERMISO: { prefijo: string | RegExp; metodos?: stri
   { prefijo: '/api/admin/loteadoras', metodos: ['DELETE'], permiso: L('maquinas', 'eliminar') },
   // Mensajes recibidos por la API de integración (solo lectura)
   { prefijo: '/api/admin/integracion', metodos: ['GET'], permiso: 'admin.integracion.ver' },
+  // Listas de /servicio
+  { prefijo: '/api/admin/servicio-catalogos', permiso: 'admin.servicio.catalogos' },
   // Registro de envíos (solo lectura)
   { prefijo: '/api/admin/loteadora-registro', metodos: ['GET'], permiso: L('registro') },
   // Zonas. Lectura también para elegir la zona de una máquina.

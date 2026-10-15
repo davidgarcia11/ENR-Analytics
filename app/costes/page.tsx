@@ -4,14 +4,12 @@
 // VIGENTE HOY, no histórica por mes (a diferencia de MRP). Ver ClickUp #869eq7vnp.
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { RequireAccess, useApiFetch, useSession } from "@/components/SessionProvider";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { RequireAccess, useApiFetch } from "@/components/SessionProvider";
 import { toast } from "sonner";
 import { Download } from "lucide-react";
 import * as XLSX from "xlsx";
-import Header from "@/components/shadcn-space/blocks/topbar-02/header";
-import { type ThemeMode } from "@/components/nova/mode-toggle";
-import { NovaPortalProvider } from "@/components/nova/portal-container";
+import NovaPanelShell from "@/components/nova/panel-shell";
 import Statistics from "@/components/shadcn-space/blocks/statistics-04/statistics";
 import CosteA1Table, { CosteA1FilterBar, useCosteA1Filters, type DespieceNode } from "@/components/nova/coste-a1-table";
 import CosteA1DesglosePanel from "@/components/nova/coste-a1-desglose-panel";
@@ -19,7 +17,6 @@ import CosteMensualChart from "@/components/shadcn-space/blocks/chart-03/chart";
 import TopImpactoChart from "@/components/shadcn-space/blocks/chart-04/chart";
 import { extremosImpacto, formatMesCorto, serieCosteMensual } from "@/components/nova/coste-a1-shared";
 import { Button } from "@/components/nova/ui/button";
-import { Toaster } from "@/components/nova/ui/sonner";
 
 
 interface CosteA1Response {
@@ -37,19 +34,8 @@ function aplanar(nodos: DespieceNode[], raiz: string, nivel: number): (DespieceN
 }
 
 function CosteA1PagePanel() {
-  const { user: sessionUser, logout } = useSession();
   const apiFetch = useApiFetch();
 
-  const [mode, setMode] = useState<ThemeMode>("system");
-  const [systemPrefersDark, setSystemPrefersDark] = useState(false);
-  useEffect(() => {
-    const mq = window.matchMedia("(prefers-color-scheme: dark)");
-    setSystemPrefersDark(mq.matches);
-    const handler = (e: MediaQueryListEvent) => setSystemPrefersDark(e.matches);
-    mq.addEventListener("change", handler);
-    return () => mq.removeEventListener("change", handler);
-  }, []);
-  const effectiveTheme = mode === "system" ? (systemPrefersDark ? "dark" : "light") : mode;
 
 
 
@@ -143,7 +129,6 @@ function CosteA1PagePanel() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [data, filtros.treeData]);
 
-  const portalContainerRef = useRef<HTMLDivElement>(null);
 
   // Gráficos "Coste real vs. teórico" y "Top artículos por impacto" (arriba de
   // la tabla) — agregan VARIOS finales a la vez, a diferencia de la tabla (un
@@ -219,57 +204,48 @@ function CosteA1PagePanel() {
     : [];
 
   return (
-    <div data-nova-theme={effectiveTheme} ref={portalContainerRef} className="min-h-screen bg-sidebar text-foreground">
-      <NovaPortalProvider container={portalContainerRef}>
-        <div className="md:m-2 md:rounded-xl md:outline md:outline-border md:shadow-sm md:overflow-hidden bg-background">
-          <Header user={sessionUser} onLogout={logout} mode={mode} onModeChange={setMode} />
-          {/* Mismo ancho que el resto de paneles (max-w-7xl, igual que /compras) */}
-          <main className="mx-auto max-w-7xl space-y-4 p-4 md:p-6">
-            <div className="flex flex-wrap items-center gap-2">
-              <CosteA1FilterBar filtros={filtros} onFiltrarFechas={() => fetchData()} loading={loading} />
-              <Button size="sm" className="ml-auto gap-1.5" onClick={exportToExcel} disabled={!data || data.finales.length === 0}>
-                <Download size={14} />
-                Exportar
-              </Button>
-            </div>
+    <NovaPanelShell title="Costes" grupo="Dashboards">
+      <div className="flex flex-wrap items-center gap-2">
+        <CosteA1FilterBar filtros={filtros} onFiltrarFechas={() => fetchData()} loading={loading} />
+        <Button size="sm" className="ml-auto gap-1.5" onClick={exportToExcel} disabled={!data || data.finales.length === 0}>
+          <Download size={14} />
+          Exportar
+        </Button>
+      </div>
 
-            {!data ? (
-              <p className="text-muted-foreground">Cargando…</p>
-            ) : (
-              <>
-                <Statistics data={stats} columns={3} />
-                {/* Coste real vs. teórico (área) + Producción (barras), mismo
-                    reparto 2/3-1/3 que la fila de tabla+desglose de abajo —
-                    pedido explícito, "dos componentes arriba". */}
-                <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
-                  <div className="lg:col-span-2">
-                    <CosteMensualChart data={serieCoste} className="h-full" />
-                  </div>
-                  <div className="lg:col-span-1">
-                    <TopImpactoChart data={topImpacto} onSelect={setSelectedCodigo} />
-                  </div>
-                </div>
-                {/* Vuelta a 2/3-1/3: el ancho exterior de tabla/panel no debía
-                    tocarse ("el componente completo fuera igual de grande, ni
-                    más ni menos") — probar 3/5-2/5 dejaba la tabla sin verse
-                    entera sin deslizar. El sitio de más para el desglose sale
-                    de reducir el margen INTERNO del panel, no de ensancharlo
-                    por fuera — ver CosteA1DesglosePanel. */}
-                <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
-                  <div className="lg:col-span-2">
-                    <CosteA1Table filtros={filtros} selectedCodigo={selectedCodigo} onSelectCodigo={setSelectedCodigo} />
-                  </div>
-                  <div className="lg:col-span-1">
-                    <CosteA1DesglosePanel node={selectedNode} />
-                  </div>
-                </div>
-              </>
-            )}
-          </main>
-        </div>
-        <Toaster />
-      </NovaPortalProvider>
-    </div>
+      {!data ? (
+        <p className="text-muted-foreground">Cargando…</p>
+      ) : (
+        <>
+          <Statistics data={stats} columns={3} />
+          {/* Coste real vs. teórico (área) + Producción (barras), mismo
+              reparto 2/3-1/3 que la fila de tabla+desglose de abajo —
+              pedido explícito, "dos componentes arriba". */}
+          <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
+            <div className="lg:col-span-2">
+              <CosteMensualChart data={serieCoste} className="h-full" />
+            </div>
+            <div className="lg:col-span-1">
+              <TopImpactoChart data={topImpacto} onSelect={setSelectedCodigo} />
+            </div>
+          </div>
+          {/* Vuelta a 2/3-1/3: el ancho exterior de tabla/panel no debía
+              tocarse ("el componente completo fuera igual de grande, ni
+              más ni menos") — probar 3/5-2/5 dejaba la tabla sin verse
+              entera sin deslizar. El sitio de más para el desglose sale
+              de reducir el margen INTERNO del panel, no de ensancharlo
+              por fuera — ver CosteA1DesglosePanel. */}
+          <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
+            <div className="lg:col-span-2">
+              <CosteA1Table filtros={filtros} selectedCodigo={selectedCodigo} onSelectCodigo={setSelectedCodigo} />
+            </div>
+            <div className="lg:col-span-1">
+              <CosteA1DesglosePanel node={selectedNode} />
+            </div>
+          </div>
+        </>
+      )}
+    </NovaPanelShell>
   );
 }
 

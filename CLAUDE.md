@@ -38,6 +38,7 @@ app/                          # Rutas Next.js (App Router)
   costes/                     # Panel de coste A1 y despiece recursivo de materiales — sistema Nova
   mrp/                        # Panel explosión de compras (previsión × lista de materiales) — sistema Nova
   muestras/                   # App control de muestras pendientes/enviadas/completadas — sistema Nova
+  servicio/                   # Panel nivel de servicio (OTIF) de pedidos por albarán — sistema Nova
   admin/page.tsx              # Panel de administración de usuarios
   admin/logs/page.tsx         # Redirige a /admin?seccion=logs (los logs son una sección de /admin)
   login/page.tsx              # Login
@@ -59,6 +60,7 @@ app/                          # Rutas Next.js (App Router)
     admin/                    # users CRUD, logs, roles, pantallas, loteadoras, muestras-sync
     mrp/                       # GET explosión recursiva de materiales a comprar a partir de previsión (F3460) + BOM (F3002) (Nova)
     muestras/                  # CRUD control de muestras pendientes/enviadas/completadas (Nova)
+    servicio/                  # GET pedidos F4211 agrupados por albarán + KPIs OTIF, PATCH datos manuales (Nova)
     presets/                  # CRUD presets de filtros
 lib/
   db.ts                       # Conexión Oracle (getDbConnection)
@@ -82,6 +84,7 @@ components/
   nova/                        # Sistema de diseño Nova (ShadcnSpace), AISLADO vía [data-nova-theme] — ver README propio
     ui/                        # Primitivos shadcn instalados para Nova (button, card, table, select, popover...)
     README.md                  # Mecanismo de aislamiento, configuración, decisiones — leer antes de tocar UI Nova
+    panel-shell.tsx            # Armazón de todo panel Nova: barra lateral ShadcnSpace + cabecera fina + tema + Toaster (<NovaPanelShell>)
   shadcn-space/blocks/          # Blocks del catálogo ShadcnSpace instalados tal cual (topbar-02, statistics-04, chart-15, chart-03, chart-04)
 proxy.ts                      # Puerta de toda la app: filtra páginas y API (runtime Node, lee SQLite)
 docs/                         # Documentación específica por panel
@@ -96,6 +99,7 @@ docs/                         # Documentación específica por panel
   costes.md                   # Panel de coste A1 y despiece recursivo de materiales (sistema Nova)
   mrp.md                      # Panel de explosión de compras / MRP (sistema Nova)
   muestras.md                 # App de control de muestras pendientes/enviadas/completadas (sistema Nova)
+  servicio.md                 # Panel de nivel de servicio / OTIF de pedidos (sistema Nova)
   api-integracion.md          # API de integración para sistemas externos: contrato, claves, bandeja de entrada
   api-integracion.openapi.yaml # Especificación OpenAPI 3 de esa API (se entrega a terceros: sin referencias internas)
 ```
@@ -237,6 +241,7 @@ Toda API que llame un sistema de fuera (no las rutas internas que usan las panta
   - Cambios en el panel de costes (`/costes`, `api/costes`) → `docs/costes.md`
   - Cambios en el panel de MRP (`/mrp`, `api/mrp`) → `docs/mrp.md`
   - Cambios en el panel de muestras (`/muestras`, `api/muestras`) → `docs/muestras.md`
+  - Cambios en el panel de nivel de servicio (`/servicio`, `api/servicio`, `lib/servicio.ts`) → `docs/servicio.md`
   - Cualquier API para sistemas externos, nueva o cambiada (`api/integracion`, `api/admin/api-claves`, `lib/integracion.ts`, `lib/api-claves.ts`) → **siempre** `docs/api-integracion.md` **y** `docs/api-integracion.openapi.yaml` (ver «Añadir o cambiar una API para sistemas externos»; el `.yaml` lo exige `__tests__/openapi.test.ts`)
   - Nuevo panel → crear `docs/nombre-panel.md` y añadir referencia en `DOCUMENTACION.md` sección 9
 - Sugerir commit con mensaje siguiendo el estilo del proyecto (conventional + español)

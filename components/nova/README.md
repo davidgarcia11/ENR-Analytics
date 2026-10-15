@@ -318,7 +318,7 @@ desde cero las mismas decisiones de diseño:
    con un `<div className="md:m-2 md:rounded-xl md:outline md:outline-border md:shadow-sm md:overflow-hidden bg-background">`
    envolviendo header + `<main>`. Es el patrón `Sidebar variant="inset"` de shadcn
    replicado a mano (sin sidebar real) — ver `app/compras/page.tsx`.
-2. **Header/nav**: `topbar-02` (`components/shadcn-space/blocks/topbar-02/`) tal cual está
+2. **Header/nav** *(sustituido: ahora todos los paneles Nova usan la barra lateral de `components/nova/panel-shell.tsx`, ver punto 12; esto describe el header antiguo `topbar-02`, que sigue en el repo pero ya sin uso)*: `topbar-02` (`components/shadcn-space/blocks/topbar-02/`) tal cual está
    instalado — ya tiene el fix de imports rotos, el active-state por ruta exacta (no
    `startsWith` suelto), la caja `rounded-lg border border-border` alrededor del grupo de
    dropdowns, y el nav filtrado por permisos reales (`getNavData(role, screensConfig)`,
@@ -370,3 +370,73 @@ desde cero las mismas decisiones de diseño:
    (`DropdownMenuTrigger render={<Button variant="ghost" size="icon-sm" />}`), y
    alta/edición/borrado en `Dialog` (confirmación con `ConfirmarDialog` de
    `components/nova/admin/comun.tsx`), nunca filas que se convierten en formulario.
+
+10. **Gráficos de ShadcnSpace parametrizados (`/servicio`, pestaña Indicadores)**: se
+    instalaron con el CLI oficial `chart-16` (áreas por canal con línea de objetivo),
+    `chart-02` (donut con total en el centro), `chart-01` (barras apiladas) y `chart-12`
+    (ver punto 13). Los bloques traen datos de ejemplo fijos, así que — igual que
+    `chart-15` — se **parametrizaron** (`data`, `series`/`title`/`description` por props):
+    `chart-16` añade `objetivo` (línea de referencia), `domain` y sufijo `%`; `chart-02`
+    pinta el total en el centro y el % de cada segmento; `chart-01` recibe el titular como
+    `headline`. `chart-16` lleva además los retoques de estilo pedidos («más redondeado y
+    limpio»): rejilla solo horizontal, curvas `monotone` sin puntos con degradado, marcas
+    del eje Y de 10 en 10, margen izquierdo 0 (para que no se corte «100%») y sin el icono
+    de la cabecera. Se probó `chart-07` (titular + filas por canal + selector) en su lugar y
+    se descartó a favor de `chart-16` (comparar los canales de un vistazo); si se quiere
+    volver: `bunx --bun shadcn@latest add @shadcn-space/chart-07`. **No reinstales sin
+    repetir esos cambios.** Al instalar: el CLI pregunta si sobrescribir `card.tsx`,
+    `badge.tsx`, `select.tsx` y `chart.tsx` (responder «no» — son los de Nova, ya con
+    ajustes), crea páginas de demo en `app/chart-XX/` (borrarlas) y añade el paquete `cn`
+    (y a veces `@iconify/react`) a `package.json` (`bun remove cn @iconify/react`), igual
+    que en las notas de arriba.
+
+11. **Tabla de seguimiento al estilo ShadcnSpace (`/servicio`)**: se evaluaron con el CLI
+    oficial `table-02` (facturas), `table-09` (productos con progreso y estado) y
+    `datatable-14` (cola de tickets). `datatable-14` se descartó: usa la API de TanStack
+    Table **v9** (`tableFeatures`, `columnOrderingFeature`) y el proyecto está fijado a
+    `^8` (ver arriba), además de traer `@dnd-kit` (se desinstaló con `bun remove`). La
+    tabla de `components/nova/servicio-table.tsx` copia el patrón de **`table-09`**
+    (Card `p-6 gap-6`, cabecera `px-6`, primera celda `ps-6`, filas con `divide-y`, celdas
+    de dos líneas, icono en cuadro tintado, `Progress` de 1 px con indicador por color,
+    `Badge` `bg-*-400/10 text-*-400`, menú «⋮») en vez de importarlo: el bloque es un
+    ejemplo con imágenes remotas y datos fijos. Los archivos de `table-02`/`table-09` se
+    borraron tras la prueba (reinstalables con `bunx --bun shadcn@latest add
+    @shadcn-space/table-09`). Mismas notas de instalación que arriba (responder «no» a
+    sobrescribir primitivos, borrar `app/table-XX/`, `bun remove cn`).
+
+12. **Barra lateral común (`components/nova/panel-shell.tsx` + bloque `sidebar-01`)**:
+    `/compras`, `/mrp`, `/costes`, `/muestras` y `/servicio` ya no llevan la barra de
+    arriba (`topbar-02`, sin uso desde entonces): se montan con
+    `<NovaPanelShell title="…" grupo="Dashboards|Apps">`. La barra lateral es el bloque
+    oficial **Sidebar 01 de ShadcnSpace** (`bunx --bun shadcn@latest add
+    @shadcn-space/sidebar-01`; `components/shadcn-space/blocks/sidebar-01/`), con
+    `variant="inset"` y colapso a iconos (como `/admin` y el dashboard de referencia).
+    Adaptaciones al bloque, sin tocar su estilo: `app-sidebar.tsx` recibe `items` por
+    props, usa el logo de Elaborados Naturales y pierde la tarjeta promocional «Grab Pro
+    Now»; `nav-main.tsx` recibe el estado activo por props (`active`, antes era un estado
+    interno por clic), usa `next/link` y admite subítems que son botones (`onSelect`) para
+    cambiar de sección sin navegar. Los paneles con secciones (`SECCIONES_PANEL` en `lib/panels.ts`; hoy solo `/servicio`) llevan SIEMPRE su submenú con la flecha en la barra de todos los paneles: desde otro panel los subítems son enlaces a `/<panel>?seccion=<key>`, y la página lee ese parámetro. El armazón construye el menú con `getNavData()`
+    (`topbar-02/data.ts` → `lib/panels.ts`, filtrado por permisos, sin el grupo
+    «Maestros» que no tiene rutas): una sección por grupo (DASHBOARDS / APPS) y, en el
+    panel actual, sus secciones propias como subítems (`secciones`, `seccionActiva`,
+    `onSeccion`; ej. `/servicio`: Seguimiento / Indicadores). Además del menú, el armazón
+    lleva la cabecera fina (botón de la barra, miga de pan, tema, avisos, perfil), el tema
+    claro/oscuro/sistema, el contenedor de portales y el `<Toaster />`: las páginas ya no
+    los montan; el contenido va a todo el ancho (sin `max-w-7xl`). **No reinstales sin
+    repetir esos cambios.** Al instalar: responder «no» a sobrescribir primitivos, borrar
+    `app/sidebar-01/` y `assets/` (logo de ShadcnSpace) y `bun remove cn`. Antes de este
+    bloque hubo un menú escrito a mano con las clases de la plantilla de administración
+    (`Shadcn Space Admin Dashboard - Next.js/…/sidebar/nav-collapse`); se descartó por ser
+    una imitación.
+
+13. **Colores y forma de los gráficos (`/servicio`)**: la paleta es la que usan los bloques
+    de ShadcnSpace — el par `blue-500` / `sky-400` como principal, `teal-400` y `orange-400`
+    de acento y un gris suave para «otros» (`PALETA` en `servicio-indicadores.tsx`);
+    nada de ámbar ni otros tonos propios. Barras en cápsula fina (`chart-01`: `barSize` 10,
+    `radius` 5, segmentos separados por el color de la tarjeta, como `chart-17`). El
+    ranking de incidencias por motivo es el bloque **`chart-12`** (barras de 30 px con la
+    mayor resaltada y el resto al 20 %, dos totales debajo), parametrizado como los
+    demás: `data` por props, iconos de `lucide-react` en vez de `@iconify/react` (que el
+    CLI añade a `package.json`: `bun remove @iconify/react`) y 4 motivos + «Otros motivos»
+    para que quepan las etiquetas. Mismas notas de instalación que en el punto 10.
+

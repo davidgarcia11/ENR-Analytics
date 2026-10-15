@@ -45,6 +45,7 @@ continuidad — ver §7.1).
 | `components/nova/month-range-picker.tsx` | Selector de rango de meses completos (sin día) |
 | `components/nova/mode-toggle.tsx` | Selector Claro/Oscuro/Sistema |
 | `components/shadcn-space/blocks/topbar-02/` | Header compartido (nav por dropdowns, perfil, notificaciones) — bloque del catálogo ShadcnSpace |
+| `components/nova/panel-shell.tsx` | **Actual**: armazón con barra lateral ShadcnSpace que sustituyó a la barra de arriba (`topbar-02`, ya sin uso) en todos los paneles Nova — ver README Nova punto 12. Las notas de este documento sobre `topbar-02` son históricas |
 | `components/shadcn-space/blocks/statistics-04/` | Tarjetas KPI (bloque del catálogo) |
 | `components/shadcn-space/blocks/chart-15/` | Gráfico de barras agrupadas de evolución mensual (bloque del catálogo, adaptado) |
 
