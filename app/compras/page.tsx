@@ -314,12 +314,16 @@ function ComprasV2PagePanel() {
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="flex items-center gap-2">
           <MonthRangePicker value={range} onChange={setRange} />
-          {/* Como el rango: se aplica al pulsar "Filtrar", no al elegir */}
+          {/* Como el tipo de previsión: se aplica al elegir (el servidor lo filtra en memoria) */}
           <Select
             items={[{ value: TODOS_SABORES, label: "Todos los sabores" }, ...(data?.sabores ?? []).map((s) => ({ value: s, label: s }))]}
             value={sabor || TODOS_SABORES}
-            onValueChange={(v) => setSabor(v === TODOS_SABORES ? "" : (v as string))}
-            disabled={!data}
+            onValueChange={(v) => {
+              const nuevo = v === TODOS_SABORES ? "" : (v as string);
+              setSabor(nuevo);
+              fetchData(range, tipo, nuevo);
+            }}
+            disabled={!data || fetching}
           >
             <SelectTrigger className="w-48">
               <SelectValue />
