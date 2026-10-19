@@ -42,7 +42,7 @@ export default function Chart02({
     ]) satisfies ChartConfig;
 
     return (
-        <Card className="h-full w-full mx-auto py-6 gap-6 rounded-2xl shadow-none">
+        <Card className="h-full w-full mx-auto py-6 gap-6 rounded-2xl">
             <CardHeader className="px-6">
                 <CardTitle>
                     <h4 className="text-lg font-medium">{title}</h4>

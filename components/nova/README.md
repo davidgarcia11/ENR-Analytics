@@ -440,3 +440,30 @@ desde cero las mismas decisiones de diseño:
     CLI añade a `package.json`: `bun remove @iconify/react`) y 4 motivos + «Otros motivos»
     para que quepan las etiquetas. Mismas notas de instalación que en el punto 10.
 
+14. **Líneas, separadores y sombras = dashboard de referencia de ShadcnSpace** (medido
+    píxel a píxel sobre su captura y contrastado con su código, `package/main`):
+    - **Tarjetas** (`components/nova/ui/card.tsx`): sin anillo, solo la sombra azulada
+      `0 1px 4px rgba(133,146,173,.2)`. Las tarjetas KPI (`statistics-04`) llevan además
+      `border`, como las `statistics` de la referencia. Los bloques de gráficos ya no
+      pisan la sombra con `shadow-none` / `shadow-xs`: no hay que volver a ponérselo.
+    - **Tarjeta de contenido** (`SidebarInset` en `panel-shell.tsx`): contorno de 1 px y
+      sombra `0 2px 4px rgba(0,0,0,.075)`. La línea que separa la barra lateral es ese
+      contorno: arranca en la esquina redondeada, no llega al borde de la ventana. No
+      hay `border-r` en la barra (se probó y se revirtió: la referencia no lo tiene).
+      **Ojo con el `px-0` del bloque `sidebar-01`**: con él, el panel de la barra (`z-10`)
+      llega hasta el píxel donde la tarjeta dibuja contorno y sombra y los tapa, y la línea
+      se ve blanca (medido: `#fbfbfb` en vez de `#e5e5e5`). `app-sidebar.tsx` lleva `pl-0 pr-2`;
+      con 8 px libres a la derecha se ve la sombra (`#f6f6f6`), el contorno (`#e5e5e5`) y el
+      blanco del contenido, igual que en la referencia. No volver a `px-0`.
+    - **Separador de la cabecera** (junto al botón de la barra): 1 px `#e5e5e5` y 16 px de
+      alto, centrado (`data-vertical:self-center`). Sin esa clase, `self-stretch` del
+      primitivo lo dejaba pegado arriba de la cabecera.
+    - **Bordes** en gris neutro (`--border`, `--input`, `--sidebar-border`
+      `oklch(.922 0 0)` = `#e5e5e5`), no el Zinc con matiz violeta.
+    - **Botón `outline`, `Input` y `SelectTrigger`**: `shadow-xs`, como la referencia.
+    - Las sombras van como valor literal en la clase (`shadow-[...]`), **no** redefiniendo
+      `--shadow-md`/`--shadow-sm` en `[data-nova-theme]`: Tailwind compila `shadow-md`
+      con el valor incrustado y esas variables no cambian nada en tiempo de ejecución.
+      Los menús y popovers siguen con el `shadow-md` por defecto de Tailwind.
+    - La cabecera no es `sticky`: la referencia lo declara, pero su `SidebarInset` lleva
+      `overflow-hidden`, así que nunca se queda fija; no se replica una clase que no hace nada.

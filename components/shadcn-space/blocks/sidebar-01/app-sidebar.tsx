@@ -13,11 +13,16 @@ import { NavItem, NavMain } from "@/components/shadcn-space/blocks/sidebar-01/na
 // estructura (cabecera, ScrollArea, NavMain) y las clases del bloque, sin tocar. Va con
 // variant="inset" y colapso a iconos, como el sidebar del dashboard de referencia y
 // /admin. Ver components/nova/README.md.
+// Adaptación: `pl-0 pr-2` en vez del `px-0` del bloque. Sin el margen derecho, el panel de la
+// barra (z-10) llega hasta el mismo píxel donde la tarjeta de contenido dibuja su contorno y su
+// sombra, y los tapa: la línea que separa la barra del contenido se ve blanca. Con 8 px
+// libres a la derecha (como el `p-2` del `inset` de la referencia) se ven el contorno y la
+// sombra suave a su izquierda.
 export type { NavItem };
 
 export function AppSidebar({ items }: { items: NavItem[] }) {
   return (
-    <Sidebar variant="inset" collapsible="icon" className="px-0 h-full [&_[data-slot=sidebar-inner]]:h-full">
+    <Sidebar variant="inset" collapsible="icon" className="pl-0 pr-2 h-full [&_[data-slot=sidebar-inner]]:h-full">
       <div className="flex flex-col gap-6">
         {/* ---------------- Header ---------------- */}
         <SidebarHeader className="px-4 pt-4">

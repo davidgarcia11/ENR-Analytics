@@ -38,7 +38,7 @@ export default function Chart01({
     ) satisfies ChartConfig;
 
     return (
-        <Card className="w-full mx-auto py-6 gap-8 rounded-2xl shadow-none">
+        <Card className="w-full mx-auto py-6 gap-8 rounded-2xl">
             <CardHeader className="flex sm:flex-row flex-col justify-between sm:items-center items-start gap-3 px-6">
                 <div className="flex flex-col gap-1">
                     <CardTitle className="text-lg font-medium">{title}</CardTitle>

@@ -66,7 +66,7 @@ const Charts16 = ({
     ) satisfies ChartConfig;
 
     return (
-        <Card className={`rounded-2xl shadow-none ${className ?? ""}`}>
+        <Card className={`rounded-2xl ${className ?? ""}`}>
             <CardHeader className="flex flex-wrap items-center justify-between px-6">
                 <div>
                     <CardTitle className="text-lg font-semibold">{title}</CardTitle>
