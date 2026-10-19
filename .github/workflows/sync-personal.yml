@@ -13,7 +13,9 @@ on:
   release:
     types: [published, edited]
   schedule:
-    - cron: "*/30 * * * *" # red de seguridad si algún evento no llega a ejecutarse
+    # Red de seguridad si algún evento no llega a ejecutarse. Cada ejecución se factura como
+    # mínimo 1 min en repos privados: cada 6 h son ~120 min/mes (cada 30 min serían ~1.400).
+    - cron: "17 */6 * * *"
   workflow_dispatch:
 
 permissions:
