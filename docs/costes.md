@@ -219,7 +219,9 @@ contra datos reales antes de escribir una línea de código (artículo
    lo mismo y la desviación es de coste de material — no la diferencia entre
    "todo el coste" y "una parte", que es justo el error que tenía la primera
    versión de este panel (§3.4.1). Los demás componentes (`X1`…`X9`) quedan
-   fuera, y `CR` también: es el total de la orden.
+   fuera, y `CR` también: es el total de la orden. **Ojo:** el A1 de un
+   artículo todavía lleva dentro los X de sus componentes — ver «A1 limpio»
+   más abajo, que es lo que realmente se devuelve como `costeReal`.
 4. **Los componentes no tienen orden — se calculan aparte.** Todo lo que no
    se fabrica con orden propia (envases, etiquetas, materia prima) sale en
    `F554105` con `CLURAB = 0`, así que no hay nada que cruzar con `F55CR001`.
@@ -258,6 +260,39 @@ las órdenes de **todas las plantas** — confirmado explícitamente con el
 usuario. El coste real de un artículo es lo que ha costado fabricarlo, se
 fabricara donde se fabricara; partirlo por planta daría un coste distinto del
 que maneja la empresa. No añadir `CLMCU` a esta consulta pensando que falta.
+
+**A1 limpio — `costeReal` es el A1 menos los X que arrastran los componentes.**
+JDE mete el coste **total** (A1 + X) de un semielaborado como material de su
+padre, de modo que el A1 real de un artículo incluye el coste de
+transformación (`X1`…`X9`) de todos los componentes que se fabrican con orden.
+Para comparar material con material, el `costeReal` que devuelve la API es:
+
+```
+costeReal(n)  = A1real(n) − Xarrastrado(n)
+Xarrastrado(n) = Σ hijos c de n [ cantidad_c × ( Xreal(c) + Xarrastrado(c) ) ]
+```
+
+- **Todos los niveles**, no solo los hijos directos (el A1 de un hijo ya lleva
+  los X de sus propios hijos). `cantidad_c` es la del BOM por unidad del padre,
+  **sin redondear** (se usa el `RawNode`, no el `DespieceNode`, que va a 3
+  decimales).
+- `Xreal(c)` es la media ponderada por cantidad de la suma de `CRCOST` ≠ `A1`,
+  ≠ `CR` de las órdenes de `c` en el mismo periodo (mes o rango). Sale de la
+  misma consulta que el A1 (`SUM(CASE WHEN …)`), sin consultas nuevas.
+- Los X del **propio** artículo no se restan: no están en su A1.
+- Un componente sin órdenes en el periodo (comprado, o fabricado sin
+  producción ese mes) aporta X = 0. Los de la rama `CLURAB = 0` tampoco tienen
+  desglose por componente, así que no restan nada.
+- Una orden sin fila `A1` en `F55CR001` se sigue descartando (igual que antes
+  de este cambio): el `HAVING COUNT(… 'A1' …) > 0` conserva ese criterio.
+- Se calcula en cada nodo con SUS órdenes y también por mes
+  (`costeRealPorMes`), así que gráficos y KPI (§3.5, §3.6) usan el A1 limpio.
+  La ponderación (`cantidad`) no cambia.
+- No se trunca a 0: si el resultado saliera negativo se muestra tal cual, para
+  que un dato raro se vea y no se oculte.
+- Se contrastó con una consulta recursiva sobre `F3002` + `F554105` +
+  `F55CR001` (artículo `1210100222`, septiembre 2026) antes de implementarlo;
+  es la misma lógica que `xArrastrado()` en `app/api/costes/route.ts`.
 
 **Desviación** (`desviacionPct()`, `coste-a1-shared.tsx`): `(costeReal −
 costeA1) / costeA1 × 100`. Positivo = el coste real sale más caro que el
