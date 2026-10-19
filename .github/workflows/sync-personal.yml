@@ -1,5 +1,8 @@
-
 name: Sync personal repository
+
+# Mantiene davidgarcia11/ENR-Analytics igual que este repositorio: ramas, etiquetas y releases.
+# Nunca fuerza ni borra: si una rama diverge, el job falla a la vista en vez de pisar datos.
+# No copia PR ni issues (no son contenido de git y GitHub no permite espejarlos).
 
 on:
   push:
@@ -7,6 +10,10 @@ on:
       - "**"
     tags:
       - "**"
+  release:
+    types: [published, edited]
+  schedule:
+    - cron: "*/30 * * * *" # red de seguridad si algún evento no llega a ejecutarse
   workflow_dispatch:
 
 permissions:
@@ -15,6 +22,9 @@ permissions:
 concurrency:
   group: sync-personal-repository
   cancel-in-progress: false
+
+env:
+  DESTINO: davidgarcia11/ENR-Analytics
 
 jobs:
   sync:
@@ -27,22 +37,68 @@ jobs:
           fetch-tags: true
           persist-credentials: false
 
-      - name: Configure Git
-        run: |
-          git config user.name "GitHub Actions"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-
       - name: Push branches and tags to personal repository
         env:
           PERSONAL_REPO_TOKEN: ${{ secrets.PERSONAL_REPO_TOKEN }}
         run: |
-          set -euo pipefail
+          set -uo pipefail
 
           git remote add personal \
-            "https://x-access-token:${PERSONAL_REPO_TOKEN}@github.com/davidgarcia11/ENR-Analytics.git"
+            "https://x-access-token:${PERSONAL_REPO_TOKEN}@github.com/${DESTINO}.git"
 
-          git push personal \
-            'refs/heads/*:refs/heads/*'
+          # En un runner solo existe como rama local la que disparó el evento; el resto
+          # están como refs/remotes/origin/*, así que se empujan desde ahí.
+          fallos=0
+          for ref in $(git for-each-ref --format='%(refname)' refs/remotes/origin); do
+            nombre="${ref#refs/remotes/origin/}"
+            [ "$nombre" = "HEAD" ] && continue
+            git push personal "${ref}:refs/heads/${nombre}" || fallos=1
+          done
 
-          git push personal \
-            'refs/tags/*:refs/tags/*'
+          git push personal 'refs/tags/*:refs/tags/*' || fallos=1
+          exit "$fallos"
+
+      - name: Copy releases to personal repository
+        # Las releases no cambian con un push de ramas: se copian al publicar/editar una,
+        # en el cron y a mano.
+        if: github.event_name != 'push'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PERSONAL_REPO_TOKEN: ${{ secrets.PERSONAL_REPO_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          # Borradores fuera: no tienen etiqueta y se duplicarían en cada ejecución.
+          gh api "repos/${GITHUB_REPOSITORY}/releases?per_page=100" --paginate \
+            | jq -s 'add | map(select(.draft | not)) | sort_by(.published_at // .created_at)' > origen.json
+          GH_TOKEN="$PERSONAL_REPO_TOKEN" gh api "repos/${DESTINO}/releases?per_page=100" --paginate \
+            | jq -s 'add' > destino.json
+
+          total=$(jq length origen.json)
+          for i in $(seq 0 $((total - 1))); do
+            tag=$(jq -r ".[$i].tag_name" origen.json)
+            # La última es la «Latest»; las demás no la reclaman.
+            ultima=false; [ "$i" -eq $((total - 1)) ] && ultima=true
+            jq --argjson i "$i" --argjson latest "$ultima" '.[$i] | {
+                tag_name, name: (.name // .tag_name), body: (.body // ""),
+                prerelease, make_latest: (if $latest then "true" else "false" end)
+              }' origen.json > cuerpo.json
+
+            id=$(jq -r --arg t "$tag" '.[] | select(.tag_name == $t) | .id' destino.json)
+            if [ -z "$id" ]; then
+              GH_TOKEN="$PERSONAL_REPO_TOKEN" gh api -X POST "repos/${DESTINO}/releases" --input cuerpo.json > /dev/null
+              echo "creada $tag"
+              continue
+            fi
+
+            # Solo se actualiza si cambió algo (el cron corre cada 30 min); se ignoran los \r.
+            igual=$(jq -r --arg t "$tag" --slurpfile c cuerpo.json '
+              (.[] | select(.tag_name == $t)) as $d
+              | (($d.name // "") == $c[0].name)
+                and (($d.body // "" | gsub("\r"; "")) == ($c[0].body | gsub("\r"; "")))
+                and ($d.prerelease == $c[0].prerelease)' destino.json)
+            if [ "$igual" != "true" ]; then
+              GH_TOKEN="$PERSONAL_REPO_TOKEN" gh api -X PATCH "repos/${DESTINO}/releases/${id}" --input cuerpo.json > /dev/null
+              echo "actualizada $tag"
+            fi
+          done
