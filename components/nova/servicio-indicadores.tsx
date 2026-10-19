@@ -150,13 +150,13 @@ export default function ServicioIndicadores({ envios }: { envios: EnvioDto[] }) 
 
       <div className="grid gap-4 lg:grid-cols-2">
         {porMotivo.length === 0 ? (
-          <Card className="py-6 gap-8 rounded-2xl shadow-none">
+          <Card className="py-6 gap-8 rounded-2xl">
             <CardHeader className="px-6"><CardTitle className="text-lg font-medium">Incidencias por motivo</CardTitle></CardHeader>
             <CardContent><Vacio texto="Sin incidencias anotadas." /></CardContent>
           </Card>
         ) : (
           <Charts12
-            className="gap-6 rounded-2xl px-6 py-6 shadow-none"
+            className="gap-6 rounded-2xl px-6 py-6"
             title="Incidencias por motivo"
             description="Envíos con motivo anotado, en el rango seleccionado"
             serieLabel="Incidencias"
@@ -165,7 +165,7 @@ export default function ServicioIndicadores({ envios }: { envios: EnvioDto[] }) 
         )}
 
         {responsables.length === 0 ? (
-          <Card className="py-6 gap-8 shadow-xs"><CardHeader className="px-6"><CardTitle className="text-lg font-medium">Responsabilidad — últimos 3 meses</CardTitle></CardHeader><CardContent><Vacio texto="Sin incidencias anotadas." /></CardContent></Card>
+          <Card className="py-6 gap-8"><CardHeader className="px-6"><CardTitle className="text-lg font-medium">Responsabilidad — últimos 3 meses</CardTitle></CardHeader><CardContent><Vacio texto="Sin incidencias anotadas." /></CardContent></Card>
         ) : (
           <Chart02
             title="Responsabilidad — últimos 3 meses"
