@@ -1346,11 +1346,16 @@ en vez de crear un wrapper aparte en `components/nova/` — mismo patrón que
     componente y el mismo gesto que el selector del panel de desglose (§4.2),
     para no inventar un patrón nuevo dentro del mismo panel.
   - `extremosImpacto()` (`coste-a1-shared.tsx`) devuelve las dos listas ya
-    separadas: ordena de mayor sobrecoste a mayor ahorro, coge 5 de cada punta y
-    deduplica por código — con menos de 10 artículos las dos mitades se
-    solaparían y un mismo artículo saldría en las dos pestañas. Los "mejores"
-    se invierten para que la primera fila sea siempre la más destacada, igual
-    que en la otra pestaña.
+    separadas: ordena de mayor sobrecoste a mayor ahorro y coge 5 de cada
+    punta, **cada lista solo con artículos de su signo** (peores = impacto > 0,
+    mejores = impacto < 0). Antes cogía los 5 primeros y los 5 últimos sin mirar
+    el signo y deduplicaba por código, y con un solo artículo filtrado (o
+    pocos) un ahorro salía en "Mayor sobrecoste", en verde, y la pestaña de
+    ahorro quedaba vacía. Con el filtro de signo no hace falta deduplicar; el
+    impacto exactamente 0 no sale en ninguna. Los "mejores" se invierten para
+    que la primera fila sea siempre la más destacada, igual que en la otra
+    pestaña. El ranking sigue los mismos filtros que la tabla (búsqueda y
+    familia), a propósito.
   - Hubo antes un top único por valor absoluto, con las dos colas en la misma
     lista separadas por una línea; se descartó al pedirse el selector. De ahí
     que las barras ahora **crezcan desde la izquierda** y no diverjan desde el
