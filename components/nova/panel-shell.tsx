@@ -90,10 +90,10 @@ export default function NovaPanelShell({ title, grupo, seccionActiva, onSeccion,
       <NovaPortalProvider container={portalContainerRef}>
         <SidebarProvider>
           <AppSidebar items={menu} />
-          <SidebarInset className="overflow-hidden md:outline md:outline-border">
+          <SidebarInset className="overflow-hidden md:outline md:outline-border md:peer-data-[variant=inset]:shadow-[0_0.125rem_0.25rem_rgba(0,0,0,0.075)]">
             <header className="flex h-14 shrink-0 items-center gap-2 border-b px-4">
               <SidebarTrigger className="-ml-1" />
-              <Separator orientation="vertical" className="mr-1 data-vertical:h-4" />
+              <Separator orientation="vertical" className="mr-1 data-vertical:h-4 data-vertical:self-center" />
               <Breadcrumb>
                 <BreadcrumbList>
                   {grupo && (

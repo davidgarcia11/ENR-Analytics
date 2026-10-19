@@ -128,7 +128,7 @@ export default function Chart04({
         value: "sobrecoste",
         label: "Mayor sobrecoste",
         content: (
-          <ListaImpacto items={data.peores} onSelect={onSelect} vacio="Sin artículos con coste real en el rango." />
+          <ListaImpacto items={data.peores} onSelect={onSelect} vacio="Ningún artículo por encima de su coste teórico." />
         ),
       },
       {

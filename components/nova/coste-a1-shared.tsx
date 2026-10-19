@@ -210,8 +210,10 @@ export interface ImpactoArticulo { codigo: string; descripcion: string; impacto:
 // elegida (pedido explícito, igual que se cambia de código en el panel de
 // desglose). Antes era un único top por valor absoluto: se perdía una de las
 // dos colas cuando todos los desvíos grandes caían del mismo lado.
-// Con menos de 2n artículos las dos mitades se solaparían, de ahí el
-// deduplicado por código: un artículo nunca sale en las dos pestañas.
+// Cada lista solo lleva artículos de SU signo (peores = impacto > 0, mejores =
+// impacto < 0): sin ese filtro, con un solo artículo (o pocos) un ahorro salía
+// en "Mayor sobrecoste", en verde. Al ser de signo opuesto, un artículo nunca
+// sale en las dos pestañas; el impacto exactamente 0 no sale en ninguna.
 export function extremosImpacto(finales: DespieceNode[], n = 5): { peores: ImpactoArticulo[]; mejores: ImpactoArticulo[] } {
   const conImpacto = finales
     .map((f) => {
@@ -222,12 +224,11 @@ export function extremosImpacto(finales: DespieceNode[], n = 5): { peores: Impac
     .filter((x): x is ImpactoArticulo => x !== null)
     .sort((a, b) => b.impacto - a.impacto);
 
-  const peores = conImpacto.slice(0, n);
-  const vistos = new Set(peores.map((d) => d.codigo));
+  const peores = conImpacto.filter((d) => d.impacto > 0).slice(0, n);
   // Los mejores, del mayor ahorro al menor — `slice(-n)` los deja al revés
   // (viene ordenado descendente), así que se invierte para que la primera fila
   // de la pestaña sea siempre la más destacada, igual que en la de sobrecostes.
-  const mejores = conImpacto.slice(-n).filter((d) => !vistos.has(d.codigo)).reverse();
+  const mejores = conImpacto.filter((d) => d.impacto < 0).slice(-n).reverse();
   return { peores, mejores };
 }
 

@@ -234,7 +234,7 @@ export default function Statistic({ data = defaultStatisticsData, columns = 4 }:
       <div className="mx-auto w-full">
         <div className={cn("grid sm:grid-cols-2 grid-cols-1 gap-6", COLUMNS_CLASS[columns])}>
           {data.map((item, index) => (
-            <Card key={index} className="p-6">
+            <Card key={index} className="border p-6">
               <CardContent className="p-0">
                 <div className="flex items-center justify-between">
                   <div className="flex flex-col gap-1">
