@@ -71,6 +71,14 @@
 //   las dos cifras comparen lo mismo. `CRUNCS`/10000 es el importe de toda la
 //   orden: el coste unitario es ese importe / cantidad de la orden, redondeado
 //   a 4 decimales.
+//   A1 "LIMPIO": JDE arrastra el coste total (A1 + X) de un semielaborado como
+//   material de su padre, así que el A1 real de un artículo lleva dentro los X
+//   (X1...X9, sin el total 'CR') de todos sus componentes. El `costeReal` que
+//   se devuelve es su A1 real MENOS esos X, de todos los niveles y ponderados
+//   por la cantidad acumulada de cada componente por unidad del artículo:
+//   `A1 − Σ cantidad × (X + X arrastrado del componente)`. Los X del propio
+//   artículo no se restan (no están en su A1). Un componente sin órdenes en el
+//   periodo (comprado) aporta X = 0. Ver docs/costes.md §3.4.
 //   Los COMPONENTES (envases, etiquetas, materia prima) no tienen orden
 //   (`CLURAB = 0`) y por tanto no cruzan con F55CR001: su coste unitario real
 //   ya viene dado en F554105, `CLUNCS`/10000, igual en todos los palet_lote
@@ -158,8 +166,9 @@ export interface DespieceNode {
   // cambia el catálogo).
   obsoleto: boolean; // F4101.IMSTKT = 'O' — mismo campo que ya usa /caducados
   costeA1: number | null;
-  // Coste real unitario (F554105 + F55CR001) en el rango de fechas pedido,
-  // media ponderada por la cantidad producida de sus órdenes — en TODOS los
+  // Coste real A1 "limpio" unitario (F554105 + F55CR001, sin los X que arrastran
+  // sus componentes) en el rango de fechas pedido, media ponderada por la
+  // cantidad producida de sus órdenes — en TODOS los
   // nodos del árbol (a diferencia de `produccion`, que solo tiene valor en la
   // raíz), cada uno con SUS propias órdenes. `null` si el artículo no tuvo
   // ninguna orden costeada en el rango (todo lo comprado, p.ej.). Ver
@@ -480,15 +489,20 @@ export async function GET(req: NextRequest) {
        ),
        por_orden AS (
          SELECT o.LARGO, o.FECHA_JDE, o.CANTIDAD,
-                SUM(ROUND((r.CRUNCS / 10000) / NULLIF(o.CANTIDAD, 0), 4)) AS COSTE_UNIT
+                SUM(CASE WHEN TRIM(r.CRCOST) = 'A1'
+                         THEN ROUND((r.CRUNCS / 10000) / NULLIF(o.CANTIDAD, 0), 4) END) AS COSTE_UNIT,
+                SUM(CASE WHEN TRIM(r.CRCOST) NOT IN ('A1', 'CR')
+                         THEN ROUND((r.CRUNCS / 10000) / NULLIF(o.CANTIDAD, 0), 4) END) AS X_UNIT
          FROM ordenes o
          JOIN F55CR001 r ON r.CRDOCO = o.ORDEN
-         WHERE TRIM(r.CRLEDG) = 'CR' AND TRIM(r.CRCOST) = 'A1'
+         WHERE TRIM(r.CRLEDG) = 'CR'
          GROUP BY o.LARGO, o.FECHA_JDE, o.ORDEN, o.CANTIDAD
+         HAVING COUNT(CASE WHEN TRIM(r.CRCOST) = 'A1' THEN 1 END) > 0
        ),
        sin_orden AS (
          SELECT TRIM(i.IMLITM) AS LARGO, c.CLURDT AS FECHA_JDE,
                 MIN(c.CLUNCS) / 10000 AS COSTE_UNIT,
+                0 AS X_UNIT,
                 SUM(c.CLSTOC) / 10000 AS CANTIDAD
          FROM F554105 c
          JOIN F4101 i ON i.IMITM = c.CLITM
@@ -500,51 +514,83 @@ export async function GET(req: NextRequest) {
        )
        SELECT LARGO, FECHA_JDE,
               SUM(COSTE_UNIT * CANTIDAD) AS IMPORTE,
+              SUM(NVL(X_UNIT, 0) * CANTIDAD) AS IMPORTE_X,
               SUM(CANTIDAD) AS CANTIDAD
-       FROM (SELECT LARGO, FECHA_JDE, COSTE_UNIT, CANTIDAD FROM por_orden
+       FROM (SELECT LARGO, FECHA_JDE, COSTE_UNIT, X_UNIT, CANTIDAD FROM por_orden
              UNION ALL
-             SELECT LARGO, FECHA_JDE, COSTE_UNIT, CANTIDAD FROM sin_orden)
+             SELECT LARGO, FECHA_JDE, COSTE_UNIT, X_UNIT, CANTIDAD FROM sin_orden)
        GROUP BY LARGO, FECHA_JDE`,
       { startJdeCR, endJdeCR, ...binds }
     );
-    // LARGO -> mes 'YYYY-MM' -> { importe, cantidad }. Se guardan los dos
+    // LARGO -> mes 'YYYY-MM' -> { importe, importeX, cantidad }. Se guardan los
     // sumatorios en vez del coste ya dividido: así se pueden agregar varios
     // meses (aquí) o varios artículos (en el frontend, para los gráficos) sin
-    // perder el peso de cada uno.
-    const costeRealPorArticulo = new Map<string, Map<string, { importe: number; cantidad: number }>>();
-    (costeRealResult.rows as { LARGO: string; FECHA_JDE: number; IMPORTE: number; CANTIDAD: number }[]).forEach((r) => {
+    // perder el peso de cada uno. `importe` es el A1 (Material); `importeX` es
+    // el resto de componentes de coste (X1...X9, sin el total 'CR'), que sirve
+    // para limpiar el A1 de los padres (ver xArrastrado()).
+    const costeRealPorArticulo = new Map<string, Map<string, { importe: number; importeX: number; cantidad: number }>>();
+    (costeRealResult.rows as { LARGO: string; FECHA_JDE: number; IMPORTE: number; IMPORTE_X: number; CANTIDAD: number }[]).forEach((r) => {
       // CLURDT lleva el prefijo de siglo (CYYDDD, p.ej. 126182); fechaJdeAMes()
       // espera el valor sin él, igual que MOD(TO55TAREA, 100000) más arriba.
       const mes = fechaJdeAMes(r.FECHA_JDE % 100000);
       if (!costeRealPorArticulo.has(r.LARGO)) costeRealPorArticulo.set(r.LARGO, new Map());
       const porMes = costeRealPorArticulo.get(r.LARGO)!;
-      const acc = porMes.get(mes) ?? { importe: 0, cantidad: 0 };
+      const acc = porMes.get(mes) ?? { importe: 0, importeX: 0, cantidad: 0 };
       acc.importe += r.IMPORTE;
+      acc.importeX += r.IMPORTE_X;
       acc.cantidad += r.CANTIDAD;
       porMes.set(mes, acc);
     });
 
-    // Coste real del rango completo: media ponderada por la cantidad producida
-    // de las MISMAS órdenes que dan el coste — no por la producción de F4111,
-    // que es otra fuente y puede no cuadrar (antes sí lo era, y de ahí salían
-    // los casos de "coste sin peso" que había que parchear con una media
-    // simple). Con un solo mes en el rango es directamente el coste de ese mes.
-    // `null` si el artículo no tuvo órdenes en el rango.
-    function costeRealNodo(codigo: string): number | null {
+    // A1 real y X real (unitarios) de un artículo en un mes, o en el rango
+    // completo si `mes` es null: media ponderada por la cantidad producida de
+    // las MISMAS órdenes que dan el coste — no por la producción de F4111, que
+    // es otra fuente y puede no cuadrar (antes sí lo era, y de ahí salían los
+    // casos de "coste sin peso" que había que parchear con una media simple).
+    // `a1` es `null` si el artículo no tuvo órdenes en el periodo; `x` es 0 en
+    // ese caso (un comprado no arrastra coste de transformación).
+    function costeRealA1X(codigo: string, mes: string | null): { a1: number | null; x: number } {
       const porMes = costeRealPorArticulo.get(codigo);
-      if (!porMes) return null;
+      if (!porMes) return { a1: null, x: 0 };
       let importe = 0;
+      let importeX = 0;
       let cantidad = 0;
-      porMes.forEach((v) => { importe += v.importe; cantidad += v.cantidad; });
-      return cantidad > 0 ? importe / cantidad : null;
+      porMes.forEach((v, m) => {
+        if (mes !== null && m !== mes) return;
+        importe += v.importe;
+        importeX += v.importeX;
+        cantidad += v.cantidad;
+      });
+      return cantidad > 0 ? { a1: importe / cantidad, x: importeX / cantidad } : { a1: null, x: 0 };
     }
 
-    // Asigna `costeReal` a todo el subárbol — cada nodo con SUS propias órdenes.
-    // Antes heredaba los pesos mensuales del artículo final, porque el coste
-    // venía de una tabla que no sabía nada de órdenes de fabricación.
-    function asignarCosteReal(n: DespieceNode): void {
-      n.costeReal = costeRealNodo(n.codigo);
-      n.children.forEach(asignarCosteReal);
+    // Coste de transformación (X1...X9) que el A1 de un artículo arrastra de
+    // TODOS sus componentes, a cualquier nivel, por unidad del artículo: JDE
+    // mete el coste total de un semielaborado como material de su padre, así
+    // que el A1 del padre lleva dentro los X de los hijos. Se calcula con la
+    // cantidad SIN redondear (RawNode) — la de DespieceNode va a 3 decimales y
+    // perdería los componentes de cantidad muy pequeña. Memoizado por nodo y
+    // periodo: el árbol de un final se recorre una sola vez por periodo.
+    const memoXArrastrado = new Map<string, Map<RawNode, number>>();
+    function xArrastrado(n: RawNode, mes: string | null): number {
+      const clave = mes ?? '*';
+      let memo = memoXArrastrado.get(clave);
+      if (!memo) { memo = new Map(); memoXArrastrado.set(clave, memo); }
+      const previo = memo.get(n);
+      if (previo !== undefined) return previo;
+      let total = 0;
+      for (const h of n.children) total += h.cantidad * (costeRealA1X(h.codigo, mes).x + xArrastrado(h, mes));
+      memo.set(n, total);
+      return total;
+    }
+
+    // Coste real A1 "limpio" de un nodo: su A1 real menos los X que arrastra de
+    // sus componentes. Cada nodo con SUS propias órdenes. `null` si el artículo
+    // no tuvo órdenes costeadas en el periodo. Con el A1 de un artículo sin
+    // componentes con órdenes, coincide con el A1 real tal cual.
+    function costeRealLimpio(n: RawNode, mes: string | null): number | null {
+      const { a1 } = costeRealA1X(n.codigo, mes);
+      return a1 === null ? null : a1 - xArrastrado(n, mes);
     }
 
     // I) Catálogo de familia (UDC 41/S2) y de categoría/tipo (UDC 41/S1) — mismo
@@ -577,7 +623,7 @@ export async function GET(req: NextRequest) {
         tipoCod: meta?.TIPO_COD || '',
         obsoleto: meta?.STKT === 'O',
         costeA1: costMap.get(n.codigo) ?? null,
-        costeReal: null, // se rellena después con asignarCosteReal() — depende de los pesos del final
+        costeReal: costeRealLimpio(n, null),
         cantidad: Math.round(n.cantidad * 1000) / 1000,
         um: n.um,
         children: n.children
@@ -591,17 +637,19 @@ export async function GET(req: NextRequest) {
     // DespieceNode. `enriquecer()` ya deja `produccion` como `undefined` en todo
     // el árbol (no está en el objeto que devuelve); aquí se rellena SOLO para los
     // finales, con lo que haya en produccionMap (0 si no tuvo producción real).
-    // `costeReal` sí se rellena en TODO el árbol de cada final, con los pesos
-    // mensuales (producción) de ESE final — ver asignarCosteReal() más arriba.
+    // `costeReal` ya viene rellenado en TODO el árbol por `enriquecer()` (A1
+    // limpio, cada nodo con SUS propias órdenes — ver costeRealLimpio()); aquí
+    // solo se calcula el desglose mensual de la raíz.
+    const arbolPorFinal = new Map(arboles.map((a) => [a.codigo, a]));
     finalesOut.forEach((f) => {
       f.produccion = produccionMap.get(f.codigo) ?? 0;
-      asignarCosteReal(f);
+      const raiz = arbolPorFinal.get(f.codigo)!;
       f.produccionPorMes = mesesRango.map((mes) => ({ mes, produccion: produccionMensualMap.get(f.codigo)?.get(mes) ?? 0 }));
       f.costeRealPorMes = mesesRango.map((mes) => {
         const acc = costeRealPorArticulo.get(f.codigo)?.get(mes);
         return {
           mes,
-          costeReal: acc && acc.cantidad > 0 ? acc.importe / acc.cantidad : null,
+          costeReal: costeRealLimpio(raiz, mes),
           cantidad: acc?.cantidad ?? 0,
         };
       });

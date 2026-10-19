@@ -365,8 +365,9 @@ function buildColumns(sortBy: SortBy, sortDir: "asc" | "desc") {
       ),
     }),
     // Coste real: coste A1 de las órdenes de fabricación costeadas del rango
-    // (F554105 + F55CR001, CRCOST='A1'), media ponderada por la cantidad
-    // producida en esas órdenes — ver app/api/costes/route.ts, apartado H.1, y
+    // (F554105 + F55CR001, CRCOST='A1') menos los X que arrastran sus
+    // componentes ("A1 limpio"), media ponderada por la cantidad producida en
+    // esas órdenes — ver app/api/costes/route.ts, apartado H.1, y
     // docs/costes.md §3.4. "—" cuando el artículo no tuvo ninguna orden
     // costeada en el rango (todo lo comprado, p.ej.).
     columnHelper.display({
