@@ -226,13 +226,23 @@ contra datos reales antes de escribir una línea de código (artículo
    se fabrica con orden propia (envases, etiquetas, materia prima) sale en
    `F554105` con `CLURAB = 0`, así que no hay nada que cruzar con `F55CR001`.
    Para esos, el coste unitario real **ya viene dado** en `CLUNCS`/10000 de la
-   propia `F554105`, y es idéntico en todos los palet_lote del mismo día
-   (verificado con `1312800005`, julio 2026: 3,90 € en los 14 días del mes).
+   propia `F554105`. **No siempre es el mismo en todos los palet_lote del día**:
+   con `1312800005` (julio 2026) sí, 3,90 € los 14 días del mes, pero con
+   `1410900003` (palets, septiembre 2026) unos palets van a 2 € y otros a
+   ~0,79 € el mismo día. Por eso el coste del día es la **media ponderada de
+   sus líneas**, `Σ(CLUNCS × CLSTOC) / Σ CLSTOC` (`/10000`), y no `MIN(CLUNCS)`,
+   que era lo que había: valía solo cuando el coste es único y, si no, cogía el
+   más bajo para toda la cantidad del día (para ese artículo salía ~0,91 en vez
+   de ~1,90, contrastado con la media hecha a mano sobre la exportación de
+   JDE). Si el coste es único, el resultado es el mismo que antes.
    Ojo a la diferencia: en esas filas `CLSTOC` es la cantidad de **cada
    palet** (varía dentro del mismo día), no la de una orden repetida — el peso
-   del día es la **suma** de los palets, no su máximo. Las dos vías (con orden
-   y sin ella) se unen con un `UNION ALL` en la misma consulta y desde ahí se
-   tratan igual.
+   del día es la **suma** de los palets, no su máximo. **Cada línea de
+   `F554105` cuenta, sin deduplicar** (confirmado con el usuario: en la
+   exportación de ese artículo, todas las líneas del almacén 10300 salían
+   dos veces idénticas, y se cuentan las dos). Las dos vías (con orden y sin
+   ella) se unen con un `UNION ALL` en la misma consulta y desde ahí se tratan
+   igual.
 5. **Media ponderada por la cantidad**, tanto para agregar las
    órdenes de un mes como para agregar los meses de un rango:
    `Σ(coste_unitario × cantidad) / Σ cantidad`. Como el peso es la cantidad de

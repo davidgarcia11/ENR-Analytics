@@ -81,9 +81,12 @@
 //   periodo (comprado) aporta X = 0. Ver docs/costes.md §3.4.
 //   Los COMPONENTES (envases, etiquetas, materia prima) no tienen orden
 //   (`CLURAB = 0`) y por tanto no cruzan con F55CR001: su coste unitario real
-//   ya viene dado en F554105, `CLUNCS`/10000, igual en todos los palet_lote
-//   del mismo día, y ahí `CLSTOC` es la cantidad de CADA palet (no la de una
-//   orden), así que el peso del día es su suma. Las dos vías se unen con un
+//   ya viene dado en F554105, `CLUNCS`/10000, y ahí `CLSTOC` es la cantidad de
+//   CADA palet (no la de una orden). `CLUNCS` NO es siempre igual en todos los
+//   palet_lote del mismo día (1410900003, septiembre 2026: unos a 2 y otros a
+//   ~0,79 el mismo día), así que el coste del día es la media ponderada de sus
+//   líneas, `Σ(CLUNCS × CLSTOC) / Σ CLSTOC`, y el peso del día es `Σ CLSTOC`. Se
+//   cuenta cada línea de F554105, sin deduplicar. Las dos vías se unen con un
 //   UNION ALL y a partir de ahí se tratan igual (ver H.1).
 //   El coste de un mes (o del rango entero) es la media PONDERADA por la
 //   cantidad producida — el peso sale de la misma fila que el coste, así que no
@@ -456,12 +459,17 @@ export async function GET(req: NextRequest) {
     //   b) `CLURAB = 0` (componentes: envases, etiquetas, materia prima...):
     //      no tienen orden, así que no hay nada que cruzar con F55CR001 — ahí
     //      el coste unitario real ya viene dado en la propia F554105,
-    //      `CLUNCS`/10000. Comprobado con datos reales (1312800005, julio
-    //      2026): es el mismo valor en todos los palet_lote del día (y de
-    //      hecho del mes entero), mientras que `CLSTOC` sí varía palet a
-    //      palet — o sea que ahí CLSTOC es la cantidad DE CADA PALET, no la
-    //      de una orden, y el peso del día es su SUMA (a diferencia del
-    //      camino (a), donde CLSTOC se repite y se deduplica).
+    //      `CLUNCS`/10000. `CLSTOC` varía palet a palet — o sea que ahí es la
+    //      cantidad DE CADA PALET, no la de una orden, y el peso del día es
+    //      su SUMA (a diferencia del camino (a), donde CLSTOC se repite y se
+    //      deduplica). `CLUNCS` puede ser el mismo en todo el día (1312800005,
+    //      julio 2026: 3,90 € el mes entero) o NO (1410900003, septiembre
+    //      2026: unos palets a 2 y otros a ~0,79 el mismo día). Antes se
+    //      tomaba `MIN(CLUNCS)` por día, que solo vale en el primer caso: en el
+    //      segundo escogía el coste más bajo para TODA la cantidad del día
+    //      (~0,91 en vez de ~1,90). Ahora es la media ponderada por línea, que
+    //      da lo mismo si el coste es único y lo correcto si no lo es. Cada línea
+    //      de F554105 cuenta, sin deduplicar (confirmado con el usuario).
     //   Las dos ramas devuelven (artículo, día, coste unitario, cantidad) y
     //   se agregan juntas con un UNION ALL: a partir de ahí el tratamiento es
     //   idéntico (media ponderada por cantidad, por mes y por rango).
@@ -501,7 +509,7 @@ export async function GET(req: NextRequest) {
        ),
        sin_orden AS (
          SELECT TRIM(i.IMLITM) AS LARGO, c.CLURDT AS FECHA_JDE,
-                MIN(c.CLUNCS) / 10000 AS COSTE_UNIT,
+                SUM(c.CLUNCS * c.CLSTOC) / NULLIF(SUM(c.CLSTOC), 0) / 10000 AS COSTE_UNIT,
                 0 AS X_UNIT,
                 SUM(c.CLSTOC) / 10000 AS CANTIDAD
          FROM F554105 c
