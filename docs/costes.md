@@ -272,6 +272,17 @@ usuario. El coste real de un artículo es lo que ha costado fabricarlo, se
 fabricara donde se fabricara; partirlo por planta daría un coste distinto del
 que maneja la empresa. No añadir `CLMCU` a esta consulta pensando que falta.
 
+**Fechas del rango (`CLURDT`)**: el rango se pasa a juliano con `isoToJulian()`
+(`lib/utils.ts`), que construye la fecha a medianoche **local**. Hasta la v1.34.2 su
+`getDayOfYear()` devolvía un día menos con esas fechas en horario de verano, así que
+elegir septiembre pedía a `F554105` del 31/08 al 29/09 (126243–126272 en vez de
+126244–126273): se perdían las líneas del último día y se colaban las del anterior.
+Se vio con `1410900003` (el panel daba 1,8944 y la media de las 232 líneas de
+septiembre era 1,8953). Ahora cuenta el día de calendario en UTC y
+`__tests__/utils.test.ts` lo fija con la zona horaria de España. Las demás rutas no se
+veían afectadas: construyen la fecha con `new Date('YYYY-MM-DD')` (medianoche UTC), que
+ya salía bien.
+
 **A1 limpio — `costeReal` es el A1 menos los X que arrastran los componentes.**
 JDE mete el coste **total** (A1 + X) de un semielaborado como material de su
 padre, de modo que el A1 real de un artículo incluye el coste de
