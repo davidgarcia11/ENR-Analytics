@@ -90,8 +90,13 @@ export function parseWasOqs(val: number | string): number {
 
 // Equivalente nativo a getDayOfYear de date-fns
 // Devuelve el día del año (1-366) para una fecha dada
+// Se calcula con el día de calendario local (año/mes/día) pasado a UTC. La versión anterior
+// restaba dos fechas locales y hacía `Math.floor` de la diferencia en días: con una fecha a
+// medianoche local en horario de verano (`new Date(y, m, d)`, como en isoToJulian) la resta
+// pierde una hora y salía un día MENOS (01/09/2026 → 243 en vez de 244). Con `new Date('2026-09-01')`
+// (medianoche UTC) salía bien por casualidad, de ahí que solo fallara /costes.
 export function getDayOfYear(date: Date): number {
-    return Math.floor((date.getTime() - new Date(date.getFullYear(), 0, 0).getTime()) / 86400000);
+    return Math.round((Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()) - Date.UTC(date.getFullYear(), 0, 0)) / 86400000);
 }
 
 // Convierte una fecha ISO (YYYY-MM-DD) al formato Julian de JDE (CYYDDD)
