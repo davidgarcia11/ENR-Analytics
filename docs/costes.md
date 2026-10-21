@@ -200,7 +200,7 @@ ledger de coste real `'CR'`:
 | Tabla | Qué es | Campos usados |
 |---|---|---|
 | `F554105` (`CLLEDG='CR'`) | Una fila **por palet_lote**, con el coste real de la orden a la que pertenece | `CLURAB` = orden, `CLURDT` = fecha de la orden (juliano `CYYDDD`), `CLSTOC`/10000 = cantidad producida en la orden, `CLITM` = artículo (código **corto**) |
-| `F55CR001` (`CRLEDG='CR'`) | Desglose del coste real **de cada orden** por componente de coste | `CRDOCO` = orden, `CRCOST` = componente (se usa solo `A1`; existen además `X1`…`X9` y `CR`), `CRUNCS`/10000 = importe de TODA la orden para ese componente |
+| `F55CR001` (`CRLEDG='CR'`) | Desglose del coste real **de cada orden** por componente de coste | `CRDOCO` = orden, `CRCOST` = componente (`A1` es el coste del artículo; `X1`…`X9` se usan solo para limpiar el A1 de los padres, ver «A1 limpio»; `CR` es el total y no se usa), `CRUNCS`/10000 = importe de TODA la orden para ese componente |
 
 Reglas de cálculo, todas confirmadas con el usuario y verificadas a mano
 contra datos reales antes de escribir una línea de código (artículo
@@ -214,25 +214,36 @@ contra datos reales antes de escribir una línea de código (artículo
 2. **`CRUNCS` es el importe de la orden entera, no unitario.** El coste
    unitario es `(CRUNCS/10000) / cantidad_de_la_orden`, **redondeado a 4
    decimales**.
-3. **Solo `CRCOST = 'A1'`** (Material). Es el mismo componente de coste que el
+3. **El coste del artículo es solo `CRCOST = 'A1'`** (Material). Es el mismo componente de coste que el
    teórico (§3.1, `F30026` con `IECOST='A1'`), así que las dos cifras comparan
    lo mismo y la desviación es de coste de material — no la diferencia entre
    "todo el coste" y "una parte", que es justo el error que tenía la primera
-   versión de este panel (§3.4.1). Los demás componentes (`X1`…`X9`) quedan
-   fuera, y `CR` también: es el total de la orden. **Ojo:** el A1 de un
+   versión de este panel (§3.4.1). Los demás componentes (`X1`…`X9`) no suman
+   al coste del artículo (solo sirven para limpiar el A1 de sus padres), y `CR`
+   queda fuera: es el total de la orden. **Ojo:** el A1 de un
    artículo todavía lleva dentro los X de sus componentes — ver «A1 limpio»
    más abajo, que es lo que realmente se devuelve como `costeReal`.
 4. **Los componentes no tienen orden — se calculan aparte.** Todo lo que no
    se fabrica con orden propia (envases, etiquetas, materia prima) sale en
    `F554105` con `CLURAB = 0`, así que no hay nada que cruzar con `F55CR001`.
    Para esos, el coste unitario real **ya viene dado** en `CLUNCS`/10000 de la
-   propia `F554105`, y es idéntico en todos los palet_lote del mismo día
-   (verificado con `1312800005`, julio 2026: 3,90 € en los 14 días del mes).
+   propia `F554105`. **No siempre es el mismo en todos los palet_lote del día**:
+   con `1312800005` (julio 2026) sí, 3,90 € los 14 días del mes, pero con
+   `1410900003` (palets, septiembre 2026) unos palets van a 2 € y otros a
+   ~0,79 € el mismo día. Por eso el coste del día es la **media ponderada de
+   sus líneas**, `Σ(CLUNCS × CLSTOC) / Σ CLSTOC` (`/10000`), y no `MIN(CLUNCS)`,
+   que era lo que había: valía solo cuando el coste es único y, si no, cogía el
+   más bajo para toda la cantidad del día (para ese artículo salía ~0,91 en vez
+   de ~1,90, contrastado con la media hecha a mano sobre la exportación de
+   JDE). Si el coste es único, el resultado es el mismo que antes.
    Ojo a la diferencia: en esas filas `CLSTOC` es la cantidad de **cada
    palet** (varía dentro del mismo día), no la de una orden repetida — el peso
-   del día es la **suma** de los palets, no su máximo. Las dos vías (con orden
-   y sin ella) se unen con un `UNION ALL` en la misma consulta y desde ahí se
-   tratan igual.
+   del día es la **suma** de los palets, no su máximo. **Cada línea de
+   `F554105` cuenta, sin deduplicar** (confirmado con el usuario: en la
+   exportación de ese artículo, todas las líneas del almacén 10300 salían
+   dos veces idénticas, y se cuentan las dos). Las dos vías (con orden y sin
+   ella) se unen con un `UNION ALL` en la misma consulta y desde ahí se tratan
+   igual.
 5. **Media ponderada por la cantidad**, tanto para agregar las
    órdenes de un mes como para agregar los meses de un rango:
    `Σ(coste_unitario × cantidad) / Σ cantidad`. Como el peso es la cantidad de
