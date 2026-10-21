@@ -156,7 +156,16 @@ garantía de "misma función para ambos caminos". **No genera entrada en `query_
   (`SidebarProvider` con `has-data-[variant=inset]:bg-sidebar` + `SidebarInset` con
   `bg-background` + margen/radio), replicado a mano porque este panel no usa un sidebar
   real — confirmado leyendo el proyecto completo de ShadcnSpace (`layout.tsx` +
-  `sidebar.tsx`), no adivinado.
+  `sidebar.tsx`), no adivinado. (Hoy ese armazón lo monta `NovaPanelShell` con la barra
+  lateral real, `components/nova/panel-shell.tsx`; ver `components/nova/README.md`
+  puntos 12 y 14.)
+- **Aspecto: líneas, separadores y sombras** (igual que el dashboard de referencia de
+  ShadcnSpace, medido píxel a píxel): tarjetas sin anillo y con sombra azulada
+  `shadow-[0_1px_4px_rgba(133,146,173,.2)]` (las KPI, además, `border`); bordes
+  `#e5e5e5`; `shadow-xs` en botón `outline`, `Input` y `SelectTrigger`; tarjeta de
+  contenido con contorno de 1 px y sombra suave. No pisar la sombra de una `Card` con
+  `shadow-none`, ni volver al `px-0` en la barra lateral (taparía la línea que la
+  separa del contenido). Detalle y motivos en `components/nova/README.md`, punto 14.
 - **Nav con caja bordeada propia**: la fila de dropdowns (`topbar-02`) va envuelta en
   `rounded-lg border border-border px-2 py-2`, separada del bloque logo/iconos de arriba
   (que no tiene ninguna línea divisoria) — mismo patrón que

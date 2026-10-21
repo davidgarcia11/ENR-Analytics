@@ -200,7 +200,7 @@ ledger de coste real `'CR'`:
 | Tabla | Qué es | Campos usados |
 |---|---|---|
 | `F554105` (`CLLEDG='CR'`) | Una fila **por palet_lote**, con el coste real de la orden a la que pertenece | `CLURAB` = orden, `CLURDT` = fecha de la orden (juliano `CYYDDD`), `CLSTOC`/10000 = cantidad producida en la orden, `CLITM` = artículo (código **corto**) |
-| `F55CR001` (`CRLEDG='CR'`) | Desglose del coste real **de cada orden** por componente de coste | `CRDOCO` = orden, `CRCOST` = componente (se usa solo `A1`; existen además `X1`…`X9` y `CR`), `CRUNCS`/10000 = importe de TODA la orden para ese componente |
+| `F55CR001` (`CRLEDG='CR'`) | Desglose del coste real **de cada orden** por componente de coste | `CRDOCO` = orden, `CRCOST` = componente (`A1` es el coste del artículo; `X1`…`X9` se usan solo para limpiar el A1 de los padres, ver «A1 limpio»; `CR` es el total y no se usa), `CRUNCS`/10000 = importe de TODA la orden para ese componente |
 
 Reglas de cálculo, todas confirmadas con el usuario y verificadas a mano
 contra datos reales antes de escribir una línea de código (artículo
@@ -214,12 +214,13 @@ contra datos reales antes de escribir una línea de código (artículo
 2. **`CRUNCS` es el importe de la orden entera, no unitario.** El coste
    unitario es `(CRUNCS/10000) / cantidad_de_la_orden`, **redondeado a 4
    decimales**.
-3. **Solo `CRCOST = 'A1'`** (Material). Es el mismo componente de coste que el
+3. **El coste del artículo es solo `CRCOST = 'A1'`** (Material). Es el mismo componente de coste que el
    teórico (§3.1, `F30026` con `IECOST='A1'`), así que las dos cifras comparan
    lo mismo y la desviación es de coste de material — no la diferencia entre
    "todo el coste" y "una parte", que es justo el error que tenía la primera
-   versión de este panel (§3.4.1). Los demás componentes (`X1`…`X9`) quedan
-   fuera, y `CR` también: es el total de la orden. **Ojo:** el A1 de un
+   versión de este panel (§3.4.1). Los demás componentes (`X1`…`X9`) no suman
+   al coste del artículo (solo sirven para limpiar el A1 de sus padres), y `CR`
+   queda fuera: es el total de la orden. **Ojo:** el A1 de un
    artículo todavía lleva dentro los X de sus componentes — ver «A1 limpio»
    más abajo, que es lo que realmente se devuelve como `costeReal`.
 4. **Los componentes no tienen orden — se calculan aparte.** Todo lo que no
