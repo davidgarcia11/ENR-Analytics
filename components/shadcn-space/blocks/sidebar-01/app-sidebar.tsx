@@ -29,11 +29,9 @@ export function AppSidebar({ items }: { items: NavItem[] }) {
           <SidebarMenu>
             <SidebarMenuItem>
               <Link href="/" className="w-full h-full">
-                {/* Logo completo abierto; cuadrado con iniciales cuando está colapsado */}
+                {/* Logo completo abierto; solo el símbolo (cuchara con hojas) cuando está colapsado */}
                 <Image src="/logo.png" alt="Elaborados Naturales" width={112} height={50} priority className="h-10 w-auto group-data-[collapsible=icon]:hidden" />
-                <span className="hidden size-8 items-center justify-center rounded-lg bg-sidebar-primary text-xs font-semibold text-sidebar-primary-foreground group-data-[collapsible=icon]:flex">
-                  EN
-                </span>
+                <Image src="/logo-icon.png" alt="Elaborados Naturales" width={128} height={59} className="hidden w-8 h-auto group-data-[collapsible=icon]:block" />
               </Link>
             </SidebarMenuItem>
           </SidebarMenu>
