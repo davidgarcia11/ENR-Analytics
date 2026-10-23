@@ -21,11 +21,9 @@ import {
   Eraser,
   RefreshCw,
 } from "lucide-react";
-import Header from "@/components/shadcn-space/blocks/topbar-02/header";
+import NovaPanelShell from "@/components/nova/panel-shell";
 import { RequireAccess, useApiFetch, useSession } from "@/components/SessionProvider";
 import { tienePermiso } from "@/lib/permisos";
-import { type ThemeMode } from "@/components/nova/mode-toggle";
-import { NovaPortalProvider } from "@/components/nova/portal-container";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/nova/ui/card";
 import { Alert, AlertDescription } from "@/components/nova/ui/alert";
 import { Button } from "@/components/nova/ui/button";
@@ -34,7 +32,6 @@ import { Input } from "@/components/nova/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/nova/ui/select";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/nova/ui/dialog";
 import { Combobox, ComboboxContent, ComboboxEmpty, ComboboxInput, ComboboxItem, ComboboxList } from "@/components/nova/ui/combobox";
-import { Toaster } from "@/components/nova/ui/sonner";
 import {
   INFO_PIEZA, MAX_MANUAL, aplicarAjusteTurno, componerCampos, diasPorTurno, piezasManuales, variablesUsadas,
   type AjusteTurno, type Campo, type TipoVariable,
@@ -146,20 +143,8 @@ function defaultFormState(): LoteadoraFormState {
 function LoteadoraPanel() {
   // Sesión, logout y el manejo del 401 vienen del provider compartido
   // (components/SessionProvider.tsx) — antes cada panel se los montaba aparte.
-  const { user: sessionUser, logout } = useSession();
+  const { user: sessionUser } = useSession();
   const apiFetch = useApiFetch();
-
-  const [mode, setMode] = useState<ThemeMode>("system");
-  const [systemPrefersDark, setSystemPrefersDark] = useState(false);
-  useEffect(() => {
-    const mq = window.matchMedia("(prefers-color-scheme: dark)");
-    setSystemPrefersDark(mq.matches);
-    const handler = (e: MediaQueryListEvent) => setSystemPrefersDark(e.matches);
-    mq.addEventListener("change", handler);
-    return () => mq.removeEventListener("change", handler);
-  }, []);
-  const effectiveTheme = mode === "system" ? (systemPrefersDark ? "dark" : "light") : mode;
-  const portalContainerRef = useRef<HTMLDivElement>(null);
 
   // Selección de artículo (búsqueda directa, sin marca)
   const [articulos, setArticulos] = useState<Articulo[]>([]);
@@ -547,438 +532,429 @@ function LoteadoraPanel() {
   const articuloPlaceholder = !selectedLoteadora ? "Elige primero la loteadora" : loadingArticulos ? "Cargando…" : articuloIds.length === 0 ? "Sin artículos disponibles para esta loteadora" : "Buscar por código o descripción…";
 
   return (
-    <div data-nova-theme={effectiveTheme} ref={portalContainerRef} className="min-h-screen bg-sidebar text-foreground">
-      <NovaPortalProvider container={portalContainerRef}>
-        <div className="overflow-hidden bg-background md:m-2 md:rounded-xl md:shadow-sm md:outline md:outline-border">
-          <Header user={sessionUser} onLogout={logout} mode={mode} onModeChange={setMode} />
+    <NovaPanelShell title="Loteadora" grupo="Apps">
+      <Card>
+        <CardHeader className="flex flex-wrap items-center justify-between gap-2 border-b pb-4">
+          <CardTitle>Loteadora</CardTitle>
+          <Badge className={jdeOnline ? "bg-emerald-400/10 text-emerald-600" : "bg-rose-400/10 text-rose-500"}>
+            {jdeOnline ? <CheckCircle2 className="size-3" /> : <XCircle className="size-3" />}
+            {jdeOnline ? "JDE conectado" : "JDE caído"}
+          </Badge>
+        </CardHeader>
+        <CardContent className="grid grid-cols-1 gap-6 pt-4 lg:grid-cols-[1fr_1.2fr] lg:divide-x lg:divide-border">
+          {/* ── Columna izquierda: formulario (compacto) ── */}
+          <div className="space-y-3 lg:pr-6">
+            <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Datos del artículo</p>
 
-          <main className="mx-auto max-w-7xl space-y-4 p-4 md:p-6">
-            <Card>
-              <CardHeader className="flex flex-wrap items-center justify-between gap-2 border-b pb-4">
-                <CardTitle>Loteadora</CardTitle>
-                <Badge className={jdeOnline ? "bg-emerald-400/10 text-emerald-600" : "bg-rose-400/10 text-rose-500"}>
-                  {jdeOnline ? <CheckCircle2 className="size-3" /> : <XCircle className="size-3" />}
-                  {jdeOnline ? "JDE conectado" : "JDE caído"}
-                </Badge>
-              </CardHeader>
-              <CardContent className="grid grid-cols-1 gap-6 pt-4 lg:grid-cols-[1fr_1.2fr] lg:divide-x lg:divide-border">
-                {/* ── Columna izquierda: formulario (compacto) ── */}
-                <div className="space-y-3 lg:pr-6">
-                  <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Datos del artículo</p>
-
-                  {/* Primero la loteadora: el artículo carga su plantilla en ella */}
-                  <div className="grid gap-1.5">
-                    <div className="flex items-center justify-between">
-                      <label className="text-xs font-semibold text-foreground">Loteadora</label>
-                      {selectedLoteadora && (
-                        <Button type="button" variant="ghost" size="icon-xs" onClick={fetchEstadoLoteadoras} disabled={loadingEstado} title="Refrescar el estado de la máquina">
-                          <RefreshCw className={loadingEstado ? "size-3.5 animate-spin" : "size-3.5"} />
-                        </Button>
-                      )}
-                    </div>
-                    <Select items={loteadoraItems} value={selectedLoteadora || null} onValueChange={(v) => handleLoteadoraSelect(v as string)}>
-                      <SelectTrigger className="w-full">
-                        <SelectValue placeholder={loteadoras.length === 0 ? "Sin loteadoras configuradas" : "Seleccionar loteadora…"} />
-                      </SelectTrigger>
-                      <SelectContent align="start" alignItemWithTrigger={false}>
-                        {loteadoras.map((l) => (
-                          <SelectItem
-                            key={l.id}
-                            value={String(l.id)}
-                            disabled={estadoDe(String(l.id)) === "apagada"}
-                            title={estadoLoteadoras.find((e) => e.id === l.id)?.motivo}
-                          >
-                            {l.name}{l.zona && <span className="text-muted-foreground"> · {l.zona}</span>}
-                            {estadoDe(String(l.id)) === "apagada" && <span className="text-muted-foreground"> · Sin conexión</span>}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-
-                  {imprimiendo && (
-                    <Alert className="border-amber-500/20 bg-amber-400/10 py-2">
-                      <AlertTriangle className="text-amber-600" />
-                      <AlertDescription className="flex flex-wrap items-center gap-x-2 text-xs text-amber-700 dark:text-amber-400">
-                        La loteadora está imprimiendo: para la impresión en la máquina para cambiar de artículo o enviar datos.
-                        <button type="button" onClick={fetchEstadoLoteadoras} className="underline hover:opacity-80">Comprobar de nuevo</button>
-                      </AlertDescription>
-                    </Alert>
-                  )}
-
-                  {sinConexion && (
-                    <Alert className="border-rose-500/20 bg-rose-400/10 py-2">
-                      <PowerOff className="text-rose-500" />
-                      <AlertDescription className="flex flex-wrap items-center gap-x-2 text-xs text-rose-600">
-                        {estadoLoteadoras.find((e) => String(e.id) === selectedLoteadora)?.motivo ?? "La loteadora no responde"}. Comprueba que está encendida y con el cable de red.
-                        <button type="button" onClick={fetchEstadoLoteadoras} className="underline hover:opacity-80">Comprobar de nuevo</button>
-                      </AlertDescription>
-                    </Alert>
-                  )}
-
-                  {selectedLoteadora && !lineaLoteadora && necesita("linea") && (
-                    <Alert className="border-amber-500/20 bg-amber-400/10 py-2">
-                      <AlertTriangle className="text-amber-600" />
-                      <AlertDescription className="text-xs text-amber-700 dark:text-amber-400">
-                        Esta loteadora no tiene línea de fabricación configurada — configúrala en /admin antes de poder enviar.
-                      </AlertDescription>
-                    </Alert>
-                  )}
-
-                  {/* Solo con permiso (admin o 'loteadora.limpiar-buffer'): descarta envíos pendientes */}
-                  {selectedLoteadora && tienePermiso(sessionUser, "loteadora.limpiar-buffer") && (
-                    <div className="grid gap-1.5">
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="sm"
-                        onClick={handleLimpiarBuffer}
-                        disabled={limpiandoBuffer}
-                        className="w-fit whitespace-nowrap"
-                        title="Vacía la cola de campos remotos pendientes (equivale a pulsar Clear en Ajustes de comunicación > Buffer en la máquina). No imprime nada."
-                      >
-                        {limpiandoBuffer ? <Loader2 className="size-3.5 animate-spin" /> : <Eraser className="size-3.5" />}
-                        Limpiar buffer
-                      </Button>
-                    </div>
-                  )}
-
-
-                  <div className="grid gap-1.5">
-                    <label className="text-xs font-semibold text-foreground">
-                      Artículo
-                      {loadingArticulos && <Loader2 className="ml-1.5 inline size-3 animate-spin text-muted-foreground" />}
-                    </label>
-                    <Combobox
-                      items={articuloIds}
-                      value={selectedArticulo?.id ?? null}
-                      onValueChange={(v) => handleArticuloChange(v as string | null)}
-                      itemToStringLabel={articuloLabel}
-                    >
-                      <ComboboxInput placeholder={articuloPlaceholder} disabled={!selectedLoteadora || !jdeOnline || loadingArticulos || imprimiendo || sinConexion} showClear />
-                      <ComboboxContent>
-                        <ComboboxEmpty>Sin resultados</ComboboxEmpty>
-                        <ComboboxList>
-                          {(id: string) => (
-                            <ComboboxItem key={id} value={id}>{articuloLabel(id)}</ComboboxItem>
-                          )}
-                        </ComboboxList>
-                      </ComboboxContent>
-                    </Combobox>
-                  </div>
-
-                  {selectedArticulo && !selectedArticulo.plantilla && (
-                    <Alert className="border-amber-500/20 bg-amber-400/10 py-2">
-                      <AlertTriangle className="text-amber-600" />
-                      <AlertDescription className="text-xs text-amber-700 dark:text-amber-400">
-                        Este artículo no tiene una plantilla asociada — configúralo en /admin antes de poder enviar.
-                      </AlertDescription>
-                    </Alert>
-                  )}
-
-                  {/* Lote Fresco y Juliano Cocida lado a lado — ambas de introducción
-                      manual: el operario escribe el contenido exacto del lote (tal cual se
-                      envía) y solo el día juliano de la cocida (el año se infiere, ver
-                      resolveCocidaYear). La caducidad se calcula desde cocida, no desde
-                      fabricación. */}
-                  <div className="grid grid-cols-2 gap-3">
-                    {necesita("fresco") && (
-                    <div className="grid gap-1.5">
-                      <label className="text-xs font-semibold text-foreground">Lote Fresco</label>
-                      <Input
-                        type="text"
-                        inputMode="numeric"
-                        value={loteManual}
-                        onChange={(e) => setLoteManual(e.target.value)}
-                        placeholder="Ej: 263221"
-                        maxLength={6}
-                      />
-                    </div>
-                    )}
-                    {(necesita("cocida") || necesita("caducidad")) && (
-                    <div className="grid gap-1.5">
-                      {/* El aviso va en línea con la etiqueta (no debajo del input) para que
-                          no cambie de alto al aparecer/desaparecer y desplace el resto del
-                          formulario — mismo patrón que los badges de "Días de caducidad". */}
-                      <div className="flex items-center justify-between gap-2">
-                        <label className="text-xs font-semibold text-foreground">Juliano Cocida</label>
-                        {cocidaAnioAnterior && (
-                          <Badge variant="outline" className="gap-1 text-amber-600">
-                            <CalendarIcon className="size-3" />
-                            Año anterior ({cocida})
-                          </Badge>
-                        )}
-                      </div>
-                      <Input
-                        type="text"
-                        inputMode="numeric"
-                        value={cocidaJulianDay}
-                        onChange={(e) => setCocidaJulianDay(e.target.value)}
-                        placeholder="Día juliano (1-366)"
-                        maxLength={3}
-                      />
-                    </div>
-                    )}
-                  </div>
-
-                  {necesita("caducidad") && (
-                  <div className="grid gap-1.5">
-                    <div className="flex items-center justify-between">
-                      <label className="text-xs font-semibold text-foreground">Días de caducidad</label>
-                      {diasDesdeJde !== null && !modoManual && (
-                        <Badge variant="outline" className="text-sky-600">desde JDE</Badge>
-                      )}
-                      {(!jdeOnline || modoManual) && (
-                        <Badge className="gap-1 bg-amber-400/10 text-amber-600">
-                          <AlertTriangle className="size-3" />manual
-                        </Badge>
-                      )}
-                    </div>
-                    <Input
-                      type="number"
-                      min={1}
-                      max={9999}
-                      value={diasCad}
-                      onChange={(e) => setDiasCad(e.target.value)}
-                      placeholder="Nº de días"
-                      readOnly={diasReadonly}
-                      className={diasReadonly ? "bg-muted text-muted-foreground" : ""}
-                    />
-                    {jdeOnline && diasDesdeJde !== null && !modoManual && (
-                      <button type="button" onClick={() => setModoManual(true)} className="w-fit text-left text-xs text-muted-foreground underline hover:text-foreground">
-                        Introducir manualmente
-                      </button>
-                    )}
-                    {modoManual && diasDesdeJde !== null && (
-                      <button
-                        type="button"
-                        onClick={() => { setModoManual(false); setDiasCad(String(diasDesdeJde)); }}
-                        className="w-fit text-left text-xs text-muted-foreground underline hover:text-foreground"
-                      >
-                        Usar valor de JDE ({diasDesdeJde} días)
-                      </button>
-                    )}
-                  </div>
-                  )}
-
-                  {necesita("turno") && (
-                  <div className="grid gap-1.5">
-                    <label className="text-xs font-semibold text-foreground">Turno</label>
-                    <Select value={turno || null} onValueChange={(v) => setTurno(v as string)}>
-                      <SelectTrigger className="w-full">
-                        <SelectValue placeholder="Seleccionar turno…" />
-                      </SelectTrigger>
-                      <SelectContent align="start" alignItemWithTrigger={false}>
-                        <SelectItem value="1">1</SelectItem>
-                        <SelectItem value="2">2</SelectItem>
-                        <SelectItem value="3">3</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  )}
-
-                  {/* Datos a introducir de la plantilla (p. ej. nº de certificado Kosher) */}
-                  {plantilla && piezasManuales(plantilla.campos).map((m) => (
-                    <div key={m.nombre} className="grid gap-1.5">
-                      <label className="text-xs font-semibold text-foreground">{m.nombre}</label>
-                      <Input
-                        value={currentForm.manuales[m.nombre] ?? ""}
-                        onChange={(e) => updateForm({ manuales: { ...currentForm.manuales, [m.nombre]: e.target.value } })}
-                        maxLength={MAX_MANUAL}
-                        placeholder={m.porDefecto || m.nombre}
-                        className="font-mono"
-                      />
-                    </div>
-                  ))}
-
-                  {/* La plantilla la decide el artículo (no se puede elegir otra a mano);
-                      el botón solo vuelve a cargar esa, p. ej. si estaba imprimiendo. */}
-                  {selectedLoteadora && plantilla && (
-                    <div className="flex items-center justify-between gap-2 rounded-lg border border-border px-3 py-2">
-                      <div className="min-w-0">
-                        <span className="block text-xs font-semibold text-foreground">
-                          Plantilla
-                        </span>
-                        <span className="block truncate font-mono text-sm text-muted-foreground">{plantilla.messageName}</span>
-                      </div>
-                      <Button type="button" variant="outline" size="sm" onClick={handleCargarMensaje} disabled={!canCargarMensaje} className="whitespace-nowrap">
-                        {cargandoMensaje ? <Loader2 className="size-3.5 animate-spin" /> : <Upload className="size-3.5" />}
-                        Volver a cargar
-                      </Button>
-                    </div>
-                  )}
-                </div>
-
-                {/* ── Columna derecha: la etiqueta es el centro visual ── */}
-                <div className="flex flex-col gap-4 lg:pl-6">
-                  <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Vista previa de impresión</p>
-                  {avisoTurno && (
-                    <p className="flex items-center gap-1.5 text-xs font-medium text-amber-600">
-                      <AlertTriangle className="size-3.5" />{avisoTurno}
-                    </p>
-                  )}
-
-                  {/* Etiqueta: grid de 2 columnas (en vez de la lista apilada original a
-                      text-4xl) — más compacta que la versión original pero con más
-                      presencia que un grid de 3 columnas, para no dejar un hueco enorme
-                      antes del botón "Enviar" (ver §5/§14 docs/loteadora.md). Contorno
-                      sólido, tanto en la tarjeta como en las casillas interiores. */}
-                  <div className="rounded-xl border border-border bg-muted/30 p-6 shadow-sm">
-                    <div className="text-center">
-                      {selectedArticulo ? (
-                        <>
-                          <p className="font-mono text-xs text-muted-foreground">{selectedArticulo.id}</p>
-                          <p className="text-sm font-semibold text-foreground">{selectedArticulo.descripcion}</p>
-                        </>
-                      ) : (
-                        <p className="text-sm text-muted-foreground">Ningún artículo seleccionado</p>
-                      )}
-                    </div>
-                    {plantilla ? (
-                      <>
-                        <p className="mt-3 text-center font-mono text-[11px] text-muted-foreground">{plantilla.messageName}</p>
-                        <div className="mt-3 grid gap-3 sm:grid-cols-2">
-                          {compuestos.map((c, i) => {
-                            const campo = plantilla.campos[i];
-                            return (
-                              <div key={c.fieldId} className="rounded-lg border border-border bg-background px-3 py-3 text-center">
-                                <span className="block text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-                                  Campo {c.fieldId}
-                                </span>
-                                <span className={`block break-all font-mono text-xl font-bold ${c.texto ? "text-foreground" : "text-muted-foreground/30"}`}>
-                                  {c.texto || "—"}
-                                </span>
-                                <span className={`mt-1 block text-[10px] ${c.faltan.length ? "text-amber-600" : "text-muted-foreground"}`}>
-                                  {c.faltan.length
-                                    ? `Falta: ${c.faltan.map((t) => INFO_PIEZA[t].label).join(", ")}`
-                                    : campo.piezas.map((p) => (p.tipo === "fijo" ? p.nombre : INFO_PIEZA[p.tipo].label)).join(" · ")}
-                                </span>
-                              </div>
-                            );
-                          })}
-                        </div>
-                      </>
-                    ) : (
-                      <p className="mt-6 text-center text-sm text-muted-foreground">
-                        {selectedArticulo ? "Este artículo no tiene plantilla: asígnale una en /admin para ver la etiqueta." : "Elige un artículo para ver cómo saldrá la etiqueta."}
-                      </p>
-                    )}
-                  </div>
-
-                  <div className="flex-1" />
-
-                  {sendError && (
-                    <Alert variant="destructive">
-                      <XCircle />
-                      <AlertDescription>
-                        <span className="font-medium">{sendError}</span>
-                        {sendErrorDetail && (
-                          <div className="mt-1">
-                            <button type="button" onClick={() => setShowSendErrorDetail((v) => !v)} className="text-xs underline hover:opacity-80">
-                              {showSendErrorDetail ? "Ocultar detalle" : "Ver más"}
-                            </button>
-                            {showSendErrorDetail && (
-                              <p className="mt-1 text-xs">Estado de la máquina: {sendErrorDetail}</p>
-                            )}
-                          </div>
-                        )}
-                      </AlertDescription>
-                    </Alert>
-                  )}
-
-                  <Button onClick={pedirConfirmacionEnvio} disabled={!canSend} className="h-11 w-full text-sm font-semibold">
-                    {sending ? <><Loader2 className="size-4 animate-spin" />Enviando...</> : <><Send className="size-4" />Enviar a loteadora</>}
+            {/* Primero la loteadora: el artículo carga su plantilla en ella */}
+            <div className="grid gap-1.5">
+              <div className="flex items-center justify-between">
+                <label className="text-xs font-semibold text-foreground">Loteadora</label>
+                {selectedLoteadora && (
+                  <Button type="button" variant="ghost" size="icon-xs" onClick={fetchEstadoLoteadoras} disabled={loadingEstado} title="Refrescar el estado de la máquina">
+                    <RefreshCw className={loadingEstado ? "size-3.5 animate-spin" : "size-3.5"} />
                   </Button>
-                </div>
-              </CardContent>
-            </Card>
+                )}
+              </div>
+              <Select items={loteadoraItems} value={selectedLoteadora || null} onValueChange={(v) => handleLoteadoraSelect(v as string)}>
+                <SelectTrigger className="w-full">
+                  <SelectValue placeholder={loteadoras.length === 0 ? "Sin loteadoras configuradas" : "Seleccionar loteadora…"} />
+                </SelectTrigger>
+                <SelectContent align="start" alignItemWithTrigger={false}>
+                  {loteadoras.map((l) => (
+                    <SelectItem
+                      key={l.id}
+                      value={String(l.id)}
+                      disabled={estadoDe(String(l.id)) === "apagada"}
+                      title={estadoLoteadoras.find((e) => e.id === l.id)?.motivo}
+                    >
+                      {l.name}{l.zona && <span className="text-muted-foreground"> · {l.zona}</span>}
+                      {estadoDe(String(l.id)) === "apagada" && <span className="text-muted-foreground"> · Sin conexión</span>}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
 
-            {/* Estado de las loteadoras (en vivo, se refresca solo cada 60s) */}
-            <Card>
-              <CardHeader className="flex flex-wrap items-center gap-2 border-b pb-4">
-                <Printer className="size-4 text-primary" />
-                <CardTitle>Estado de las loteadoras</CardTitle>
-                <Button type="button" variant="ghost" size="icon-xs" onClick={fetchEstadoLoteadoras} disabled={loadingEstado} title="Refrescar el estado de las máquinas">
-                  <RefreshCw className={loadingEstado ? "size-3.5 animate-spin" : "size-3.5"} />
+            {imprimiendo && (
+              <Alert className="border-amber-500/20 bg-amber-400/10 py-2">
+                <AlertTriangle className="text-amber-600" />
+                <AlertDescription className="flex flex-wrap items-center gap-x-2 text-xs text-amber-700 dark:text-amber-400">
+                  La loteadora está imprimiendo: para la impresión en la máquina para cambiar de artículo o enviar datos.
+                  <button type="button" onClick={fetchEstadoLoteadoras} className="underline hover:opacity-80">Comprobar de nuevo</button>
+                </AlertDescription>
+              </Alert>
+            )}
+
+            {sinConexion && (
+              <Alert className="border-rose-500/20 bg-rose-400/10 py-2">
+                <PowerOff className="text-rose-500" />
+                <AlertDescription className="flex flex-wrap items-center gap-x-2 text-xs text-rose-600">
+                  {estadoLoteadoras.find((e) => String(e.id) === selectedLoteadora)?.motivo ?? "La loteadora no responde"}. Comprueba que está encendida y con el cable de red.
+                  <button type="button" onClick={fetchEstadoLoteadoras} className="underline hover:opacity-80">Comprobar de nuevo</button>
+                </AlertDescription>
+              </Alert>
+            )}
+
+            {selectedLoteadora && !lineaLoteadora && necesita("linea") && (
+              <Alert className="border-amber-500/20 bg-amber-400/10 py-2">
+                <AlertTriangle className="text-amber-600" />
+                <AlertDescription className="text-xs text-amber-700 dark:text-amber-400">
+                  Esta loteadora no tiene línea de fabricación configurada — configúrala en /admin antes de poder enviar.
+                </AlertDescription>
+              </Alert>
+            )}
+
+            {/* Solo con permiso (admin o 'loteadora.limpiar-buffer'): descarta envíos pendientes */}
+            {selectedLoteadora && tienePermiso(sessionUser, "loteadora.limpiar-buffer") && (
+              <div className="grid gap-1.5">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={handleLimpiarBuffer}
+                  disabled={limpiandoBuffer}
+                  className="w-fit whitespace-nowrap"
+                  title="Vacía la cola de campos remotos pendientes (equivale a pulsar Clear en Ajustes de comunicación > Buffer en la máquina). No imprime nada."
+                >
+                  {limpiandoBuffer ? <Loader2 className="size-3.5 animate-spin" /> : <Eraser className="size-3.5" />}
+                  Limpiar buffer
                 </Button>
-              </CardHeader>
-              <CardContent className="pt-4">
-                {estadoLoteadoras.length === 0 ? (
-                  <p className="text-sm text-muted-foreground">No hay loteadoras habilitadas configuradas en /admin.</p>
+              </div>
+            )}
+
+
+            <div className="grid gap-1.5">
+              <label className="text-xs font-semibold text-foreground">
+                Artículo
+                {loadingArticulos && <Loader2 className="ml-1.5 inline size-3 animate-spin text-muted-foreground" />}
+              </label>
+              <Combobox
+                items={articuloIds}
+                value={selectedArticulo?.id ?? null}
+                onValueChange={(v) => handleArticuloChange(v as string | null)}
+                itemToStringLabel={articuloLabel}
+              >
+                <ComboboxInput placeholder={articuloPlaceholder} disabled={!selectedLoteadora || !jdeOnline || loadingArticulos || imprimiendo || sinConexion} showClear />
+                <ComboboxContent>
+                  <ComboboxEmpty>Sin resultados</ComboboxEmpty>
+                  <ComboboxList>
+                    {(id: string) => (
+                      <ComboboxItem key={id} value={id}>{articuloLabel(id)}</ComboboxItem>
+                    )}
+                  </ComboboxList>
+                </ComboboxContent>
+              </Combobox>
+            </div>
+
+            {selectedArticulo && !selectedArticulo.plantilla && (
+              <Alert className="border-amber-500/20 bg-amber-400/10 py-2">
+                <AlertTriangle className="text-amber-600" />
+                <AlertDescription className="text-xs text-amber-700 dark:text-amber-400">
+                  Este artículo no tiene una plantilla asociada — configúralo en /admin antes de poder enviar.
+                </AlertDescription>
+              </Alert>
+            )}
+
+            {/* Lote Fresco y Juliano Cocida lado a lado — ambas de introducción
+                manual: el operario escribe el contenido exacto del lote (tal cual se
+                envía) y solo el día juliano de la cocida (el año se infiere, ver
+                resolveCocidaYear). La caducidad se calcula desde cocida, no desde
+                fabricación. */}
+            <div className="grid grid-cols-2 gap-3">
+              {necesita("fresco") && (
+              <div className="grid gap-1.5">
+                <label className="text-xs font-semibold text-foreground">Lote Fresco</label>
+                <Input
+                  type="text"
+                  inputMode="numeric"
+                  value={loteManual}
+                  onChange={(e) => setLoteManual(e.target.value)}
+                  placeholder="Ej: 263221"
+                  maxLength={6}
+                />
+              </div>
+              )}
+              {(necesita("cocida") || necesita("caducidad")) && (
+              <div className="grid gap-1.5">
+                {/* El aviso va en línea con la etiqueta (no debajo del input) para que
+                    no cambie de alto al aparecer/desaparecer y desplace el resto del
+                    formulario — mismo patrón que los badges de "Días de caducidad". */}
+                <div className="flex items-center justify-between gap-2">
+                  <label className="text-xs font-semibold text-foreground">Juliano Cocida</label>
+                  {cocidaAnioAnterior && (
+                    <Badge variant="outline" className="gap-1 text-amber-600">
+                      <CalendarIcon className="size-3" />
+                      Año anterior ({cocida})
+                    </Badge>
+                  )}
+                </div>
+                <Input
+                  type="text"
+                  inputMode="numeric"
+                  value={cocidaJulianDay}
+                  onChange={(e) => setCocidaJulianDay(e.target.value)}
+                  placeholder="Día juliano (1-366)"
+                  maxLength={3}
+                />
+              </div>
+              )}
+            </div>
+
+            {necesita("caducidad") && (
+            <div className="grid gap-1.5">
+              <div className="flex items-center justify-between">
+                <label className="text-xs font-semibold text-foreground">Días de caducidad</label>
+                {diasDesdeJde !== null && !modoManual && (
+                  <Badge variant="outline" className="text-sky-600">desde JDE</Badge>
+                )}
+                {(!jdeOnline || modoManual) && (
+                  <Badge className="gap-1 bg-amber-400/10 text-amber-600">
+                    <AlertTriangle className="size-3" />manual
+                  </Badge>
+                )}
+              </div>
+              <Input
+                type="number"
+                min={1}
+                max={9999}
+                value={diasCad}
+                onChange={(e) => setDiasCad(e.target.value)}
+                placeholder="Nº de días"
+                readOnly={diasReadonly}
+                className={diasReadonly ? "bg-muted text-muted-foreground" : ""}
+              />
+              {jdeOnline && diasDesdeJde !== null && !modoManual && (
+                <button type="button" onClick={() => setModoManual(true)} className="w-fit text-left text-xs text-muted-foreground underline hover:text-foreground">
+                  Introducir manualmente
+                </button>
+              )}
+              {modoManual && diasDesdeJde !== null && (
+                <button
+                  type="button"
+                  onClick={() => { setModoManual(false); setDiasCad(String(diasDesdeJde)); }}
+                  className="w-fit text-left text-xs text-muted-foreground underline hover:text-foreground"
+                >
+                  Usar valor de JDE ({diasDesdeJde} días)
+                </button>
+              )}
+            </div>
+            )}
+
+            {necesita("turno") && (
+            <div className="grid gap-1.5">
+              <label className="text-xs font-semibold text-foreground">Turno</label>
+              <Select value={turno || null} onValueChange={(v) => setTurno(v as string)}>
+                <SelectTrigger className="w-full">
+                  <SelectValue placeholder="Seleccionar turno…" />
+                </SelectTrigger>
+                <SelectContent align="start" alignItemWithTrigger={false}>
+                  <SelectItem value="1">1</SelectItem>
+                  <SelectItem value="2">2</SelectItem>
+                  <SelectItem value="3">3</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            )}
+
+            {/* Datos a introducir de la plantilla (p. ej. nº de certificado Kosher) */}
+            {plantilla && piezasManuales(plantilla.campos).map((m) => (
+              <div key={m.nombre} className="grid gap-1.5">
+                <label className="text-xs font-semibold text-foreground">{m.nombre}</label>
+                <Input
+                  value={currentForm.manuales[m.nombre] ?? ""}
+                  onChange={(e) => updateForm({ manuales: { ...currentForm.manuales, [m.nombre]: e.target.value } })}
+                  maxLength={MAX_MANUAL}
+                  placeholder={m.porDefecto || m.nombre}
+                  className="font-mono"
+                />
+              </div>
+            ))}
+
+            {/* La plantilla la decide el artículo (no se puede elegir otra a mano);
+                el botón solo vuelve a cargar esa, p. ej. si estaba imprimiendo. */}
+            {selectedLoteadora && plantilla && (
+              <div className="flex items-center justify-between gap-2 rounded-lg border border-border px-3 py-2">
+                <div className="min-w-0">
+                  <span className="block text-xs font-semibold text-foreground">
+                    Plantilla
+                  </span>
+                  <span className="block truncate font-mono text-sm text-muted-foreground">{plantilla.messageName}</span>
+                </div>
+                <Button type="button" variant="outline" size="sm" onClick={handleCargarMensaje} disabled={!canCargarMensaje} className="whitespace-nowrap">
+                  {cargandoMensaje ? <Loader2 className="size-3.5 animate-spin" /> : <Upload className="size-3.5" />}
+                  Volver a cargar
+                </Button>
+              </div>
+            )}
+          </div>
+
+          {/* ── Columna derecha: la etiqueta es el centro visual ── */}
+          <div className="flex flex-col gap-4 lg:pl-6">
+            <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Vista previa de impresión</p>
+            {avisoTurno && (
+              <p className="flex items-center gap-1.5 text-xs font-medium text-amber-600">
+                <AlertTriangle className="size-3.5" />{avisoTurno}
+              </p>
+            )}
+
+            {/* Etiqueta: grid de 2 columnas (en vez de la lista apilada original a
+                text-4xl) — más compacta que la versión original pero con más
+                presencia que un grid de 3 columnas, para no dejar un hueco enorme
+                antes del botón "Enviar" (ver §5/§14 docs/loteadora.md). Contorno
+                sólido, tanto en la tarjeta como en las casillas interiores. */}
+            <div className="rounded-xl border border-border bg-muted/30 p-6 shadow-sm">
+              <div className="text-center">
+                {selectedArticulo ? (
+                  <>
+                    <p className="font-mono text-xs text-muted-foreground">{selectedArticulo.id}</p>
+                    <p className="text-sm font-semibold text-foreground">{selectedArticulo.descripcion}</p>
+                  </>
                 ) : (
-                  <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-                    {estadoLoteadoras.map((l) => {
-                      const info = ESTADO_INFO[l.state];
-                      const Icon = info.icon;
+                  <p className="text-sm text-muted-foreground">Ningún artículo seleccionado</p>
+                )}
+              </div>
+              {plantilla ? (
+                <>
+                  <p className="mt-3 text-center font-mono text-[11px] text-muted-foreground">{plantilla.messageName}</p>
+                  <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                    {compuestos.map((c, i) => {
+                      const campo = plantilla.campos[i];
                       return (
-                        <div key={l.id} className="rounded-lg border border-border px-4 py-2.5">
-                          <div className="flex items-center justify-between gap-2">
-                            <span className="truncate text-sm font-medium text-foreground">
-                              {l.name}
-                              {l.zona && <span className="ml-1.5 text-xs font-normal text-muted-foreground">{l.zona}</span>}
-                            </span>
-                            <Badge className={`gap-1.5 whitespace-nowrap ${info.className}`}>
-                              <Icon className="size-3.5" />
-                              {info.label}
-                            </Badge>
-                          </div>
-                          {/* Siempre una línea (aunque esté vacía, y cortada con "…" si no cabe;
-                              entera al pasar el ratón): así la separación del último envío queda
-                              a la misma altura en todas las tarjetas. Motivo de "Sin conexión" en
-                              gris; avisos en ámbar y errores en rojo, como en el manual. */}
-                          <p
-                            className="mt-1 h-4 truncate text-xs leading-4 text-muted-foreground"
-                            title={l.motivo ?? l.avisos?.map((a) => a.texto).join(" · ")}
-                          >
-                            {l.motivo}
-                            {l.avisos?.map((a, i) => (
-                              <span key={i} className={a.error ? "text-rose-500" : "text-amber-600"}>{i > 0 && " · "}{a.texto}</span>
-                            ))}
-                          </p>
-                          {l.ultimoEnvio ? (
-                            <div className="mt-2 border-t border-border pt-2">
-                              <p className="text-[11px] text-muted-foreground">
-                                Último envío · {cuandoEnvio(l.ultimoEnvio.enviadoAt)}
-                                {l.ultimoEnvio.usuario && <> · {l.ultimoEnvio.usuario}</>}
-                              </p>
-                              <p className="truncate font-mono text-xs text-muted-foreground">{l.ultimoEnvio.plantilla}</p>
-                              <div className="mt-1 grid gap-0.5 overflow-x-auto">
-                                {l.ultimoEnvio.lineas.map((linea, i) => (
-                                  <span key={i} className="font-mono text-sm font-semibold whitespace-pre text-foreground">
-                                    {linea.map((t, j) => t.reloj
-                                      ? <span key={j} className="font-normal text-muted-foreground" title="Reloj de la máquina (hora de cada impresión)">{t.texto}</span>
-                                      : t.texto)}
-                                  </span>
-                                ))}
-                              </div>
-                            </div>
-                          ) : (
-                            <p className="mt-2 border-t border-border pt-2 text-[11px] text-muted-foreground">Sin envíos desde el panel</p>
-                          )}
+                        <div key={c.fieldId} className="rounded-lg border border-border bg-background px-3 py-3 text-center">
+                          <span className="block text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                            Campo {c.fieldId}
+                          </span>
+                          <span className={`block break-all font-mono text-xl font-bold ${c.texto ? "text-foreground" : "text-muted-foreground/30"}`}>
+                            {c.texto || "—"}
+                          </span>
+                          <span className={`mt-1 block text-[10px] ${c.faltan.length ? "text-amber-600" : "text-muted-foreground"}`}>
+                            {c.faltan.length
+                              ? `Falta: ${c.faltan.map((t) => INFO_PIEZA[t].label).join(", ")}`
+                              : campo.piezas.map((p) => (p.tipo === "fijo" ? p.nombre : INFO_PIEZA[p.tipo].label)).join(" · ")}
+                          </span>
                         </div>
                       );
                     })}
                   </div>
-                )}
-              </CardContent>
-            </Card>
-          </main>
-        </div>
-        <Dialog open={!!confirmacion} onOpenChange={(o) => !o && cancelarConfirmacion()}>
-          <DialogContent>
-            <DialogHeader>
-              <DialogTitle>{confirmacion?.titulo}</DialogTitle>
-              <DialogDescription render={<div />}>{confirmacion?.detalle}</DialogDescription>
-            </DialogHeader>
-            <DialogFooter>
-              <Button variant="outline" onClick={cancelarConfirmacion}>Cancelar</Button>
-              <Button onClick={() => { confirmacion?.accion(); setConfirmacion(null); }}>{confirmacion?.boton}</Button>
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
-        <Toaster />
-      </NovaPortalProvider>
-    </div>
+                </>
+              ) : (
+                <p className="mt-6 text-center text-sm text-muted-foreground">
+                  {selectedArticulo ? "Este artículo no tiene plantilla: asígnale una en /admin para ver la etiqueta." : "Elige un artículo para ver cómo saldrá la etiqueta."}
+                </p>
+              )}
+            </div>
+
+            <div className="flex-1" />
+
+            {sendError && (
+              <Alert variant="destructive">
+                <XCircle />
+                <AlertDescription>
+                  <span className="font-medium">{sendError}</span>
+                  {sendErrorDetail && (
+                    <div className="mt-1">
+                      <button type="button" onClick={() => setShowSendErrorDetail((v) => !v)} className="text-xs underline hover:opacity-80">
+                        {showSendErrorDetail ? "Ocultar detalle" : "Ver más"}
+                      </button>
+                      {showSendErrorDetail && (
+                        <p className="mt-1 text-xs">Estado de la máquina: {sendErrorDetail}</p>
+                      )}
+                    </div>
+                  )}
+                </AlertDescription>
+              </Alert>
+            )}
+
+            <Button onClick={pedirConfirmacionEnvio} disabled={!canSend} className="h-11 w-full text-sm font-semibold">
+              {sending ? <><Loader2 className="size-4 animate-spin" />Enviando...</> : <><Send className="size-4" />Enviar a loteadora</>}
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Estado de las loteadoras (en vivo, se refresca solo cada 60s) */}
+      <Card>
+        <CardHeader className="flex flex-wrap items-center gap-2 border-b pb-4">
+          <Printer className="size-4 text-primary" />
+          <CardTitle>Estado de las loteadoras</CardTitle>
+          <Button type="button" variant="ghost" size="icon-xs" onClick={fetchEstadoLoteadoras} disabled={loadingEstado} title="Refrescar el estado de las máquinas">
+            <RefreshCw className={loadingEstado ? "size-3.5 animate-spin" : "size-3.5"} />
+          </Button>
+        </CardHeader>
+        <CardContent className="pt-4">
+          {estadoLoteadoras.length === 0 ? (
+            <p className="text-sm text-muted-foreground">No hay loteadoras habilitadas configuradas en /admin.</p>
+          ) : (
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+              {estadoLoteadoras.map((l) => {
+                const info = ESTADO_INFO[l.state];
+                const Icon = info.icon;
+                return (
+                  <div key={l.id} className="rounded-lg border border-border px-4 py-2.5">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="truncate text-sm font-medium text-foreground">
+                        {l.name}
+                        {l.zona && <span className="ml-1.5 text-xs font-normal text-muted-foreground">{l.zona}</span>}
+                      </span>
+                      <Badge className={`gap-1.5 whitespace-nowrap ${info.className}`}>
+                        <Icon className="size-3.5" />
+                        {info.label}
+                      </Badge>
+                    </div>
+                    {/* Siempre una línea (aunque esté vacía, y cortada con "…" si no cabe;
+                        entera al pasar el ratón): así la separación del último envío queda
+                        a la misma altura en todas las tarjetas. Motivo de "Sin conexión" en
+                        gris; avisos en ámbar y errores en rojo, como en el manual. */}
+                    <p
+                      className="mt-1 h-4 truncate text-xs leading-4 text-muted-foreground"
+                      title={l.motivo ?? l.avisos?.map((a) => a.texto).join(" · ")}
+                    >
+                      {l.motivo}
+                      {l.avisos?.map((a, i) => (
+                        <span key={i} className={a.error ? "text-rose-500" : "text-amber-600"}>{i > 0 && " · "}{a.texto}</span>
+                      ))}
+                    </p>
+                    {l.ultimoEnvio ? (
+                      <div className="mt-2 border-t border-border pt-2">
+                        <p className="text-[11px] text-muted-foreground">
+                          Último envío · {cuandoEnvio(l.ultimoEnvio.enviadoAt)}
+                          {l.ultimoEnvio.usuario && <> · {l.ultimoEnvio.usuario}</>}
+                        </p>
+                        <p className="truncate font-mono text-xs text-muted-foreground">{l.ultimoEnvio.plantilla}</p>
+                        <div className="mt-1 grid gap-0.5 overflow-x-auto">
+                          {l.ultimoEnvio.lineas.map((linea, i) => (
+                            <span key={i} className="font-mono text-sm font-semibold whitespace-pre text-foreground">
+                              {linea.map((t, j) => t.reloj
+                                ? <span key={j} className="font-normal text-muted-foreground" title="Reloj de la máquina (hora de cada impresión)">{t.texto}</span>
+                                : t.texto)}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    ) : (
+                      <p className="mt-2 border-t border-border pt-2 text-[11px] text-muted-foreground">Sin envíos desde el panel</p>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </CardContent>
+      </Card>
+      <Dialog open={!!confirmacion} onOpenChange={(o) => !o && cancelarConfirmacion()}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>{confirmacion?.titulo}</DialogTitle>
+            <DialogDescription render={<div />}>{confirmacion?.detalle}</DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={cancelarConfirmacion}>Cancelar</Button>
+            <Button onClick={() => { confirmacion?.accion(); setConfirmacion(null); }}>{confirmacion?.boton}</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </NovaPanelShell>
   );
 }
 

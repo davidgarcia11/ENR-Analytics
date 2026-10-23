@@ -13,7 +13,7 @@
 
 Rama: `feature/loteadora`.
 
-**Rediseñado sobre el sistema Nova (ShadcnSpace)** — no usa `AppShell`/tokens del sistema viejo (`components/ui/`), sino `components/nova/` + `app/nova-theme.css`, igual que `/compras`, `/costes`, `/mrp` y `/muestras`. Ver §14 para el detalle de los patrones nuevos que aportó este panel (Combobox con búsqueda, selector de fecha única).
+**Rediseñado sobre el sistema Nova (ShadcnSpace)** — no usa `AppShell`/tokens del sistema viejo (`components/ui/`), sino `components/nova/` + `app/nova-theme.css`, igual que `/compras`, `/costes`, `/mrp` y `/muestras` (y, como ellos, montado con `<NovaPanelShell title="Loteadora" grupo="Apps">`: barra lateral común). Ver §14 para el detalle de los patrones nuevos que aportó este panel (Combobox con búsqueda, selector de fecha única).
 
 **Sigue el patrón de acceso configurable (`is_public`/`allowed_roles`) del resto de paneles**, con una diferencia: es el único que nace **privado** (§16). Sus siete rutas pasan por `requireScreenAccess('loteadora')`, así que los permisos que configure un admin en `/admin` → Pantallas se aplican de verdad en servidor.
 
@@ -470,7 +470,7 @@ La vista previa de impresión (columna derecha) es el centro visual del panel, n
 
 Pasó por tres versiones: (1) lista vertical de bloques a `text-4xl`, uno por fila — crecía demasiado según se añadían hora/turno/línea; (2) grid de 3 columnas con casillas pequeñas (`text-base`) y borde discontinuo — muy compacta, pero al ensanchar el panel a `max-w-7xl` (ver más abajo) dejaba un hueco vacío enorme entre la tarjeta y el botón "Enviar" (la columna izquierda, con más campos, marca la altura del layout vía el `<div className="flex-1" />` que empuja el botón abajo); (3) la actual, grid de 2 columnas con casillas más grandes — ocupa más alto sin volver a la lista original, reduciendo ese hueco. El formulario (columna izquierda) se mantiene compacto a propósito — fabricación y cocida van lado a lado en vez de apiladas — para no competir visualmente con la vista previa. Columnas asimétricas (`lg:grid-cols-[1fr_1.2fr]`, más peso a la derecha).
 
-**Ancho del panel**: `<main>` usa `max-w-7xl` (antes `max-w-5xl`), igual que `/compras` y `/mrp` — el contenedor exterior (`bg-sidebar`/`md:m-2 md:rounded-xl`) ya ocupaba todo el ancho de la ventana sin límite, así que `max-w-5xl` dejaba mucho margen sin usar en tablet/desktop.
+**Armazón y ancho**: desde la migración a `NovaPanelShell` (barra lateral común, ver `components/nova/README.md` punto 12) el panel ya no lleva su propio contenedor ni `<main max-w-7xl>`: el ancho lo da el `<main>` del armazón, igual que en el resto de paneles Nova. Antes usaba la barra de arriba (`topbar-02`) y `max-w-7xl` (antes `max-w-5xl`).
 
 ### Avisos y errores con `Alert`
 

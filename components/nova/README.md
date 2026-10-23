@@ -405,7 +405,7 @@ desde cero las mismas decisiones de diseño:
     sobrescribir primitivos, borrar `app/table-XX/`, `bun remove cn`).
 
 12. **Barra lateral común (`components/nova/panel-shell.tsx` + bloque `sidebar-01`)**:
-    `/compras`, `/mrp`, `/costes`, `/muestras` y `/servicio` ya no llevan la barra de
+    `/compras`, `/mrp`, `/costes`, `/muestras`, `/servicio` y `/loteadora` ya no llevan la barra de
     arriba (`topbar-02`, sin uso desde entonces): se montan con
     `<NovaPanelShell title="…" grupo="Dashboards|Apps">`. La barra lateral es el bloque
     oficial **Sidebar 01 de ShadcnSpace** (`bunx --bun shadcn@latest add
