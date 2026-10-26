@@ -15,7 +15,7 @@ import CosteA1Table, { CosteA1FilterBar, useCosteA1Filters, type DespieceNode } 
 import CosteA1DesglosePanel from "@/components/nova/coste-a1-desglose-panel";
 import CosteMensualChart from "@/components/shadcn-space/blocks/chart-03/chart";
 import TopImpactoChart from "@/components/shadcn-space/blocks/chart-04/chart";
-import { extremosImpacto, formatMesCorto, serieCosteMensual } from "@/components/nova/coste-a1-shared";
+import { extremosImpacto, filaDetalleExcel, filaResumenExcel, formatMesCorto, serieCosteMensual } from "@/components/nova/coste-a1-shared";
 import { Button } from "@/components/nova/ui/button";
 
 
@@ -84,26 +84,20 @@ function CosteA1PagePanel() {
     if (!data) return;
     const wb = XLSX.utils.book_new();
 
-    const resumenRows = data.finales.map((n) => ({
-      Codigo: n.codigo, Descripcion: n.descripcion, Tipo: n.tipo, Familia: n.familiaDescripcion,
-      CosteA1: n.costeA1 != null ? Math.round(n.costeA1 * 10000) / 10000 : "",
-    }));
-    const wsResumen = XLSX.utils.json_to_sheet(resumenRows);
-    wsResumen["!cols"] = [{ wch: 14 }, { wch: 34 }, { wch: 14 }, { wch: 16 }, { wch: 12 }];
+    const wsResumen = XLSX.utils.json_to_sheet(data.finales.map(filaResumenExcel));
+    wsResumen["!cols"] = [{ wch: 14 }, { wch: 34 }, { wch: 14 }, { wch: 16 }, { wch: 12 }, { wch: 12 }, { wch: 14 }, { wch: 18 }, { wch: 16 }, { wch: 14 }];
     XLSX.utils.book_append_sheet(wb, wsResumen, "Coste por articulo final");
 
-    const detalleRows = data.finales.flatMap((n) =>
-      aplanar(n.children, n.codigo, 1).map((d) => ({
-        ArticuloFinal: n.codigo, Nivel: d.nivel, Codigo: d.codigo, Descripcion: d.descripcion,
-        Tipo: d.tipo, Cantidad: Math.round(d.cantidad * 1000) / 1000, UM: d.um,
-        CosteA1: d.costeA1 != null ? Math.round(d.costeA1 * 10000) / 10000 : "",
-      }))
-    );
+    const detalleRows = data.finales.flatMap((n) => aplanar(n.children, n.codigo, 1).map(filaDetalleExcel));
     const wsDetalle = XLSX.utils.json_to_sheet(detalleRows);
-    wsDetalle["!cols"] = [{ wch: 14 }, { wch: 8 }, { wch: 14 }, { wch: 30 }, { wch: 14 }, { wch: 12 }, { wch: 8 }, { wch: 12 }];
+    wsDetalle["!cols"] = [{ wch: 14 }, { wch: 8 }, { wch: 14 }, { wch: 30 }, { wch: 14 }, { wch: 12 }, { wch: 8 }, { wch: 12 }, { wch: 12 }, { wch: 14 }, { wch: 18 }, { wch: 20 }];
     XLSX.utils.book_append_sheet(wb, wsDetalle, "Despiece completo");
 
-    XLSX.writeFile(wb, `Coste_A1_${new Date().toISOString().slice(0, 10)}.xlsx`);
+    // El periodo sale de los meses que realmente se calcularon (`mesesRango`), no del selector:
+    // ese puede haberse movido sin pulsar «Filtrar».
+    const meses = data.meta.mesesRango;
+    const periodo = meses.length ? `${meses[0]}_${meses[meses.length - 1]}` : new Date().toISOString().slice(0, 10);
+    XLSX.writeFile(wb, `Costes_${periodo}.xlsx`);
   };
 
   const selectedNode = useMemo(
