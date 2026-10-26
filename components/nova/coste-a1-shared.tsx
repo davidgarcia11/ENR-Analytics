@@ -232,4 +232,54 @@ export function extremosImpacto(finales: DespieceNode[], n = 5): { peores: Impac
   return { peores, mejores };
 }
 
+// --- Exportación a Excel (botón «Exportar» de /costes) ---
+//
+// Dos funciones puras, una por hoja, para poder comprobar la aritmética sin abrir la
+// página. Los costes van a 4 decimales (igual que se calculan), los importes a 2 y la
+// desviación a 2; lo que no se puede calcular sale como "" (celda vacía), nunca 0.
+const redondear = (v: number | null, dec: number): number | "" =>
+  v == null ? "" : Math.round(v * 10 ** dec) / 10 ** dec;
+
+// Hoja «Coste por articulo final» (una fila por final). `CantidadCosteada` es la
+// producción de las órdenes que dan el coste real en el rango (suma de
+// `costeRealPorMes[].cantidad`), la misma que usa el impacto en € del panel. Importe =
+// cantidad × coste; vacío si falta el coste o la cantidad es 0.
+export function filaResumenExcel(n: DespieceNode) {
+  const cantidad = (n.costeRealPorMes ?? []).reduce((s, m) => s + m.cantidad, 0);
+  const importe = (coste: number | null) => (coste != null && cantidad > 0 ? coste * cantidad : null);
+  return {
+    Codigo: n.codigo,
+    Descripcion: n.descripcion,
+    Tipo: n.tipo,
+    Familia: n.familiaDescripcion,
+    CosteA1: redondear(n.costeA1, 4),
+    CosteReal: redondear(n.costeReal, 4),
+    DesviacionPct: redondear(desviacionPct(n), 2),
+    CantidadCosteada: cantidad > 0 ? redondear(cantidad, 3) : "",
+    ImporteTeorico: redondear(importe(n.costeA1), 2),
+    ImporteReal: redondear(importe(n.costeReal), 2),
+  };
+}
+
+// Hoja «Despiece completo» (una fila por componente). Aquí `Cantidad` es la del BOM por
+// unidad de SU padre directo (no producción), así que `CantidadXCosteA1` / `CantidadXCosteReal`
+// son lo que esa línea aporta al coste de una unidad de su padre.
+export function filaDetalleExcel(d: DespieceNode & { articuloFinal: string; nivel: number }) {
+  const linea = (coste: number | null) => (coste != null ? coste * d.cantidad : null);
+  return {
+    ArticuloFinal: d.articuloFinal,
+    Nivel: d.nivel,
+    Codigo: d.codigo,
+    Descripcion: d.descripcion,
+    Tipo: d.tipo,
+    Cantidad: redondear(d.cantidad, 3),
+    UM: d.um,
+    CosteA1: redondear(d.costeA1, 4),
+    CosteReal: redondear(d.costeReal, 4),
+    DesviacionPct: redondear(desviacionPct(d), 2),
+    CantidadXCosteA1: redondear(linea(d.costeA1), 4),
+    CantidadXCosteReal: redondear(linea(d.costeReal), 4),
+  };
+}
+
 

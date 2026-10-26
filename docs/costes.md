@@ -1508,7 +1508,25 @@ en vez de crear un wrapper aparte en `components/nova/` — mismo patrón que
 
 ## 5. Exportación a Excel
 
-Dos hojas (mismo patrón multi-hoja que compras/MRP):
-- **Coste por artículo final**: un artículo final por fila.
+Dos hojas (mismo patrón multi-hoja que compras/MRP). Cada fila sale de una función pura
+de `coste-a1-shared.tsx` (`filaResumenExcel()`, `filaDetalleExcel()`), no de la página.
+Hasta la v1.34.3 solo llevaba el coste teórico; ahora lleva también el real. Los costes
+van a 4 decimales, los importes y la desviación a 2, y lo que no se puede calcular sale
+como celda **vacía**, nunca como 0.
+- **Coste por artículo final** (un artículo final por fila): `CosteA1` (teórico),
+  `CosteReal` (A1 limpio, §3.4), `DesviacionPct` (`(real − teórico) / teórico × 100`,
+  la misma que muestra el panel), `CantidadCosteada` (suma de `costeRealPorMes[].cantidad`:
+  la producción de las órdenes que dan el coste real en el rango, la misma que pondera
+  el impacto en € del panel), `ImporteTeorico` (= `CantidadCosteada × CosteA1`) e
+  `ImporteReal` (= `CantidadCosteada × CosteReal`). Vacío si falta el coste o la cantidad
+  es 0. `ImporteReal − ImporteTeorico` es el impacto en € de ese artículo.
 - **Despiece completo**: árbol aplanado (una fila por nodo, con `Nivel` y
-  `ArticuloFinal` para poder reconstruir la jerarquía en Excel).
+  `ArticuloFinal` para poder reconstruir la jerarquía en Excel), con `CosteA1`,
+  `CosteReal` y `DesviacionPct`. Aquí `Cantidad` es la del BOM por unidad de **su padre
+  directo** (no producción), así que `CantidadXCosteA1` y `CantidadXCosteReal` son lo que
+  esa línea aporta al coste de una unidad de su padre, no un importe de producción.
+- **Nombre del archivo**: `Costes_<primer mes>_<último mes>.xlsx` (p. ej.
+  `Costes_2026-09_2026-09.xlsx`). El periodo sale de los meses que se calcularon
+  (`meta.mesesRango`), no del selector, que puede haberse movido sin pulsar «Filtrar».
+- Exporta todos los finales que devuelve la API, sin aplicar la búsqueda ni la familia
+  de la tabla (como antes).
