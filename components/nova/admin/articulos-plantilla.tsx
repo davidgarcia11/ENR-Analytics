@@ -24,7 +24,16 @@ interface Asociacion {
   articulo_id: string;
   mensaje_id: number;
   mensaje_name: string;
+  // Datos de JDE del artículo (null si JDE no respondió)
+  jde: { descripcion: string | null; diasCaducidad: number | null; estado: "obsoleto" | "fuera" | "no_existe" | null } | null;
 }
+
+// Por qué un artículo con plantilla ya no se puede elegir en /loteadora
+const ESTADO_JDE = {
+  obsoleto: { label: "Obsoleto", title: "Obsoleto en JDE: no sale en /loteadora. Si no se va a reactivar, quita la asociación." },
+  fuera: { label: "No sale en /loteadora", title: "Ya no cumple los filtros de JDE de la loteadora (categoría 1 = 12 y categoría 6 = Y)." },
+  no_existe: { label: "No existe en JDE", title: "Este código ya no está en JDE." },
+} as const;
 
 interface Articulo {
   id: string;
@@ -83,12 +92,18 @@ export default function AdminArticulosPlantilla({ titulo, descripcion }: Seccion
   const articuloLabel = (id: string) => (descripcionDe.has(id) ? `${id} — ${descripcionDe.get(id)}` : id);
   const mensajeItems = mensajes.map((m) => ({ value: String(m.id), label: m.name }));
 
+  // La descripción viene con la asociación (JDE); si JDE no respondió, la del catálogo
+  const descripcionFila = (a: Asociacion) => a.jde?.descripcion ?? descripcionDe.get(a.articulo_id) ?? null;
+  const estado = (a: Asociacion) => (a.jde?.estado ? ESTADO_JDE[a.jde.estado] : null);
+
   const filtradas = useMemo(() => {
     const q = busqueda.trim().toLowerCase();
     if (!q) return asociaciones;
+    // También por la etiqueta: «obsoleto» deja solo las que sobran
     return asociaciones.filter((a) =>
-      `${a.articulo_id} ${descripcionDe.get(a.articulo_id) ?? ""} ${a.mensaje_name}`.toLowerCase().includes(q)
+      `${a.articulo_id} ${descripcionFila(a) ?? ""} ${a.mensaje_name} ${estado(a)?.label ?? ""}`.toLowerCase().includes(q)
     );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [asociaciones, busqueda, descripcionDe]);
 
   const cerrar = () => { setAsociando(false); setQuitando(null); setError(""); };
@@ -148,19 +163,29 @@ export default function AdminArticulosPlantilla({ titulo, descripcion }: Seccion
               <TableRow>
                 <TableHead>Artículo</TableHead>
                 <TableHead>Descripción</TableHead>
+                <TableHead className="text-right">Caducidad</TableHead>
                 <TableHead>Plantilla</TableHead>
                 <TableHead className="w-10"><span className="sr-only">Acciones</span></TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {cargando || filtradas.length === 0 ? (
-                <FilaVacia colSpan={4} cargando={cargando} texto={asociaciones.length === 0 ? "Ningún artículo tiene plantilla todavía" : "Sin resultados"} />
+                <FilaVacia colSpan={5} cargando={cargando} texto={asociaciones.length === 0 ? "Ningún artículo tiene plantilla todavía" : "Sin resultados"} />
               ) : (
-                filtradas.map((a) => (
+                filtradas.map((a) => {
+                  const est = estado(a);
+                  const dias = a.jde?.diasCaducidad;
+                  return (
                   <TableRow key={a.articulo_id}>
                     <TableCell className="font-mono text-sm font-medium text-foreground">{a.articulo_id}</TableCell>
                     <TableCell className="text-muted-foreground">
-                      {descripcionDe.get(a.articulo_id) ?? (cargandoArticulos ? "…" : "—")}
+                      <span className="flex flex-wrap items-center gap-2">
+                        {descripcionFila(a) ?? (!a.jde && cargandoArticulos ? "…" : "—")}
+                        {est && <Badge className="bg-amber-400/10 text-amber-600" title={est.title}>{est.label}</Badge>}
+                      </span>
+                    </TableCell>
+                    <TableCell className="text-right tabular-nums text-muted-foreground">
+                      {dias == null ? "—" : `${dias} día${dias === 1 ? "" : "s"}`}
                     </TableCell>
                     <TableCell><Badge variant="secondary" className="font-mono">{a.mensaje_name}</Badge></TableCell>
                     <TableCell>
@@ -180,7 +205,8 @@ export default function AdminArticulosPlantilla({ titulo, descripcion }: Seccion
                       )}
                     </TableCell>
                   </TableRow>
-                ))
+                  );
+                })
               )}
             </TableBody>
           </Table>
