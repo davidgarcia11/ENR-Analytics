@@ -432,6 +432,16 @@ Un artículo solo puede tener una plantilla a la vez (`articulo_id` es clave pri
 
 CRUD de `loteadora_articulo_mensajes` en `app/api/admin/loteadora-articulos/route.ts` (GET/POST, upsert por `articulo_id`) y `[articuloId]/route.ts` (DELETE). La sección (`components/nova/admin/articulos-plantilla.tsx`) hace la asociación en un diálogo: el buscador de artículo reutiliza `GET /api/loteadora/articulos` (el mismo catálogo y el mismo `Combobox` que `/loteadora`) y avisa si el artículo ya tiene plantilla (se sustituye); `POST` valida `articuloId` con el regex ya usado en el proyecto (`/^\d{10}$/`) y que `mensajeId` exista.
 
+**Descripción, caducidad y artículos que ya no sirven** (nov. 2026): el `GET` consulta en `F4101` solo los artículos que tienen plantilla (con bind variables, en bloques de 1000) y devuelve con cada asociación `jde: { descripcion, diasCaducidad, estado }`. La tabla enseña la descripción, una columna **Caducidad** (`IMSLD`, en días) y, si el artículo ya no se puede elegir en `/loteadora`, una etiqueta ámbar con el motivo:
+
+| `estado` | Etiqueta | Cuándo |
+|---|---|---|
+| `obsoleto` | Obsoleto | `IMSTKT` es `O` o `U` |
+| `fuera` | No sale en /loteadora | Existe, pero ya no cumple `IMSRP1 = '12'` o `IMSRP6 = 'Y'` |
+| `no_existe` | No existe en JDE | El código ya no está en `F4101` |
+
+La asociación no se borra sola: si el artículo se reactiva en JDE, vuelve a salir en `/loteadora` con su plantilla. Para limpiar las que sobran, buscar «obsoleto» en el buscador de la sección y quitar la asociación desde el menú de la fila. Si JDE no responde, `jde` llega a `null` y la tabla sale igual (la descripción, del catálogo si se pudo cargar; la caducidad, «—»).
+
 Esta sección (Loteadora › Artículos) la puede abrir también un usuario no admin con el permiso de Artículos (§18), por su rol o como extra (DOCUMENTACION.md §5b): solo ve esta sección de `/admin`, puede leer las plantillas (`GET /api/admin/loteadora-mensajes`) pero no crearlas ni editarlas.
 
 ### Cómo llega a `/loteadora`
