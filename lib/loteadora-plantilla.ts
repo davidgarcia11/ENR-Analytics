@@ -397,7 +397,10 @@ export function validarMedidas(m: any): { error: string } | { value: MedidasMens
 export function largoPieza(p: Pieza, largoLinea = 2): number {
   switch (p.tipo) {
     case 'texto': return (p.valor ?? '').length;
-    case 'fijo': return Math.max((p.valor ?? '').length, 6); // margen: el valor se edita después
+    // Justo lo que mide: sin margen, para que lo que se pone detrás en la máquina (p. ej. el «€»
+    // tras el precio) quede pegado. Si el valor cambia de largo, hay que volver a crear el mensaje
+    // (lo avisa /admin → Datos fijos).
+    case 'fijo': return (p.valor ?? '').length;
     case 'fresco': return 6;
     case 'turno': return 1;
     case 'linea': return Math.max(1, largoLinea);
