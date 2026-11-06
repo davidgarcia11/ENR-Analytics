@@ -30,6 +30,11 @@ describe('formatos', () => {
     expect(largoPieza({ tipo: 'caducidad', formato: 'MM/AAAA' })).toBe(7)
   })
 
+  it('un dato fijo reserva justo lo que mide su valor (sin margen: el «€» de la máquina queda pegado)', () => {
+    expect(largoPieza({ tipo: 'fijo', nombre: 'Precio', valor: '3.99' })).toBe(4)
+    expect(largoPieza({ tipo: 'fijo', nombre: 'Certificado', valor: 'KOS-12345' })).toBe(9)
+  })
+
   it('cocida con padding del día juliano', () => {
     expect(formatearCocida(2026, 5, 'AAJJJ')).toBe('26005')
     expect(formatearCocida(2026, 364, 'AJJJ')).toBe('6364')
