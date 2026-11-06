@@ -56,6 +56,12 @@ export default function AdminDatosFijos({ titulo, descripcion }: SeccionProps) {
       const data = await res.json();
       if (!res.ok) { toast.error(data.error || "Error al guardar"); return; }
       toast.success(`${d.nombre} de ${d.plantilla} guardado`);
+      // El campo de la máquina mide lo que medía el valor al crear el mensaje (largoPieza):
+      // con otro largo, se corta o deja huecos hasta que se vuelva a crear
+      const nuevo = borradores[d.id] ?? "";
+      if (nuevo.length !== d.valor.length) {
+        toast.warning(`El valor ha pasado de ${d.valor.length} a ${nuevo.length} caracteres: vuelve a crear el mensaje ${d.plantilla} en las loteadoras (Plantillas → Crear en la loteadora), o saldrá ${nuevo.length > d.valor.length ? "cortado" : "con huecos"}.`, { duration: 15000 });
+      }
       cargar();
     } catch { toast.error("Error de conexión"); } finally { setGuardando(null); }
   };
