@@ -57,6 +57,8 @@ function valoresEjemplo(): ValoresEtiqueta {
   return { fresco: "263221", cocidaAnio: cocida.getFullYear(), cocidaDia: dia, caducidad: iso, hora: "0930", turno: "1", linea: "1", conReloj: true };
 }
 const EJEMPLO = valoresEjemplo();
+// Fuentes que se sugieren siempre en «Crear en la loteadora» (más las ya usadas, que da la API)
+const FUENTES_BASE = ["Arial", "Arial-MonoBold"];
 // Los datos a introducir no tienen valor de ejemplo fijo: el suyo por defecto o <nombre>
 const conManuales = (v: ValoresEtiqueta, campos: Campo[]): ValoresEtiqueta => ({
   ...v,
@@ -312,12 +314,14 @@ export default function AdminPlantillas({ titulo, descripcion }: SeccionProps) {
   // esa máquina, o las de por defecto) y se guardan al crear.
   const [medidas, setMedidas] = useState<MedidasMensaje | null>(null);
   const [origenMedidas, setOrigenMedidas] = useState<"guardadas" | "maquina" | "defecto" | null>(null);
+  // Sugerencias del campo Fuente: las de siempre + las ya usadas al crear mensajes (las da la API)
+  const [fuentes, setFuentes] = useState<string[]>(FUENTES_BASE);
   useEffect(() => {
     if (!enMaquina || !loteadoraId) { setMedidas(null); return; }
     let vigente = true;
     apiFetch(`/api/admin/loteadora-mensajes/${enMaquina.id}/crear-en-maquina?loteadoraId=${loteadoraId}`)
       .then((r) => (r.ok ? r.json() : null))
-      .then((d) => { if (vigente && d) { setMedidas(d.medidas); setOrigenMedidas(d.origen); } })
+      .then((d) => { if (vigente && d) { setMedidas(d.medidas); setOrigenMedidas(d.origen); setFuentes(d.fuentes ?? FUENTES_BASE); } })
       .catch(() => {});
     return () => { vigente = false; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -637,7 +641,7 @@ export default function AdminPlantillas({ titulo, descripcion }: SeccionProps) {
                 <div className="grid gap-1.5">
                   <Label htmlFor="m-fuente">Fuente</Label>
                   <Input id="m-fuente" list="m-fuentes" value={medidas.fuente} onChange={(e) => cambiarMedidas({ fuente: e.target.value })} className="font-mono" />
-                  <datalist id="m-fuentes"><option value="Arial" /><option value="Arial-MonoBold" /></datalist>
+                  <datalist id="m-fuentes">{fuentes.map((f) => <option key={f} value={f} />)}</datalist>
                 </div>
                 <div className="grid gap-1.5">
                   <Label htmlFor="m-tamano">Tamaño</Label>

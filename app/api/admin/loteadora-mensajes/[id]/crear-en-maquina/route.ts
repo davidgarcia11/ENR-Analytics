@@ -49,7 +49,11 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
   const db = getDb();
   const { mensaje, campos } = cargarMensaje(db, mensajeId);
   if (!mensaje) return NextResponse.json({ error: 'Plantilla no encontrada' }, { status: 404 });
-  return NextResponse.json(medidasPropuestas(db, mensajeId, loteadoraId, campos));
+  // Sugerencias del campo Fuente: las de siempre y las que ya se han usado al crear algún
+  // mensaje (la máquina no tiene comando para listar las suyas). Se puede escribir otra.
+  const usadas = (db.prepare('SELECT DISTINCT fuente FROM loteadora_medidas_mensaje').all() as { fuente: string }[]).map((f) => f.fuente);
+  const fuentes = [...new Set(['Arial', 'Arial-MonoBold', ...usadas])].sort((a, b) => a.localeCompare(b));
+  return NextResponse.json({ ...medidasPropuestas(db, mensajeId, loteadoraId, campos), fuentes });
 }
 
 // Body: { loteadoraId, medidas }
