@@ -15,6 +15,8 @@ import { Input } from "@/components/nova/ui/input";
 import { Label } from "@/components/nova/ui/label";
 import { Badge } from "@/components/nova/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/nova/ui/select";
+import { ComboboxContent, ComboboxInput, ComboboxList } from "@/components/nova/ui/combobox";
+import { Autocomplete } from "@base-ui/react";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/nova/ui/table";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/nova/ui/dialog";
 import {
@@ -640,15 +642,32 @@ export default function AdminPlantillas({ titulo, descripcion }: SeccionProps) {
               <div className="grid gap-3 sm:grid-cols-3">
                 <div className="grid gap-1.5">
                   <Label htmlFor="m-fuente">Fuente</Label>
-                  <Input id="m-fuente" list="m-fuentes" value={medidas.fuente} onChange={(e) => cambiarMedidas({ fuente: e.target.value })} className="font-mono" />
-                  <datalist id="m-fuentes">{fuentes.map((f) => <option key={f} value={f} />)}</datalist>
+                  {/* Texto libre con sugerencias (la máquina no tiene comando para listar sus fuentes).
+                      Autocomplete de Base UI y no Combobox: el Combobox devuelve el texto a la opción
+                      elegida al salir y borraba una fuente escrita a mano. Comparte con el Combobox de
+                      Nova todas las piezas menos la opción, que lleva sus mismas clases.
+                      mode="none": se ven siempre todas (son pocas), no solo las que encajan con lo escrito. */}
+                  <Autocomplete.Root items={fuentes} mode="none" value={medidas.fuente} onValueChange={(v) => cambiarMedidas({ fuente: v })}>
+                    <ComboboxInput id="m-fuente" className="w-full font-mono" />
+                    {/* Ancho según el contenido: los nombres de fuente no se parten en dos líneas */}
+                    <ComboboxContent className="w-auto">
+                      <ComboboxList>
+                        {(f: string) => (
+                          <Autocomplete.Item key={f} value={f} className="relative flex w-full cursor-default items-center rounded-md py-1 pr-8 pl-1.5 font-mono text-sm whitespace-nowrap outline-hidden select-none data-highlighted:bg-accent data-highlighted:text-accent-foreground">
+                            {f}
+                          </Autocomplete.Item>
+                        )}
+                      </ComboboxList>
+                    </ComboboxContent>
+                  </Autocomplete.Root>
                 </div>
                 <div className="grid gap-1.5">
                   <Label htmlFor="m-tamano">Tamaño</Label>
                   <Input id="m-tamano" type="number" min={5} max={1200} value={medidas.tamano} onChange={(e) => cambiarMedidas({ tamano: Number(e.target.value) })} />
                 </div>
                 <div className="grid gap-1.5">
-                  <Label title="Lo usan los campos que no tienen espaciado propio en la plantilla">Espaciado por defecto</Label>
+                  {/* Etiqueta corta: con «Espaciado por defecto» bajaba a dos líneas y descuadraba los tres controles */}
+                  <Label title="Espaciado por defecto: lo usan los campos que no tienen espaciado propio en la plantilla">Espaciado</Label>
                   <Select items={ESPACIADOS.map((v) => ({ value: String(v), label: v > 0 ? `+${v}` : String(v) }))} value={String(medidas.espaciado)} onValueChange={(v) => cambiarMedidas({ espaciado: Number(v) })}>
                     <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
                     <SelectContent>
