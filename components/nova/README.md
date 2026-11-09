@@ -269,6 +269,14 @@ de intentar un script inline propio.
     seleccionar. Si necesitas mostrar más que el propio valor (código + descripción),
     pásale `itemToStringLabel={(id) => ...}` al `<Combobox>` y renderiza tú mismo el label
     dentro de `<ComboboxItem>` — ver `app/loteadora/page.tsx` y `docs/loteadora.md` §14.
+  - **Texto libre con sugerencias** (se elige de la lista o se escribe otro valor): **no**
+    uses el `Combobox`, que al salir del campo devuelve el texto a la opción elegida y borra
+    lo escrito a mano. Usa `Autocomplete.Root` de `@base-ui/react` (sin registro en
+    shadcn) con `value`/`onValueChange` sobre el texto, y dentro las piezas de Nova
+    `ComboboxInput`/`ComboboxContent`/`ComboboxList` (Base UI las comparte); solo la opción
+    va como `Autocomplete.Item` con las clases de `ComboboxItem`. Ejemplo: el campo Fuente
+    de «Crear en la loteadora» (`components/nova/admin/plantillas.tsx`), con `mode="none"`
+    para enseñar siempre todas las sugerencias.
 - **No hay "date picker" de una fecha única en el catálogo ShadcnSpace** (comprobado con
   `searchBlocks`/`listComponents` antes de construir uno) — solo el rango
   (`date-range-picker.tsx`). Para una fecha exacta, `components/nova/date-picker.tsx`
