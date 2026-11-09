@@ -377,3 +377,10 @@ necesita ver algo fuera de esa lista, lo añade él mismo.
 - **Historial de quién añadió/quitó un artículo de la lista** (§6): `sample_article_filter`
   no guarda auditoría de cambios, solo el estado actual — se añade si hace falta trazar
   quién configuró qué.
+
+## Presets
+
+Botón «Presets» en la barra de filtros (los comunes de Nova, `components/nova/README.md` punto 15).
+Como el panel solo filtra por fechas, cada preset guarda un periodo (`screen = 'muestras'`): fijo o
+relativo (últimos 7/30/90 días, mes en curso…). Sin preset predeterminado se sigue abriendo con todas
+las fechas; con él, se abre con su periodo.

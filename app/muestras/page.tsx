@@ -3,7 +3,7 @@
 // y docs/muestras.md.
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useState } from "react";
 import { RequireAccess, useApiFetch, useSession } from "@/components/SessionProvider";
 import { tienePermiso } from "@/lib/permisos";
 import { toast } from "sonner";
@@ -13,6 +13,8 @@ import Statistics from "@/components/shadcn-space/blocks/statistics-04/statistic
 import MuestrasTable, { type Muestra, type Estado, ESTADO_LABEL, ESTADO_TEXT_COLOR } from "@/components/nova/muestras-table";
 import MuestrasArticleConfig from "@/components/nova/muestras-article-config";
 import DateRangePicker, { type DateRange } from "@/components/nova/date-range-picker";
+import NovaPresets, { useNovaPresets } from "@/components/nova/presets";
+import type { Aplicacion } from "@/lib/presets-nova";
 import { Button } from "@/components/nova/ui/button";
 
 interface MuestrasResponse {
@@ -51,8 +53,14 @@ function MuestrasPagePanel() {
     }
   }, [apiFetch]);
 
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  useEffect(() => { fetchData(null); }, []);
+  // Presets comunes de Nova (aquí solo guardan el periodo). Sin preset predeterminado se abre con todas
+  // las fechas, como siempre; la primera carga la hace useNovaPresets cuando ya lo sabe.
+  const aplicarPreset = (a: Aplicacion<Record<string, never>>) => {
+    if (!a.fechas) return;
+    setRange(a.fechas);
+    fetchData(a.fechas);
+  };
+  const presets = useNovaPresets<Record<string, never>>("muestras", (p) => (p?.fechas ? aplicarPreset(p) : fetchData(null)));
 
   const recalcularResumen = (muestras: Muestra[]) => ({
     total: muestras.length,
@@ -129,6 +137,7 @@ function MuestrasPagePanel() {
             {loading ? <Loader2 size={14} className="animate-spin" /> : <Filter size={14} />}
             Filtrar
           </Button>
+          <NovaPresets presets={presets} actual={{ filtros: {}, fechas: range }} granularidad="dia" onAplicar={aplicarPreset} />
         </div>
         {puedeConfigurar && <MuestrasArticleConfig />}
       </div>

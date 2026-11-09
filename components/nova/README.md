@@ -475,3 +475,35 @@ desde cero las mismas decisiones de diseño:
       Los menús y popovers siguen con el `shadow-md` por defecto de Tailwind.
     - La cabecera no es `sticky`: la referencia lo declara, pero su `SidebarInset` lleva
       `overflow-hidden`, así que nunca se queda fija; no se replica una clase que no hace nada.
+
+15. **Presets (`components/nova/presets.tsx` + `lib/presets-nova.ts`)**: todos los paneles Nova con
+    filtros llevan el mismo botón «Presets» en la barra de filtros, a la derecha de «Filtrar». No se
+    hacen presets a mano en un panel (`PresetPanel` es del sistema viejo y no sirve en Nova).
+    - **Qué hace**: lista de presets del usuario para ese panel (un clic aplica; la estrella marca el
+      **predeterminado**, que se aplica al abrir el panel; el lápiz edita; la papelera borra) y un
+      formulario para guardar los filtros actuales con nombre y un selector de fechas: *sin fechas*,
+      *fechas fijas* (el rango exacto actual) o un *periodo relativo* (mes en curso, mes anterior,
+      últimos 3/12 meses, año en curso/anterior y, en paneles por días, últimos 7/30/90 días).
+    - **Editar** funciona como en el PresetPanel de producción: carga el preset en el panel, se
+      cambian los filtros y «Actualizar» guarda los filtros actuales (y el modo de fechas) en él.
+    - **En el panel** solo hay que decir qué filtros guarda y cómo aplicarlos:
+      ```tsx
+      const aplicar = (a: Aplicacion<Filtros>) => { /* poner a.filtros y, si viene, a.fechas; consultar */ };
+      const presets = useNovaPresets<Filtros>("mi-panel", (p) => (p ? aplicar(p) : fetchData(range)));
+      <NovaPresets presets={presets} actual={{ filtros, fechas: range }} granularidad="dia" onAplicar={aplicar}
+        describir={(f) => "resumen corto para la lista"} />
+      ```
+      `useNovaPresets` llama a su callback **una vez**, cuando ya sabe si hay predeterminado: la
+      **primera consulta del panel va ahí** (no en un `useEffect` de montaje), para no consultar
+      Oracle dos veces al abrir. `screen` = `null` mientras no se sepa qué presets cargar (p. ej.
+      hasta leer `?mock=1`; `/servicio` usa `servicio-ejemplo` en modo de ejemplo).
+    - **Filtros de preset**: los de la barra que tenga sentido repetir (no la selección de una fila
+      ni el texto de búsqueda de una tabla). Un panel sin más filtros que las fechas pasa
+      `filtros: {}` y el preset siempre guarda un periodo. `granularidad: "mes"` en paneles con
+      `MonthRangePicker` (solo se ofrecen periodos de meses completos).
+    - **Formato** (`presets.filters`): `{ v: 2, filtros, fechas? }`, con `fechas` fijas
+      (`{ tipo: 'fijas', desde, hasta }`) o relativas (`{ tipo: 'relativas', periodo }`), que se
+      resuelven a un rango el día que se aplican. Un preset sin `v` (formato anterior) se lee como
+      `filtros`. Lógica pura y probada en `lib/presets-nova.ts` / `__tests__/presets-nova.test.ts`.
+    - **Paneles que lo usan**: `/servicio` (clientes), `/compras` (previsión, sabor, vista),
+      `/mrp` y `/muestras` (solo periodo). `/costes` no tiene filtros. `/produccion-v2` cuando se retome.
