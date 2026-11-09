@@ -13,10 +13,13 @@ import ServicioIndicadores from "@/components/nova/servicio-indicadores";
 import ServicioTable, { type CatalogosServicio, type EnvioDto, type PatchEnvio, ENTREGA_LABEL } from "@/components/nova/servicio-table";
 import DateRangePicker, { type DateRange } from "@/components/nova/date-range-picker";
 import ServicioClientesFiltro, { type OpcionCliente } from "@/components/nova/servicio-clientes-filtro";
+import NovaPresets, { useNovaPresets } from "@/components/nova/presets";
+import type { Aplicacion } from "@/lib/presets-nova";
 import { Button } from "@/components/nova/ui/button";
 import { OBJETIVO_OTIF_PCT, calcularKpis, estadoEntrega, filtrarPorClientes, resumirPedidos } from "@/lib/servicio";
 
 const iso = (d: Date) => d.toISOString().slice(0, 10);
+type FiltrosServicio = { clientes: number[] };
 const pct = (n: number | null) => (n === null ? "—" : `${n.toLocaleString("es-ES", { maximumFractionDigits: 1 })} %`);
 
 function ServicioPagePanel() {
@@ -35,7 +38,7 @@ function ServicioPagePanel() {
   // del lápiz solo quedan en pantalla. Se lee en el efecto de montaje para no desajustar la hidratación.
   const mockRef = useRef(false);
   const [esMock, setEsMock] = useState(false);
-  // El filtro de clientes carga presets según el modo: se monta cuando ya se ha leído ?mock=1
+  // Los presets dependen del modo (en ?mock=1 van a otro panel): no se cargan hasta haber leído la URL
   const [modoListo, setModoListo] = useState(false);
 
   const fetchData = useCallback(async (r: DateRange | null) => {
@@ -77,19 +80,26 @@ function ServicioPagePanel() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+  // Solo lee el modo; la primera consulta la hace useNovaPresets cuando sabe si hay preset predeterminado
   useEffect(() => {
-    setModoListo(true);
     if (new URLSearchParams(window.location.search).get("mock") === "1") {
       mockRef.current = true;
       setEsMock(true);
-      const r = { startDate: "2024-01-01", endDate: "2024-07-31" };
-      setRange(r);
-      fetchData(r);
-      return;
+      setRange({ startDate: "2024-01-01", endDate: "2024-07-31" });
     }
-    fetchData(range);
+    setModoListo(true);
   }, []);
+
+  // Presets comunes de Nova. En ?mock=1 van a 'servicio-ejemplo' para no mezclar clientes inventados con
+  // los reales. Aplicar uno pone sus clientes y, si trae fechas, consulta ese rango.
+  const aplicarPreset = (a: Aplicacion<FiltrosServicio>) => {
+    setClientes(Array.isArray(a.filtros.clientes) ? a.filtros.clientes.filter(Number.isInteger) : []);
+    if (a.fechas) { setRange(a.fechas); fetchData(a.fechas); }
+  };
+  const presets = useNovaPresets<FiltrosServicio>(modoListo ? (esMock ? "servicio-ejemplo" : "servicio") : null, (p) => {
+    if (p) aplicarPreset(p);
+    if (!p?.fechas) fetchData(range);
+  });
 
   // Guarda en el servidor y, si va bien, refleja el cambio en pantalla recalculando el
   // estado de entrega y los KPIs en cliente (lib/servicio.ts es lógica pura).
@@ -173,11 +183,18 @@ function ServicioPagePanel() {
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="flex flex-wrap items-center gap-2">
           <DateRangePicker value={range} onChange={setRange} />
-          {modoListo && <ServicioClientesFiltro opciones={opcionesClientes} value={clientes} onChange={setClientes} esMock={esMock} />}
+          <ServicioClientesFiltro opciones={opcionesClientes} value={clientes} onChange={setClientes} />
           <Button size="sm" className="gap-1.5" onClick={() => fetchData(range)} disabled={loading}>
             {loading ? <Loader2 size={14} className="animate-spin" /> : <Filter size={14} />}
             Filtrar
           </Button>
+          <NovaPresets
+            presets={presets}
+            actual={{ filtros: { clientes }, fechas: range }}
+            granularidad="dia"
+            onAplicar={aplicarPreset}
+            describir={(f) => (f.clientes?.length ? `${f.clientes.length} cliente${f.clientes.length === 1 ? "" : "s"}` : "Todos los clientes")}
+          />
           <span className="text-xs text-muted-foreground">Por fecha de entrega prometida</span>
           {esMock && <span className="rounded-full bg-amber-500/15 px-2 py-0.5 text-xs font-medium text-amber-600">Datos de ejemplo</span>}
         </div>

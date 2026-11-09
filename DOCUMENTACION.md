@@ -912,9 +912,14 @@ Los usuarios logueados pueden guardar combinaciones de filtros con nombre para r
 | Caducados | `'caducados'` |
 | Pedidos | `'pedidos'` |
 | Comparativa SERES vs JDE | `'comparativa'` |
-| Nivel de servicio (clientes) | `'servicio'` (`'servicio-ejemplo'` en `?mock=1`) |
+| Nivel de servicio (Nova) | `'servicio'` (`'servicio-ejemplo'` en `?mock=1`) |
+| Compras (Nova) | `'compras'` |
+| Explosión de compras (Nova) | `'mrp'` |
+| Muestras (Nova) | `'muestras'` |
 
-**Preset predeterminado:** `PATCH /api/presets/:id` con `{ predeterminado: true|false }` marca uno como el que se aplica al abrir el panel; marcar uno desmarca el resto del mismo usuario y panel. Hoy solo lo usa `/servicio` (ver `docs/servicio.md` §17); los demás paneles ignoran el campo.
+**Preset predeterminado:** `PATCH /api/presets/:id` con `{ predeterminado: true|false }` marca uno como el que se aplica al abrir el panel; marcar uno desmarca el resto del mismo usuario y panel. Lo usan los paneles Nova; los del sistema viejo ignoran el campo.
+
+**Paneles Nova:** usan su propio componente (`components/nova/presets.tsx`) sobre la misma API, con el formato `{ v: 2, filtros, fechas? }` (fechas fijas o un periodo relativo que se resuelve el día que se aplica). Ver `components/nova/README.md` punto 15.
 
 ### Qué se guarda en un preset
 

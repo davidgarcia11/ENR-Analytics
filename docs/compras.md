@@ -373,3 +373,13 @@ real vs. Venta real año anterior), para no tener que crear un dashboard nuevo p
 tipo de comparativa — mismo panel, mismo gráfico/tabla, cambia solo la fuente de datos.
 Tarea ClickUp: lista "Compras" (ENR Analytics), "[Compras] Rediseño de compras-v2 sobre
 sistema Nova...". Sin fecha de inicio, sin diseño de datos aún.
+
+## 11. Presets
+
+Botón «Presets» en la barra de filtros: los comunes de Nova (`components/nova/presets.tsx`, ver
+`components/nova/README.md` punto 15). Un preset de `/compras` (`screen = 'compras'`) guarda
+**previsión (PN/PM), sabor y vista (uds/kg/€)** y, si se elige, el periodo: fijo o relativo de meses
+completos (mes en curso, últimos 3/12 meses, año en curso…). Aplicarlo recarga los datos. El
+predeterminado (estrella) se aplica al abrir, antes de la primera consulta, así que no se consulta
+Oracle dos veces. Si el sabor guardado no está entre los del periodo cargado, se añade al desplegable
+para que se vea elegido.
