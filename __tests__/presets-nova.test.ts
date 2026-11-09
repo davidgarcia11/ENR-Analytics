@@ -86,6 +86,11 @@ describe('¿coincide lo actual con el filtro guardado? (para «modificado»)', (
     expect(coincide(sin, { filtros: { sabor: 'X', tipo: 'PM' }, fechas: { startDate: '2020-01-01', endDate: '2020-12-31' } }, hoy)).toBe(true)
     expect(coincide(sin, { filtros: { sabor: 'Y', tipo: 'PM' }, fechas: null }, hoy)).toBe(false)
   })
+  it('un filtro guardado sin `excluir` coincide con excluir = false, pero no con true', () => {
+    const viejo = leerPreset<{ clientes: number[]; excluir: boolean }>('{"v":2,"filtros":{"clientes":[1]}}')
+    expect(coincide(viejo, { filtros: { clientes: [1], excluir: false }, fechas: null }, hoy)).toBe(true)
+    expect(coincide(viejo, { filtros: { clientes: [1], excluir: true }, fechas: null }, hoy)).toBe(false)
+  })
   it('panel con un filtro nuevo que el guardado no tiene: vacío/null cuenta como «no lo tiene»', () => {
     const viejo = leerPreset<{ clientes: number[]; canal: string | null }>('{"clientes":[1]}')
     expect(coincide(viejo, { filtros: { clientes: [1], canal: null }, fechas: null }, hoy)).toBe(true)
