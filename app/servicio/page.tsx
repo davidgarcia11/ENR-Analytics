@@ -12,8 +12,9 @@ import Statistics from "@/components/shadcn-space/blocks/statistics-04/statistic
 import ServicioIndicadores from "@/components/nova/servicio-indicadores";
 import ServicioTable, { type CatalogosServicio, type EnvioDto, type PatchEnvio, ENTREGA_LABEL } from "@/components/nova/servicio-table";
 import DateRangePicker, { type DateRange } from "@/components/nova/date-range-picker";
+import ServicioClientesFiltro, { type OpcionCliente } from "@/components/nova/servicio-clientes-filtro";
 import { Button } from "@/components/nova/ui/button";
-import { OBJETIVO_OTIF_PCT, calcularKpis, estadoEntrega, resumirPedidos } from "@/lib/servicio";
+import { OBJETIVO_OTIF_PCT, calcularKpis, estadoEntrega, filtrarPorClientes, resumirPedidos } from "@/lib/servicio";
 
 const iso = (d: Date) => d.toISOString().slice(0, 10);
 const pct = (n: number | null) => (n === null ? "—" : `${n.toLocaleString("es-ES", { maximumFractionDigits: 1 })} %`);
@@ -24,6 +25,8 @@ function ServicioPagePanel() {
   // Rango sobre la fecha de entrega prometida. Por defecto, últimos 30 días.
   const [range, setRange] = useState<DateRange | null>({ startDate: iso(new Date(Date.now() - 30 * 86400000)), endDate: iso(new Date()) });
   const [envios, setEnvios] = useState<EnvioDto[] | null>(null);
+  // Clientes elegidos (SDAN8); vacío = todos. Filtra en pantalla los envíos ya cargados.
+  const [clientes, setClientes] = useState<number[]>([]);
   const [loading, setLoading] = useState(false);
   // Opciones de los desplegables (motivos, responsables, transportistas): se editan en /admin → Listas de servicio
   const [catalogos, setCatalogos] = useState<CatalogosServicio>({ motivos: [], responsables: [], transportistas: [] });
@@ -32,6 +35,8 @@ function ServicioPagePanel() {
   // del lápiz solo quedan en pantalla. Se lee en el efecto de montaje para no desajustar la hidratación.
   const mockRef = useRef(false);
   const [esMock, setEsMock] = useState(false);
+  // El filtro de clientes carga presets según el modo: se monta cuando ya se ha leído ?mock=1
+  const [modoListo, setModoListo] = useState(false);
 
   const fetchData = useCallback(async (r: DateRange | null) => {
     setLoading(true);
@@ -74,6 +79,7 @@ function ServicioPagePanel() {
 
   // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => {
+    setModoListo(true);
     if (new URLSearchParams(window.location.search).get("mock") === "1") {
       mockRef.current = true;
       setEsMock(true);
@@ -107,11 +113,18 @@ function ServicioPagePanel() {
     toast.success(mockRef.current ? `Pedido ${e.pedido} (ejemplo, solo en pantalla)` : `Pedido ${e.pedido} guardado`);
   }, [apiFetch]);
 
-  const kpis = useMemo(() => (envios ? calcularKpis(resumirPedidos(envios), iso(new Date())) : null), [envios]);
+  const opcionesClientes = useMemo<OpcionCliente[]>(() => {
+    const porId = new Map<number, string>();
+    envios?.forEach((e) => { if (!porId.has(e.cliente)) porId.set(e.cliente, e.clienteNombre); });
+    return Array.from(porId, ([id, nombre]) => ({ id, nombre })).sort((a, b) => a.nombre.localeCompare(b.nombre, "es", { numeric: true }));
+  }, [envios]);
+  const visibles = useMemo(() => (envios ? filtrarPorClientes(envios, clientes) : null), [envios, clientes]);
+
+  const kpis = useMemo(() => (visibles ? calcularKpis(resumirPedidos(visibles), iso(new Date())) : null), [visibles]);
 
   const exportar = () => {
-    if (!envios) return;
-    const filas = envios.map((e) => ({
+    if (!visibles) return;
+    const filas = visibles.map((e) => ({
       Pedido: e.pedido, "Su pedido": e.suPedido, Cliente: e.clienteNombre, Destino: e.destinoNombre, Canal: e.canalLabel ?? "",
       Albarán: e.albaran || "", "Fecha envío": e.fechaEnvio ?? "",
       "Fecha prometida": e.fechaPrometida ?? "", "Fecha entrega real": e.fechaEntregaReal ?? "", "Uds enviadas": e.udsEnviadas,
@@ -125,7 +138,7 @@ function ServicioPagePanel() {
 
   // Envíos ya enviados a los que aún falta la fecha de entrega real: lo que hay que rellenar para que
   // el % a tiempo y el OTIF digan algo (por eso van en una tarjeta propia).
-  const pendientes = envios ? envios.filter((e) => e.entrega === "sin_confirmar").length : 0;
+  const pendientes = visibles ? visibles.filter((e) => e.entrega === "sin_confirmar").length : 0;
   const coberturaBaja = kpis?.cobertura != null && kpis.cobertura < 80;
 
   // Color de los KPI frente al objetivo: verde si lo cumple, ámbar hasta 8 puntos por debajo, rojo por debajo
@@ -160,6 +173,7 @@ function ServicioPagePanel() {
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="flex flex-wrap items-center gap-2">
           <DateRangePicker value={range} onChange={setRange} />
+          {modoListo && <ServicioClientesFiltro opciones={opcionesClientes} value={clientes} onChange={setClientes} esMock={esMock} />}
           <Button size="sm" className="gap-1.5" onClick={() => fetchData(range)} disabled={loading}>
             {loading ? <Loader2 size={14} className="animate-spin" /> : <Filter size={14} />}
             Filtrar
@@ -167,7 +181,7 @@ function ServicioPagePanel() {
           <span className="text-xs text-muted-foreground">Por fecha de entrega prometida</span>
           {esMock && <span className="rounded-full bg-amber-500/15 px-2 py-0.5 text-xs font-medium text-amber-600">Datos de ejemplo</span>}
         </div>
-        <Button size="sm" variant="outline" className="gap-1.5" onClick={exportar} disabled={!envios?.length}>
+        <Button size="sm" variant="outline" className="gap-1.5" onClick={exportar} disabled={!visibles?.length}>
           <Download size={14} /> Exportar
         </Button>
       </div>
@@ -177,10 +191,10 @@ function ServicioPagePanel() {
       ) : vista === "seguimiento" ? (
         <>
           <Statistics data={stats} columns={4} />
-          <ServicioTable data={envios} catalogos={catalogos} onSave={handleSave} />
+          <ServicioTable data={visibles ?? []} catalogos={catalogos} onSave={handleSave} />
         </>
       ) : (
-        <ServicioIndicadores envios={envios} />
+        <ServicioIndicadores envios={visibles ?? []} />
       )}
     </NovaPanelShell>
   );

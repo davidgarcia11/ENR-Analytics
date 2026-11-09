@@ -416,3 +416,11 @@ export const responsableEfectivo = (e: Pick<ConIncidencia, 'responsable' | 'udsC
 export function tieneIncidencia(e: ConIncidencia): boolean {
   return !!e.motivo || !!e.incidencia || e.udsAfectadas > 0 || (e.cajasAfectadas ?? 0) > 0 || (e.udsCanceladas ?? 0) > 0;
 }
+
+// Filtro de clientes de /servicio: lista vacía = todos. Se aplica sobre los envíos ya cargados, así que no
+// toca Oracle y KPIs, tabla e indicadores se calculan con lo que queda. `cliente` es SDAN8 (no el destino).
+export function filtrarPorClientes<T extends { cliente: number }>(envios: T[], clientes: number[]): T[] {
+  if (clientes.length === 0) return envios;
+  const elegidos = new Set(clientes);
+  return envios.filter((e) => elegidos.has(e.cliente));
+}
