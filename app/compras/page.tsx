@@ -4,7 +4,7 @@
 // docs/compras.md (documentación completa del panel).
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { RequireAccess, useApiFetch } from "@/components/SessionProvider";
 import * as XLSX from "xlsx";
 import { toast } from "sonner";
@@ -15,6 +15,8 @@ import Charts15 from "@/components/shadcn-space/blocks/chart-15/charts-15";
 import DeviationByFamilyChart from "@/components/nova/deviation-by-family-chart";
 import HierarchicalTable, { type DrillState, type FamiliaRow, type Unit } from "@/components/nova/hierarchical-table";
 import MonthRangePicker, { type MonthRange } from "@/components/nova/month-range-picker";
+import NovaPresets, { useNovaPresets } from "@/components/nova/presets";
+import type { Aplicacion } from "@/lib/presets-nova";
 import { Button } from "@/components/nova/ui/button";
 import { Tabs, TabsList, TabsTrigger } from "@/components/nova/ui/tabs";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/nova/ui/select";
@@ -23,6 +25,9 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 // cuando se llama sin startDate/endDate.
 type TipoPrevision = "PN" | "PM";
 const TODOS_SABORES = "__todos__";
+// Lo que guarda un preset de /compras (además de las fechas, que van aparte)
+type FiltrosCompras = { tipo: TipoPrevision; sabor: string; unit: Unit };
+const UNIDADES: Unit[] = ["unidades", "kg", "importe"];
 
 function currentMonthRange(): MonthRange {
   const now = new Date();
@@ -146,10 +151,24 @@ function ComprasV2PagePanel() {
       .finally(() => setFetching(false));
   };
 
-  // Solo al montar, con el rango por defecto — las siguientes cargas las dispara el
-  // botón "Filtrar", nunca automáticamente al cambiar el selector de meses.
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  useEffect(() => { fetchData(range); }, []);
+  // Presets comunes de Nova. Aplicar uno pone su previsión, sabor y vista (y su rango, si lo trae) y
+  // recarga. La primera carga la hace useNovaPresets cuando ya sabe si hay un preset predeterminado, así
+  // que no se consulta Oracle dos veces al abrir. Las siguientes cargas las dispara "Filtrar" (el rango
+  // no recarga al cambiar el selector de meses).
+  const aplicarPreset = (a: Aplicacion<FiltrosCompras>) => {
+    const t = a.filtros.tipo === "PN" || a.filtros.tipo === "PM" ? a.filtros.tipo : tipo;
+    const s = typeof a.filtros.sabor === "string" ? a.filtros.sabor : sabor;
+    const r = a.fechas ?? range;
+    setTipo(t);
+    setSabor(s);
+    if (a.filtros.unit && UNIDADES.includes(a.filtros.unit)) setUnit(a.filtros.unit);
+    if (a.fechas) setRange(a.fechas);
+    fetchData(r, t, s);
+  };
+  const presets = useNovaPresets<FiltrosCompras>("compras", (p) => (p ? aplicarPreset(p) : fetchData(range)));
+  // El sabor de un preset puede no estar entre los del periodo cargado: se añade para que se vea elegido
+  const sabores = data?.sabores ?? [];
+  const opcionesSabor = sabor && !sabores.includes(sabor) ? [...sabores, sabor] : sabores;
 
 
 
@@ -316,7 +335,7 @@ function ComprasV2PagePanel() {
           <MonthRangePicker value={range} onChange={setRange} />
           {/* Como el tipo de previsión: se aplica al elegir (el servidor lo filtra en memoria) */}
           <Select
-            items={[{ value: TODOS_SABORES, label: "Todos los sabores" }, ...(data?.sabores ?? []).map((s) => ({ value: s, label: s }))]}
+            items={[{ value: TODOS_SABORES, label: "Todos los sabores" }, ...opcionesSabor.map((s) => ({ value: s, label: s }))]}
             value={sabor || TODOS_SABORES}
             onValueChange={(v) => {
               const nuevo = v === TODOS_SABORES ? "" : (v as string);
@@ -330,7 +349,7 @@ function ComprasV2PagePanel() {
             </SelectTrigger>
             <SelectContent align="start" alignItemWithTrigger={false}>
               <SelectItem value={TODOS_SABORES}>Todos los sabores</SelectItem>
-              {(data?.sabores ?? []).map((s) => (
+              {opcionesSabor.map((s) => (
                 <SelectItem key={s} value={s}>{s}</SelectItem>
               ))}
             </SelectContent>
@@ -339,6 +358,13 @@ function ComprasV2PagePanel() {
             {fetching ? <Loader2 size={14} className="animate-spin" /> : <Filter size={14} />}
             Filtrar
           </Button>
+          <NovaPresets
+            presets={presets}
+            actual={{ filtros: { tipo, sabor, unit }, fechas: range }}
+            granularidad="mes"
+            onAplicar={aplicarPreset}
+            describir={(f) => [f.tipo === "PN" ? "Original (PN)" : f.tipo === "PM" ? "Modificada (PM)" : null, f.sabor || "Todos los sabores", f.unit].filter(Boolean).join(" · ")}
+          />
         </div>
         <div className="flex items-center gap-3">
           {/* Cambiar el tipo recarga al instante con el rango del selector */}

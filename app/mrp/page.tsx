@@ -4,7 +4,7 @@
 // vigencia del BOM evaluada por mes de previsión, no por "hoy").
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useState } from "react";
 import { RequireAccess, useApiFetch } from "@/components/SessionProvider";
 import { toast } from "sonner";
 import { Download, Filter, Loader2 } from "lucide-react";
@@ -12,6 +12,8 @@ import * as XLSX from "xlsx";
 import NovaPanelShell from "@/components/nova/panel-shell";
 import Statistics from "@/components/shadcn-space/blocks/statistics-04/statistics";
 import MonthRangePicker, { type MonthRange } from "@/components/nova/month-range-picker";
+import NovaPresets, { useNovaPresets } from "@/components/nova/presets";
+import type { Aplicacion } from "@/lib/presets-nova";
 import MrpMaterialsTable, { agregarPorMes, type Material } from "@/components/nova/mrp-materials-table";
 import { Button } from "@/components/nova/ui/button";
 
@@ -59,8 +61,14 @@ function MrpPagePanel() {
     }
   }, [apiFetch]);
 
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  useEffect(() => { fetchData(range); }, []);
+  // Presets comunes de Nova (aquí solo guardan el periodo). La primera carga la hace useNovaPresets cuando
+  // ya sabe si hay un preset predeterminado, para no calcular la explosión dos veces al abrir.
+  const aplicarPreset = (a: Aplicacion<Record<string, never>>) => {
+    if (!a.fechas) return;
+    setRange(a.fechas);
+    fetchData(a.fechas);
+  };
+  const presets = useNovaPresets<Record<string, never>>("mrp", (p) => (p?.fechas ? aplicarPreset(p) : fetchData(range)));
 
   const exportToExcel = () => {
     if (!data) return;
@@ -118,6 +126,7 @@ function MrpPagePanel() {
             {loading ? <Loader2 size={14} className="animate-spin" /> : <Filter size={14} />}
             Filtrar
           </Button>
+          <NovaPresets presets={presets} actual={{ filtros: {}, fechas: range }} granularidad="mes" onAplicar={aplicarPreset} />
         </div>
         <Button size="sm" className="gap-1.5" onClick={exportToExcel} disabled={!data || data.materiales.length === 0}>
           <Download size={14} />
