@@ -25,6 +25,7 @@ export interface EnvioDto {
   pedido: number;
   suPedido: string;
   albaran: number;
+  cliente: number; // SDAN8: lo usa el filtro de clientes
   clienteNombre: string;
   destinoNombre: string;
   canal: string | null;

@@ -130,7 +130,7 @@ dashboard/
         ├── presets/
         │   ├── route.ts          ← GET/POST /api/presets
         │   └── [id]/
-        │       └── route.ts      ← DELETE /api/presets/:id
+        │       └── route.ts      ← PUT/PATCH/DELETE /api/presets/:id (PATCH marca el predeterminado)
         ├── categories/
         │   └── route.ts          ← GET /api/categories?field=X
         ├── production/
@@ -294,6 +294,7 @@ CREATE TABLE presets (
   name TEXT NOT NULL,
   filters TEXT NOT NULL,                        -- JSON con los filtros del panel
   screen TEXT NOT NULL DEFAULT 'produccion',    -- panel al que pertenece el preset
+  es_predeterminado INTEGER NOT NULL DEFAULT 0, -- 1 = se aplica al abrir el panel (solo uno por usuario y panel)
   created_at TEXT DEFAULT (datetime('now')),
   UNIQUE(user_id, name)
 );
@@ -370,6 +371,7 @@ Todos los seeds usan `INSERT OR IGNORE` para no romper DBs existentes.
 - `must_change_password`, `name`, `surname`, `default_plant` → tabla `users`
 - `source` → tabla `query_logs`
 - `screen` → tabla `presets` (con `DEFAULT 'produccion'` para no romper presets anteriores)
+- `es_predeterminado` → tabla `presets` (`DEFAULT 0`)
 
 **Usuario admin por defecto:** Si la tabla `users` está vacía, crea `admin` / `admin123` con role `admin`.
 
@@ -910,6 +912,9 @@ Los usuarios logueados pueden guardar combinaciones de filtros con nombre para r
 | Caducados | `'caducados'` |
 | Pedidos | `'pedidos'` |
 | Comparativa SERES vs JDE | `'comparativa'` |
+| Nivel de servicio (clientes) | `'servicio'` (`'servicio-ejemplo'` en `?mock=1`) |
+
+**Preset predeterminado:** `PATCH /api/presets/:id` con `{ predeterminado: true|false }` marca uno como el que se aplica al abrir el panel; marcar uno desmarca el resto del mismo usuario y panel. Hoy solo lo usa `/servicio` (ver `docs/servicio.md` §17); los demás paneles ignoran el campo.
 
 ### Qué se guarda en un preset
 

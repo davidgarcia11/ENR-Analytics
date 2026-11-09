@@ -510,6 +510,10 @@ export function getDb(): Database.Database {
   if (!presetColumns.some(c => c.name === 'screen')) {
     _db.exec("ALTER TABLE presets ADD COLUMN screen TEXT NOT NULL DEFAULT 'produccion'");
   }
+  // Migración: preset predeterminado (el que se aplica al abrir el panel; solo uno por usuario y panel)
+  if (!presetColumns.some(c => c.name === 'es_predeterminado')) {
+    _db.exec("ALTER TABLE presets ADD COLUMN es_predeterminado INTEGER NOT NULL DEFAULT 0");
+  }
 
   // Migración: quitar columna message_name de loteadoras si existe (BDs creadas
   // antes de que la plantilla pasara a elegirse en vivo desde /loteadora)
