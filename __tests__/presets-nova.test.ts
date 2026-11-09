@@ -3,7 +3,7 @@
  * Las fechas relativas se calculan contra un «hoy» fijo; los meses se construyen en hora local.
  */
 import { describe, it, expect } from 'bun:test'
-import { resolverFechas, crearContenido, leerPreset, aplicacionDe, modoDe, periodosPara, describirFechas } from '../lib/presets-nova'
+import { resolverFechas, crearContenido, leerPreset, aplicacionDe, modoDe, periodosPara, describirFechas, coincide } from '../lib/presets-nova'
 
 const hoy = new Date(2026, 0, 15) // 15 ene 2026
 
@@ -64,5 +64,31 @@ describe('guardar y leer', () => {
     expect(describirFechas(undefined)).toBe('Sin fechas')
     expect(describirFechas({ tipo: 'fijas', desde: '2026-01-01', hasta: '2026-03-31' })).toBe('01/01/26 – 31/03/26')
     expect(describirFechas({ tipo: 'relativas', periodo: 'mes_actual' })).toBe('Mes en curso')
+  })
+})
+
+describe('¿coincide lo actual con el filtro guardado? (para «modificado»)', () => {
+  const rango30 = { startDate: '2025-12-17', endDate: '2026-01-15' }
+  const c = crearContenido({ clientes: [1, 2] }, 'ultimos_30', null)
+  it('mismos filtros y mismo periodo resuelto → coincide', () => {
+    expect(coincide(c, { filtros: { clientes: [1, 2] }, fechas: rango30 }, hoy)).toBe(true)
+  })
+  it('el orden de una lista no importa', () => {
+    expect(coincide(c, { filtros: { clientes: [2, 1] }, fechas: rango30 }, hoy)).toBe(true)
+  })
+  it('otro cliente u otras fechas → modificado', () => {
+    expect(coincide(c, { filtros: { clientes: [1] }, fechas: rango30 }, hoy)).toBe(false)
+    expect(coincide(c, { filtros: { clientes: [1, 2] }, fechas: { startDate: '2026-01-01', endDate: '2026-01-15' } }, hoy)).toBe(false)
+    expect(coincide(c, { filtros: { clientes: [1, 2] }, fechas: null }, hoy)).toBe(false)
+  })
+  it('un filtro sin fechas no mira las fechas', () => {
+    const sin = crearContenido({ sabor: 'X', tipo: 'PM' }, 'sin', null)
+    expect(coincide(sin, { filtros: { sabor: 'X', tipo: 'PM' }, fechas: { startDate: '2020-01-01', endDate: '2020-12-31' } }, hoy)).toBe(true)
+    expect(coincide(sin, { filtros: { sabor: 'Y', tipo: 'PM' }, fechas: null }, hoy)).toBe(false)
+  })
+  it('panel con un filtro nuevo que el guardado no tiene: vacío/null cuenta como «no lo tiene»', () => {
+    const viejo = leerPreset<{ clientes: number[]; canal: string | null }>('{"clientes":[1]}')
+    expect(coincide(viejo, { filtros: { clientes: [1], canal: null }, fechas: null }, hoy)).toBe(true)
+    expect(coincide(viejo, { filtros: { clientes: [1], canal: 'HOR' }, fechas: null }, hoy)).toBe(false)
   })
 })

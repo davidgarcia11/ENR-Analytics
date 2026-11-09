@@ -476,10 +476,16 @@ desde cero las mismas decisiones de diseño:
     - La cabecera no es `sticky`: la referencia lo declara, pero su `SidebarInset` lleva
       `overflow-hidden`, así que nunca se queda fija; no se replica una clase que no hace nada.
 
-15. **Presets (`components/nova/presets.tsx` + `lib/presets-nova.ts`)**: todos los paneles Nova con
-    filtros llevan el mismo botón «Presets» en la barra de filtros, a la derecha de «Filtrar». No se
+15. **Filtros guardados / presets (`components/nova/presets.tsx` + `lib/presets-nova.ts`)**: todos los
+    paneles Nova con filtros llevan el mismo botón **«Mis filtros»** en la barra de filtros, a la derecha
+    de «Filtrar». Para el usuario se llaman «filtros» (guardar filtro, filtros guardados); en el código y
+    la API siguen siendo `presets`. No se
     hacen presets a mano en un panel (`PresetPanel` es del sistema viejo y no sirve en Nova).
-    - **Qué hace**: lista de presets del usuario para ese panel (un clic aplica; la estrella marca el
+    - **Qué filtro está aplicado**: el botón muestra el nombre del último filtro guardado aplicado (o
+      del predeterminado al abrir) y, si después se cambia algo, añade «· modificado» (`coincide`,
+      `lib/presets-nova.ts`: compara los filtros del panel sin importar el orden de las listas, y las
+      fechas solo si el filtro las guarda). En la lista, el aplicado lleva una marca.
+    - **Qué hace**: lista de filtros guardados del usuario para ese panel (un clic aplica; la estrella marca el
       **predeterminado**, que se aplica al abrir el panel; el lápiz edita; la papelera borra) y un
       formulario para guardar los filtros actuales con nombre y un selector de fechas: *sin fechas*,
       *fechas fijas* (el rango exacto actual) o un *periodo relativo* (mes en curso, mes anterior,
