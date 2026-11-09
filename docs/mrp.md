@@ -80,7 +80,7 @@ por mes" (mismo agregado que ver en pantalla, `agregarPorMes()` reutilizada).
 
 ## Presets
 
-Botón «Presets» en la barra de filtros (los comunes de Nova, `components/nova/README.md` punto 15).
+Botón «Mis filtros» en la barra de filtros (los filtros guardados comunes de Nova, `components/nova/README.md` punto 15).
 Como el panel solo filtra por periodo, cada preset guarda un periodo (`screen = 'mrp'`): fijo o
 relativo de meses completos (mes en curso, últimos 3/12 meses, año en curso…). El predeterminado
 (estrella) se aplica al abrir, antes del primer cálculo, para no calcular la explosión dos veces.

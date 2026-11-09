@@ -106,6 +106,18 @@ export function leerPreset<F>(filters: string): ContenidoPreset<F> {
 export const aplicacionDe = <F>(c: ContenidoPreset<F>, hoy: Date = new Date()): Aplicacion<F> =>
   c.fechas ? { filtros: c.filtros, fechas: resolverFechas(c.fechas, hoy) } : { filtros: c.filtros };
 
+// ¿Lo que hay ahora en el panel es lo que guarda el filtro? Para mostrar «modificado» en el botón.
+// Compara solo los filtros que tiene el panel (un filtro guardado viejo puede no tener alguno) y las
+// fechas solo si el filtro las guarda. Las listas se comparan sin orden (elegir A y luego B = B y A).
+export function coincide<F extends object>(c: ContenidoPreset<F>, actual: { filtros: F; fechas: Rango | null }, hoy: Date = new Date()): boolean {
+  const norm = (v: unknown) => JSON.stringify(Array.isArray(v) ? [...v].sort() : v ?? null);
+  const guardados = c.filtros as Record<string, unknown>;
+  const iguales = Object.entries(actual.filtros).every(([k, v]) => norm(guardados[k]) === norm(v));
+  if (!iguales || !c.fechas) return iguales;
+  const r = resolverFechas(c.fechas, hoy);
+  return !!actual.fechas && actual.fechas.startDate === r.startDate && actual.fechas.endDate === r.endDate;
+}
+
 export const modoDe = (c: ContenidoPreset<unknown>): ModoFechas =>
   !c.fechas ? 'sin' : c.fechas.tipo === 'fijas' ? 'fijas' : c.fechas.periodo;
 
