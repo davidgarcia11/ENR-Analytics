@@ -110,7 +110,10 @@ export const aplicacionDe = <F>(c: ContenidoPreset<F>, hoy: Date = new Date()): 
 // Compara solo los filtros que tiene el panel (un filtro guardado viejo puede no tener alguno) y las
 // fechas solo si el filtro las guarda. Las listas se comparan sin orden (elegir A y luego B = B y A).
 export function coincide<F extends object>(c: ContenidoPreset<F>, actual: { filtros: F; fechas: Rango | null }, hoy: Date = new Date()): boolean {
-  const norm = (v: unknown) => JSON.stringify(Array.isArray(v) ? [...v].sort() : v ?? null);
+  // «No lo tiene», null, false, "" y [] son lo mismo: un filtro guardado antes de existir un filtro nuevo
+  // (p. ej. `excluir` en /servicio) coincide mientras ese filtro siga en su valor por defecto.
+  const vacio = (v: unknown) => v === undefined || v === null || v === false || v === "" || (Array.isArray(v) && v.length === 0);
+  const norm = (v: unknown) => (vacio(v) ? "∅" : JSON.stringify(Array.isArray(v) ? [...v].sort() : v));
   const guardados = c.filtros as Record<string, unknown>;
   const iguales = Object.entries(actual.filtros).every(([k, v]) => norm(guardados[k]) === norm(v));
   if (!iguales || !c.fechas) return iguales;

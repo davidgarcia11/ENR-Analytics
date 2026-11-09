@@ -174,6 +174,11 @@ describe('filtro de clientes', () => {
   it('deja solo los de los clientes elegidos', () => {
     expect(filtrarPorClientes(envios, [10, 30]).map((e) => e.pedido)).toEqual([1, 3, 4])
   })
+  it('«todos menos»: con excluir, quita solo los de la lista', () => {
+    expect(filtrarPorClientes(envios, [10], true).map((e) => e.pedido)).toEqual([2, 4])
+    expect(filtrarPorClientes(envios, [], true)).toBe(envios) // todos marcados = sin filtro
+    expect(filtrarPorClientes(envios, [999], true)).toEqual(envios) // excluir uno que no está no quita nada
+  })
   it('un cliente que no aparece en los datos (preset antiguo) no rompe nada: deja la lista vacía', () => {
     expect(filtrarPorClientes(envios, [999])).toEqual([])
   })

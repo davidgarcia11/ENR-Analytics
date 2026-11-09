@@ -19,7 +19,7 @@ import { Button } from "@/components/nova/ui/button";
 import { OBJETIVO_OTIF_PCT, calcularKpis, estadoEntrega, filtrarPorClientes, resumirPedidos } from "@/lib/servicio";
 
 const iso = (d: Date) => d.toISOString().slice(0, 10);
-type FiltrosServicio = { clientes: number[] };
+type FiltrosServicio = { clientes: number[]; excluir: boolean };
 const pct = (n: number | null) => (n === null ? "—" : `${n.toLocaleString("es-ES", { maximumFractionDigits: 1 })} %`);
 
 function ServicioPagePanel() {
@@ -28,8 +28,10 @@ function ServicioPagePanel() {
   // Rango sobre la fecha de entrega prometida. Por defecto, últimos 30 días.
   const [range, setRange] = useState<DateRange | null>({ startDate: iso(new Date(Date.now() - 30 * 86400000)), endDate: iso(new Date()) });
   const [envios, setEnvios] = useState<EnvioDto[] | null>(null);
-  // Clientes elegidos (SDAN8); vacío = todos. Filtra en pantalla los envíos ya cargados.
+  // Clientes elegidos (SDAN8); vacío = todos. Con `excluirClientes`, son los quitados («todos menos»).
+  // Filtra en pantalla los envíos ya cargados.
   const [clientes, setClientes] = useState<number[]>([]);
+  const [excluirClientes, setExcluirClientes] = useState(false);
   const [loading, setLoading] = useState(false);
   // Opciones de los desplegables (motivos, responsables, transportistas): se editan en /admin → Listas de servicio
   const [catalogos, setCatalogos] = useState<CatalogosServicio>({ motivos: [], responsables: [], transportistas: [] });
@@ -94,6 +96,7 @@ function ServicioPagePanel() {
   // los reales. Aplicar uno pone sus clientes y, si trae fechas, consulta ese rango.
   const aplicarPreset = (a: Aplicacion<FiltrosServicio>) => {
     setClientes(Array.isArray(a.filtros.clientes) ? a.filtros.clientes.filter(Number.isInteger) : []);
+    setExcluirClientes(a.filtros.excluir === true);
     if (a.fechas) { setRange(a.fechas); fetchData(a.fechas); }
   };
   const presets = useNovaPresets<FiltrosServicio>(modoListo ? (esMock ? "servicio-ejemplo" : "servicio") : null, (p) => {
@@ -128,7 +131,7 @@ function ServicioPagePanel() {
     envios?.forEach((e) => { if (!porId.has(e.cliente)) porId.set(e.cliente, e.clienteNombre); });
     return Array.from(porId, ([id, nombre]) => ({ id, nombre })).sort((a, b) => a.nombre.localeCompare(b.nombre, "es", { numeric: true }));
   }, [envios]);
-  const visibles = useMemo(() => (envios ? filtrarPorClientes(envios, clientes) : null), [envios, clientes]);
+  const visibles = useMemo(() => (envios ? filtrarPorClientes(envios, clientes, excluirClientes) : null), [envios, clientes, excluirClientes]);
 
   const kpis = useMemo(() => (visibles ? calcularKpis(resumirPedidos(visibles), iso(new Date())) : null), [visibles]);
 
@@ -183,17 +186,26 @@ function ServicioPagePanel() {
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="flex flex-wrap items-center gap-2">
           <DateRangePicker value={range} onChange={setRange} />
-          <ServicioClientesFiltro opciones={opcionesClientes} value={clientes} onChange={setClientes} />
+          <ServicioClientesFiltro
+            opciones={opcionesClientes}
+            value={clientes}
+            excluir={excluirClientes}
+            onChange={(c, ex) => { setClientes(c); setExcluirClientes(ex); }}
+          />
           <Button size="sm" className="gap-1.5" onClick={() => fetchData(range)} disabled={loading}>
             {loading ? <Loader2 size={14} className="animate-spin" /> : <Filter size={14} />}
             Filtrar
           </Button>
           <NovaPresets
             presets={presets}
-            actual={{ filtros: { clientes }, fechas: range }}
+            actual={{ filtros: { clientes, excluir: excluirClientes }, fechas: range }}
             granularidad="dia"
             onAplicar={aplicarPreset}
-            describir={(f) => (f.clientes?.length ? `${f.clientes.length} cliente${f.clientes.length === 1 ? "" : "s"}` : "Todos los clientes")}
+            describir={(f) => {
+              const n = f.clientes?.length ?? 0;
+              if (!n) return "Todos los clientes";
+              return f.excluir ? `Todos menos ${n} cliente${n === 1 ? "" : "s"}` : `${n} cliente${n === 1 ? "" : "s"}`;
+            }}
           />
           <span className="text-xs text-muted-foreground">Por fecha de entrega prometida</span>
           {esMock && <span className="rounded-full bg-amber-500/15 px-2 py-0.5 text-xs font-medium text-amber-600">Datos de ejemplo</span>}
