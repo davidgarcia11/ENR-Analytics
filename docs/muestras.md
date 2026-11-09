@@ -380,7 +380,7 @@ necesita ver algo fuera de esa lista, lo añade él mismo.
 
 ## Presets
 
-Botón «Presets» en la barra de filtros (los comunes de Nova, `components/nova/README.md` punto 15).
+Botón «Mis filtros» en la barra de filtros (los filtros guardados comunes de Nova, `components/nova/README.md` punto 15).
 Como el panel solo filtra por fechas, cada preset guarda un periodo (`screen = 'muestras'`): fijo o
 relativo (últimos 7/30/90 días, mes en curso…). Sin preset predeterminado se sigue abriendo con todas
 las fechas; con él, se abre con su periodo.
