@@ -20,12 +20,14 @@ app/servicio/page.tsx              # Página (Nova): rango de fechas, KPIs, tabl
 app/api/servicio/route.ts          # GET (F4211 + capa manual) y PATCH (datos manuales de un envío)
 lib/servicio.ts                    # Lógica pura: agrupar envíos, estado de entrega, KPIs, fechas JDE
 components/nova/servicio-table.tsx # Tabla de envíos + Dialog de edición
+components/nova/servicio-clientes-filtro.tsx # Filtro de clientes + presets de clientes (§17)
 components/nova/panel-shell.tsx    # Armazón común (barra lateral ShadcnSpace) — secciones Seguimiento / Indicadores
 components/nova/servicio-indicadores.tsx # Pestaña Indicadores: resumen mes×canal y gráficos
 components/shadcn-space/blocks/chart-16|chart-12|chart-02|chart-01  # Bloques ShadcnSpace (OTIF por canal, barras de motivos, donut, apiladas) parametrizados
 lib/sqlite.ts                      # Tabla order_service_tracking
 lib/panels.ts                      # Entrada 'servicio' (grupo Dashboards del nav)
 __tests__/servicio.test.ts         # Tests de lib/servicio.ts
+__tests__/presets.test.ts          # Tests del preset predeterminado (PATCH /api/presets/:id)
 ```
 
 ## 3. Origen de datos (JDE, F4211)
@@ -237,3 +239,11 @@ Para que el KPI no engañe:
   hay y, si no, las unidades afectadas pasadas a cajas con esa misma proporción.
 - **En la tabla**, la celda Incidencia muestra «91 uds · 8 cajas» y el motivo debajo.
 
+## 17. Filtro de clientes y presets
+
+- **Filtro:** desplegable «Todos los clientes» junto al rango de fechas, con búsqueda y selección múltiple. Las opciones salen de los envíos ya cargados (`cliente` = `SDAN8`, con el nombre de F0101), no de una consulta nueva. Filtra **en pantalla** (`filtrarPorClientes`, `lib/servicio.ts`): KPIs, tabla, Indicadores y exportación a Excel usan solo los clientes elegidos. Vacío = todos. Es el cliente del pedido (`SDAN8`), no el destino de entrega.
+- **Presets de clientes:** dentro del mismo desplegable se guarda la selección con un nombre («clientes de siempre»), se carga con un clic y se borra con la papelera. Usan la API genérica `/api/presets` (por usuario) con `screen = 'servicio'` y `filters = { clientes: number[] }` (ids `SDAN8`). La interfaz es propia de Nova: `PresetPanel` es del sistema viejo.
+- **Predeterminado:** la estrella marca el preset que se aplica solo al abrir el panel (uno por usuario; marcar otro lo cambia, pulsar de nuevo lo quita). Columna `presets.es_predeterminado`, endpoint `PATCH /api/presets/:id`. Se aplica una vez, al terminar de cargar los presets, así que un envío que no sea de esos clientes simplemente no se ve hasta quitar el filtro (botón ✕).
+- **Un cliente que ya no aparece** en el periodo sigue en el preset: no rompe nada, solo no se ve en la lista.
+- **Modo de ejemplo:** `?mock=1` guarda los presets en `screen = 'servicio-ejemplo'`, para no mezclar clientes inventados con los reales.
+- **No se guarda** el rango de fechas ni otros filtros: solo los clientes.

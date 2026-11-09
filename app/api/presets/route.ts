@@ -12,7 +12,7 @@ export async function GET(req: NextRequest) {
 
   const db = getDb();
   const presets = db.prepare(
-    'SELECT id, name, filters, created_at FROM presets WHERE user_id = ? AND screen = ? ORDER BY name'
+    'SELECT id, name, filters, created_at, es_predeterminado FROM presets WHERE user_id = ? AND screen = ? ORDER BY name'
   ).all(user.id, screen);
   return NextResponse.json(presets);
 }

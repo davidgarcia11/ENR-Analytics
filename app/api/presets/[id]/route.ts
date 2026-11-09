@@ -34,6 +34,35 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
   return NextResponse.json({ ok: true });
 }
 
+// Marca (o desmarca) un preset como predeterminado: el que se aplica al abrir el panel.
+// Solo hay uno por usuario y panel, así que marcar uno desmarca el resto.
+export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+  const acceso = await requireAccess({ sesion: true });
+  if (!acceso.ok) return acceso.denied;
+  const user = acceso.user!;
+
+  const { id } = await params;
+  const body = await req.json().catch(() => null);
+  if (typeof body?.predeterminado !== 'boolean') {
+    return NextResponse.json({ error: 'predeterminado debe ser true o false' }, { status: 400 });
+  }
+
+  const db = getDb();
+  const preset = db.prepare('SELECT screen FROM presets WHERE id = ? AND user_id = ?').get(Number(id), user.id) as { screen: string } | undefined;
+  if (!preset) {
+    return NextResponse.json({ error: 'Preset no encontrado' }, { status: 404 });
+  }
+
+  db.transaction(() => {
+    db.prepare('UPDATE presets SET es_predeterminado = 0 WHERE user_id = ? AND screen = ?').run(user.id, preset.screen);
+    if (body.predeterminado) {
+      db.prepare('UPDATE presets SET es_predeterminado = 1 WHERE id = ? AND user_id = ?').run(Number(id), user.id);
+    }
+  })();
+
+  return NextResponse.json({ ok: true });
+}
+
 export async function DELETE(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const acceso = await requireAccess({ sesion: true });
   if (!acceso.ok) return acceso.denied;
