@@ -23,7 +23,7 @@ components/nova/servicio-table.tsx # Tabla de envíos + Dialog de edición
 components/nova/servicio-clientes-filtro.tsx # Filtro de selección múltiple: clientes y tipos de pedido (§17)
 components/nova/panel-shell.tsx    # Armazón común (barra lateral ShadcnSpace) — secciones Seguimiento / Indicadores
 components/nova/servicio-indicadores.tsx # Pestaña Indicadores: resumen mes×canal y gráficos
-components/shadcn-space/blocks/chart-16|chart-12|chart-02|chart-01  # Bloques ShadcnSpace (OTIF por canal, barras de motivos, donut, apiladas) parametrizados
+components/shadcn-space/blocks/chart-16|chart-12|chart-02|chart-01  # Bloques ShadcnSpace (OTIF por canal, barras de responsables, donut de motivos, apiladas) parametrizados
 lib/sqlite.ts                      # Tablas order_service_tracking y order_service_incidencia_articulo
 lib/panels.ts                      # Entrada 'servicio' (grupo Dashboards del nav)
 __tests__/servicio.test.ts         # Tests de lib/servicio.ts
@@ -147,8 +147,8 @@ página), con `resumenMensual`, `contarIncidencias` e `incidenciasPorMes` de
 |---|---|---|
 | Tabla resumen mes × canal (con total por mes) | Tabla dinámica `TD % NS OTIF` | % a tiempo, % completo, % OTIF por pedido, uds pedidas, uds con incidencia, % OTIF uds. En rojo por debajo del 98 % |
 | Áreas del % OTIF por pedido, una por canal (`chart-16`) | Columnas OTIF de esa tabla | Línea de referencia en el 98 % |
-| Barras de incidencias por motivo | Tabla «Incidencias» | Cuenta envíos con motivo anotado |
-| Donut de responsabilidad, últimos 3 meses (`chart-02`) | Gráfico circular 3D | El mes más reciente con datos y los 2 anteriores |
+| Donut de incidencias por motivo (`chart-02`) | Tabla «Incidencias» | Cuenta envíos con motivo anotado: los 4 motivos más frecuentes y «Otros motivos» |
+| Barras de responsabilidad, últimos 3 meses (`chart-12`) | Gráfico circular 3D | El mes más reciente con datos y los 2 anteriores. Antes era el donut y motivos las barras; se intercambiaron a petición del negocio |
 | Barras apiladas por mes y motivo (`chart-01`) | — | Para ver si un motivo crece |
 
 **% OTIF en unidades** = 1 − (uds no enviadas + uds afectadas anotadas a mano) / uds
