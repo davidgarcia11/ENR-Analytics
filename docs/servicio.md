@@ -24,7 +24,7 @@ components/nova/servicio-clientes-filtro.tsx # Filtro de selección múltiple: c
 components/nova/panel-shell.tsx    # Armazón común (barra lateral ShadcnSpace) — secciones Seguimiento / Indicadores
 components/nova/servicio-indicadores.tsx # Pestaña Indicadores: resumen mes×canal y gráficos
 components/shadcn-space/blocks/chart-16|chart-12|chart-02|chart-01  # Bloques ShadcnSpace (OTIF por canal, barras de motivos, donut, apiladas) parametrizados
-lib/sqlite.ts                      # Tabla order_service_tracking
+lib/sqlite.ts                      # Tablas order_service_tracking y order_service_incidencia_articulo
 lib/panels.ts                      # Entrada 'servicio' (grupo Dashboards del nav)
 __tests__/servicio.test.ts         # Tests de lib/servicio.ts
 __tests__/presets.test.ts          # Tests del preset predeterminado (PATCH /api/presets/:id)
@@ -108,7 +108,9 @@ Tabla `order_service_tracking`, clave `(pedido, albaran)`, upsert vía `PATCH /a
 | `fecha_entrega_real` | La que decide a tiempo/tarde |
 | `transportista` | Texto libre **de momento** (no está claro que exista en JDE). Si no está, se sustituirá por una lista configurable en `/admin` + desplegable |
 | `responsable`, `motivo` | Listas cerradas en `lib/servicio.ts` (`RESPONSABLES`, `MOTIVOS`), sacadas de las categorías del Excel; ajustar ahí si el negocio quiere otras |
-| `incidencia` (≤500), `uds_afectadas` | Texto libre y unidades afectadas |
+| `incidencia` (≤500), `uds_afectadas`, `cajas_afectadas` | Texto libre y total de afectadas del envío (si hay desglose por artículo, es su suma: §18) |
+
+Desglose por artículo en `order_service_incidencia_articulo`, clave `(pedido, albaran, articulo)` (§18).
 
 El `PATCH` valida cada campo en el límite de la API y conserva los que no vengan.
 
@@ -262,8 +264,9 @@ Para que el KPI no engañe:
   definidas, solo se admiten unidades. En SQLite se guardan **las dos** (`uds_afectadas`,
   `cajas_afectadas`), la columna nueva se añade sola a las bases existentes. El `PATCH` acepta
   `udsAfectadas` y `cajasAfectadas`.
-- **Aproximación:** si un envío mezcla artículos con distinto nº de unidades por caja, la conversión usa
-  la media del envío, así que es aproximada. Para el OTIF por cajas se usan las cajas anotadas si las
+- **Aproximación (solo sin desglose):** si un envío mezcla artículos con distinto nº de unidades por caja,
+  la conversión usa la media del envío, así que es aproximada. Desde §18 las afectadas se anotan por
+  artículo, cada uno con su conversión; esto solo queda para lo anotado antes y para un envío sin artículos. Para el OTIF por cajas se usan las cajas anotadas si las
   hay y, si no, las unidades afectadas pasadas a cajas con esa misma proporción.
 - **En la tabla**, la celda Incidencia muestra «91 uds · 8 cajas» y el motivo debajo.
 
@@ -275,3 +278,35 @@ Para que el KPI no engañe:
 - **Presets:** los filtros guardados comunes de Nova (botón «Mis filtros», ver `components/nova/README.md` punto 15). En este panel guardan `{ clientes, excluir, tipos, excluirTipos }` (`excluir` es el «todos menos» de los clientes, con ese nombre porque es anterior al filtro de tipos; un filtro guardado sin `tipos` los coge todos) y, si se elige, las fechas (fijas o un periodo relativo como «Últimos 30 días»). `screen = 'servicio'`; en `?mock=1`, `'servicio-ejemplo'` para no mezclar clientes inventados con los reales. Los presets guardados con la v1.39.0 (solo `{ clientes }`) se siguen leyendo.
 - **Predeterminado:** el marcado con la estrella se aplica al abrir el panel, antes de la primera consulta (si trae fechas, se consulta directamente ese rango).
 - **Un cliente que ya no aparece** en el periodo sigue en el preset: no rompe nada, solo no se ve en la lista.
+
+## 18. Afectadas por artículo
+
+En «Editar datos», en vez de un único campo «Afectadas», sale **una fila por artículo del envío**:
+descripción, código, unidades enviadas de las pedidas y unidades por caja. Se escriben las **unidades
+afectadas de cada artículo** y sus **cajas se calculan con la conversión de ese artículo, con decimales**
+(21 uds de un artículo de 5 uds/caja = 4,2 cajas; decisión del negocio: sin redondear). Debajo, el total.
+El motivo, el responsable y el texto de la incidencia siguen siendo **uno por envío**.
+
+- **Artículos del envío:** salen de F4211 (`SDLITM` = «2º nº de artículo», `SDDSC1` = descripción), sumando
+  sus líneas; las líneas sin albarán que se suman al último envío (§4) también suman sus artículos. Las uds
+  por caja son las de F41002 (CJ↔UN) o, si el artículo no la tiene, las de la línea (`SDUORG / SDSQOR`).
+  Sin ninguna de las dos, el artículo se anota solo en unidades («— cajas») y no suma cajas al total.
+- **Almacén:** tabla `order_service_incidencia_articulo(pedido, albaran, articulo, uds, cajas)`, creada sola al
+  arrancar. Solo guarda los artículos con algo anotado. `uds_afectadas` / `cajas_afectadas` de
+  `order_service_tracking` se guardan como **la suma del desglose**, así que KPIs, gráficos, filtro «Con
+  incidencia» y celda Incidencia funcionan igual que antes.
+- **API:** `PATCH /api/servicio` acepta `afectadasArticulos: [{ articulo, uds, cajas }]` (`validarAfectadasArticulos`,
+  `lib/servicio.ts`: código de 1–25 caracteres `[A-Za-z0-9_.-]`, sin repetir, uds enteras ≥ 0, cajas ≥ 0
+  redondeadas a 2 decimales, máximo 200 artículos; las filas a cero se quitan). Si viene, **sustituye** al
+  desglose anterior y el total pasa a ser su suma; vacío borra el desglose y deja el total que venga en
+  `udsAfectadas` / `cajasAfectadas`. Datos del envío y desglose se guardan en una transacción. Las cajas
+  las calcula la pantalla (el `PATCH` no consulta Oracle).
+- **Lo anotado antes sin desglose** (un total sin artículos): el diálogo lo muestra como «Anotado sin
+  desglose: 85 uds · 17 cajas» y **se conserva** mientras no se reparta por artículo. Al anotar algún
+  artículo, se sustituye por el desglose; también hay un enlace «Quitar» para ponerlo a cero.
+- **Envío sin artículos** (no debería pasar con datos de JDE): se mantiene el campo único antiguo.
+- **Tabla:** la celda Incidencia muestra el total y, al pasar el ratón, el desglose por artículo.
+- **Excel:** hoja «Incidencias por artículo» (pedido, albarán, cliente, artículo, descripción, uds y cajas
+  afectadas, motivo, responsable), solo si algún envío tiene desglose.
+- **Datos de ejemplo:** los pedidos pares llevan dos artículos inventados (`9000000001`, de 12 uds/caja, y
+  `9000000002`, de 6) y las afectadas van en el primero.

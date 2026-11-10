@@ -74,6 +74,25 @@ export interface LineaJde {
   cajasEnviadas: number; // proporcional por línea: SDSQOR × SDSOQS / SDUORG
   udsCanceladas: number; // SDSOCN — informativo: no genera incidencia sola (ver docs/servicio.md §8)
   canal: string | null; // código F554101.AAZE06 del artículo
+  articulo: string; // SDLITM (2º nº de artículo)
+  descripcion: string; // SDDSC1
+  udsPorCaja: number | null; // de F41002 o, si no, SDUORG / SDSQOR; null = sin cajas
+}
+
+// Un artículo de un envío (suma de sus líneas), para anotar las afectadas por artículo
+export interface ArticuloEnvio {
+  articulo: string;
+  descripcion: string;
+  udsPedidas: number;
+  udsEnviadas: number;
+  udsPorCaja: number | null;
+}
+
+// Afectadas anotadas a mano de un artículo (tabla order_service_incidencia_articulo)
+export interface AfectadaArticulo {
+  articulo: string;
+  uds: number;
+  cajas: number; // uds ÷ uds por caja de ese artículo, con decimales; 0 si el artículo no tiene cajas
 }
 
 // Una entrega de un pedido: todas las líneas de F4211 con el mismo (pedido, albarán). Las líneas
@@ -96,7 +115,19 @@ export interface Envio {
   cajasPedidas: number;
   cajasEnviadas: number;
   udsCanceladas: number;
+  articulos: ArticuloEnvio[];
 }
+
+// Suma una línea (o un artículo de otro envío) a la lista de artículos de un envío
+function sumarArticulo(lista: ArticuloEnvio[], a: ArticuloEnvio) {
+  const x = lista.find((y) => y.articulo === a.articulo);
+  if (!x) { lista.push({ ...a }); return; }
+  x.udsPedidas += a.udsPedidas;
+  x.udsEnviadas += a.udsEnviadas;
+  if (x.udsPorCaja === null) x.udsPorCaja = a.udsPorCaja;
+  if (!x.descripcion) x.descripcion = a.descripcion;
+}
+const articuloDe = (l: LineaJde): ArticuloEnvio => ({ articulo: l.articulo, descripcion: l.descripcion, udsPedidas: l.udsPedidas, udsEnviadas: l.udsEnviadas, udsPorCaja: l.udsPorCaja });
 
 // JDE guarda fechas como CYYDDD (C=1 → 2000s, DDD = día del año). 0 = sin fecha.
 export function jdeAIso(n: number | null | undefined): string | null {
@@ -144,9 +175,11 @@ export function agruparEnvios(lineas: LineaJde[]): Envio[] {
         canal: canalDe(l.pedido),
         fechaEnvio: l.fechaEnvio, fechaPrometida: l.fechaPrometida,
         udsPedidas: l.udsPedidas, udsEnviadas: l.udsEnviadas, cajasPedidas: l.cajasPedidas, cajasEnviadas: l.cajasEnviadas, udsCanceladas: l.udsCanceladas,
+        articulos: [articuloDe(l)],
       });
       continue;
     }
+    sumarArticulo(e.articulos, articuloDe(l));
     e.fechaEnvio = max(e.fechaEnvio, l.fechaEnvio);
     e.fechaPrometida = min(e.fechaPrometida, l.fechaPrometida);
     e.udsPedidas += l.udsPedidas;
@@ -178,6 +211,7 @@ export function agruparEnvios(lineas: LineaJde[]): Envio[] {
     destino.cajasPedidas += e.cajasPedidas;
     destino.cajasEnviadas += e.cajasEnviadas;
     destino.udsCanceladas += e.udsCanceladas;
+    for (const a of e.articulos) sumarArticulo(destino.articulos, a);
     return false;
   });
 }
@@ -338,9 +372,40 @@ export function incidenciasPorMes(envios: EnvioIndicadores[]): { mes: string; [m
 }
 
 // Datos manuales de un envío tal como se guardan en SQLite (order_service_tracking).
+// `articulos`: desglose de las afectadas por artículo (order_service_incidencia_articulo). Si lo hay,
+// uds_afectadas y cajas_afectadas son su suma; si no, son lo anotado antes «sin desglose».
 export interface TrackingManual {
   transportista: string; fecha_entrega_real: string | null; responsable: string; motivo: string; incidencia: string; uds_afectadas: number; cajas_afectadas?: number;
+  articulos?: AfectadaArticulo[];
 }
+
+const MAX_ARTICULOS = 200;
+const CODIGO_ARTICULO = /^[\w.-]{1,25}$/;
+
+// Valida el desglose de afectadas por artículo que llega en el PATCH. Quita las filas a cero y
+// redondea las cajas a 2 decimales. null si algo no es válido (la API responde 400).
+export function validarAfectadasArticulos(v: unknown): AfectadaArticulo[] | null {
+  if (!Array.isArray(v) || v.length > MAX_ARTICULOS) return null;
+  const vistos = new Set<string>();
+  const r: AfectadaArticulo[] = [];
+  for (const x of v) {
+    if (!x || typeof x !== 'object') return null;
+    const { articulo, uds, cajas } = x as Record<string, unknown>;
+    if (typeof articulo !== 'string' || !CODIGO_ARTICULO.test(articulo) || vistos.has(articulo)) return null;
+    const u = Number(uds);
+    const c = Number(cajas ?? 0);
+    if (!Number.isInteger(u) || u < 0 || u > 10_000_000 || !Number.isFinite(c) || c < 0 || c > 10_000_000) return null;
+    vistos.add(articulo);
+    if (u > 0 || c > 0) r.push({ articulo, uds: u, cajas: Math.round(c * 100) / 100 });
+  }
+  return r;
+}
+
+// Total de un desglose: es lo que se guarda en uds_afectadas / cajas_afectadas (KPIs y gráficos)
+export const totalAfectadas = (lista: AfectadaArticulo[]) => ({
+  uds: lista.reduce((s, a) => s + a.uds, 0),
+  cajas: Math.round(lista.reduce((s, a) => s + a.cajas, 0) * 100) / 100,
+});
 
 // Cruza las líneas de JDE con los datos manuales y calcula todo lo que devuelve la API:
 // envíos con estado de entrega, unidades del pedido completo y KPIs. Es la misma ruta
@@ -359,6 +424,7 @@ export function armarRespuesta(lineas: LineaJde[], tracking: Map<string, Trackin
       incidencia: t?.incidencia ?? '',
       udsAfectadas: t?.uds_afectadas ?? 0,
       cajasAfectadas: t?.cajas_afectadas ?? 0,
+      afectadasArticulos: t?.articulos ?? [],
       entrega: estadoEntrega(e, entregaReal),
     };
   });
@@ -395,6 +461,13 @@ const MOTIVOS_PESO = ['Preparación', 'Preparación', 'Preparación', 'Producci�
 const TRANSPORTISTAS = ['Transportes Norte', 'Frío Ibérica', 'Logística Sur', 'Camiones del Ebro'];
 // Repetidos a propósito: casi todo es venta (SO/SE), alguna muestra
 const TIPOS_EJEMPLO: TipoPedido[] = ['SO', 'SO', 'SO', 'SO', 'SE', 'SE', 'SE', 'SM', 'SO', 'SY'];
+// Artículos inventados (códigos 9000…, que no existen en JDE)
+type ArticuloEjemplo = { articulo: string; descripcion: string; udsPorCaja: number };
+const ARTICULOS_EJEMPLO: ArticuloEjemplo[] = [
+  { articulo: '9000000001', descripcion: 'Tortilla ejemplo 600 g', udsPorCaja: 12 },
+  { articulo: '9000000002', descripcion: 'Tortilla ejemplo con cebolla 1 kg', udsPorCaja: 6 },
+  { articulo: '9000000003', descripcion: 'Migas ejemplo 400 g', udsPorCaja: 12 },
+];
 
 export function generarEjemplo(): { lineas: LineaJde[]; tracking: Map<string, TrackingManual> } {
   let semilla = 12345; // LCG determinista
@@ -427,18 +500,37 @@ export function generarEjemplo(): { lineas: LineaJde[]; tracking: Map<string, Tr
           const sinFecha = !problema && rnd() < 0.05; // sin fecha real anotada: cuenta la prometida
           const real = sinFecha ? null : suma(prometida, llegaTarde ? 1 + Math.floor(rnd() * 3) : -Math.floor(rnd() * 2));
           const motivo = problema ? (llegaTarde && rnd() < 0.5 ? 'Transporte' : MOTIVOS_PESO[Math.floor(rnd() * MOTIVOS_PESO.length)]) : '';
-          lineas.push({
-            pedido, tipoPedido: TIPOS_EJEMPLO[pedido % TIPOS_EJEMPLO.length], suPedido: `EJ-${pedido}`, albaran, cliente: 100 + (pedido % 40),
-            clienteNombre: `Cliente ejemplo ${canal} ${pedido % 40}`, destino: 100 + (pedido % 40), destinoNombre: `Cliente ejemplo ${canal} ${pedido % 40}`,
-            fechaEnvio: suma(prometida, -1), fechaPrometida: prometida,
-            udsPedidas: Math.round(pedidas * parte), udsEnviadas: Math.round(enviadasTotal * parte), canal,
-            udsCanceladas: incompleto && c === 0 && pedido % 3 === 0 ? Math.max(0, Math.round((pedidas - enviadasTotal) * parte)) : 0,
-            cajasPedidas: Math.round((pedidas * parte) / 12), cajasEnviadas: Math.round((enviadasTotal * parte) / 12), // ejemplo: 12 uds por caja
+          // Los pedidos pares llevan dos artículos (de 12 y de 6 uds/caja) para ver el desglose por artículo
+          const uP = Math.round(pedidas * parte);
+          const uE = Math.round(enviadasTotal * parte);
+          const reparto: [ArticuloEjemplo, number][] = pedido % 2 === 0
+            ? [[ARTICULOS_EJEMPLO[0], 0.5], [ARTICULOS_EJEMPLO[1], 0.5]]
+            : [[ARTICULOS_EJEMPLO[pedido % ARTICULOS_EJEMPLO.length], 1]];
+          let restoP = uP, restoE = uE;
+          reparto.forEach(([art, frac], j) => {
+            const ultimo = j === reparto.length - 1;
+            const p = ultimo ? restoP : Math.round(uP * frac);
+            const e = ultimo ? restoE : Math.round(uE * frac);
+            restoP -= p; restoE -= e;
+            lineas.push({
+              pedido, tipoPedido: TIPOS_EJEMPLO[pedido % TIPOS_EJEMPLO.length], suPedido: `EJ-${pedido}`, albaran, cliente: 100 + (pedido % 40),
+              clienteNombre: `Cliente ejemplo ${canal} ${pedido % 40}`, destino: 100 + (pedido % 40), destinoNombre: `Cliente ejemplo ${canal} ${pedido % 40}`,
+              fechaEnvio: suma(prometida, -1), fechaPrometida: prometida,
+              udsPedidas: p, udsEnviadas: e, canal,
+              udsCanceladas: incompleto && c === 0 && j === 0 && pedido % 3 === 0 ? Math.max(0, Math.round((pedidas - enviadasTotal) * parte)) : 0,
+              cajasPedidas: p / art.udsPorCaja, cajasEnviadas: e / art.udsPorCaja,
+              articulo: art.articulo, descripcion: art.descripcion, udsPorCaja: art.udsPorCaja,
+            });
           });
+          // Afectadas: todas en el primer artículo del envío
+          const u = motivo ? 6 + Math.floor(rnd() * 90) : 0;
+          const art = reparto[0][0];
+          const articulos: AfectadaArticulo[] = u > 0 ? [{ articulo: art.articulo, uds: u, cajas: Math.round((u / art.udsPorCaja) * 100) / 100 }] : [];
+          const total = totalAfectadas(articulos);
           tracking.set(`${pedido}|${albaran}`, {
             transportista: TRANSPORTISTAS[pedido % TRANSPORTISTAS.length], fecha_entrega_real: real,
             responsable: motivo ? MOTIVO_RESP[motivo].resp : '', motivo, incidencia: motivo ? MOTIVO_RESP[motivo].texto : '',
-            ...(() => { const u = motivo ? 6 + Math.floor(rnd() * 90) : 0; return { uds_afectadas: u, cajas_afectadas: Math.round((u / 12) * 10) / 10 }; })(),
+            uds_afectadas: total.uds, cajas_afectadas: total.cajas, articulos,
           });
         }
       }

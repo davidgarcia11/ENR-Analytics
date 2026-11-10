@@ -370,6 +370,18 @@ export function getDb(): Database.Database {
       PRIMARY KEY (pedido, albaran)
     );
 
+    -- Desglose por artículo (SDLITM) de las afectadas de un envío de /servicio. Si un envío
+    -- tiene filas aquí, uds_afectadas/cajas_afectadas de order_service_tracking son su suma;
+    -- si no, son lo anotado antes «sin desglose». Solo filas con algo anotado. ver docs/servicio.md §18
+    CREATE TABLE IF NOT EXISTS order_service_incidencia_articulo (
+      pedido INTEGER NOT NULL,
+      albaran INTEGER NOT NULL,
+      articulo TEXT NOT NULL,
+      uds INTEGER NOT NULL DEFAULT 0,
+      cajas REAL NOT NULL DEFAULT 0,
+      PRIMARY KEY (pedido, albaran, articulo)
+    );
+
     -- Lista global de artículos visibles en /muestras (si está vacía, se ven todos —
     -- comportamiento abierto por defecto hasta que admin/responsable la configuran).
     -- NO es por usuario: es una única lista compartida, editable por admin y por
