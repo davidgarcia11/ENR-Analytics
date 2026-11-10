@@ -4,11 +4,11 @@
  * medir por envío (albarán) y no solo por pedido.
  */
 import { describe, it, expect } from 'bun:test'
-import { agruparEnvios, tieneIncidencia, estadoEntrega, resumirPedidos, calcularKpis, resumenMensual, contarIncidencias, incidenciasPorMes, jdeAIso, isoAJde, limpiarNombreCatalogo, udsPorCaja, motivoEfectivo, responsableEfectivo, filtrarPorClientes, type LineaJde } from '../lib/servicio'
+import { agruparEnvios, tieneIncidencia, estadoEntrega, resumirPedidos, calcularKpis, resumenMensual, contarIncidencias, incidenciasPorMes, jdeAIso, isoAJde, limpiarNombreCatalogo, udsPorCaja, sinFechaReal, filtrarPorClientes, filtrarPorTipos, TIPOS_PEDIDO, generarEjemplo, type LineaJde } from '../lib/servicio'
 import { permisoDeRutaAdmin, seccionesAdminPorPermisos } from '../lib/permisos'
 
 const linea = (o: Partial<LineaJde>): LineaJde => ({
-  pedido: 1, suPedido: 'A', albaran: 100, cliente: 1, clienteNombre: 'C', destino: 1, destinoNombre: 'D',
+  pedido: 1, tipoPedido: 'SO', suPedido: 'A', albaran: 100, cliente: 1, clienteNombre: 'C', destino: 1, destinoNombre: 'D',
   fechaEnvio: '2024-03-02', fechaPrometida: '2024-03-04', udsPedidas: 100, udsEnviadas: 100, cajasPedidas: 10, cajasEnviadas: 10, udsCanceladas: 0, canal: 'HOR', ...o,
 })
 
@@ -33,6 +33,36 @@ describe('agruparEnvios', () => {
     const e = agruparEnvios([linea({ canal: 'HOR', udsPedidas: 10 }), linea({ albaran: 101, canal: 'EXP', udsPedidas: 90 })])
     expect(e.every((x) => x.canal === 'EXP')).toBe(true)
   })
+  it('las líneas sin albarán (pendientes o canceladas) se suman al último envío del pedido y no salen aparte', () => {
+    // Línea partida en JDE: 800 pedidas, 715 enviadas en el albarán 100 y el resto (85) sin albarán y cancelado
+    const e = agruparEnvios([
+      linea({ udsPedidas: 520, udsEnviadas: 520, cajasPedidas: 104, cajasEnviadas: 104 }),
+      linea({ udsPedidas: 195, udsEnviadas: 195, cajasPedidas: 39, cajasEnviadas: 39 }),
+      linea({ albaran: 0, fechaEnvio: null, fechaPrometida: '2024-03-01', udsPedidas: 85, udsEnviadas: 0, udsCanceladas: 85, cajasPedidas: 17, cajasEnviadas: 0 }),
+    ])
+    expect(e.length).toBe(1)
+    expect(e[0].albaran).toBe(100)
+    expect(e[0].udsPedidas).toBe(800)
+    expect(e[0].udsEnviadas).toBe(715)
+    expect(e[0].cajasPedidas).toBe(160)
+    expect(e[0].udsCanceladas).toBe(85)
+    expect(e[0].fechaPrometida).toBe('2024-03-04') // las fechas son las del envío real
+    expect(e[0].fechaEnvio).toBe('2024-03-02')
+  })
+  it('con varios albaranes, lo no enviado va al último enviado', () => {
+    const e = agruparEnvios([
+      linea({ albaran: 100, fechaEnvio: '2024-03-02' }),
+      linea({ albaran: 101, fechaEnvio: '2024-03-03' }),
+      linea({ albaran: 0, fechaEnvio: null, udsEnviadas: 0, udsPedidas: 30 }),
+    ])
+    expect(e.map((x) => x.albaran).sort()).toEqual([100, 101])
+    expect(e.find((x) => x.albaran === 101)!.udsPedidas).toBe(130)
+    expect(e.find((x) => x.albaran === 100)!.udsPedidas).toBe(100)
+  })
+  it('un pedido sin ningún albarán sigue saliendo como «Sin enviar»', () => {
+    const e = agruparEnvios([linea({ albaran: 0, fechaEnvio: null, udsEnviadas: 0 }), linea({ pedido: 2 })])
+    expect(e.map((x) => `${x.pedido}|${x.albaran}`).sort()).toEqual(['1|0', '2|100'])
+  })
 })
 
 describe('estadoEntrega', () => {
@@ -42,24 +72,35 @@ describe('estadoEntrega', () => {
     expect(estadoEntrega(e, '2024-03-03')).toBe('a_tiempo')
     expect(estadoEntrega(e, '2024-03-05')).toBe('tarde')
   })
-  it('sin real queda sin confirmar; sin enviar, pendiente', () => {
-    expect(estadoEntrega(e, null)).toBe('sin_confirmar')
+  it('enviado sin fecha real se da por entregado en la prometida (a tiempo); sin enviar, pendiente', () => {
+    expect(estadoEntrega(e, null)).toBe('a_tiempo')
     expect(estadoEntrega({ ...e, fechaEnvio: null }, null)).toBe('pendiente_envio')
+  })
+  it('sinFechaReal: solo los enviados sin fecha real anotada', () => {
+    expect(sinFechaReal({ fechaEnvio: '2024-03-02', fechaEntregaReal: null })).toBe(true)
+    expect(sinFechaReal({ fechaEnvio: '2024-03-02', fechaEntregaReal: '2024-03-04' })).toBe(false)
+    expect(sinFechaReal({ fechaEnvio: null, fechaEntregaReal: null })).toBe(false)
   })
 })
 
 describe('KPIs', () => {
   const envio = (pedido: number, entrega: any, enviadas = 100, pedidas = 100, prom = '2024-03-04') => ({ pedido, udsPedidas: pedidas, udsEnviadas: enviadas, fechaPrometida: prom, entrega })
-  it('un camión tarde hace tarde al pedido; OTIF solo sobre confirmados', () => {
-    const p = resumirPedidos([envio(1, 'a_tiempo', 50, 50), envio(1, 'tarde', 50, 50), envio(2, 'a_tiempo'), envio(3, 'a_tiempo', 80), envio(4, 'sin_confirmar')])
+  it('un camión tarde hace tarde al pedido; a tiempo y OTIF sobre todos los evaluados', () => {
+    const p = resumirPedidos([envio(1, 'a_tiempo', 50, 50), envio(1, 'tarde', 50, 50), envio(2, 'a_tiempo'), envio(3, 'a_tiempo', 80), envio(4, 'pendiente_envio', 0)])
     expect(p.find((x) => x.pedido === 1)!.entrega).toBe('tarde')
     const k = calcularKpis(p, '2024-04-01')
     expect(k.pedidos).toBe(4)
-    expect(k.confirmados).toBe(3)
-    expect(k.sinConfirmar).toBe(1)
-    expect(k.pctATiempo).toBeCloseTo(66.67, 1) // pedidos 2 y 3 a tiempo, 1 tarde
-    expect(k.pctCompleto).toBe(75) // el 3 está incompleto
-    expect(k.pctOtif).toBeCloseTo(33.33, 1) // solo el 2 es a tiempo y completo
+    expect(k.aTiempo).toBe(2) // 2 y 3; el 4 está vencido sin enviar
+    expect(k.pctATiempo).toBe(50)
+    expect(k.pctCompleto).toBe(50) // el 3 y el 4 están incompletos
+    expect(k.pctOtif).toBe(25) // solo el 2 es a tiempo y completo
+  })
+  it('cuenta los pedidos con algún envío sin fecha real anotada', () => {
+    const e = (pedido: number, real: string | null) => ({ ...envio(pedido, 'a_tiempo'), fechaEnvio: '2024-03-02', fechaEntregaReal: real })
+    const k = calcularKpis(resumirPedidos([e(1, '2024-03-04'), e(2, null), e(2, '2024-03-04'), e(3, '2024-03-03')]), '2024-04-01')
+    expect(k.sinFechaReal).toBe(1)
+    expect(k.pctConFechaReal).toBeCloseTo(66.67, 1)
+    expect(k.pctATiempo).toBe(100) // sin fecha real cuenta como a tiempo
   })
   it('un pedido incompleto con fecha prometida futura no se evalúa', () => {
     const k = calcularKpis(resumirPedidos([envio(1, 'pendiente_envio', 0, 100, '2024-05-01')]), '2024-04-01')
@@ -133,23 +174,18 @@ describe('udsPorCaja (F41002)', () => {
   })
 })
 
-describe('cancelaciones del cliente, cajas y cobertura', () => {
-  it('una cancelación es incidencia y su responsable es el cliente, salvo lo anotado a mano', () => {
-    const base = { motivo: '', responsable: '', incidencia: '', udsAfectadas: 0 }
-    expect(tieneIncidencia({ ...base, udsCanceladas: 10 })).toBe(true)
-    expect(tieneIncidencia({ ...base, udsCanceladas: 0 })).toBe(false)
-    expect(motivoEfectivo({ motivo: '', udsCanceladas: 10 })).toBe('Cancelación del cliente')
-    expect(responsableEfectivo({ responsable: '', udsCanceladas: 10 })).toBe('Cliente')
-    expect(motivoEfectivo({ motivo: 'Producción', udsCanceladas: 10 })).toBe('Producción')
-    expect(responsableEfectivo({ responsable: 'Elaborados', udsCanceladas: 10 })).toBe('Elaborados')
-    const d = [{ pedido: 1, canal: 'HOR', udsPedidas: 100, udsEnviadas: 90, udsAfectadas: 0, udsCanceladas: 10, fechaPrometida: '2024-03-10', entrega: 'a_tiempo' as const, motivo: '', responsable: '' }]
-    expect(contarIncidencias(d, 'motivo')).toEqual({ 'Cancelación del cliente': 1 })
-    expect(contarIncidencias(d, 'responsable')).toEqual({ Cliente: 1 })
+describe('cancelaciones y cajas', () => {
+  it('una cancelación no es incidencia sola: solo cuenta como no enviada', () => {
+    const d = [{ pedido: 1, canal: 'HOR', udsPedidas: 100, udsEnviadas: 90, udsAfectadas: 0, fechaPrometida: '2024-03-10', entrega: 'a_tiempo' as const, motivo: '', responsable: '' }]
+    expect(tieneIncidencia({ motivo: '', incidencia: '', udsAfectadas: 0 })).toBe(false)
+    expect(contarIncidencias(d, 'motivo')).toEqual({})
+    const k = resumenMensual(d, '2024-06-01')[0].kpis
+    expect(k.udsIncidencia).toBe(10) // las 10 canceladas, una sola vez
+    expect(k.pctCompleto).toBe(0)
   })
-  it('OTIF por cajas y cobertura', () => {
+  it('OTIF por cajas', () => {
     const e = (pedido: number, entrega: any, o: any = {}) => ({ pedido, udsPedidas: 120, udsEnviadas: 120, cajasPedidas: 10, cajasEnviadas: 10, udsAfectadas: 0, fechaPrometida: '2024-03-04', entrega, ...o })
-    const k = calcularKpis(resumirPedidos([e(1, 'a_tiempo'), e(2, 'sin_confirmar'), e(3, 'a_tiempo', { cajasEnviadas: 8, udsEnviadas: 96 }), e(4, 'sin_confirmar')]), '2024-04-01')
-    expect(k.cobertura).toBe(50) // 2 de 4 evaluados con entrega confirmada
+    const k = calcularKpis(resumirPedidos([e(1, 'a_tiempo'), e(2, 'a_tiempo'), e(3, 'a_tiempo', { cajasEnviadas: 8, udsEnviadas: 96 }), e(4, 'a_tiempo')]), '2024-04-01')
     expect(k.cajasIncidencia).toBe(2) // faltan 2 cajas del pedido 3
     expect(k.pctOtifCajas).toBeCloseTo(95, 5) // 1 − 2/40
   })
@@ -181,5 +217,21 @@ describe('filtro de clientes', () => {
   })
   it('un cliente que no aparece en los datos (preset antiguo) no rompe nada: deja la lista vacía', () => {
     expect(filtrarPorClientes(envios, [999])).toEqual([])
+  })
+})
+
+describe('tipos de pedido', () => {
+  const envios = [{ pedido: 1, tipoPedido: 'SO' }, { pedido: 2, tipoPedido: 'SE' }, { pedido: 3, tipoPedido: 'SM' }, { pedido: 4, tipoPedido: 'SY' }]
+  it('cuentan venta, EDI y muestras; no envíos entre almacenes, cargos ni abonos', () => {
+    expect(Object.keys(TIPOS_PEDIDO).sort()).toEqual(['SE', 'SM', 'SO', 'SY'])
+  })
+  it('filtra como el de clientes: vacío = todos, elegidos o «todos menos»', () => {
+    expect(filtrarPorTipos(envios, [])).toBe(envios)
+    expect(filtrarPorTipos(envios, ['SO', 'SE']).map((e) => e.pedido)).toEqual([1, 2])
+    expect(filtrarPorTipos(envios, ['SM', 'SY'], true).map((e) => e.pedido)).toEqual([1, 2])
+  })
+  it('los datos de ejemplo solo usan tipos válidos', () => {
+    const { lineas } = generarEjemplo()
+    expect(lineas.every((l) => l.tipoPedido in TIPOS_PEDIDO)).toBe(true)
   })
 })

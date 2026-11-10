@@ -18,11 +18,12 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Card } from "@/components/nova/ui/card";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/nova/ui/dialog";
 import PremiumRibbon from "@/components/shadcn-space/pagination/pagination-02";
-import { motivoEfectivo, tieneIncidencia, type EstadoEntrega } from "@/lib/servicio";
+import { tieneIncidencia, type EstadoEntrega } from "@/lib/servicio";
 import { cn } from "@/lib/utils";
 
 export interface EnvioDto {
   pedido: number;
+  tipoPedido: string; // SDDCTO: SO, SE, SM, SY (lo usa el filtro de tipos)
   suPedido: string;
   albaran: number;
   cliente: number; // SDAN8: lo usa el filtro de clientes
@@ -70,14 +71,12 @@ export interface CatalogosServicio {
 
 export const ENTREGA_LABEL: Record<EstadoEntrega, string> = {
   pendiente_envio: "Sin enviar",
-  sin_confirmar: "Sin confirmar",
   a_tiempo: "A tiempo",
   tarde: "Tarde",
 };
 
 const ENTREGA_CLASS: Record<EstadoEntrega, string> = {
   pendiente_envio: "bg-muted text-muted-foreground",
-  sin_confirmar: "bg-amber-400/10 text-amber-500",
   a_tiempo: "bg-teal-400/10 text-teal-400",
   tarde: "bg-red-500/10 text-red-500",
 };
@@ -125,7 +124,8 @@ function EditarEnvio({ envio, catalogos, onClose, onSave }: { envio: EnvioDto | 
   const udsPorCajaEnvio = envio && envio.cajasPedidas > 0 && envio.udsPedidas > 0 ? envio.udsPedidas / envio.cajasPedidas : null;
   const [guardando, setGuardando] = useState(false);
   useEffect(() => {
-    if (envio) setForm({ transportista: envio.transportista, fechaEntregaReal: envio.fechaEntregaReal, responsable: envio.responsable, motivo: envio.motivo, incidencia: envio.incidencia, udsAfectadas: envio.udsAfectadas, cajasAfectadas: envio.cajasAfectadas });
+    // Sin fecha real anotada, el envío ya enviado sale con la fecha prometida (como si llegara a tiempo); se cambia si no fue así
+    if (envio) setForm({ transportista: envio.transportista, fechaEntregaReal: envio.fechaEntregaReal ?? (envio.fechaEnvio ? envio.fechaPrometida : null), responsable: envio.responsable, motivo: envio.motivo, incidencia: envio.incidencia, udsAfectadas: envio.udsAfectadas, cajasAfectadas: envio.cajasAfectadas });
     setUnidad("uds");
   }, [envio]);
 
@@ -159,6 +159,9 @@ function EditarEnvio({ envio, catalogos, onClose, onSave }: { envio: EnvioDto | 
           <div className="space-y-1.5">
             <Label>Fecha de entrega real</Label>
             <Input type="date" value={form.fechaEntregaReal ?? ""} onChange={(e) => setForm({ ...form, fechaEntregaReal: e.target.value || null })} />
+            {envio?.fechaEnvio && envio.fechaEntregaReal === null && (
+              <p className="text-xs text-muted-foreground">Sin fecha anotada: se propone la prometida. Cámbiala si no llegó ese día.</p>
+            )}
           </div>
           <div className="space-y-1.5">
             <Label>Transportista</Label>
@@ -305,7 +308,7 @@ export default function ServicioTable({ data, catalogos, onSave }: { data: Envio
                           </span>
                           <div>
                             <h6 className="text-sm font-medium text-foreground">{e.pedido}</h6>
-                            <p className="text-xs text-muted-foreground">{e.suPedido || "Sin ref. cliente"}</p>
+                            <p className="text-xs text-muted-foreground">{e.suPedido || "Sin ref. cliente"} · {e.tipoPedido}</p>
                           </div>
                         </div>
                       </TableCell>
@@ -320,7 +323,8 @@ export default function ServicioTable({ data, catalogos, onSave }: { data: Envio
                       <TableCell className="py-3">
                         <h6 className="text-sm font-medium text-foreground">{fecha(e.fechaPrometida)}</h6>
                         <p className={cn("text-xs", e.entrega === "tarde" ? "text-red-500" : "text-muted-foreground")}>
-                          {e.fechaEntregaReal ? `Real ${fecha(e.fechaEntregaReal)}` : "Real sin confirmar"}
+                          {/* Sin fecha real anotada se da por entregado en la fecha prometida */}
+                          {e.fechaEnvio ? `Real ${fecha(e.fechaEntregaReal ?? e.fechaPrometida)}` : "Sin enviar"}
                         </p>
                       </TableCell>
                       <TableCell className="py-3" title={`Este albarán: ${num(e.udsEnviadas)} uds${e.cajasPedidas > 0 ? ` · ${numCajas(e.cajasEnviadas)} cajas` : ""}`}>
@@ -339,9 +343,9 @@ export default function ServicioTable({ data, catalogos, onSave }: { data: Envio
                         {tieneIncidencia(e) ? (
                           <>
                             <h6 className="text-sm font-medium tabular-nums text-red-500">
-                              {e.udsAfectadas > 0 || e.cajasAfectadas > 0 ? `${num(e.udsAfectadas)} uds${e.cajasAfectadas > 0 ? ` · ${numCajas(e.cajasAfectadas)} cajas` : ""}` : e.udsCanceladas > 0 && !e.motivo ? `${num(e.udsCanceladas)} uds` : "Anotada"}
+                              {e.udsAfectadas > 0 || e.cajasAfectadas > 0 ? `${num(e.udsAfectadas)} uds${e.cajasAfectadas > 0 ? ` · ${numCajas(e.cajasAfectadas)} cajas` : ""}` : "Anotada"}
                             </h6>
-                            <p className="max-w-40 truncate text-xs text-muted-foreground">{motivoEfectivo(e) || e.incidencia}</p>
+                            <p className="max-w-40 truncate text-xs text-muted-foreground">{e.motivo || e.incidencia}</p>
                           </>
                         ) : (
                           <span className="text-sm text-muted-foreground">—</span>
