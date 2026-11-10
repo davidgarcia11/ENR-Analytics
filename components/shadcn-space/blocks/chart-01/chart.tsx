@@ -1,5 +1,6 @@
 "use client";
 import { Card, CardHeader, CardTitle, CardContent, CardDescription } from "@/components/nova/ui/card";
+import type { ReactNode } from "react";
 import { ChartContainer, ChartTooltip, ChartTooltipContent, type ChartConfig } from "@/components/nova/ui/chart"
 import { Bar, BarChart, CartesianGrid, XAxis, YAxis } from "recharts"
 
@@ -26,12 +27,14 @@ export default function Chart01({
     headline,
     data,
     series,
+    accion,
 }: {
     title?: string;
     description?: string;
     headline?: string;
     data: Chart01Datum[];
     series: Chart01Serie[];
+    accion?: ReactNode; // acción opcional en la cabecera (p. ej. el botón «Compartir» de components/nova/compartir.tsx)
 }) {
     const chartConfig = Object.fromEntries(
         series.map((s) => [s.key, { label: s.label, color: s.color }])
@@ -57,6 +60,7 @@ export default function Chart01({
                             <p className="text-sm text-muted-foreground">{item.label}</p>
                         </div>
                     ))}
+                    {accion}
                 </div>
             </CardHeader>
             <CardContent className="px-6">

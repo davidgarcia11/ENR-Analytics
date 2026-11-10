@@ -59,7 +59,9 @@ function cookieOptions(req: NextRequest) {
 const alLogin = (req: NextRequest, pathname: string) => {
   const url = req.nextUrl.clone();
   url.pathname = '/login';
-  url.search = `?next=${encodeURIComponent(pathname)}`;
+  // Con la query (p. ej. /servicio?mock=1), para volver a lo mismo tras el login; el login solo
+  // acepta rutas que sean exactamente las de un panel (app/login/page.tsx)
+  url.search = `?next=${encodeURIComponent(pathname + req.nextUrl.search)}`;
   return NextResponse.redirect(url);
 };
 

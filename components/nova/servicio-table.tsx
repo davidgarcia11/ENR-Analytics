@@ -5,7 +5,7 @@
 // Dialog por fila. Estilo del bloque Table 09 de ShadcnSpace (Popular Products): celdas de
 // dos líneas, icono, barra de progreso, insignia de estado y menú «⋮», con márgenes
 // laterales amplios. Ver components/nova/README.md.
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { SearchX, Loader2, EllipsisVertical, SquarePen } from "lucide-react";
 import { Input } from "@/components/nova/ui/input";
 import { Label } from "@/components/nova/ui/label";
@@ -306,7 +306,9 @@ function EditarEnvio({ envio, catalogos, onClose, onSave }: { envio: EnvioDto | 
   );
 }
 
-export default function ServicioTable({ data, catalogos, onSave }: { data: EnvioDto[]; catalogos: CatalogosServicio; onSave: (e: EnvioDto, p: PatchEnvio) => Promise<void> }) {
+// `accion`: botón «Compartir» junto al título (components/nova/compartir.tsx). En la imagen no salen los
+// filtros de la tabla, el menú «⋮» ni la paginación, y la incidencia sale con su texto completo.
+export default function ServicioTable({ data, catalogos, onSave, accion }: { data: EnvioDto[]; catalogos: CatalogosServicio; onSave: (e: EnvioDto, p: PatchEnvio) => Promise<void>; accion?: ReactNode }) {
   const [busqueda, setBusqueda] = useState("");
   const [filtro, setFiltro] = useState<EstadoEntrega | "todos">("todos");
   const [filtroInc, setFiltroInc] = useState<"todas" | "con" | "sin">("todas");
@@ -334,10 +336,13 @@ export default function ServicioTable({ data, catalogos, onSave }: { data: Envio
       <Card className="gap-6 px-0 py-6">
         <div className="flex flex-wrap items-center justify-between gap-3 px-6">
           <div>
-            <h5 className="text-lg font-medium text-foreground">Envíos</h5>
+            <div className="flex items-center gap-1">
+              <h5 className="text-lg font-medium text-foreground">Envíos</h5>
+              {accion}
+            </div>
             <p className="text-sm text-muted-foreground">{filtradas.length} de {data.length} envío{data.length === 1 ? "" : "s"}</p>
           </div>
-          <div className="flex flex-wrap items-center gap-2">
+          <div data-compartir-ocultar className="flex flex-wrap items-center gap-2">
             <Input placeholder="Buscar pedido, su pedido, cliente, albarán…" value={busqueda} onChange={(e) => setBusqueda(e.target.value)} className="h-8 w-72" />
             <Select value={filtro} onValueChange={(v) => setFiltro(v as EstadoEntrega | "todos")}>
               <SelectTrigger size="sm" className="w-40">
@@ -378,7 +383,7 @@ export default function ServicioTable({ data, catalogos, onSave }: { data: Envio
                   <TableHead className="text-sm">Unidades</TableHead>
                   <TableHead className="text-sm">Incidencia</TableHead>
                   <TableHead className="text-sm">Estado</TableHead>
-                  <TableHead className="pe-4" />
+                  <TableHead data-compartir-ocultar className="pe-4" />
                 </TableRow>
               </TableHeader>
               <TableBody className="divide-y divide-border">
@@ -398,8 +403,8 @@ export default function ServicioTable({ data, catalogos, onSave }: { data: Envio
                         </div>
                       </TableCell>
                       <TableCell className="py-3" title={e.destinoNombre && e.destinoNombre !== e.clienteNombre ? `${e.clienteNombre} → ${e.destinoNombre}` : e.clienteNombre}>
-                        <h6 className="max-w-36 truncate text-sm font-medium text-foreground">{e.clienteNombre || "—"}</h6>
-                        <p className="max-w-36 truncate text-xs text-muted-foreground">{e.canalLabel ?? "Sin canal"}{e.transportista ? ` · ${e.transportista}` : ""}</p>
+                        <h6 data-compartir-completo className="max-w-36 truncate text-sm font-medium text-foreground">{e.clienteNombre || "—"}</h6>
+                        <p data-compartir-completo className="max-w-36 truncate text-xs text-muted-foreground">{e.canalLabel ?? "Sin canal"}{e.transportista ? ` · ${e.transportista}` : ""}</p>
                       </TableCell>
                       <TableCell className="py-3">
                         <h6 className="text-sm font-medium text-foreground">{e.albaran || "—"}</h6>
@@ -430,7 +435,11 @@ export default function ServicioTable({ data, catalogos, onSave }: { data: Envio
                             <h6 className="text-sm font-medium tabular-nums text-red-500">
                               {e.udsAfectadas > 0 || e.cajasAfectadas > 0 ? `${num(e.udsAfectadas)} uds${e.cajasAfectadas > 0 ? ` · ${numCajas2(e.cajasAfectadas)} cajas` : ""}` : "Anotada"}
                             </h6>
-                            <p className="max-w-40 truncate text-xs text-muted-foreground">{e.motivo || e.incidencia}</p>
+                            {e.motivo && <p className="max-w-40 truncate text-xs text-muted-foreground">{e.motivo}</p>}
+                            {/* El texto de la incidencia: en pantalla, solo si no hay motivo (y recortado); en la imagen, siempre y entero */}
+                            {e.incidencia && (
+                              <p data-compartir-completo className={cn("max-w-40 truncate text-xs text-muted-foreground", e.motivo && "hidden")}>{e.incidencia}</p>
+                            )}
                           </>
                         ) : (
                           <span className="text-sm text-muted-foreground">—</span>
@@ -439,7 +448,7 @@ export default function ServicioTable({ data, catalogos, onSave }: { data: Envio
                       <TableCell className="py-3">
                         <Badge className={cn("text-xs font-normal", ENTREGA_CLASS[e.entrega])}>{ENTREGA_LABEL[e.entrega]}</Badge>
                       </TableCell>
-                      <TableCell className="py-3 pe-4">
+                      <TableCell data-compartir-ocultar className="py-3 pe-4">
                         <DropdownMenu>
                           <DropdownMenuTrigger className="outline-none" aria-label="Acciones">
                             <span className="flex h-9 w-9 cursor-pointer items-center justify-center rounded-full hover:bg-accent hover:text-accent-foreground">
@@ -463,7 +472,9 @@ export default function ServicioTable({ data, catalogos, onSave }: { data: Envio
         )}
       </Card>
 
-      {filtradas.length > 0 && totalPaginas > 1 && <PremiumRibbon page={pagina} totalPages={totalPaginas} onPageChange={setPagina} />}
+      {filtradas.length > 0 && totalPaginas > 1 && (
+        <div data-compartir-ocultar><PremiumRibbon page={pagina} totalPages={totalPaginas} onPageChange={setPagina} /></div>
+      )}
       <EditarEnvio envio={editando} catalogos={catalogos} onClose={() => setEditando(null)} onSave={onSave} />
     </div>
   );
