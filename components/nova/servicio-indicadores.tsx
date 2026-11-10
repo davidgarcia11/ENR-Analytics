@@ -166,13 +166,12 @@ export default function ServicioIndicadores({ envios }: { envios: EnvioDto[] }) 
           </Card>
         ) : (
           <Compartible titulo="Incidencias por motivo" className={ESTIRA}>{(boton) => (
-          <Charts12
+          <Chart02
             accion={boton}
-            className="gap-6 rounded-2xl px-6 py-6"
             title="Incidencias por motivo"
             description="Envíos con motivo anotado, en el rango seleccionado"
-            serieLabel="Incidencias"
-            data={barrasMotivo}
+            centerLabel="Incidencias"
+            data={barrasMotivo.map(({ label, value }, i) => ({ name: label, value, color: PALETA[i % PALETA.length] }))}
           />
           )}</Compartible>
         )}
@@ -181,12 +180,13 @@ export default function ServicioIndicadores({ envios }: { envios: EnvioDto[] }) 
           <Card className="py-6 gap-8"><CardHeader className="px-6"><CardTitle className="text-lg font-medium">Responsabilidad — últimos 3 meses</CardTitle></CardHeader><CardContent><Vacio texto="Sin incidencias anotadas." /></CardContent></Card>
         ) : (
           <Compartible titulo="Responsabilidad — últimos 3 meses" className={ESTIRA}>{(boton) => (
-          <Chart02
+          <Charts12
             accion={boton}
+            className="gap-6 rounded-2xl px-6 py-6"
             title="Responsabilidad — últimos 3 meses"
             description="Incidencias por responsable (el mes más reciente con datos y los 2 anteriores)"
-            centerLabel="Incidencias"
-            data={responsables.map(([name, value], i) => ({ name, value, color: PALETA[i % PALETA.length] }))}
+            serieLabel="Incidencias"
+            data={responsables.map(([label, value]) => ({ label, value }))}
           />
           )}</Compartible>
         )}
