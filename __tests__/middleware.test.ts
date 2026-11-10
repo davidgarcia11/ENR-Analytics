@@ -243,6 +243,12 @@ describe('Proxy — filtrado de páginas', () => {
     expect(destino(res)).toContain('/login?next=%2Fadmin')
   })
 
+  it('sin sesión, ?next= conserva la query de la página (p. ej. ?seccion=)', async () => {
+    const res = await middleware(req('/admin?seccion=logs'))
+    expect(esRedirect(res)).toBe(true)
+    expect(destino(res)).toContain('/login?next=%2Fadmin%3Fseccion%3Dlogs')
+  })
+
   it('/admin/logs con rol user → redirige al login', async () => {
     const token = await makeToken({ sub: '2', role: 'user', username: 'user1' })
     const res = await middleware(req('/admin/logs', token))

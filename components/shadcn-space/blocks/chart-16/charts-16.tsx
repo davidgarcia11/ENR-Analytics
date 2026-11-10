@@ -1,5 +1,6 @@
 "use client";
 
+import type { ReactNode } from "react";
 import {
     Card,
     CardContent,
@@ -51,6 +52,7 @@ const Charts16 = ({
     objetivo,
     domain = [0, 100],
     valueSuffix = "%",
+    accion,
 }: {
     className?: string;
     title?: string;
@@ -58,6 +60,7 @@ const Charts16 = ({
     data: Chart16Datum[];
     series: Chart16Serie[];
     objetivo?: number;
+    accion?: ReactNode; // acción opcional en la cabecera (p. ej. el botón «Compartir» de components/nova/compartir.tsx)
     domain?: [number, number];
     valueSuffix?: string;
 }) => {
@@ -73,10 +76,11 @@ const Charts16 = ({
                     <CardDescription>{description}</CardDescription>
                 </div>
 
-                <div className="mt-4 flex flex-wrap gap-3 md:mt-0">
+                <div className="mt-4 flex flex-wrap items-center gap-3 md:mt-0">
                     {series.map((s) => (
                         <LegendDot key={s.key} color={s.color} label={s.label} />
                     ))}
+                    {accion}
                 </div>
             </CardHeader>
 

@@ -1,9 +1,11 @@
 "use client";
 
+import type { ReactNode } from "react";
 import { Grip, TriangleAlert } from "lucide-react";
 
 import {
   Card,
+  CardAction,
   CardDescription,
   CardTitle,
   CardHeader,
@@ -37,12 +39,14 @@ const Charts12 = ({
   description = "Every month",
   data,
   serieLabel = "Total",
+  accion,
 }: {
   className?: string;
   title?: string;
   description?: string;
   data: Chart12Datum[];
   serieLabel?: string;
+  accion?: ReactNode; // acción opcional en la cabecera (p. ej. el botón «Compartir» de components/nova/compartir.tsx)
 }) => {
   const chartConfig = {
     value: { label: serieLabel, color: "var(--color-blue-500)" },
@@ -56,6 +60,7 @@ const Charts12 = ({
       <CardHeader className="px-0">
         <CardTitle className="text-foreground text-lg font-medium">{title}</CardTitle>
         <CardDescription className="text-sm text-muted-foreground font-normal">{description}</CardDescription>
+        {accion && <CardAction>{accion}</CardAction>}
       </CardHeader>
       <CardContent className="px-0">
         <div>
