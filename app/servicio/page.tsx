@@ -161,6 +161,13 @@ function ServicioPagePanel() {
     }));
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(filas), "Envíos");
+    // Desglose de las afectadas por artículo (solo los envíos que lo tienen)
+    const porArticulo = visibles.flatMap((e) => e.afectadasArticulos.map((a) => ({
+      Pedido: e.pedido, Albarán: e.albaran || "", Cliente: e.clienteNombre, Artículo: a.articulo,
+      Descripción: e.articulos.find((x) => x.articulo === a.articulo)?.descripcion ?? "",
+      "Uds afectadas": a.uds, "Cajas afectadas": a.cajas, Motivo: e.motivo, Responsable: e.responsable,
+    })));
+    if (porArticulo.length) XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(porArticulo), "Incidencias por artículo");
     XLSX.writeFile(wb, `nivel-servicio_${range?.startDate ?? "todo"}_${range?.endDate ?? ""}.xlsx`);
   };
 

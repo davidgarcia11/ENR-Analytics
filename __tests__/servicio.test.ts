@@ -4,12 +4,13 @@
  * medir por envío (albarán) y no solo por pedido.
  */
 import { describe, it, expect } from 'bun:test'
-import { agruparEnvios, tieneIncidencia, estadoEntrega, resumirPedidos, calcularKpis, resumenMensual, contarIncidencias, incidenciasPorMes, jdeAIso, isoAJde, limpiarNombreCatalogo, udsPorCaja, sinFechaReal, filtrarPorClientes, filtrarPorTipos, TIPOS_PEDIDO, generarEjemplo, type LineaJde } from '../lib/servicio'
+import { agruparEnvios, tieneIncidencia, estadoEntrega, resumirPedidos, calcularKpis, resumenMensual, contarIncidencias, incidenciasPorMes, jdeAIso, isoAJde, limpiarNombreCatalogo, udsPorCaja, sinFechaReal, filtrarPorClientes, filtrarPorTipos, TIPOS_PEDIDO, generarEjemplo, validarAfectadasArticulos, totalAfectadas, armarRespuesta, type LineaJde } from '../lib/servicio'
 import { permisoDeRutaAdmin, seccionesAdminPorPermisos } from '../lib/permisos'
 
 const linea = (o: Partial<LineaJde>): LineaJde => ({
   pedido: 1, tipoPedido: 'SO', suPedido: 'A', albaran: 100, cliente: 1, clienteNombre: 'C', destino: 1, destinoNombre: 'D',
-  fechaEnvio: '2024-03-02', fechaPrometida: '2024-03-04', udsPedidas: 100, udsEnviadas: 100, cajasPedidas: 10, cajasEnviadas: 10, udsCanceladas: 0, canal: 'HOR', ...o,
+  fechaEnvio: '2024-03-02', fechaPrometida: '2024-03-04', udsPedidas: 100, udsEnviadas: 100, cajasPedidas: 10, cajasEnviadas: 10, udsCanceladas: 0, canal: 'HOR',
+  articulo: '1000000001', descripcion: 'Artículo A', udsPorCaja: 10, ...o,
 })
 
 describe('fechas JDE', () => {
@@ -233,5 +234,102 @@ describe('tipos de pedido', () => {
   it('los datos de ejemplo solo usan tipos válidos', () => {
     const { lineas } = generarEjemplo()
     expect(lineas.every((l) => l.tipoPedido in TIPOS_PEDIDO)).toBe(true)
+  })
+})
+
+describe('afectadas por artículo', () => {
+  it('cada envío lleva sus artículos sumados, también los de las líneas sin albarán', () => {
+    const e = agruparEnvios([
+      linea({ articulo: '1000000001', udsPedidas: 520, udsEnviadas: 520 }),
+      linea({ articulo: '1000000001', udsPedidas: 195, udsEnviadas: 195 }),
+      linea({ articulo: '1000000002', descripcion: 'Artículo B', udsPorCaja: 12, udsPedidas: 480, udsEnviadas: 480 }),
+      linea({ albaran: 0, fechaEnvio: null, articulo: '1000000001', udsPedidas: 85, udsEnviadas: 0 }),
+    ])
+    expect(e.length).toBe(1)
+    expect(e[0].articulos).toEqual([
+      { articulo: '1000000001', descripcion: 'Artículo A', udsPedidas: 800, udsEnviadas: 715, udsPorCaja: 10 },
+      { articulo: '1000000002', descripcion: 'Artículo B', udsPedidas: 480, udsEnviadas: 480, udsPorCaja: 12 },
+    ])
+  })
+  it('valida el desglose: quita las filas a cero, redondea las cajas y rechaza lo inválido', () => {
+    expect(validarAfectadasArticulos([{ articulo: '1000000001', uds: 21, cajas: 4.2 }, { articulo: '1000000002', uds: 0, cajas: 0 }]))
+      .toEqual([{ articulo: '1000000001', uds: 21, cajas: 4.2 }])
+    expect(validarAfectadasArticulos([{ articulo: '1000000001', uds: 7, cajas: 7 / 3 }])).toEqual([{ articulo: '1000000001', uds: 7, cajas: 2.33 }])
+    expect(validarAfectadasArticulos([])).toEqual([])
+    expect(validarAfectadasArticulos('x')).toBeNull()
+    expect(validarAfectadasArticulos([{ articulo: '1000000001', uds: 1.5, cajas: 0 }])).toBeNull() // uds enteras
+    expect(validarAfectadasArticulos([{ articulo: '1000000001', uds: -1, cajas: 0 }])).toBeNull()
+    expect(validarAfectadasArticulos([{ articulo: "1'; DROP", uds: 1, cajas: 0 }])).toBeNull()
+    expect(validarAfectadasArticulos([{ articulo: '1000000001', uds: 1 }, { articulo: '1000000001', uds: 2 }])).toBeNull() // repetido
+    expect(validarAfectadasArticulos(Array.from({ length: 201 }, (_, i) => ({ articulo: String(i), uds: 1 })))).toBeNull()
+  })
+  it('el total del envío es la suma del desglose, con cajas de cada artículo', () => {
+    expect(totalAfectadas([{ articulo: 'A', uds: 21, cajas: 4.2 }, { articulo: 'B', uds: 21, cajas: 1.75 }])).toEqual({ uds: 42, cajas: 5.95 })
+    expect(totalAfectadas([])).toEqual({ uds: 0, cajas: 0 })
+  })
+  it('la respuesta lleva el desglose anotado de cada envío (vacío si no lo hay)', () => {
+    const tracking = new Map([['1|100', { transportista: '', fecha_entrega_real: null, responsable: '', motivo: 'Producción', incidencia: '', uds_afectadas: 21, cajas_afectadas: 2.1, articulos: [{ articulo: '1000000001', uds: 21, cajas: 2.1 }] }]])
+    const r = armarRespuesta([linea({}), linea({ pedido: 2, albaran: 200 })], tracking, {}, '2024-06-01')
+    expect(r.envios.find((e) => e.pedido === 1)!.afectadasArticulos).toEqual([{ articulo: '1000000001', uds: 21, cajas: 2.1 }])
+    expect(r.envios.find((e) => e.pedido === 2)!.afectadasArticulos).toEqual([])
+  })
+  it('los datos de ejemplo traen artículos y su desglose cuadra con el total', () => {
+    const { lineas, tracking } = generarEjemplo()
+    expect(lineas.every((l) => l.articulo && l.udsPorCaja)).toBe(true)
+    for (const t of tracking.values()) expect(t.uds_afectadas).toBe(totalAfectadas(t.articulos ?? []).uds)
+  })
+})
+
+describe('PATCH /api/servicio con desglose por artículo', async () => {
+  const { mock, beforeEach } = await import('bun:test')
+  const { Database } = await import('bun:sqlite')
+  const { NextRequest } = await import('next/server')
+  const crear = () => {
+    const db = new Database(':memory:')
+    db.exec(`
+      CREATE TABLE order_service_tracking (pedido INTEGER NOT NULL, albaran INTEGER NOT NULL DEFAULT 0, transportista TEXT NOT NULL DEFAULT '',
+        fecha_entrega_real TEXT, responsable TEXT NOT NULL DEFAULT '', motivo TEXT NOT NULL DEFAULT '', incidencia TEXT NOT NULL DEFAULT '',
+        uds_afectadas INTEGER NOT NULL DEFAULT 0, cajas_afectadas REAL NOT NULL DEFAULT 0, updated_by TEXT, updated_at TEXT, PRIMARY KEY (pedido, albaran));
+      CREATE TABLE order_service_incidencia_articulo (pedido INTEGER NOT NULL, albaran INTEGER NOT NULL, articulo TEXT NOT NULL,
+        uds INTEGER NOT NULL DEFAULT 0, cajas REAL NOT NULL DEFAULT 0, PRIMARY KEY (pedido, albaran, articulo));
+    `)
+    return db
+  }
+  const ctx = { db: crear() }
+  mock.module('@/lib/sqlite', () => ({ getDb: () => ctx.db }))
+  mock.module('@/lib/permissions', () => ({ requireScreenAccess: async () => null }))
+  mock.module('@/lib/auth', () => ({ verifySession: async () => ({ id: 1, username: 'ana' }) }))
+  mock.module('@/lib/db', () => ({ getDbConnection: async () => { throw new Error('sin Oracle en tests') } }))
+  mock.module('@/lib/servicio-catalogo', () => ({ valorPermitido: () => true }))
+  const { PATCH } = await import('@/app/api/servicio/route')
+  const patch = (body: unknown) => PATCH(new NextRequest('http://localhost/api/servicio', { method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) }))
+  const fila = () => ctx.db.prepare('SELECT uds_afectadas, cajas_afectadas, motivo FROM order_service_tracking WHERE pedido = 1 AND albaran = 100').get() as any
+  const desglose = () => ctx.db.prepare('SELECT articulo, uds, cajas FROM order_service_incidencia_articulo ORDER BY articulo').all()
+  beforeEach(() => { ctx.db = crear() })
+
+  it('guarda el desglose y el total del envío es su suma', async () => {
+    const r = await patch({ pedido: 1, albaran: 100, motivo: 'Producción', afectadasArticulos: [{ articulo: '1000000001', uds: 21, cajas: 4.2 }, { articulo: '1000000002', uds: 21, cajas: 1.75 }] })
+    expect(r.status).toBe(200)
+    expect(fila()).toEqual({ uds_afectadas: 42, cajas_afectadas: 5.95, motivo: 'Producción' })
+    expect(desglose()).toEqual([{ articulo: '1000000001', uds: 21, cajas: 4.2 }, { articulo: '1000000002', uds: 21, cajas: 1.75 }])
+  })
+  it('un desglose nuevo sustituye al anterior; vacío lo borra y deja el total que se mande', async () => {
+    await patch({ pedido: 1, albaran: 100, afectadasArticulos: [{ articulo: '1000000001', uds: 10, cajas: 2 }] })
+    await patch({ pedido: 1, albaran: 100, afectadasArticulos: [{ articulo: '1000000002', uds: 5, cajas: 1 }] })
+    expect(desglose()).toEqual([{ articulo: '1000000002', uds: 5, cajas: 1 }])
+    await patch({ pedido: 1, albaran: 100, udsAfectadas: 0, cajasAfectadas: 0, afectadasArticulos: [] })
+    expect(desglose()).toEqual([])
+    expect(fila().uds_afectadas).toBe(0)
+  })
+  it('sin desglose, lo anotado antes se conserva', async () => {
+    await patch({ pedido: 1, albaran: 100, udsAfectadas: 85, cajasAfectadas: 17 })
+    await patch({ pedido: 1, albaran: 100, motivo: 'Producción' })
+    expect(fila()).toEqual({ uds_afectadas: 85, cajas_afectadas: 17, motivo: 'Producción' })
+  })
+  it('un desglose inválido no guarda nada', async () => {
+    const r = await patch({ pedido: 1, albaran: 100, motivo: 'Producción', afectadasArticulos: [{ articulo: '1000000001', uds: -3 }] })
+    expect(r.status).toBe(400)
+    expect(fila()).toBeNull()
+    expect(desglose()).toEqual([])
   })
 })
