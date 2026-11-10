@@ -1,8 +1,9 @@
 "use client";
 
+import type { ReactNode } from "react";
 
 import { Label, Pie, PieChart } from "recharts"
-import { Card, CardHeader, CardTitle, CardContent, CardDescription } from "@/components/nova/ui/card";
+import { Card, CardAction, CardHeader, CardTitle, CardContent, CardDescription } from "@/components/nova/ui/card";
 import { Badge } from "@/components/nova/ui/badge";
 import {
     ChartConfig,
@@ -28,11 +29,13 @@ export default function Chart02({
     description,
     centerLabel = "Total",
     data,
+    accion,
 }: {
     title?: string;
     description?: string;
     centerLabel?: string;
     data: Chart02Segmento[];
+    accion?: ReactNode; // acción opcional en la cabecera (p. ej. el botón «Compartir» de components/nova/compartir.tsx)
 }) {
     const total = data.reduce((s, d) => s + d.value, 0);
     const chartData = data.map((d, i) => ({ ...d, key: `s${i}`, fill: d.color }));
@@ -48,6 +51,7 @@ export default function Chart02({
                     <h4 className="text-lg font-medium">{title}</h4>
                 </CardTitle>
                 {description && <CardDescription>{description}</CardDescription>}
+                {accion && <CardAction>{accion}</CardAction>}
             </CardHeader>
             <CardContent className="flex flex-col justify-between gap-8 flex-1 px-6">
                 <ChartContainer config={chartConfig} className="aspect-square max-h-50">

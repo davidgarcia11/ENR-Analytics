@@ -242,10 +242,10 @@ Decisiones tomadas con el negocio:
 - **Periodo:** sin cambios; no se compara con periodos anteriores (la tendencia es la del rango cargado).
 
 Para que el KPI no engañe:
-- **Sin fecha real** (tarjeta): envíos ya enviados a los que nadie ha anotado la fecha de entrega real
-  (`sinFechaReal`, `lib/servicio.ts`). Cuentan como a tiempo con la fecha prometida; la tarjeta solo dice
-  cuántos estados son supuestos. En la tabla de Indicadores, la columna **«Con fecha real»** es el % de
-  pedidos evaluados con todas sus fechas reales anotadas (`pctConFechaReal`).
+- **Con fecha real** (columna de la tabla de Indicadores): % de pedidos evaluados con todas sus fechas
+  reales anotadas (`pctConFechaReal`); los demás cuentan como a tiempo con la fecha prometida. Hubo también
+  una tarjeta KPI «Sin fecha real» (v1.43); se quitó a petición del negocio, así que las tarjetas son tres:
+  % OTIF, % A tiempo y % Completo.
 - **«Editar datos»:** si el envío no tiene fecha real, el campo sale relleno con la fecha prometida (con un
   aviso debajo); al guardar se queda anotada.
 - **% OTIF cajas** = 1 − (cajas no enviadas + cajas afectadas) / cajas pedidas, donde las cajas afectadas son
@@ -256,8 +256,7 @@ Para que el KPI no engañe:
 
 - **Color de las tarjetas:** el % OTIF, el % A tiempo y el % Completo se pintan frente al objetivo
   (`OBJETIVO_OTIF_PCT` = 98 %, `lib/servicio.ts`): verde si lo cumple, ámbar hasta 8 puntos por debajo y
-  rojo si está más lejos. Cada una lleva una insignia con la distancia al objetivo («−3,9 pp»). «Sin fecha
-  real» lleva la insignia gris «A tiempo supuesto» si hay alguno y verde «Todas anotadas» si no.
+  rojo si está más lejos. Cada una lleva una insignia con la distancia al objetivo («−3,9 pp»).
 - **Afectadas en unidades o en cajas:** en «Editar datos» el campo «Afectadas» tiene un selector
   **Uds / Cajas**; el otro valor se calcula al momento con las unidades por caja de ese envío
   (unidades pedidas ÷ cajas pedidas) y se enseña debajo («≈ 8 cajas»). Si el envío no tiene cajas
@@ -323,3 +322,17 @@ con unidades sin completar, y daba por enviadas unidades de una línea que aún 
 - **Enviadas:** `SDSOQS` ya viene relleno en las líneas en picking (550), sin albarán ni fecha de envío.
   Ahora solo cuenta como enviado lo que tiene fecha de envío real (`SDADDJ`). Cambia el % Completo y el OTIF
   de los pedidos con líneas aún sin salir.
+
+## 20. Compartir como imagen
+
+Botón «Compartir» (icono) en la esquina de la última tarjeta KPI, en la tabla de envíos y en cada bloque de Indicadores, y
+«Compartir» con texto en la barra de filtros para la sección entera (Seguimiento o Indicadores). Genera un PNG
+con cabecera (logo, «Nivel de servicio · Sección», título), el componente con el tema de pantalla y un pie con
+el **rango cargado** (el de la última consulta, no el del selector), los clientes y tipos de pedido (con nombres
+si son 3 o menos), «Datos de ejemplo» si es `?mock=1`, y «Uso interno · Generado por … · fecha y hora».
+
+- **Tabla de envíos**: solo la página visible (hasta 50 filas). No salen los filtros de la tabla, el menú «⋮»
+  ni la paginación; el **texto de la incidencia sale completo** (en pantalla solo se ve en el texto emergente)
+  y el cliente y el canal, sin recortar.
+- En producción (HTTP) solo se puede descargar; «Copiar» sale con HTTPS o en localhost.
+- Mecanismo y cómo ponerlo en otro panel: `components/nova/README.md` punto 16.

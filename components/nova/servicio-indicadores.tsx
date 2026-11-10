@@ -5,7 +5,8 @@
 // canal, e incidencias por motivo, por mes y por responsable. Todo se calcula en cliente
 // sobre los envíos ya cargados (rango de la página), con lib/servicio.ts.
 import { useMemo } from "react";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/nova/ui/card";
+import { Card, CardAction, CardContent, CardHeader, CardTitle } from "@/components/nova/ui/card";
+import { Compartible } from "@/components/nova/compartir";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/nova/ui/table";
 import Chart01, { type Chart01Datum } from "@/components/shadcn-space/blocks/chart-01/chart";
 import Charts12 from "@/components/shadcn-space/blocks/chart-12/charts-12";
@@ -18,6 +19,9 @@ import { cn } from "@/lib/utils";
 // ponytail: objetivo único del 98 % (Makro, lib/servicio.ts). Carrefour exige el 99 % por cajas — cuando se
 // haga la pestaña de penalizaciones, el objetivo pasará a ser por cliente.
 const OBJETIVO_PCT = OBJETIVO_OTIF_PCT;
+
+// Envoltorio de Compartible dentro de la rejilla: estira la tarjeta para que las dos midan lo mismo
+const ESTIRA = "flex flex-col [&>*]:flex-1";
 
 const PALETA = ["var(--color-blue-500)", "var(--color-sky-400)", "var(--color-teal-400)", "var(--color-orange-400)", "var(--color-slate-300)"];
 
@@ -98,9 +102,11 @@ export default function ServicioIndicadores({ envios }: { envios: EnvioDto[] }) 
 
   return (
     <div className="space-y-4">
+      <Compartible titulo="Resumen por mes y canal">{(boton) => (
       <Card className="p-0">
         <CardHeader className="px-6 pt-6">
           <CardTitle className="text-lg font-medium text-foreground">Resumen por mes y canal</CardTitle>
+          {filas.length > 0 && <CardAction>{boton}</CardAction>}
           <p className="text-sm font-normal text-muted-foreground">
             Por mes de la fecha prometida. En rojo, por debajo del {OBJETIVO_PCT} %. OTIF en unidades (o cajas) = 1 − (no enviadas + afectadas) / pedidas. Con fecha real = pedidos con la fecha de entrega real anotada; los demás cuentan como entregados en la fecha prometida.
           </p>
@@ -134,11 +140,14 @@ export default function ServicioIndicadores({ envios }: { envios: EnvioDto[] }) 
           )}
         </CardContent>
       </Card>
+      )}</Compartible>
 
       {lineas.length === 0 ? (
         <Card><CardContent><Vacio texto="Sin datos." /></CardContent></Card>
       ) : (
+        <Compartible titulo="% OTIF por pedido">{(boton) => (
         <Charts16
+          accion={boton}
           title="% OTIF por pedido"
           description={`Evolución por canal · línea discontinua: objetivo del ${OBJETIVO_PCT} %`}
           data={lineas as Chart16Datum[]}
@@ -146,6 +155,7 @@ export default function ServicioIndicadores({ envios }: { envios: EnvioDto[] }) 
           objetivo={OBJETIVO_PCT}
           domain={[Math.floor(Math.min(...lineas.flatMap((l) => Object.entries(l).filter(([k, v]) => k !== "month" && typeof v === "number").map(([, v]) => v as number)), 90) / 10) * 10, 100]}
         />
+        )}</Compartible>
       )}
 
       <div className="grid gap-4 lg:grid-cols-2">
@@ -155,37 +165,46 @@ export default function ServicioIndicadores({ envios }: { envios: EnvioDto[] }) 
             <CardContent><Vacio texto="Sin incidencias anotadas." /></CardContent>
           </Card>
         ) : (
+          <Compartible titulo="Incidencias por motivo" className={ESTIRA}>{(boton) => (
           <Charts12
+            accion={boton}
             className="gap-6 rounded-2xl px-6 py-6"
             title="Incidencias por motivo"
             description="Envíos con motivo anotado, en el rango seleccionado"
             serieLabel="Incidencias"
             data={barrasMotivo}
           />
+          )}</Compartible>
         )}
 
         {responsables.length === 0 ? (
           <Card className="py-6 gap-8"><CardHeader className="px-6"><CardTitle className="text-lg font-medium">Responsabilidad — últimos 3 meses</CardTitle></CardHeader><CardContent><Vacio texto="Sin incidencias anotadas." /></CardContent></Card>
         ) : (
+          <Compartible titulo="Responsabilidad — últimos 3 meses" className={ESTIRA}>{(boton) => (
           <Chart02
+            accion={boton}
             title="Responsabilidad — últimos 3 meses"
             description="Incidencias por responsable (el mes más reciente con datos y los 2 anteriores)"
             centerLabel="Incidencias"
             data={responsables.map(([name, value], i) => ({ name, value, color: PALETA[i % PALETA.length] }))}
           />
+          )}</Compartible>
         )}
       </div>
 
       {apiladas.length === 0 ? (
         <Card><CardContent><Vacio texto="Sin incidencias anotadas." /></CardContent></Card>
       ) : (
+        <Compartible titulo="Incidencias por mes y motivo">{(boton) => (
         <Chart01
+          accion={boton}
           title="Incidencias por mes y motivo"
           headline={String(porMotivo.reduce((s, [, n]) => s + n, 0))}
           description="incidencias en el rango"
           data={apiladas as Chart01Datum[]}
           series={motivosApilados.map((label, i) => ({ key: `s${i}`, label, color: PALETA[i % PALETA.length] }))}
         />
+        )}</Compartible>
       )}
     </div>
   );

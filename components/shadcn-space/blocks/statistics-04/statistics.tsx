@@ -1,5 +1,6 @@
 "use client";
 
+import type { ReactNode } from "react";
 import { Card, CardContent } from "@/components/nova/ui/card";
 import { Badge } from "@/components/nova/ui/badge";
 import {
@@ -191,6 +192,8 @@ type StatisticsProps = {
   data?: Statistics[];
   /** Nº de columnas en pantallas lg — 4 por defecto (igual que antes de este prop). */
   columns?: 2 | 3 | 4;
+  /** Acción opcional (p. ej. el botón «Compartir» de components/nova/compartir.tsx), en la esquina de la última tarjeta. */
+  accion?: ReactNode;
 };
 
 const COLUMNS_CLASS: Record<2 | 3 | 4, string> = {
@@ -228,13 +231,14 @@ const defaultStatisticsData: Statistics[] = [
   },
 ];
 
-export default function Statistic({ data = defaultStatisticsData, columns = 4 }: StatisticsProps) {
+export default function Statistic({ data = defaultStatisticsData, columns = 4, accion }: StatisticsProps) {
   return (
     <div className="py-4">
       <div className="mx-auto w-full">
         <div className={cn("grid sm:grid-cols-2 grid-cols-1 gap-6", COLUMNS_CLASS[columns])}>
           {data.map((item, index) => (
-            <Card key={index} className="border p-6">
+            <Card key={index} className="relative border p-6">
+              {accion && index === data.length - 1 && <div className="absolute right-3 top-3">{accion}</div>}
               <CardContent className="p-0">
                 <div className="flex items-center justify-between">
                   <div className="flex flex-col gap-1">

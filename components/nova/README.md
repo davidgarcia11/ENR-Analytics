@@ -513,3 +513,28 @@ desde cero las mismas decisiones de diseño:
       `filtros`. Lógica pura y probada en `lib/presets-nova.ts` / `__tests__/presets-nova.test.ts`.
     - **Paneles que lo usan**: `/servicio` (clientes), `/compras` (previsión, sabor, vista),
       `/mrp` y `/muestras` (solo periodo). `/costes` no tiene filtros. `/produccion-v2` cuando se retome.
+16. **Compartir como imagen (`components/nova/compartir.tsx`, dependencia `html-to-image`)**: botón
+    «Compartir» que genera un PNG «bonito» de un componente o de la página entera, con vista previa y
+    «Descargar PNG» (y «Copiar» si hay HTTPS o es localhost: el navegador no deja copiar imágenes por HTTP).
+    - **La lámina**: marco suave, tarjeta con cabecera (logo sobre fondo blanco, «Panel · Sección» y el
+      título del bloque), el componente tal como se ve —con el tema claro/oscuro de quien la genera— y un pie
+      con los filtros aplicados y «Uso interno · Generado por … · fecha y hora». A doble resolución (menos si
+      la imagen pasaría de 16.000 px por un lado).
+    - **Cómo se dibuja**: se copia el nodo a una lámina fuera de pantalla dentro del mismo
+      `[data-nova-theme]` (hereda tema y colores) y `html-to-image` la pasa a PNG con el propio navegador
+      (respeta `oklch` y Geist; `html2canvas` no). En la copia, los contenedores con scroll se despliegan
+      enteros (una tabla más ancha que la pantalla sale completa).
+    - **Uso en un panel**: envolver la página en `<CompartirProvider valor={{ panel, seccion, filtros }}>`
+      (los filtros son las líneas del pie); cada bloque con
+      `<Compartible titulo="…">{(boton) => <Bloque accion={boton} … />}</Compartible>`; la página entera con
+      `<BotonCompartir objetivo={ref} titulo="…" conTexto />` en la barra de filtros.
+    - **Bloques con prop `accion`** (el botón en su cabecera): `chart-01`, `chart-02`, `chart-12`, `chart-16`, y
+      `statistics-04` (en la esquina superior derecha de la última tarjeta KPI, dentro de la tarjeta).
+      Para una tarjeta propia, `<CardAction>{boton}</CardAction>` en su `CardHeader`.
+    - **Marcas en el DOM**: `data-compartir-ocultar` (no sale: botones, filtros de la tabla, menú «⋮»,
+      paginación) y `data-compartir-completo` (sale entero: quita `hidden` y el truncado, p. ej. el texto de
+      la incidencia o el nombre del cliente).
+    - **Paneles que lo usan**: `/servicio` (KPIs, tabla de envíos, cada bloque de Indicadores y la página).
+      Pendiente extenderlo a `/compras`, `/costes`, `/mrp` y `/muestras`.
+    - **Rendimiento**: un gráfico tarda 1–2 s; la tabla de envíos con 50 filas, unos 10 s (la vista previa
+      muestra un indicador de carga mientras tanto).

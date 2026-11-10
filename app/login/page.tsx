@@ -68,10 +68,14 @@ export default function LoginPage() {
           // por `screens`), así que se resuelven aparte antes de mirar la lista.
           if (next?.startsWith('/admin') && data.role === 'admin') { router.push(next); return }
 
+          // Se compara solo la ruta (sin ?query ni #) con la del panel y se conserva la query, para
+          // volver p. ej. a /servicio?mock=1 y no caer en el primer panel. La ruta tiene que ser
+          // exactamente la de un panel, así que la query no abre ningún redirect a fuera.
+          const ruta = next?.split(/[?#]/)[0] ?? ''
           const destino = next && next.startsWith('/') && !next.startsWith('//')
-            ? PANELS.find(p => p.href === next && tieneAcceso(p))
+            ? PANELS.find(p => p.href === ruta && tieneAcceso(p))
             : undefined
-          if (destino) { router.push(destino.href); return }
+          if (destino) { router.push(destino.href + next!.slice(ruta.length)); return }
 
           const first = PANELS.find(tieneAcceso)
           if (first) { router.push(first.href); return }

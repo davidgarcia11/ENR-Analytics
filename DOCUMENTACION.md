@@ -766,8 +766,10 @@ permisos (los dos navbars y las páginas).
 - **El "flash" del panel antes del login.** `RequireAccess` no pinta nada hasta
   resolver sesión + permisos. Antes la página se pintaba y el `useEffect` decidía
   después, de ahí el segundo de panel visible al que no tenías acceso.
-- **Volver a donde ibas.** Las redirecciones llevan `?next=<ruta>`, y el login lo
-  respeta si la ruta es interna y el usuario tiene acceso real a ese panel.
+- **Volver a donde ibas.** Las redirecciones llevan `?next=<ruta>` (con su query, p. ej.
+  `/servicio?mock=1`), y el login lo respeta si la ruta es interna y el usuario tiene acceso real a
+  ese panel. Se compara solo la ruta (sin `?`/`#`) con la del panel y se conserva la query; antes una
+  query hacía que no coincidiera y se acababa en el primer panel (`/produccion`).
 
 **Dos cosas que hay que saber al usarlo:**
 

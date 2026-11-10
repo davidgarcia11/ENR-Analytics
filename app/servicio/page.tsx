@@ -14,9 +14,10 @@ import ServicioTable, { type CatalogosServicio, type EnvioDto, type PatchEnvio, 
 import DateRangePicker, { type DateRange } from "@/components/nova/date-range-picker";
 import ServicioClientesFiltro, { type OpcionCliente, type OpcionFiltro, type TextosFiltro } from "@/components/nova/servicio-clientes-filtro";
 import NovaPresets, { useNovaPresets } from "@/components/nova/presets";
-import type { Aplicacion } from "@/lib/presets-nova";
+import { BotonCompartir, Compartible, CompartirProvider } from "@/components/nova/compartir";
+import { describirRango, type Aplicacion } from "@/lib/presets-nova";
 import { Button } from "@/components/nova/ui/button";
-import { OBJETIVO_OTIF_PCT, TIPOS_PEDIDO, calcularKpis, estadoEntrega, filtrarPorClientes, filtrarPorTipos, resumirPedidos, sinFechaReal } from "@/lib/servicio";
+import { OBJETIVO_OTIF_PCT, TIPOS_PEDIDO, calcularKpis, estadoEntrega, filtrarPorClientes, filtrarPorTipos, resumirPedidos } from "@/lib/servicio";
 
 const iso = (d: Date) => d.toISOString().slice(0, 10);
 // `excluir` es el modo «todos menos» de los clientes (nombre de antes de existir el filtro de tipos: los
@@ -25,6 +26,12 @@ type FiltrosServicio = { clientes: number[]; excluir: boolean; tipos: string[]; 
 // Tipos de pedido (SDDCTO): siempre los cuatro, aunque en el rango no haya de alguno
 const OPCIONES_TIPOS: OpcionFiltro<string>[] = Object.entries(TIPOS_PEDIDO).map(([id, nombre]) => ({ id, nombre: `${nombre} (${id})` }));
 const TEXTOS_TIPOS: TextosFiltro = { todos: "Todos los tipos", plural: "tipos", buscar: "Buscar tipo…", vacio: "Sin tipos", quitar: "Quitar el filtro de tipos de pedido" };
+// Filtro de clientes o tipos para el pie de la imagen compartida: con nombres si son 3 o menos
+const filtroParaImagen = <K,>(valores: K[], excluir: boolean, nombre: (k: K) => string, todos: string, plural: string) => {
+  if (valores.length === 0) return todos;
+  const lista = valores.length <= 3 ? valores.map(nombre).join(", ") : `${valores.length} ${plural}`;
+  return excluir ? `Todos menos ${lista}` : `${plural.charAt(0).toUpperCase()}${plural.slice(1)}: ${lista}`;
+};
 const describirLista = (n: number, excluir: boolean, singular: string, plural: string) =>
   `${excluir ? "todos menos " : ""}${n} ${n === 1 ? singular : plural}`;
 const pct = (n: number | null) => (n === null ? "—" : `${n.toLocaleString("es-ES", { maximumFractionDigits: 1 })} %`);
@@ -35,6 +42,10 @@ function ServicioPagePanel() {
   // Rango sobre la fecha de entrega prometida. Por defecto, últimos 30 días.
   const [range, setRange] = useState<DateRange | null>({ startDate: iso(new Date(Date.now() - 30 * 86400000)), endDate: iso(new Date()) });
   const [envios, setEnvios] = useState<EnvioDto[] | null>(null);
+  // Rango de los datos cargados, para el pie de las imágenes compartidas (el del selector puede haberse
+  // cambiado sin pulsar «Filtrar»)
+  const [rangoCargado, setRangoCargado] = useState<DateRange | null>(null);
+  const pagina = useRef<HTMLDivElement>(null);
   // Clientes elegidos (SDAN8); vacío = todos. Con `excluirClientes`, son los quitados («todos menos»).
   // Filtra en pantalla los envíos ya cargados.
   const [clientes, setClientes] = useState<number[]>([]);
@@ -63,6 +74,7 @@ function ServicioPagePanel() {
       const json = await res.json();
       if (!res.ok) throw new Error(json.error);
       setEnvios(json.envios);
+      setRangoCargado(r);
       toast.success(`${json.envios.length} envíos encontrados`, { id });
     } catch (err) {
       console.error("Error cargando nivel de servicio:", err);
@@ -171,9 +183,6 @@ function ServicioPagePanel() {
     XLSX.writeFile(wb, `nivel-servicio_${range?.startDate ?? "todo"}_${range?.endDate ?? ""}.xlsx`);
   };
 
-  // Envíos ya enviados sin fecha de entrega real anotada: cuentan como a tiempo (fecha prometida), pero
-  // se cuentan aparte para que se vea cuántos estados son supuestos y no confirmados.
-  const sinFecha = visibles ? visibles.filter(sinFechaReal).length : 0;
 
   // Color de los KPI frente al objetivo: verde si lo cumple, ámbar hasta 8 puntos por debajo, rojo por debajo
   const colorKpi = (v: number | null) => {
@@ -193,11 +202,25 @@ function ServicioPagePanel() {
         kpi("% OTIF", kpis.pctOtif, `${kpis.pedidos} pedidos evaluados`),
         kpi("% A tiempo", kpis.pctATiempo, `${kpis.aTiempo} de ${kpis.pedidos} pedidos`),
         kpi("% Completo", kpis.pctCompleto, `${kpis.udsEnviadas.toLocaleString("es-ES")} de ${kpis.udsPedidas.toLocaleString("es-ES")} uds`),
-        { title: "Sin fecha real", value: String(sinFecha), subValue: "Envíos que cuentan con la fecha prometida", badgeValue: sinFecha > 0 ? "A tiempo supuesto" : "Todas anotadas", badgeColor: sinFecha > 0 ? "bg-muted text-muted-foreground" : "bg-teal-400/10 text-teal-500" },
       ]
     : [];
 
+  // Pie de las imágenes compartidas: rango, clientes, tipos de pedido y si son datos de ejemplo
+  const infoCompartir = {
+    panel: "Nivel de servicio",
+    seccion: vista === "seguimiento" ? "Seguimiento" : "Indicadores",
+    filtros: [
+      [
+        rangoCargado ? `Entrega prometida ${describirRango(rangoCargado)}` : "",
+        filtroParaImagen(clientes, excluirClientes, (id) => opcionesClientes.find((o) => o.id === id)?.nombre ?? `Cliente ${id}`, "Todos los clientes", "clientes"),
+        filtroParaImagen(tipos, excluirTipos, (t) => OPCIONES_TIPOS.find((o) => o.id === t)?.nombre ?? t, "Todos los tipos de pedido", "tipos"),
+        esMock ? "Datos de ejemplo" : "",
+      ].filter(Boolean).join(" · "),
+    ],
+  };
+
   return (
+    <CompartirProvider valor={infoCompartir}>
     <NovaPanelShell
       title="Nivel de servicio"
       grupo="Dashboards"
@@ -244,22 +267,35 @@ function ServicioPagePanel() {
           <span className="text-xs text-muted-foreground">Por fecha de entrega prometida</span>
           {esMock && <span className="rounded-full bg-amber-500/15 px-2 py-0.5 text-xs font-medium text-amber-600">Datos de ejemplo</span>}
         </div>
-        <Button size="sm" variant="outline" className="gap-1.5" onClick={exportar} disabled={!visibles?.length}>
-          <Download size={14} /> Exportar
-        </Button>
+        <div className="flex items-center gap-2">
+          {envios && <BotonCompartir objetivo={pagina} titulo={vista === "seguimiento" ? "Seguimiento de envíos" : "Indicadores"} conTexto />}
+          <Button size="sm" variant="outline" className="gap-1.5" onClick={exportar} disabled={!visibles?.length}>
+            <Download size={14} /> Exportar
+          </Button>
+        </div>
       </div>
 
       {!envios ? (
         <p className="text-muted-foreground">Cargando…</p>
-      ) : vista === "seguimiento" ? (
-        <>
-          <Statistics data={stats} columns={4} />
-          <ServicioTable data={visibles ?? []} catalogos={catalogos} onSave={handleSave} />
-        </>
       ) : (
-        <ServicioIndicadores envios={visibles ?? []} />
+        // La página completa (botón «Compartir» de la barra) es esta sección; cada bloque tiene además el suyo
+        <div ref={pagina} className="flex flex-col gap-4">
+          {vista === "seguimiento" ? (
+            <>
+              <Compartible titulo="Indicadores clave">{(boton) => (
+                <Statistics data={stats} columns={3} accion={boton} />
+              )}</Compartible>
+              <Compartible titulo="Envíos">{(boton) => (
+                <ServicioTable data={visibles ?? []} catalogos={catalogos} onSave={handleSave} accion={boton} />
+              )}</Compartible>
+            </>
+          ) : (
+            <ServicioIndicadores envios={visibles ?? []} />
+          )}
+        </div>
       )}
     </NovaPanelShell>
+    </CompartirProvider>
   );
 }
 
