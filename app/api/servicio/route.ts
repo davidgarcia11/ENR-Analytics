@@ -1,7 +1,7 @@
 // Panel /servicio — nivel de servicio (OTIF) de los pedidos de venta. Ver docs/servicio.md.
 //
 // Los datos de pedido salen de F4211 en directo (una fila por línea, partida por SSCC
-// enviado) y se agrupan por (pedido, camión SDSHPN) en lib/servicio.ts. Lo que JDE no
+// enviado) y se agrupan por (pedido, albarán SDDELN) en lib/servicio.ts. Lo que JDE no
 // sabe (transportista, fecha de entrega real, incidencia...) vive en SQLite
 // (order_service_tracking) y se cruza aquí en memoria, igual que /muestras.
 import { NextRequest, NextResponse } from 'next/server';
@@ -10,11 +10,15 @@ import { requireScreenAccess } from '@/lib/permissions';
 import { getDb } from '@/lib/sqlite';
 import { verifySession } from '@/lib/auth';
 import {
-  EJEMPLO_CANALES, UM_CAJA, UM_UNIDAD, armarRespuesta, generarEjemplo, isoAJde, jdeAIso, udsPorCaja, type ConversionUm, type LineaJde,
+  EJEMPLO_CANALES, TIPOS_PEDIDO, TIPO_LINEA_STOCK, UM_CAJA, UM_UNIDAD, armarRespuesta, generarEjemplo, isoAJde, jdeAIso, udsPorCaja,
+  totalAfectadas, validarAfectadasArticulos, type AfectadaArticulo, type ConversionUm, type LineaJde, type TipoPedido, type TrackingManual,
 } from '@/lib/servicio';
 import { valorPermitido } from '@/lib/servicio-catalogo';
 
-const TIPO_DOC_EXCLUIDO = 'ST';
+// Solo pedidos de venta y muestras (SDDCTO) y solo líneas de stock (SDLNTY = 'S'): las líneas N
+// (portes, cargos) nunca llevan albarán ni se envían. Ver docs/servicio.md §3.
+const TIPOS_DOC = Object.keys(TIPOS_PEDIDO) as TipoPedido[];
+const BINDS_TIPOS = Object.fromEntries(TIPOS_DOC.map((t, i) => [`tipo${i}`, t]));
 const ISO = /^\d{4}-\d{2}-\d{2}$/;
 const MAX_IN = 900; // Oracle admite 1000 elementos en un IN
 
@@ -24,6 +28,21 @@ interface TrackingRow {
 }
 
 const hoyIso = () => new Date().toISOString().slice(0, 10);
+
+// Datos manuales de todos los envíos, con su desglose de afectadas por artículo
+function leerTracking(db: ReturnType<typeof getDb>): Map<string, TrackingManual> {
+  const porEnvio = new Map<string, AfectadaArticulo[]>();
+  for (const a of db.prepare('SELECT pedido, albaran, articulo, uds, cajas FROM order_service_incidencia_articulo').all() as (AfectadaArticulo & { pedido: number; albaran: number })[]) {
+    const k = `${a.pedido}|${a.albaran}`;
+    porEnvio.set(k, [...(porEnvio.get(k) ?? []), { articulo: a.articulo, uds: a.uds, cajas: a.cajas }]);
+  }
+  return new Map(
+    (db.prepare('SELECT * FROM order_service_tracking').all() as TrackingRow[]).map((t) => {
+      const k = `${t.pedido}|${t.albaran}`;
+      return [k, { ...t, articulos: porEnvio.get(k) ?? [] }];
+    })
+  );
+}
 
 export async function GET(req: NextRequest) {
   const denied = await requireScreenAccess('servicio');
@@ -53,15 +72,17 @@ export async function GET(req: NextRequest) {
     conn = await getDbConnection();
 
     const result = await conn.execute(
-      `SELECT A.SDDOCO, TRIM(A.SDVR01) AS SDVR01, A.SDSHPN, A.SDDELN, A.SDAN8, A.SDSHAN,
+      `SELECT A.SDDOCO, TRIM(A.SDDCTO) AS SDDCTO, TRIM(A.SDVR01) AS SDVR01, A.SDSHPN, A.SDDELN, A.SDAN8, A.SDSHAN,
               A.SDPDDJ, A.SDADDJ, A.SDRSDJ, A.SDUORG, A.SDSOQS, A.SDSOCN, A.SDSQOR, A.SDITM,
+              TRIM(A.SDLITM) AS SDLITM, TRIM(A.SDDSC1) AS SDDSC1,
               TRIM(B.ABALPH) AS AN8_DESC, TRIM(C.ABALPH) AS SHAN_DESC
        FROM F4211 A
        LEFT JOIN F0101 B ON B.ABAN8 = A.SDAN8
        LEFT JOIN F0101 C ON C.ABAN8 = A.SDSHAN
-       WHERE TRIM(A.SDDCTO) != :tipoDocExcluido
+       WHERE TRIM(A.SDDCTO) IN (${TIPOS_DOC.map((_, i) => `:tipo${i}`).join(', ')})
+         AND TRIM(A.SDLNTY) = :tipoLinea
          AND A.SDRSDJ BETWEEN :startJde AND :endJde`,
-      { tipoDocExcluido: TIPO_DOC_EXCLUIDO, startJde: isoAJde(startDate), endJde: isoAJde(endDate) }
+      { ...BINDS_TIPOS, tipoLinea: TIPO_LINEA_STOCK, startJde: isoAJde(startDate), endJde: isoAJde(endDate) }
     );
     const rows = result.rows as any[];
 
@@ -104,6 +125,7 @@ export async function GET(req: NextRequest) {
 
     const lineas: LineaJde[] = rows.map((r) => ({
       pedido: r.SDDOCO,
+      tipoPedido: String(r.SDDCTO || '').trim(),
       suPedido: String(r.SDVR01 || '').trim(),
       albaran: r.SDDELN || 0,
       cliente: r.SDAN8 || 0,
@@ -127,12 +149,15 @@ export async function GET(req: NextRequest) {
           : { cajasPedidas: (r.SDSQOR || 0) / 100, cajasEnviadas: r.SDUORG ? ((r.SDSQOR || 0) / 100) * ((r.SDSOQS || 0) / r.SDUORG) : 0 };
       })(),
       canal: canalPorItem.get(String(r.SDITM).trim()) ?? null,
+      articulo: String(r.SDLITM || r.SDITM || '').trim(),
+      descripcion: String(r.SDDSC1 || '').trim(),
+      // Uds por caja del artículo, para pasar a cajas las afectadas de cada artículo: la de F41002 o, si
+      // no la tiene, la de la línea (SDUORG / SDSQOR)
+      udsPorCaja: udsPorCaja(convPorItem.get(String(r.SDITM).trim()) ?? []) ?? (r.SDSQOR > 0 && r.SDUORG > 0 ? r.SDUORG / r.SDSQOR : null),
     }));
 
     const db = getDb();
-    const tracking = new Map(
-      (db.prepare('SELECT * FROM order_service_tracking').all() as TrackingRow[]).map((t) => [`${t.pedido}|${t.albaran}`, t])
-    );
+    const tracking = leerTracking(db);
 
     const { envios: enviosDto, kpis } = armarRespuesta(lineas, tracking, canalLabels, hoy);
 
@@ -211,16 +236,36 @@ export async function PATCH(req: NextRequest) {
     if (!Number.isFinite(n) || n < 0 || n > 10_000_000) return NextResponse.json({ error: 'Cajas afectadas inválidas' }, { status: 400 });
     next.cajas_afectadas = Math.round(n * 10) / 10;
   }
+  // Desglose por artículo: si viene, sustituye al anterior y el total del envío pasa a ser su suma
+  // (manda sobre udsAfectadas / cajasAfectadas sueltos)
+  let articulos: AfectadaArticulo[] | null = null;
+  if (body.afectadasArticulos !== undefined) {
+    articulos = validarAfectadasArticulos(body.afectadasArticulos);
+    if (!articulos) return NextResponse.json({ error: 'Afectadas por artículo inválidas' }, { status: 400 });
+    if (articulos.length > 0) {
+      const t = totalAfectadas(articulos);
+      next.uds_afectadas = t.uds;
+      next.cajas_afectadas = t.cajas;
+    }
+  }
 
   try {
-    db.prepare(`
-      INSERT INTO order_service_tracking (pedido, albaran, transportista, fecha_entrega_real, responsable, motivo, incidencia, uds_afectadas, cajas_afectadas, updated_by, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
-      ON CONFLICT(pedido, albaran) DO UPDATE SET
-        transportista = excluded.transportista, fecha_entrega_real = excluded.fecha_entrega_real,
-        responsable = excluded.responsable, motivo = excluded.motivo, incidencia = excluded.incidencia,
-        uds_afectadas = excluded.uds_afectadas, cajas_afectadas = excluded.cajas_afectadas, updated_by = excluded.updated_by, updated_at = excluded.updated_at
-    `).run(pedido, albaran, next.transportista, next.fecha_entrega_real, next.responsable, next.motivo, next.incidencia, next.uds_afectadas, next.cajas_afectadas, user ? user.username : 'Invitado');
+    // Datos del envío y desglose por artículo a la vez: o se guarda todo o nada
+    db.transaction(() => {
+      db.prepare(`
+        INSERT INTO order_service_tracking (pedido, albaran, transportista, fecha_entrega_real, responsable, motivo, incidencia, uds_afectadas, cajas_afectadas, updated_by, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+        ON CONFLICT(pedido, albaran) DO UPDATE SET
+          transportista = excluded.transportista, fecha_entrega_real = excluded.fecha_entrega_real,
+          responsable = excluded.responsable, motivo = excluded.motivo, incidencia = excluded.incidencia,
+          uds_afectadas = excluded.uds_afectadas, cajas_afectadas = excluded.cajas_afectadas, updated_by = excluded.updated_by, updated_at = excluded.updated_at
+      `).run(pedido, albaran, next.transportista, next.fecha_entrega_real, next.responsable, next.motivo, next.incidencia, next.uds_afectadas, next.cajas_afectadas, user ? user.username : 'Invitado');
+      if (articulos) {
+        db.prepare('DELETE FROM order_service_incidencia_articulo WHERE pedido = ? AND albaran = ?').run(pedido, albaran);
+        const alta = db.prepare('INSERT INTO order_service_incidencia_articulo (pedido, albaran, articulo, uds, cajas) VALUES (?, ?, ?, ?, ?)');
+        for (const a of articulos) alta.run(pedido, albaran, a.articulo, a.uds, a.cajas);
+      }
+    })();
     return NextResponse.json({ ok: true });
   } catch (err: any) {
     console.error('Error actualizando order_service_tracking:', err);

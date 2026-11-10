@@ -6,20 +6,27 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import * as XLSX from "xlsx";
 import { RequireAccess, useApiFetch } from "@/components/SessionProvider";
 import { toast } from "sonner";
-import { Download, Filter, Loader2 } from "lucide-react";
+import { Download, Filter, Loader2, Tags } from "lucide-react";
 import NovaPanelShell from "@/components/nova/panel-shell";
 import Statistics from "@/components/shadcn-space/blocks/statistics-04/statistics";
 import ServicioIndicadores from "@/components/nova/servicio-indicadores";
 import ServicioTable, { type CatalogosServicio, type EnvioDto, type PatchEnvio, ENTREGA_LABEL } from "@/components/nova/servicio-table";
 import DateRangePicker, { type DateRange } from "@/components/nova/date-range-picker";
-import ServicioClientesFiltro, { type OpcionCliente } from "@/components/nova/servicio-clientes-filtro";
+import ServicioClientesFiltro, { type OpcionCliente, type OpcionFiltro, type TextosFiltro } from "@/components/nova/servicio-clientes-filtro";
 import NovaPresets, { useNovaPresets } from "@/components/nova/presets";
 import type { Aplicacion } from "@/lib/presets-nova";
 import { Button } from "@/components/nova/ui/button";
-import { OBJETIVO_OTIF_PCT, calcularKpis, estadoEntrega, filtrarPorClientes, resumirPedidos } from "@/lib/servicio";
+import { OBJETIVO_OTIF_PCT, TIPOS_PEDIDO, calcularKpis, estadoEntrega, filtrarPorClientes, filtrarPorTipos, resumirPedidos, sinFechaReal } from "@/lib/servicio";
 
 const iso = (d: Date) => d.toISOString().slice(0, 10);
-type FiltrosServicio = { clientes: number[]; excluir: boolean };
+// `excluir` es el modo «todos menos» de los clientes (nombre de antes de existir el filtro de tipos: los
+// filtros ya guardados lo usan así)
+type FiltrosServicio = { clientes: number[]; excluir: boolean; tipos: string[]; excluirTipos: boolean };
+// Tipos de pedido (SDDCTO): siempre los cuatro, aunque en el rango no haya de alguno
+const OPCIONES_TIPOS: OpcionFiltro<string>[] = Object.entries(TIPOS_PEDIDO).map(([id, nombre]) => ({ id, nombre: `${nombre} (${id})` }));
+const TEXTOS_TIPOS: TextosFiltro = { todos: "Todos los tipos", plural: "tipos", buscar: "Buscar tipo…", vacio: "Sin tipos", quitar: "Quitar el filtro de tipos de pedido" };
+const describirLista = (n: number, excluir: boolean, singular: string, plural: string) =>
+  `${excluir ? "todos menos " : ""}${n} ${n === 1 ? singular : plural}`;
 const pct = (n: number | null) => (n === null ? "—" : `${n.toLocaleString("es-ES", { maximumFractionDigits: 1 })} %`);
 
 function ServicioPagePanel() {
@@ -32,6 +39,9 @@ function ServicioPagePanel() {
   // Filtra en pantalla los envíos ya cargados.
   const [clientes, setClientes] = useState<number[]>([]);
   const [excluirClientes, setExcluirClientes] = useState(false);
+  // Tipos de pedido elegidos (SDDCTO: venta, EDI, muestras); mismas reglas que los clientes
+  const [tipos, setTipos] = useState<string[]>([]);
+  const [excluirTipos, setExcluirTipos] = useState(false);
   const [loading, setLoading] = useState(false);
   // Opciones de los desplegables (motivos, responsables, transportistas): se editan en /admin → Listas de servicio
   const [catalogos, setCatalogos] = useState<CatalogosServicio>({ motivos: [], responsables: [], transportistas: [] });
@@ -97,6 +107,8 @@ function ServicioPagePanel() {
   const aplicarPreset = (a: Aplicacion<FiltrosServicio>) => {
     setClientes(Array.isArray(a.filtros.clientes) ? a.filtros.clientes.filter(Number.isInteger) : []);
     setExcluirClientes(a.filtros.excluir === true);
+    setTipos(Array.isArray(a.filtros.tipos) ? a.filtros.tipos.filter((t) => t in TIPOS_PEDIDO) : []);
+    setExcluirTipos(a.filtros.excluirTipos === true);
     if (a.fechas) { setRange(a.fechas); fetchData(a.fechas); }
   };
   const presets = useNovaPresets<FiltrosServicio>(modoListo ? (esMock ? "servicio-ejemplo" : "servicio") : null, (p) => {
@@ -128,17 +140,20 @@ function ServicioPagePanel() {
 
   const opcionesClientes = useMemo<OpcionCliente[]>(() => {
     const porId = new Map<number, string>();
-    envios?.forEach((e) => { if (!porId.has(e.cliente)) porId.set(e.cliente, e.clienteNombre); });
+    envios?.forEach((e) => { if (!porId.has(e.cliente)) porId.set(e.cliente, e.clienteNombre || `Cliente ${e.cliente}`); });
     return Array.from(porId, ([id, nombre]) => ({ id, nombre })).sort((a, b) => a.nombre.localeCompare(b.nombre, "es", { numeric: true }));
   }, [envios]);
-  const visibles = useMemo(() => (envios ? filtrarPorClientes(envios, clientes, excluirClientes) : null), [envios, clientes, excluirClientes]);
+  const visibles = useMemo(
+    () => (envios ? filtrarPorTipos(filtrarPorClientes(envios, clientes, excluirClientes), tipos, excluirTipos) : null),
+    [envios, clientes, excluirClientes, tipos, excluirTipos]
+  );
 
   const kpis = useMemo(() => (visibles ? calcularKpis(resumirPedidos(visibles), iso(new Date())) : null), [visibles]);
 
   const exportar = () => {
     if (!visibles) return;
     const filas = visibles.map((e) => ({
-      Pedido: e.pedido, "Su pedido": e.suPedido, Cliente: e.clienteNombre, Destino: e.destinoNombre, Canal: e.canalLabel ?? "",
+      Pedido: e.pedido, "Tipo pedido": e.tipoPedido, "Su pedido": e.suPedido, Cliente: e.clienteNombre, Destino: e.destinoNombre, Canal: e.canalLabel ?? "",
       Albarán: e.albaran || "", "Fecha envío": e.fechaEnvio ?? "",
       "Fecha prometida": e.fechaPrometida ?? "", "Fecha entrega real": e.fechaEntregaReal ?? "", "Uds enviadas": e.udsEnviadas,
       "Uds pedidas (envío)": e.udsPedidas, "Cajas enviadas": Math.round(e.cajasEnviadas * 10) / 10, "Cajas pedidas (envío)": Math.round(e.cajasPedidas * 10) / 10, Transportista: e.transportista, Estado: ENTREGA_LABEL[e.entrega],
@@ -146,13 +161,19 @@ function ServicioPagePanel() {
     }));
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(filas), "Envíos");
+    // Desglose de las afectadas por artículo (solo los envíos que lo tienen)
+    const porArticulo = visibles.flatMap((e) => e.afectadasArticulos.map((a) => ({
+      Pedido: e.pedido, Albarán: e.albaran || "", Cliente: e.clienteNombre, Artículo: a.articulo,
+      Descripción: e.articulos.find((x) => x.articulo === a.articulo)?.descripcion ?? "",
+      "Uds afectadas": a.uds, "Cajas afectadas": a.cajas, Motivo: e.motivo, Responsable: e.responsable,
+    })));
+    if (porArticulo.length) XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(porArticulo), "Incidencias por artículo");
     XLSX.writeFile(wb, `nivel-servicio_${range?.startDate ?? "todo"}_${range?.endDate ?? ""}.xlsx`);
   };
 
-  // Envíos ya enviados a los que aún falta la fecha de entrega real: lo que hay que rellenar para que
-  // el % a tiempo y el OTIF digan algo (por eso van en una tarjeta propia).
-  const pendientes = visibles ? visibles.filter((e) => e.entrega === "sin_confirmar").length : 0;
-  const coberturaBaja = kpis?.cobertura != null && kpis.cobertura < 80;
+  // Envíos ya enviados sin fecha de entrega real anotada: cuentan como a tiempo (fecha prometida), pero
+  // se cuentan aparte para que se vea cuántos estados son supuestos y no confirmados.
+  const sinFecha = visibles ? visibles.filter(sinFechaReal).length : 0;
 
   // Color de los KPI frente al objetivo: verde si lo cumple, ámbar hasta 8 puntos por debajo, rojo por debajo
   const colorKpi = (v: number | null) => {
@@ -169,10 +190,10 @@ function ServicioPagePanel() {
 
   const stats = kpis
     ? [
-        kpi("% OTIF", kpis.pctOtif, `${kpis.pedidos} pedidos evaluados · cobertura ${pct(kpis.cobertura)}`, coberturaBaja ? "Cobertura baja" : undefined),
-        kpi("% A tiempo", kpis.pctATiempo, `${kpis.confirmados} de ${kpis.pedidos} con entrega confirmada`),
+        kpi("% OTIF", kpis.pctOtif, `${kpis.pedidos} pedidos evaluados`),
+        kpi("% A tiempo", kpis.pctATiempo, `${kpis.aTiempo} de ${kpis.pedidos} pedidos`),
         kpi("% Completo", kpis.pctCompleto, `${kpis.udsEnviadas.toLocaleString("es-ES")} de ${kpis.udsPedidas.toLocaleString("es-ES")} uds`),
-        { title: "Pendientes de confirmar", value: String(pendientes), subValue: "Envíos sin fecha de entrega real", valueClassName: pendientes > 0 ? "text-amber-500" : "text-teal-500", badgeValue: pendientes > 0 ? "Por rellenar" : "Al día", badgeColor: pendientes > 0 ? "bg-amber-400/10 text-amber-500" : "bg-teal-400/10 text-teal-500" },
+        { title: "Sin fecha real", value: String(sinFecha), subValue: "Envíos que cuentan con la fecha prometida", badgeValue: sinFecha > 0 ? "A tiempo supuesto" : "Todas anotadas", badgeColor: sinFecha > 0 ? "bg-muted text-muted-foreground" : "bg-teal-400/10 text-teal-500" },
       ]
     : [];
 
@@ -192,19 +213,32 @@ function ServicioPagePanel() {
             excluir={excluirClientes}
             onChange={(c, ex) => { setClientes(c); setExcluirClientes(ex); }}
           />
+          <ServicioClientesFiltro<string>
+            opciones={OPCIONES_TIPOS}
+            value={tipos}
+            excluir={excluirTipos}
+            onChange={(t, ex) => { setTipos(t); setExcluirTipos(ex); }}
+            textos={TEXTOS_TIPOS}
+            icono={Tags}
+            buscador={false}
+          />
           <Button size="sm" className="gap-1.5" onClick={() => fetchData(range)} disabled={loading}>
             {loading ? <Loader2 size={14} className="animate-spin" /> : <Filter size={14} />}
             Filtrar
           </Button>
           <NovaPresets
             presets={presets}
-            actual={{ filtros: { clientes, excluir: excluirClientes }, fechas: range }}
+            actual={{ filtros: { clientes, excluir: excluirClientes, tipos, excluirTipos }, fechas: range }}
             granularidad="dia"
             onAplicar={aplicarPreset}
             describir={(f) => {
-              const n = f.clientes?.length ?? 0;
-              if (!n) return "Todos los clientes";
-              return f.excluir ? `Todos menos ${n} cliente${n === 1 ? "" : "s"}` : `${n} cliente${n === 1 ? "" : "s"}`;
+              const nc = f.clientes?.length ?? 0;
+              const nt = f.tipos?.length ?? 0;
+              const partes = [
+                nc ? describirLista(nc, f.excluir === true, "cliente", "clientes") : "",
+                nt ? describirLista(nt, f.excluirTipos === true, "tipo", "tipos") : "",
+              ].filter(Boolean).join(" · ");
+              return partes ? partes.charAt(0).toUpperCase() + partes.slice(1) : "Todos los clientes y tipos";
             }}
           />
           <span className="text-xs text-muted-foreground">Por fecha de entrega prometida</span>

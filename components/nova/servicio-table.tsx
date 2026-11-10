@@ -18,11 +18,12 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Card } from "@/components/nova/ui/card";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/nova/ui/dialog";
 import PremiumRibbon from "@/components/shadcn-space/pagination/pagination-02";
-import { motivoEfectivo, tieneIncidencia, type EstadoEntrega } from "@/lib/servicio";
+import { tieneIncidencia, totalAfectadas, type AfectadaArticulo, type ArticuloEnvio, type EstadoEntrega } from "@/lib/servicio";
 import { cn } from "@/lib/utils";
 
 export interface EnvioDto {
   pedido: number;
+  tipoPedido: string; // SDDCTO: SO, SE, SM, SY (lo usa el filtro de tipos)
   suPedido: string;
   albaran: number;
   cliente: number; // SDAN8: lo usa el filtro de clientes
@@ -49,6 +50,8 @@ export interface EnvioDto {
   incidencia: string;
   udsAfectadas: number;
   cajasAfectadas: number;
+  articulos: ArticuloEnvio[]; // artículos del envío, para anotar las afectadas de cada uno
+  afectadasArticulos: AfectadaArticulo[]; // desglose anotado (vacío = sin desglose)
   entrega: EstadoEntrega;
 }
 
@@ -60,6 +63,7 @@ export interface PatchEnvio {
   incidencia?: string;
   udsAfectadas?: number;
   cajasAfectadas?: number;
+  afectadasArticulos?: AfectadaArticulo[];
 }
 
 export interface CatalogosServicio {
@@ -70,14 +74,12 @@ export interface CatalogosServicio {
 
 export const ENTREGA_LABEL: Record<EstadoEntrega, string> = {
   pendiente_envio: "Sin enviar",
-  sin_confirmar: "Sin confirmar",
   a_tiempo: "A tiempo",
   tarde: "Tarde",
 };
 
 const ENTREGA_CLASS: Record<EstadoEntrega, string> = {
   pendiente_envio: "bg-muted text-muted-foreground",
-  sin_confirmar: "bg-amber-400/10 text-amber-500",
   a_tiempo: "bg-teal-400/10 text-teal-400",
   tarde: "bg-red-500/10 text-red-500",
 };
@@ -86,6 +88,9 @@ const PAGE_SIZE = 50;
 const NINGUNO = "__ninguno__"; // Base UI no distingue "" de "sin valor" en Select (ver components/nova/README.md)
 const num = (n: number) => n.toLocaleString("es-ES");
 const numCajas = (n: number) => n.toLocaleString("es-ES", { maximumFractionDigits: 1 }); // las enviadas pueden salir con decimales (reparto proporcional)
+const numCajas2 = (n: number) => n.toLocaleString("es-ES", { maximumFractionDigits: 2 }); // afectadas por artículo: 21 uds de 5/caja = 4,2
+// Cajas de unas unidades de un artículo, con decimales (0 si el artículo no tiene cajas)
+const cajasDe = (uds: number, a: ArticuloEnvio) => (a.udsPorCaja ? Math.round((uds / a.udsPorCaja) * 100) / 100 : 0);
 const fecha = (iso: string | null) => (iso ? iso.split("-").reverse().map((x, i) => (i === 2 ? x.slice(2) : x)).join("/") : "—");
 // Avatar de la fila: iniciales del cliente sobre el color de su canal (en vez de un icono
 // igual para todas las filas). Los colores se asignan por código de canal, estables.
@@ -101,6 +106,12 @@ const iniciales = (nombre: string) => {
   return ((p[0]?.[0] ?? "?") + (p[1]?.[0] ?? "")).toUpperCase();
 };
 const claveDe = (e: { pedido: number; albaran: number }) => `${e.pedido}|${e.albaran}`;
+// Texto emergente de la celda Incidencia: el texto anotado y el desglose por artículo
+const textoIncidencia = (e: EnvioDto) => {
+  const nombre = (cod: string) => e.articulos.find((a) => a.articulo === cod)?.descripcion || cod;
+  const lineas = e.afectadasArticulos.map((a) => `${nombre(a.articulo)}: ${num(a.uds)} uds${a.cajas > 0 ? ` · ${numCajas2(a.cajas)} cajas` : ""}`);
+  return [e.incidencia, ...lineas].filter(Boolean).join("\n");
+};
 
 function SelectLista({ valor, opciones, onChange }: { valor: string; opciones: readonly string[]; onChange: (v: string) => void }) {
   // Si el valor guardado se desactivó en /admin, se sigue mostrando (marcado) para no perderlo al editar
@@ -119,15 +130,30 @@ function SelectLista({ valor, opciones, onChange }: { valor: string; opciones: r
 }
 
 function EditarEnvio({ envio, catalogos, onClose, onSave }: { envio: EnvioDto | null; catalogos: CatalogosServicio; onClose: () => void; onSave: (e: EnvioDto, p: PatchEnvio) => Promise<void> }) {
-  const [form, setForm] = useState<Required<PatchEnvio>>({ transportista: "", fechaEntregaReal: null, responsable: "", motivo: "", incidencia: "", udsAfectadas: 0, cajasAfectadas: 0 });
+  const [form, setForm] = useState<Required<Omit<PatchEnvio, "afectadasArticulos">>>({ transportista: "", fechaEntregaReal: null, responsable: "", motivo: "", incidencia: "", udsAfectadas: 0, cajasAfectadas: 0 });
+  // Afectadas por artículo (uds de cada uno; las cajas salen de su conversión). Lo anotado antes sin
+  // desglose se conserva mientras no se reparta por artículo o se quite.
+  const [desglose, setDesglose] = useState<Record<string, number>>({});
+  const [quitarSinDesglose, setQuitarSinDesglose] = useState(false);
+  const porArticulo = !!envio && envio.articulos.length > 0;
+  const sinDesglose = !!envio && envio.afectadasArticulos.length === 0 && (envio.udsAfectadas > 0 || envio.cajasAfectadas > 0);
   // Las afectadas se anotan en unidades o en cajas; el otro valor se calcula con las unidades por caja de este envío
   const [unidad, setUnidad] = useState<"uds" | "cajas">("uds");
   const udsPorCajaEnvio = envio && envio.cajasPedidas > 0 && envio.udsPedidas > 0 ? envio.udsPedidas / envio.cajasPedidas : null;
   const [guardando, setGuardando] = useState(false);
   useEffect(() => {
-    if (envio) setForm({ transportista: envio.transportista, fechaEntregaReal: envio.fechaEntregaReal, responsable: envio.responsable, motivo: envio.motivo, incidencia: envio.incidencia, udsAfectadas: envio.udsAfectadas, cajasAfectadas: envio.cajasAfectadas });
+    // Sin fecha real anotada, el envío ya enviado sale con la fecha prometida (como si llegara a tiempo); se cambia si no fue así
+    if (envio) setForm({ transportista: envio.transportista, fechaEntregaReal: envio.fechaEntregaReal ?? (envio.fechaEnvio ? envio.fechaPrometida : null), responsable: envio.responsable, motivo: envio.motivo, incidencia: envio.incidencia, udsAfectadas: envio.udsAfectadas, cajasAfectadas: envio.cajasAfectadas });
     setUnidad("uds");
+    setDesglose(Object.fromEntries((envio?.afectadasArticulos ?? []).map((a) => [a.articulo, a.uds])));
+    setQuitarSinDesglose(false);
   }, [envio]);
+
+  const listaDesglose = (): AfectadaArticulo[] =>
+    (envio?.articulos ?? [])
+      .map((a) => ({ articulo: a.articulo, uds: desglose[a.articulo] ?? 0, cajas: cajasDe(desglose[a.articulo] ?? 0, a) }))
+      .filter((a) => a.uds > 0);
+  const totalDesglose = totalAfectadas(listaDesglose());
 
   const cambiarAfectadas = (texto: string) => {
     const n = Math.max(0, Number(texto) || 0);
@@ -143,7 +169,15 @@ function EditarEnvio({ envio, catalogos, onClose, onSave }: { envio: EnvioDto | 
   const guardar = async () => {
     if (!envio) return;
     setGuardando(true);
-    try { await onSave(envio, form); onClose(); } finally { setGuardando(false); }
+    let patch: PatchEnvio = form;
+    if (porArticulo) {
+      const lista = listaDesglose();
+      // Con desglose, el total es su suma; sin él, se queda lo anotado antes (o 0 si se ha quitado)
+      const total = lista.length > 0 ? totalAfectadas(lista)
+        : sinDesglose && !quitarSinDesglose ? { uds: envio.udsAfectadas, cajas: envio.cajasAfectadas } : { uds: 0, cajas: 0 };
+      patch = { ...form, udsAfectadas: total.uds, cajasAfectadas: total.cajas, afectadasArticulos: lista };
+    }
+    try { await onSave(envio, patch); onClose(); } finally { setGuardando(false); }
   };
 
   return (
@@ -159,6 +193,9 @@ function EditarEnvio({ envio, catalogos, onClose, onSave }: { envio: EnvioDto | 
           <div className="space-y-1.5">
             <Label>Fecha de entrega real</Label>
             <Input type="date" value={form.fechaEntregaReal ?? ""} onChange={(e) => setForm({ ...form, fechaEntregaReal: e.target.value || null })} />
+            {envio?.fechaEnvio && envio.fechaEntregaReal === null && (
+              <p className="text-xs text-muted-foreground">Sin fecha anotada: se propone la prometida. Cámbiala si no llegó ese día.</p>
+            )}
           </div>
           <div className="space-y-1.5">
             <Label>Transportista</Label>
@@ -179,6 +216,56 @@ function EditarEnvio({ envio, catalogos, onClose, onSave }: { envio: EnvioDto | 
             <Label>Incidencia</Label>
             <Input value={form.incidencia} maxLength={500} placeholder="Sin incidencia" onChange={(e) => setForm({ ...form, incidencia: e.target.value })} />
           </div>
+          {porArticulo ? (
+            <div className="space-y-1.5 sm:col-span-2">
+              <Label>Afectadas por artículo</Label>
+              <div className="max-h-56 overflow-y-auto rounded-md border border-border">
+                {envio!.articulos.map((a) => {
+                  const uds = desglose[a.articulo] ?? 0;
+                  return (
+                    <div key={a.articulo} className="flex items-center gap-3 border-b border-border px-3 py-2 last:border-b-0">
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate text-sm text-foreground" title={a.descripcion}>{a.descripcion || a.articulo}</p>
+                        <p className="text-xs text-muted-foreground">
+                          {a.articulo} · {num(a.udsEnviadas)} de {num(a.udsPedidas)} uds{a.udsPorCaja ? ` · ${numCajas2(a.udsPorCaja)} uds/caja` : ""}
+                        </p>
+                      </div>
+                      <Input
+                        type="number"
+                        min={0}
+                        step={1}
+                        className="w-24"
+                        aria-label={`Unidades afectadas de ${a.articulo}`}
+                        value={uds || ""}
+                        placeholder="0"
+                        onChange={(e) => setDesglose((d) => ({ ...d, [a.articulo]: Math.max(0, Math.trunc(Number(e.target.value) || 0)) }))}
+                      />
+                      <span className="w-20 text-right text-xs tabular-nums text-muted-foreground">
+                        {a.udsPorCaja ? `${numCajas2(cajasDe(uds, a))} cajas` : "— cajas"}
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+              <p className="text-xs text-muted-foreground">
+                Total: {num(totalDesglose.uds)} uds · {numCajas2(totalDesglose.cajas)} cajas
+              </p>
+              {sinDesglose && !quitarSinDesglose && (
+                <p className="text-xs text-muted-foreground">
+                  Anotado sin desglose: {num(envio!.udsAfectadas)} uds{envio!.cajasAfectadas > 0 ? ` · ${numCajas2(envio!.cajasAfectadas)} cajas` : ""}.{" "}
+                  {totalDesglose.uds > 0 ? "Al guardar se sustituye por el desglose." : (
+                    <>
+                      Se mantiene mientras no se reparta por artículo.{" "}
+                      <button type="button" className="underline underline-offset-2 hover:text-foreground" onClick={() => setQuitarSinDesglose(true)}>Quitar</button>
+                    </>
+                  )}
+                </p>
+              )}
+              {sinDesglose && quitarSinDesglose && (
+                <p className="text-xs text-muted-foreground">Lo anotado sin desglose se quitará al guardar.</p>
+              )}
+            </div>
+          ) : (
           <div className="space-y-1.5">
             <Label>Afectadas</Label>
             <div className="flex gap-2">
@@ -205,6 +292,7 @@ function EditarEnvio({ envio, catalogos, onClose, onSave }: { envio: EnvioDto | 
                 : "Este envío no tiene cajas definidas: solo unidades"}
             </p>
           </div>
+          )}
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={onClose}>Cancelar</Button>
@@ -305,7 +393,7 @@ export default function ServicioTable({ data, catalogos, onSave }: { data: Envio
                           </span>
                           <div>
                             <h6 className="text-sm font-medium text-foreground">{e.pedido}</h6>
-                            <p className="text-xs text-muted-foreground">{e.suPedido || "Sin ref. cliente"}</p>
+                            <p className="text-xs text-muted-foreground">{e.suPedido || "Sin ref. cliente"} · {e.tipoPedido}</p>
                           </div>
                         </div>
                       </TableCell>
@@ -320,7 +408,8 @@ export default function ServicioTable({ data, catalogos, onSave }: { data: Envio
                       <TableCell className="py-3">
                         <h6 className="text-sm font-medium text-foreground">{fecha(e.fechaPrometida)}</h6>
                         <p className={cn("text-xs", e.entrega === "tarde" ? "text-red-500" : "text-muted-foreground")}>
-                          {e.fechaEntregaReal ? `Real ${fecha(e.fechaEntregaReal)}` : "Real sin confirmar"}
+                          {/* Sin fecha real anotada se da por entregado en la fecha prometida */}
+                          {e.fechaEnvio ? `Real ${fecha(e.fechaEntregaReal ?? e.fechaPrometida)}` : "Sin enviar"}
                         </p>
                       </TableCell>
                       <TableCell className="py-3" title={`Este albarán: ${num(e.udsEnviadas)} uds${e.cajasPedidas > 0 ? ` · ${numCajas(e.cajasEnviadas)} cajas` : ""}`}>
@@ -335,13 +424,13 @@ export default function ServicioTable({ data, catalogos, onSave }: { data: Envio
                           <Progress value={pctPedido} className={cn("h-1 w-full", e.pedidoCompleto ? "**:data-[slot=progress-indicator]:bg-teal-400" : "**:data-[slot=progress-indicator]:bg-amber-300")} />
                         </div>
                       </TableCell>
-                      <TableCell className="py-3" title={e.incidencia || undefined}>
+                      <TableCell className="py-3" title={textoIncidencia(e) || undefined}>
                         {tieneIncidencia(e) ? (
                           <>
                             <h6 className="text-sm font-medium tabular-nums text-red-500">
-                              {e.udsAfectadas > 0 || e.cajasAfectadas > 0 ? `${num(e.udsAfectadas)} uds${e.cajasAfectadas > 0 ? ` · ${numCajas(e.cajasAfectadas)} cajas` : ""}` : e.udsCanceladas > 0 && !e.motivo ? `${num(e.udsCanceladas)} uds` : "Anotada"}
+                              {e.udsAfectadas > 0 || e.cajasAfectadas > 0 ? `${num(e.udsAfectadas)} uds${e.cajasAfectadas > 0 ? ` · ${numCajas2(e.cajasAfectadas)} cajas` : ""}` : "Anotada"}
                             </h6>
-                            <p className="max-w-40 truncate text-xs text-muted-foreground">{motivoEfectivo(e) || e.incidencia}</p>
+                            <p className="max-w-40 truncate text-xs text-muted-foreground">{e.motivo || e.incidencia}</p>
                           </>
                         ) : (
                           <span className="text-sm text-muted-foreground">—</span>

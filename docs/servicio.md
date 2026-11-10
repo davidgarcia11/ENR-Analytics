@@ -10,8 +10,8 @@ prometió entregar y cuándo se entregó de verdad. Dashboard sobre el sistema *
 Dos pestañas: **Seguimiento** (tabla de envíos con KPIs y edición de datos manuales) e
 **Indicadores** (sustituye a las tablas dinámicas y al gráfico del Excel, ver §8).
 **Pendiente**: penalizaciones (Makro/Carrefour) — a la espera de respuesta del negocio —,
-filtros por transportista/cliente/responsable (los «segmentadores» del Excel) y
-filtros por transportista y ranking de transportistas (la lista de transportistas ya se gestiona en `/admin`).
+filtros por transportista y responsable (los «segmentadores» del Excel; el de cliente ya está, §17)
+y ranking de transportistas (la lista de transportistas ya se gestiona en `/admin`).
 
 ## 2. Archivos
 
@@ -20,11 +20,11 @@ app/servicio/page.tsx              # Página (Nova): rango de fechas, KPIs, tabl
 app/api/servicio/route.ts          # GET (F4211 + capa manual) y PATCH (datos manuales de un envío)
 lib/servicio.ts                    # Lógica pura: agrupar envíos, estado de entrega, KPIs, fechas JDE
 components/nova/servicio-table.tsx # Tabla de envíos + Dialog de edición
-components/nova/servicio-clientes-filtro.tsx # Filtro de clientes + presets de clientes (§17)
+components/nova/servicio-clientes-filtro.tsx # Filtro de selección múltiple: clientes y tipos de pedido (§17)
 components/nova/panel-shell.tsx    # Armazón común (barra lateral ShadcnSpace) — secciones Seguimiento / Indicadores
 components/nova/servicio-indicadores.tsx # Pestaña Indicadores: resumen mes×canal y gráficos
 components/shadcn-space/blocks/chart-16|chart-12|chart-02|chart-01  # Bloques ShadcnSpace (OTIF por canal, barras de motivos, donut, apiladas) parametrizados
-lib/sqlite.ts                      # Tabla order_service_tracking
+lib/sqlite.ts                      # Tablas order_service_tracking y order_service_incidencia_articulo
 lib/panels.ts                      # Entrada 'servicio' (grupo Dashboards del nav)
 __tests__/servicio.test.ts         # Tests de lib/servicio.ts
 __tests__/presets.test.ts          # Tests del preset predeterminado (PATCH /api/presets/:id)
@@ -42,15 +42,31 @@ SSCC** enviado o vendido; un pedido puede ir en varios albaranes (entregas).
 | Nº de albarán | `SDDELN` | 0 = aún sin albarán. **Es la unidad del panel** |
 | Fecha de envío real | `SDADDJ` | 0 = aún sin enviar |
 | Fecha de entrega **prometida** | `SDRSDJ` | contra ella se compara la entrega real |
-| Uds canceladas | `SDSOCN` | ÷100. Cuentan como falta de servicio, con responsable «Cliente» (§15) |
+| Uds canceladas | `SDSOCN` | ÷100. Solo informativo: lo cancelado ya cuenta como no enviado; no genera incidencia sola (§15) |
 | Uds pedidas / enviadas | `SDUORG` / `SDSOQS` | ÷100. Todo son unidades (tortillas, migas…), sin cajas |
 | Cajas (pedidas y enviadas) | `F41002` (`UMITM`, `UMUM`, `UMRUM`, `UMCONV` ÷10.000.000) | Unidades ÷ unidades por caja, con la conversión CJ→UN del artículo (o la inversa UN→CJ). **Los códigos `CJ`/`UN` son los del ejemplo de `docs/produccion.md`: confirmar que son los de JDE** (se cambian en `UM_CAJA`/`UM_UNIDAD`, `lib/servicio.ts`) |
 | Cajas, respaldo | `SDSQOR` | Cantidad pedida secundaria (cajas), ÷100 (**suposición: misma escala que `SDUORG`**). Solo si el artículo no tiene conversión CJ↔UN; las enviadas entonces se reparten en proporción: `SDSQOR × SDSOQS / SDUORG` |
 | Cliente / destino | `SDAN8` / `SDSHAN` → `F0101.ABALPH` | |
 | Canal (= Business Line) | `F554101.AAZE06` (UDC `17/B6`) | mismo origen que `/compras`; atributo del artículo |
 
-Filtro: `SDDCTO != 'ST'` (de momento es la única exclusión). El rango de fechas de la
-pantalla se aplica sobre `SDRSDJ`. Fechas JDE (CYYDDD) ↔ ISO en `jdeAIso` / `isoAJde`.
+Filtros de la consulta (`TIPOS_PEDIDO` y `TIPO_LINEA_STOCK`, `lib/servicio.ts`), sacados del flujo de
+estados por tipo de pedido de JDE:
+
+| Tipo (`SDDCTO`) | Qué es | ¿Cuenta? |
+|---|---|---|
+| `SO` | Pedido de venta | Sí |
+| `SE` | Pedido EDI / Mercadona | Sí |
+| `SM` / `SY` | Muestra nacional / de exportación | Sí (se pueden quitar con el filtro de tipos, §17) |
+| `ST` / `OT` | Envío entre almacenes | No |
+| `S1` / `SH` | Cargo rectificativo / correctivo (línea N, sin envío) | No |
+| `CO` / `C1` | Devolución y abonos | No |
+
+Además, **solo líneas de stock** (`SDLNTY = 'S'`): las líneas `N` de un pedido de venta (portes, cargos)
+pasan de 520 a 580 sin albarán ni envío y dejarían el pedido siempre incompleto. Los estados
+(`SDLTTR`/`SDNXTR`) no se leen: el albarán (`SDDELN`, se pone en 550→570) y la fecha de envío (`SDADDJ`,
+salida de stock 570→580) ya dicen si una línea se ha enviado, y una cancelada (980) se trata como no
+enviada igual que una pendiente. El rango de fechas de la pantalla se aplica sobre `SDRSDJ`. Fechas JDE
+(CYYDDD) ↔ ISO en `jdeAIso` / `isoAJde`.
 
 **Canal del pedido**: un pedido tiene un solo canal; se toma el de sus artículos (si JDE
 devolviera varios, el mayoritario en unidades).
@@ -58,21 +74,30 @@ devolviera varios, el mayoritario en unidades).
 ## 4. Qué es un «envío» y cómo se evalúa
 
 La unidad de la tabla es el **envío = (pedido, albarán)**. Las líneas SSCC del mismo
-albarán se suman. Lo aún no enviado se agrupa en el albarán 0 («Sin enviar»). El nº de
+albarán se suman. Las líneas **sin albarán** (`SDDELN` = 0: lo pendiente o lo cancelado, p. ej.
+el resto de una línea que JDE partió y canceló) **no salen como fila aparte si el pedido ya tiene
+algún albarán**: se suman a su último envío (el de fecha de envío más reciente). Así cuentan en el
+total del pedido —la barra de unidades no se completa y el pedido no es completo— sin repetir el
+total del pedido en una fila «Sin enviar». Solo se suman cantidades; las fechas son las del envío
+real. Si el pedido no tiene **ningún** albarán, sí sale una fila «Sin enviar» (albarán 0). El nº de
 camión (`SDSHPN`) y la fecha de carga (`SDPDDJ`) se quitaron de la vista a petición del
 negocio; la consulta a F4211 sigue trayendo ambas columnas aunque ya no se usen (no se
 tocó la consulta Oracle), se pueden quitar del `SELECT` cuando convenga.
 
-- **Estado de entrega de un envío**: sin `SDADDJ` → *Sin enviar*; enviado sin fecha real
-  introducida → *Sin confirmar*; real ≤ prometida → *A tiempo*; real > prometida → *Tarde*.
-- **Pedido**: cualquier envío tarde → tarde; si no, alguno sin confirmar → sin confirmar;
-  si no, a tiempo. **Completo** = uds enviadas ≥ uds pedidas (suma de todos sus envíos).
+- **Estado de entrega de un envío**: sin `SDADDJ` → *Sin enviar*; real ≤ prometida → *A tiempo*;
+  real > prometida → *Tarde*. **Enviado sin fecha real anotada → se da por entregado en la fecha
+  prometida (*A tiempo*)**, como en el Excel original: si no fue así, se anota la fecha real y
+  cuenta esa. En la tabla, la línea «Real» muestra la fecha prometida en ese caso.
+- **Pedido**: cualquier envío tarde → tarde; si no, alguno a tiempo → a tiempo; si no (nada
+  enviado) → sin enviar. **Completo** = uds enviadas ≥ uds pedidas (suma de todos sus envíos).
 - **Abierto**: pedido incompleto cuya fecha prometida aún no ha vencido. No se evalúa
   (todavía puede cumplirse).
-- **KPIs** (`calcularKpis`): `% A tiempo` y `% OTIF` sobre pedidos con entrega confirmada
-  (a tiempo/tarde); `% Completo` sobre todos los evaluados. OTIF = a tiempo y completo.
-  Los *sin confirmar* no cuentan hasta que alguien introduzca la fecha real (decisión
-  tomada: así el KPI no se infla, a diferencia del Excel, donde sin dato = OK).
+- **KPIs** (`calcularKpis`): `% A tiempo`, `% Completo` y `% OTIF` sobre **todos los pedidos
+  evaluados**. OTIF = a tiempo y completo. Un pedido vencido sin nada enviado no está a tiempo.
+- **Historial de la decisión:** hasta la v1.42 un envío sin fecha real era *Sin confirmar* y no
+  contaba en el % a tiempo ni en el OTIF (había tarjeta «Pendientes de confirmar» y aviso
+  «Cobertura baja»). Se cambió a petición del negocio: lo normal es que llegue en la fecha
+  prometida y solo se anota cuando no es así.
 
 ## 5. Datos manuales (SQLite)
 
@@ -83,7 +108,9 @@ Tabla `order_service_tracking`, clave `(pedido, albaran)`, upsert vía `PATCH /a
 | `fecha_entrega_real` | La que decide a tiempo/tarde |
 | `transportista` | Texto libre **de momento** (no está claro que exista en JDE). Si no está, se sustituirá por una lista configurable en `/admin` + desplegable |
 | `responsable`, `motivo` | Listas cerradas en `lib/servicio.ts` (`RESPONSABLES`, `MOTIVOS`), sacadas de las categorías del Excel; ajustar ahí si el negocio quiere otras |
-| `incidencia` (≤500), `uds_afectadas` | Texto libre y unidades afectadas |
+| `incidencia` (≤500), `uds_afectadas`, `cajas_afectadas` | Texto libre y total de afectadas del envío (si hay desglose por artículo, es su suma: §18) |
+
+Desglose por artículo en `order_service_incidencia_articulo`, clave `(pedido, albaran, articulo)` (§18).
 
 El `PATCH` valida cada campo en el límite de la API y conserva los que no vengan.
 
@@ -96,7 +123,10 @@ No se han podido contrastar estas hipótesis con Oracle al escribir el panel:
    saldría «completo». Comprobar con un pedido de varios SSCC.
 2. Si las líneas servidas siguen en F4211 (como asume `/compras`) o pasan a F42119.
 3. Que `SDRSDJ` sea de verdad la fecha prometida al cliente.
-4. Qué más hay que excluir además de `SDDCTO = 'ST'`.
+4. ~~Qué más hay que excluir además de `SDDCTO = 'ST'`~~ → resuelto con la tabla de tipos de pedido y
+   líneas de §3. Pendiente de comprobar en producción con un pedido conocido (p. ej. uno con portes).
+   Ojo: los envíos se agrupan por nº de pedido (`SDDOCO`) sin el tipo; si un `SM` y un `SO` pudieran
+   tener el mismo número, se mezclarían. Comprobar que los rangos de numeración no se solapan.
 5. Rendimiento de la consulta (filtra por `SDRSDJ`, sin índice conocido): si fuera lenta,
    acotar el rango por defecto o pasar a caché como `/muestras`.
 
@@ -130,7 +160,7 @@ el 99 % por cajas (irá por cliente al hacer la pestaña de penalizaciones).
 
 Para ver el panel y los gráficos sin datos reales: `GET /api/servicio?mock=1` devuelve
 ~500 envíos **ficticios** de enero a julio de 2024 (clientes inventados, con entregas a
-tiempo, tarde, sin confirmar, incompletas y varios motivos de incidencia), generados en
+tiempo, tarde, sin fecha real, incompletas y varios motivos de incidencia), generados en
 `generarEjemplo()` (`lib/servicio.ts`, determinista). Responde **antes** de abrir Oracle
 y no lee ni escribe SQLite. Solo se activa por URL, no hay botón (igual que
 `/compras?mock=1`). La página lo detecta, fija el rango a ene–jul, muestra la etiqueta
@@ -199,24 +229,25 @@ un decimal (unidades que no llenan una caja, o el reparto proporcional del respa
 `SDSQOR`, se muestra «— cajas». El Excel exportado añade «Cajas enviadas» y «Cajas
 pedidas (envío)». Los KPI siguen calculándose en unidades.
 
-## 15. KPI: cobertura, cajas y cancelaciones
+## 15. KPI: fecha real, cajas y cancelaciones
 
 Decisiones tomadas con el negocio:
-- **A tiempo** = fecha de entrega real ≤ fecha prometida, sin tolerancia.
-- **Cancelaciones:** las unidades canceladas por el cliente (`SDSOCN`) **sí cuentan como falta de servicio**
-  (el pedido sale incompleto y bajan el OTIF) pero la **responsabilidad es del cliente**: un envío con
-  cancelaciones se trata como una incidencia aunque nadie la haya anotado (motivo «Cancelación del
-  cliente», responsable «Cliente»), y sale así en los gráficos, en el filtro «Con incidencia» y en la
-  celda Incidencia. Lo anotado a mano manda sobre esto (`motivoEfectivo` / `responsableEfectivo`).
+- **A tiempo** = fecha de entrega real ≤ fecha prometida, sin tolerancia. Sin fecha real anotada, cuenta la
+  prometida (§4).
+- **Cancelaciones:** las unidades canceladas (`SDSOCN`) cuentan como **no enviadas** (el pedido sale incompleto
+  y bajan el OTIF), una sola vez. **No generan una incidencia automática** (hasta la v1.42 se ponía sola
+  «Cancelación del cliente» con responsable «Cliente»): quien revise el pedido ve la barra incompleta y anota
+  el motivo y el responsable si lo ve conveniente. Al anotarlo, **no** hay que poner esas unidades también como
+  afectadas: ya cuentan como no enviadas y saldrían dos veces en el OTIF por unidades.
 - **Periodo:** sin cambios; no se compara con periodos anteriores (la tendencia es la del rango cargado).
 
 Para que el KPI no engañe:
-- **Cobertura** = pedidos con entrega confirmada / pedidos evaluados. El % a tiempo y el OTIF solo cuentan los
-  confirmados, así que con poca cobertura se apoyan en pocos datos. En las tarjetas, el OTIF se muestra en
-  ámbar y con «(baja)» si la cobertura es menor del 80 %; en la tabla de Indicadores hay una columna
-  «Cobertura».
-- **Pendientes de confirmar** (tarjeta): envíos ya enviados sin fecha de entrega real; es lo que hay que
-  rellenar. Sustituye a «Pedidos evaluados», que pasa al subtítulo del OTIF.
+- **Sin fecha real** (tarjeta): envíos ya enviados a los que nadie ha anotado la fecha de entrega real
+  (`sinFechaReal`, `lib/servicio.ts`). Cuentan como a tiempo con la fecha prometida; la tarjeta solo dice
+  cuántos estados son supuestos. En la tabla de Indicadores, la columna **«Con fecha real»** es el % de
+  pedidos evaluados con todas sus fechas reales anotadas (`pctConFechaReal`).
+- **«Editar datos»:** si el envío no tiene fecha real, el campo sale relleno con la fecha prometida (con un
+  aviso debajo); al guardar se queda anotada.
 - **% OTIF cajas** = 1 − (cajas no enviadas + cajas afectadas) / cajas pedidas, donde las cajas afectadas son
   las unidades afectadas anotadas, pasadas a cajas con la proporción de su envío. Carrefour mide por cajas y
   Makro por unidades.
@@ -225,17 +256,17 @@ Para que el KPI no engañe:
 
 - **Color de las tarjetas:** el % OTIF, el % A tiempo y el % Completo se pintan frente al objetivo
   (`OBJETIVO_OTIF_PCT` = 98 %, `lib/servicio.ts`): verde si lo cumple, ámbar hasta 8 puntos por debajo y
-  rojo si está más lejos. Cada una lleva una insignia con la distancia al objetivo («−3,9 pp»); el OTIF
-  muestra «Cobertura baja» (ámbar) si la cobertura es menor del 80 %. «Pendientes de confirmar» es ámbar
-  («Por rellenar») si hay alguno y verde («Al día») si no.
+  rojo si está más lejos. Cada una lleva una insignia con la distancia al objetivo («−3,9 pp»). «Sin fecha
+  real» lleva la insignia gris «A tiempo supuesto» si hay alguno y verde «Todas anotadas» si no.
 - **Afectadas en unidades o en cajas:** en «Editar datos» el campo «Afectadas» tiene un selector
   **Uds / Cajas**; el otro valor se calcula al momento con las unidades por caja de ese envío
   (unidades pedidas ÷ cajas pedidas) y se enseña debajo («≈ 8 cajas»). Si el envío no tiene cajas
   definidas, solo se admiten unidades. En SQLite se guardan **las dos** (`uds_afectadas`,
   `cajas_afectadas`), la columna nueva se añade sola a las bases existentes. El `PATCH` acepta
   `udsAfectadas` y `cajasAfectadas`.
-- **Aproximación:** si un envío mezcla artículos con distinto nº de unidades por caja, la conversión usa
-  la media del envío, así que es aproximada. Para el OTIF por cajas se usan las cajas anotadas si las
+- **Aproximación (solo sin desglose):** si un envío mezcla artículos con distinto nº de unidades por caja,
+  la conversión usa la media del envío, así que es aproximada. Desde §18 las afectadas se anotan por
+  artículo, cada uno con su conversión; esto solo queda para lo anotado antes y para un envío sin artículos. Para el OTIF por cajas se usan las cajas anotadas si las
   hay y, si no, las unidades afectadas pasadas a cajas con esa misma proporción.
 - **En la tabla**, la celda Incidencia muestra «91 uds · 8 cajas» y el motivo debajo.
 
@@ -243,6 +274,39 @@ Para que el KPI no engañe:
 
 - **Filtro:** desplegable «Todos los clientes» junto al rango de fechas (`components/nova/servicio-clientes-filtro.tsx`), con búsqueda y selección múltiple. Las opciones salen de los envíos ya cargados (`cliente` = `SDAN8`, con el nombre de F0101), no de una consulta nueva. Filtra **en pantalla** (`filtrarPorClientes`, `lib/servicio.ts`): KPIs, tabla, Indicadores y exportación a Excel usan solo los clientes elegidos. Vacío = todos. Es el cliente del pedido (`SDAN8`), no el destino de entrega.
 - **Seleccionar todos / «todos menos»:** «Seleccionar todos» marca todos los clientes; desmarcar uno lo **excluye** y el botón muestra «Todos menos 2» (o el nombre si es uno). En ese modo se recuerdan los clientes quitados, no los marcados, así que un cliente nuevo o de otro periodo entra solo, también en un filtro guardado (`{ clientes, excluir: true }`). Con texto en la búsqueda, el botón pasa a «Marcar los N mostrados». «Limpiar» (o la ✕) quita el filtro.
-- **Presets:** los filtros guardados comunes de Nova (botón «Mis filtros», ver `components/nova/README.md` punto 15). En este panel guardan `{ clientes, excluir }` y, si se elige, las fechas (fijas o un periodo relativo como «Últimos 30 días»). `screen = 'servicio'`; en `?mock=1`, `'servicio-ejemplo'` para no mezclar clientes inventados con los reales. Los presets guardados con la v1.39.0 (solo `{ clientes }`) se siguen leyendo.
+- **Tipos de pedido:** segundo desplegable, «Todos los tipos» (venta `SO`, EDI / Mercadona `SE`, muestra nacional `SM`, muestra exportación `SY`). Es el mismo componente que el de clientes (`servicio-clientes-filtro.tsx`, con `textos`, `icono` y sin buscador), con las mismas reglas («Seleccionar todos», «todos menos») y filtra en pantalla con `filtrarPorTipos`. Salen siempre los cuatro tipos, haya o no pedidos de ese tipo en el rango. La tabla muestra el tipo junto a «su pedido» y el Excel exportado lo añade en «Tipo pedido».
+- **Presets:** los filtros guardados comunes de Nova (botón «Mis filtros», ver `components/nova/README.md` punto 15). En este panel guardan `{ clientes, excluir, tipos, excluirTipos }` (`excluir` es el «todos menos» de los clientes, con ese nombre porque es anterior al filtro de tipos; un filtro guardado sin `tipos` los coge todos) y, si se elige, las fechas (fijas o un periodo relativo como «Últimos 30 días»). `screen = 'servicio'`; en `?mock=1`, `'servicio-ejemplo'` para no mezclar clientes inventados con los reales. Los presets guardados con la v1.39.0 (solo `{ clientes }`) se siguen leyendo.
 - **Predeterminado:** el marcado con la estrella se aplica al abrir el panel, antes de la primera consulta (si trae fechas, se consulta directamente ese rango).
 - **Un cliente que ya no aparece** en el periodo sigue en el preset: no rompe nada, solo no se ve en la lista.
+
+## 18. Afectadas por artículo
+
+En «Editar datos», en vez de un único campo «Afectadas», sale **una fila por artículo del envío**:
+descripción, código, unidades enviadas de las pedidas y unidades por caja. Se escriben las **unidades
+afectadas de cada artículo** y sus **cajas se calculan con la conversión de ese artículo, con decimales**
+(21 uds de un artículo de 5 uds/caja = 4,2 cajas; decisión del negocio: sin redondear). Debajo, el total.
+El motivo, el responsable y el texto de la incidencia siguen siendo **uno por envío**.
+
+- **Artículos del envío:** salen de F4211 (`SDLITM` = «2º nº de artículo», `SDDSC1` = descripción), sumando
+  sus líneas; las líneas sin albarán que se suman al último envío (§4) también suman sus artículos. Las uds
+  por caja son las de F41002 (CJ↔UN) o, si el artículo no la tiene, las de la línea (`SDUORG / SDSQOR`).
+  Sin ninguna de las dos, el artículo se anota solo en unidades («— cajas») y no suma cajas al total.
+- **Almacén:** tabla `order_service_incidencia_articulo(pedido, albaran, articulo, uds, cajas)`, creada sola al
+  arrancar. Solo guarda los artículos con algo anotado. `uds_afectadas` / `cajas_afectadas` de
+  `order_service_tracking` se guardan como **la suma del desglose**, así que KPIs, gráficos, filtro «Con
+  incidencia» y celda Incidencia funcionan igual que antes.
+- **API:** `PATCH /api/servicio` acepta `afectadasArticulos: [{ articulo, uds, cajas }]` (`validarAfectadasArticulos`,
+  `lib/servicio.ts`: código de 1–25 caracteres `[A-Za-z0-9_.-]`, sin repetir, uds enteras ≥ 0, cajas ≥ 0
+  redondeadas a 2 decimales, máximo 200 artículos; las filas a cero se quitan). Si viene, **sustituye** al
+  desglose anterior y el total pasa a ser su suma; vacío borra el desglose y deja el total que venga en
+  `udsAfectadas` / `cajasAfectadas`. Datos del envío y desglose se guardan en una transacción. Las cajas
+  las calcula la pantalla (el `PATCH` no consulta Oracle).
+- **Lo anotado antes sin desglose** (un total sin artículos): el diálogo lo muestra como «Anotado sin
+  desglose: 85 uds · 17 cajas» y **se conserva** mientras no se reparta por artículo. Al anotar algún
+  artículo, se sustituye por el desglose; también hay un enlace «Quitar» para ponerlo a cero.
+- **Envío sin artículos** (no debería pasar con datos de JDE): se mantiene el campo único antiguo.
+- **Tabla:** la celda Incidencia muestra el total y, al pasar el ratón, el desglose por artículo.
+- **Excel:** hoja «Incidencias por artículo» (pedido, albarán, cliente, artículo, descripción, uds y cajas
+  afectadas, motivo, responsable), solo si algún envío tiene desglose.
+- **Datos de ejemplo:** los pedidos pares llevan dos artículos inventados (`9000000001`, de 12 uds/caja, y
+  `9000000002`, de 6) y las afectadas van en el primero.
