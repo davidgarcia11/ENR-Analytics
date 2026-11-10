@@ -44,14 +44,22 @@ export function udsPorCaja(conversiones: ConversionUm[]): number | null {
   return inversa ? 1 / inversa.factor : null;
 }
 
+// Tipos de pedido de JDE (SDDCTO) que cuentan para el nivel de servicio, con su nombre en pantalla.
+// Fuera: ST/OT (envíos entre almacenes), S1/SH (cargos), CO/C1 (devoluciones y abonos). Solo se leen
+// las líneas de stock (SDLNTY = 'S'): las N (portes, cargos) no llevan albarán ni se envían.
+export const TIPOS_PEDIDO = { SO: 'Venta', SE: 'EDI / Mercadona', SM: 'Muestra nacional', SY: 'Muestra exportación' } as const;
+export type TipoPedido = keyof typeof TIPOS_PEDIDO;
+export const TIPO_LINEA_STOCK = 'S';
+
 /** Objetivo de servicio (%): el de Makro. Por encima, verde; por debajo, ámbar y, muy por debajo, rojo. */
 export const OBJETIVO_OTIF_PCT = 98;
 
-export type EstadoEntrega = 'pendiente_envio' | 'sin_confirmar' | 'a_tiempo' | 'tarde';
+export type EstadoEntrega = 'pendiente_envio' | 'a_tiempo' | 'tarde';
 
 // Una línea de F4211 ya normalizada (fechas ISO o null, cantidades ya divididas entre 100).
 export interface LineaJde {
   pedido: number;
+  tipoPedido: string; // SDDCTO (TIPOS_PEDIDO)
   suPedido: string;
   albaran: number; // SDDELN — 0 si aún no hay albarán (sin enviar)
   cliente: number;
@@ -64,14 +72,16 @@ export interface LineaJde {
   udsEnviadas: number; // SDSOQS
   cajasPedidas: number; // SDSQOR (cantidad pedida secundaria = cajas)
   cajasEnviadas: number; // proporcional por línea: SDSQOR × SDSOQS / SDUORG
-  udsCanceladas: number; // SDSOCN
+  udsCanceladas: number; // SDSOCN — informativo: no genera incidencia sola (ver docs/servicio.md §8)
   canal: string | null; // código F554101.AAZE06 del artículo
 }
 
-// Una entrega de un pedido: todas las líneas de F4211 con el mismo (pedido, albarán). El
-// albarán 0 agrupa lo que aún no se ha enviado.
+// Una entrega de un pedido: todas las líneas de F4211 con el mismo (pedido, albarán). Las líneas
+// sin albarán (0) solo son un envío propio («Sin enviar») si el pedido no tiene ningún albarán;
+// si lo tiene, se suman a su último envío (ver agruparEnvios).
 export interface Envio {
   pedido: number;
+  tipoPedido: string;
   suPedido: string;
   albaran: number;
   cliente: number;
@@ -129,7 +139,7 @@ export function agruparEnvios(lineas: LineaJde[]): Envio[] {
     const e = envios.get(k);
     if (!e) {
       envios.set(k, {
-        pedido: l.pedido, suPedido: l.suPedido, albaran: l.albaran,
+        pedido: l.pedido, tipoPedido: l.tipoPedido, suPedido: l.suPedido, albaran: l.albaran,
         cliente: l.cliente, clienteNombre: l.clienteNombre, destino: l.destino, destinoNombre: l.destinoNombre,
         canal: canalDe(l.pedido),
         fechaEnvio: l.fechaEnvio, fechaPrometida: l.fechaPrometida,
@@ -145,16 +155,46 @@ export function agruparEnvios(lineas: LineaJde[]): Envio[] {
     e.cajasEnviadas += l.cajasEnviadas;
     e.udsCanceladas += l.udsCanceladas;
   }
-  return [...envios.values()];
+
+  // Líneas sin albarán (pendientes o canceladas, p. ej. el resto de una línea partida en JDE) de un
+  // pedido que ya tiene algún albarán: no salen como fila «Sin enviar» aparte (repetía el total del
+  // pedido), sino que se suman a su último envío. Así cuentan en el total del pedido (la barra no se
+  // completa y el pedido no es completo) y quien lo vea decide si anota una incidencia. Solo se suman
+  // cantidades: las fechas son las del envío real.
+  const lista = [...envios.values()];
+  const ultimoEnvio = new Map<number, Envio>();
+  for (const e of lista) {
+    if (e.albaran === 0) continue;
+    const u = ultimoEnvio.get(e.pedido);
+    const fe = e.fechaEnvio ?? '';
+    const fu = u?.fechaEnvio ?? '';
+    if (!u || fe > fu || (fe === fu && e.albaran > u.albaran)) ultimoEnvio.set(e.pedido, e);
+  }
+  return lista.filter((e) => {
+    const destino = e.albaran === 0 ? ultimoEnvio.get(e.pedido) : undefined;
+    if (!destino) return true;
+    destino.udsPedidas += e.udsPedidas;
+    destino.udsEnviadas += e.udsEnviadas;
+    destino.cajasPedidas += e.cajasPedidas;
+    destino.cajasEnviadas += e.cajasEnviadas;
+    destino.udsCanceladas += e.udsCanceladas;
+    return false;
+  });
 }
 
-// A tiempo = entrega real ≤ fecha prometida de JDE. Un envío ya enviado sin fecha real
-// introducida queda "sin confirmar" (no cuenta ni como a tiempo ni como tarde).
+// A tiempo = entrega real ≤ fecha prometida de JDE. Un envío ya enviado sin fecha real anotada se
+// da por entregado en la fecha prometida (a tiempo), como en el Excel original; si después se anota
+// otra fecha, cuenta esa. Lo no enviado queda «pendiente de envío».
 export function estadoEntrega(e: { fechaEnvio: string | null; fechaPrometida: string | null }, entregaReal: string | null): EstadoEntrega {
   if (!e.fechaEnvio) return 'pendiente_envio';
-  if (!entregaReal || !e.fechaPrometida) return 'sin_confirmar';
+  if (!entregaReal || !e.fechaPrometida) return 'a_tiempo';
   return entregaReal <= e.fechaPrometida ? 'a_tiempo' : 'tarde';
 }
+
+// ¿Envío enviado al que nadie ha anotado la fecha de entrega real? Cuenta como a tiempo (fecha
+// prometida), pero se cuenta aparte para que se vea cuántos estados son supuestos.
+export const sinFechaReal = (e: { fechaEnvio: string | null; fechaEntregaReal?: string | null }): boolean =>
+  !!e.fechaEnvio && e.fechaEntregaReal === null;
 
 export interface PedidoResumen {
   pedido: number;
@@ -167,16 +207,17 @@ export interface PedidoResumen {
   completo: boolean;
   fechaPrometida: string | null;
   entrega: EstadoEntrega;
+  sinFechaReal: boolean; // algún envío enviado sin fecha de entrega real anotada (su «a tiempo» es supuesto)
 }
 
 // Resumen por pedido a partir de sus envíos (con el estado de entrega ya calculado).
 // Completo = se ha enviado todo lo pedido. Entrega del pedido: cualquier envío tarde →
-// tarde; si no, cualquiera sin confirmar → sin confirmar; si no, nada enviado →
-// pendiente de envío; si no, a tiempo.
-export function resumirPedidos(envios: { pedido: number; udsPedidas: number; udsEnviadas: number; cajasPedidas?: number; cajasEnviadas?: number; udsAfectadas?: number; cajasAfectadas?: number; fechaPrometida: string | null; entrega: EstadoEntrega }[]): PedidoResumen[] {
+// tarde; si no, alguno a tiempo → a tiempo; si no (nada enviado) → pendiente de envío.
+export function resumirPedidos(envios: { pedido: number; udsPedidas: number; udsEnviadas: number; cajasPedidas?: number; cajasEnviadas?: number; udsAfectadas?: number; cajasAfectadas?: number; fechaPrometida: string | null; entrega: EstadoEntrega; fechaEnvio?: string | null; fechaEntregaReal?: string | null }[]): PedidoResumen[] {
   const pedidos = new Map<number, PedidoResumen>();
   for (const e of envios) {
-    const p = pedidos.get(e.pedido) ?? { pedido: e.pedido, udsPedidas: 0, udsEnviadas: 0, cajasPedidas: 0, cajasEnviadas: 0, cajasAfectadas: 0, udsAfectadas: 0, completo: false, fechaPrometida: null, entrega: 'pendiente_envio' as EstadoEntrega };
+    const p = pedidos.get(e.pedido) ?? { pedido: e.pedido, udsPedidas: 0, udsEnviadas: 0, cajasPedidas: 0, cajasEnviadas: 0, cajasAfectadas: 0, udsAfectadas: 0, completo: false, fechaPrometida: null, entrega: 'pendiente_envio' as EstadoEntrega, sinFechaReal: false };
+    if (sinFechaReal({ fechaEnvio: e.fechaEnvio ?? null, fechaEntregaReal: e.fechaEntregaReal })) p.sinFechaReal = true;
     p.udsPedidas += e.udsPedidas;
     p.udsEnviadas += e.udsEnviadas;
     p.cajasPedidas += e.cajasPedidas ?? 0;
@@ -187,7 +228,6 @@ export function resumirPedidos(envios: { pedido: number; udsPedidas: number; uds
     else if (e.udsPedidas > 0) p.cajasAfectadas += (e.udsAfectadas ?? 0) * ((e.cajasPedidas ?? 0) / e.udsPedidas);
     p.fechaPrometida = min(p.fechaPrometida, e.fechaPrometida);
     if (e.entrega === 'tarde' || p.entrega === 'tarde') p.entrega = 'tarde';
-    else if (e.entrega === 'sin_confirmar' || p.entrega === 'sin_confirmar') p.entrega = 'sin_confirmar';
     else if (e.entrega === 'a_tiempo') p.entrega = 'a_tiempo';
     pedidos.set(e.pedido, p);
   }
@@ -198,8 +238,8 @@ export function resumirPedidos(envios: { pedido: number; udsPedidas: number; uds
 export interface Kpis {
   pedidos: number; // evaluados (los abiertos no cuentan)
   abiertos: number; // incompletos con fecha prometida aún no vencida
-  confirmados: number; // evaluados con entrega a tiempo/tarde conocida
-  sinConfirmar: number;
+  aTiempo: number; // evaluados a tiempo
+  sinFechaReal: number; // evaluados con algún envío sin fecha real anotada (a tiempo supuesto)
   pctATiempo: number | null;
   pctCompleto: number | null;
   pctOtif: number | null;
@@ -209,19 +249,19 @@ export interface Kpis {
   pctOtifUds: number | null; // 1 − uds con incidencia / uds pedidas
   cajasIncidencia: number; // no enviadas + afectadas, en cajas
   pctOtifCajas: number | null; // 1 − cajas con incidencia / cajas pedidas (Carrefour mide por cajas)
-  cobertura: number | null; // % de pedidos evaluados con entrega confirmada: si es baja, el % a tiempo y el OTIF se apoyan en pocos datos
+  pctConFechaReal: number | null; // % de pedidos evaluados con todas sus fechas de entrega reales anotadas
 }
 
 const pct = (n: number, d: number) => (d > 0 ? (n / d) * 100 : null);
 
 // Un pedido "abierto" (incompleto y con la fecha prometida aún por llegar) todavía puede
-// cumplirse, así que no se evalúa. A tiempo y OTIF se miden solo sobre los pedidos con
-// entrega confirmada; completo, sobre todos los evaluados.
+// cumplirse, así que no se evalúa. A tiempo, completo y OTIF se miden sobre todos los evaluados:
+// un pedido vencido sin nada enviado no está a tiempo.
 export function calcularKpis(pedidos: PedidoResumen[], hoy: string): Kpis {
   const abierto = (p: PedidoResumen) => !p.completo && (!p.fechaPrometida || p.fechaPrometida >= hoy);
   const evaluados = pedidos.filter((p) => !abierto(p));
-  const confirmados = evaluados.filter((p) => p.entrega === 'a_tiempo' || p.entrega === 'tarde');
-  const aTiempo = confirmados.filter((p) => p.entrega === 'a_tiempo');
+  const aTiempo = evaluados.filter((p) => p.entrega === 'a_tiempo');
+  const sinFecha = evaluados.filter((p) => p.sinFechaReal).length;
   const udsPedidas = evaluados.reduce((s, p) => s + p.udsPedidas, 0);
   const udsIncidencia = evaluados.reduce((s, p) => s + Math.max(0, p.udsPedidas - p.udsEnviadas) + p.udsAfectadas, 0);
   const cajasPedidas = evaluados.reduce((s, p) => s + p.cajasPedidas, 0);
@@ -229,26 +269,27 @@ export function calcularKpis(pedidos: PedidoResumen[], hoy: string): Kpis {
   return {
     pedidos: evaluados.length,
     abiertos: pedidos.length - evaluados.length,
-    confirmados: confirmados.length,
-    sinConfirmar: evaluados.filter((p) => p.entrega === 'sin_confirmar').length,
-    pctATiempo: pct(aTiempo.length, confirmados.length),
+    aTiempo: aTiempo.length,
+    sinFechaReal: sinFecha,
+    pctATiempo: pct(aTiempo.length, evaluados.length),
     pctCompleto: pct(evaluados.filter((p) => p.completo).length, evaluados.length),
-    pctOtif: pct(aTiempo.filter((p) => p.completo).length, confirmados.length),
+    pctOtif: pct(aTiempo.filter((p) => p.completo).length, evaluados.length),
     udsPedidas,
     udsEnviadas: evaluados.reduce((s, p) => s + p.udsEnviadas, 0),
     udsIncidencia,
     pctOtifUds: udsPedidas > 0 ? 100 - (udsIncidencia / udsPedidas) * 100 : null,
     cajasIncidencia,
     pctOtifCajas: cajasPedidas > 0 ? 100 - (cajasIncidencia / cajasPedidas) * 100 : null,
-    cobertura: pct(confirmados.length, evaluados.length),
+    pctConFechaReal: pct(evaluados.length - sinFecha, evaluados.length),
   };
 }
 
 // --- Indicadores (pestaña «Indicadores»): agregados por mes y canal ---------------------
 
 type EnvioIndicadores = {
-  pedido: number; canal: string | null; udsPedidas: number; udsEnviadas: number; udsAfectadas: number; udsCanceladas?: number;
+  pedido: number; canal: string | null; udsPedidas: number; udsEnviadas: number; udsAfectadas: number;
   fechaPrometida: string | null; entrega: EstadoEntrega; motivo: string; responsable: string;
+  fechaEnvio?: string | null; fechaEntregaReal?: string | null;
 };
 
 export interface FilaMes { mes: string; canal: string | null; kpis: Kpis }
@@ -275,8 +316,8 @@ export function resumenMensual(envios: EnvioIndicadores[], hoy: string): FilaMes
 export function contarIncidencias(envios: EnvioIndicadores[], por: 'motivo' | 'responsable'): Record<string, number> {
   const r: Record<string, number> = {};
   for (const e of envios) {
-    if (!motivoEfectivo(e)) continue;
-    const clave = (por === 'motivo' ? motivoEfectivo(e) : responsableEfectivo(e)) || 'Sin indicar';
+    if (!e.motivo) continue;
+    const clave = (por === 'motivo' ? e.motivo : e.responsable) || 'Sin indicar';
     r[clave] = (r[clave] ?? 0) + 1;
   }
   return r;
@@ -287,7 +328,7 @@ export function incidenciasPorMes(envios: EnvioIndicadores[]): { mes: string; [m
   const meses = new Map<string, Record<string, number>>();
   for (const e of envios) {
     const mes = e.fechaPrometida?.slice(0, 7);
-    const motivo = motivoEfectivo(e);
+    const motivo = e.motivo;
     if (!mes || !motivo) continue;
     const m = meses.get(mes) ?? {};
     m[motivo] = (m[motivo] ?? 0) + 1;
@@ -352,6 +393,8 @@ const MOTIVO_RESP: Record<string, { resp: string; texto: string }> = {
 // Repetidos a propósito: Preparación y Producción son los motivos más frecuentes.
 const MOTIVOS_PESO = ['Preparación', 'Preparación', 'Preparación', 'Producción', 'Producción', 'Cajas rotas', 'Transporte', 'Expediciones', 'Comercial', 'Otros', 'Cliente'];
 const TRANSPORTISTAS = ['Transportes Norte', 'Frío Ibérica', 'Logística Sur', 'Camiones del Ebro'];
+// Repetidos a propósito: casi todo es venta (SO/SE), alguna muestra
+const TIPOS_EJEMPLO: TipoPedido[] = ['SO', 'SO', 'SO', 'SO', 'SE', 'SE', 'SE', 'SM', 'SO', 'SY'];
 
 export function generarEjemplo(): { lineas: LineaJde[]; tracking: Map<string, TrackingManual> } {
   let semilla = 12345; // LCG determinista
@@ -381,11 +424,11 @@ export function generarEjemplo(): { lineas: LineaJde[]; tracking: Map<string, Tr
           const albaran = 700000 + pedido * 2 + c;
           const parte = albaranes === 1 ? 1 : c === 0 ? 0.6 : 0.4;
           const llegaTarde = problema && rnd() < 0.5;
-          const sinConfirmar = !problema && rnd() < 0.05;
-          const real = sinConfirmar ? null : suma(prometida, llegaTarde ? 1 + Math.floor(rnd() * 3) : -Math.floor(rnd() * 2));
+          const sinFecha = !problema && rnd() < 0.05; // sin fecha real anotada: cuenta la prometida
+          const real = sinFecha ? null : suma(prometida, llegaTarde ? 1 + Math.floor(rnd() * 3) : -Math.floor(rnd() * 2));
           const motivo = problema ? (llegaTarde && rnd() < 0.5 ? 'Transporte' : MOTIVOS_PESO[Math.floor(rnd() * MOTIVOS_PESO.length)]) : '';
           lineas.push({
-            pedido, suPedido: `EJ-${pedido}`, albaran, cliente: 100 + (pedido % 40),
+            pedido, tipoPedido: TIPOS_EJEMPLO[pedido % TIPOS_EJEMPLO.length], suPedido: `EJ-${pedido}`, albaran, cliente: 100 + (pedido % 40),
             clienteNombre: `Cliente ejemplo ${canal} ${pedido % 40}`, destino: 100 + (pedido % 40), destinoNombre: `Cliente ejemplo ${canal} ${pedido % 40}`,
             fechaEnvio: suma(prometida, -1), fechaPrometida: prometida,
             udsPedidas: Math.round(pedidas * parte), udsEnviadas: Math.round(enviadasTotal * parte), canal,
@@ -404,17 +447,12 @@ export function generarEjemplo(): { lineas: LineaJde[]; tracking: Map<string, Tr
   return { lineas, tracking };
 }
 
-// Cancelación del cliente: las unidades canceladas (SDSOCN) cuentan como falta de servicio pero la
-// responsabilidad es del cliente, así que un envío con cancelaciones es una incidencia aunque nadie la haya
-// anotado a mano: motivo «Cancelación del cliente» y responsable «Cliente» (lo anotado a mano manda).
-export const MOTIVO_CANCELACION = 'Cancelación del cliente';
-type ConIncidencia = { motivo: string; responsable?: string; incidencia: string; udsAfectadas: number; cajasAfectadas?: number; udsCanceladas?: number };
-export const motivoEfectivo = (e: Pick<ConIncidencia, 'motivo' | 'udsCanceladas'>): string => e.motivo || ((e.udsCanceladas ?? 0) > 0 ? MOTIVO_CANCELACION : '');
-export const responsableEfectivo = (e: Pick<ConIncidencia, 'responsable' | 'udsCanceladas'>): string => e.responsable || ((e.udsCanceladas ?? 0) > 0 ? 'Cliente' : '');
-
-// Un envío «tiene incidencia» si se le ha anotado algo (motivo, texto o unidades afectadas) o tiene cancelaciones.
+// Un envío «tiene incidencia» solo si se le ha anotado algo (motivo, texto o unidades afectadas). Las
+// unidades canceladas (SDSOCN) ya no generan una incidencia sola: cuentan como no enviadas (el pedido no
+// es completo) y quien lo revise anota el motivo si lo ve conveniente.
+type ConIncidencia = { motivo: string; incidencia: string; udsAfectadas: number; cajasAfectadas?: number };
 export function tieneIncidencia(e: ConIncidencia): boolean {
-  return !!e.motivo || !!e.incidencia || e.udsAfectadas > 0 || (e.cajasAfectadas ?? 0) > 0 || (e.udsCanceladas ?? 0) > 0;
+  return !!e.motivo || !!e.incidencia || e.udsAfectadas > 0 || (e.cajasAfectadas ?? 0) > 0;
 }
 
 // Filtro de clientes de /servicio: lista vacía = todos. Con `excluir`, la lista son los clientes QUITADOS
@@ -424,4 +462,11 @@ export function filtrarPorClientes<T extends { cliente: number }>(envios: T[], c
   if (clientes.length === 0) return envios;
   const lista = new Set(clientes);
   return envios.filter((e) => lista.has(e.cliente) !== excluir);
+}
+
+// Filtro de tipos de pedido (SDDCTO): mismas reglas que el de clientes (vacío = todos; `excluir` = todos menos).
+export function filtrarPorTipos<T extends { tipoPedido: string }>(envios: T[], tipos: string[], excluir = false): T[] {
+  if (tipos.length === 0) return envios;
+  const lista = new Set(tipos);
+  return envios.filter((e) => lista.has(e.tipoPedido) !== excluir);
 }

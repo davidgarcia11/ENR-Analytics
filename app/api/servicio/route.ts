@@ -1,7 +1,7 @@
 // Panel /servicio — nivel de servicio (OTIF) de los pedidos de venta. Ver docs/servicio.md.
 //
 // Los datos de pedido salen de F4211 en directo (una fila por línea, partida por SSCC
-// enviado) y se agrupan por (pedido, camión SDSHPN) en lib/servicio.ts. Lo que JDE no
+// enviado) y se agrupan por (pedido, albarán SDDELN) en lib/servicio.ts. Lo que JDE no
 // sabe (transportista, fecha de entrega real, incidencia...) vive en SQLite
 // (order_service_tracking) y se cruza aquí en memoria, igual que /muestras.
 import { NextRequest, NextResponse } from 'next/server';
@@ -10,11 +10,15 @@ import { requireScreenAccess } from '@/lib/permissions';
 import { getDb } from '@/lib/sqlite';
 import { verifySession } from '@/lib/auth';
 import {
-  EJEMPLO_CANALES, UM_CAJA, UM_UNIDAD, armarRespuesta, generarEjemplo, isoAJde, jdeAIso, udsPorCaja, type ConversionUm, type LineaJde,
+  EJEMPLO_CANALES, TIPOS_PEDIDO, TIPO_LINEA_STOCK, UM_CAJA, UM_UNIDAD, armarRespuesta, generarEjemplo, isoAJde, jdeAIso, udsPorCaja,
+  type ConversionUm, type LineaJde, type TipoPedido,
 } from '@/lib/servicio';
 import { valorPermitido } from '@/lib/servicio-catalogo';
 
-const TIPO_DOC_EXCLUIDO = 'ST';
+// Solo pedidos de venta y muestras (SDDCTO) y solo líneas de stock (SDLNTY = 'S'): las líneas N
+// (portes, cargos) nunca llevan albarán ni se envían. Ver docs/servicio.md §3.
+const TIPOS_DOC = Object.keys(TIPOS_PEDIDO) as TipoPedido[];
+const BINDS_TIPOS = Object.fromEntries(TIPOS_DOC.map((t, i) => [`tipo${i}`, t]));
 const ISO = /^\d{4}-\d{2}-\d{2}$/;
 const MAX_IN = 900; // Oracle admite 1000 elementos en un IN
 
@@ -53,15 +57,16 @@ export async function GET(req: NextRequest) {
     conn = await getDbConnection();
 
     const result = await conn.execute(
-      `SELECT A.SDDOCO, TRIM(A.SDVR01) AS SDVR01, A.SDSHPN, A.SDDELN, A.SDAN8, A.SDSHAN,
+      `SELECT A.SDDOCO, TRIM(A.SDDCTO) AS SDDCTO, TRIM(A.SDVR01) AS SDVR01, A.SDSHPN, A.SDDELN, A.SDAN8, A.SDSHAN,
               A.SDPDDJ, A.SDADDJ, A.SDRSDJ, A.SDUORG, A.SDSOQS, A.SDSOCN, A.SDSQOR, A.SDITM,
               TRIM(B.ABALPH) AS AN8_DESC, TRIM(C.ABALPH) AS SHAN_DESC
        FROM F4211 A
        LEFT JOIN F0101 B ON B.ABAN8 = A.SDAN8
        LEFT JOIN F0101 C ON C.ABAN8 = A.SDSHAN
-       WHERE TRIM(A.SDDCTO) != :tipoDocExcluido
+       WHERE TRIM(A.SDDCTO) IN (${TIPOS_DOC.map((_, i) => `:tipo${i}`).join(', ')})
+         AND TRIM(A.SDLNTY) = :tipoLinea
          AND A.SDRSDJ BETWEEN :startJde AND :endJde`,
-      { tipoDocExcluido: TIPO_DOC_EXCLUIDO, startJde: isoAJde(startDate), endJde: isoAJde(endDate) }
+      { ...BINDS_TIPOS, tipoLinea: TIPO_LINEA_STOCK, startJde: isoAJde(startDate), endJde: isoAJde(endDate) }
     );
     const rows = result.rows as any[];
 
@@ -104,6 +109,7 @@ export async function GET(req: NextRequest) {
 
     const lineas: LineaJde[] = rows.map((r) => ({
       pedido: r.SDDOCO,
+      tipoPedido: String(r.SDDCTO || '').trim(),
       suPedido: String(r.SDVR01 || '').trim(),
       albaran: r.SDDELN || 0,
       cliente: r.SDAN8 || 0,

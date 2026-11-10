@@ -91,7 +91,7 @@ export default function ServicioIndicadores({ envios }: { envios: EnvioDto[] }) 
       <TableCell className="px-4 text-right tabular-nums">{num(k.udsIncidencia)}</TableCell>
       <TableCell className="px-4 text-right"><Pct v={k.pctOtifUds} /></TableCell>
       <TableCell className="px-4 text-right"><Pct v={k.pctOtifCajas} /></TableCell>
-      <TableCell className="px-4 text-right text-muted-foreground">{pct(k.cobertura)}</TableCell>
+      <TableCell className="px-4 text-right text-muted-foreground">{pct(k.pctConFechaReal)}</TableCell>
     </>
   );
   const th = "h-9 bg-muted/40 px-4 text-right text-muted-foreground";
@@ -102,7 +102,7 @@ export default function ServicioIndicadores({ envios }: { envios: EnvioDto[] }) 
         <CardHeader className="px-6 pt-6">
           <CardTitle className="text-lg font-medium text-foreground">Resumen por mes y canal</CardTitle>
           <p className="text-sm font-normal text-muted-foreground">
-            Por mes de la fecha prometida. En rojo, por debajo del {OBJETIVO_PCT} %. OTIF en unidades (o cajas) = 1 − (no enviadas + afectadas) / pedidas. Cobertura = pedidos con entrega confirmada: si es baja, el % a tiempo y el OTIF se apoyan en pocos datos.
+            Por mes de la fecha prometida. En rojo, por debajo del {OBJETIVO_PCT} %. OTIF en unidades (o cajas) = 1 − (no enviadas + afectadas) / pedidas. Con fecha real = pedidos con la fecha de entrega real anotada; los demás cuentan como entregados en la fecha prometida.
           </p>
         </CardHeader>
         <CardContent className="overflow-hidden rounded-b-xl border-t border-border p-0">
@@ -121,7 +121,7 @@ export default function ServicioIndicadores({ envios }: { envios: EnvioDto[] }) 
                     <TableHead className={th}>Uds con incidencia</TableHead>
                     <TableHead className={th}>% OTIF uds</TableHead>
                     <TableHead className={th}>% OTIF cajas</TableHead>
-                    <TableHead className={th}>Cobertura</TableHead>
+                    <TableHead className={th}>Con fecha real</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
