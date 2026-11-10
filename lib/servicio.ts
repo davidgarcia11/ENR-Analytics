@@ -20,12 +20,6 @@ export function limpiarNombreCatalogo(v: unknown): string | null {
   return n.length >= 1 && n.length <= 40 ? n : null;
 }
 
-// Códigos de unidad de medida de JDE (F41002.UMUM / UMRUM) para cajas y unidades. Son los que usa
-// docs/produccion.md en su ejemplo de conversiones (CJ→UN); si en JDE se llaman distinto, se
-// cambian aquí y en nada más.
-export const UM_CAJA = 'CJ';
-export const UM_UNIDAD = 'UN';
-
 export interface ConversionUm {
   de: string; // F41002.UMUM
   a: string; // F41002.UMRUM
@@ -33,15 +27,46 @@ export interface ConversionUm {
 }
 
 /**
- * Unidades que hay en una caja de un artículo, a partir de sus conversiones de F41002: la que
- * va de CJ a UN («1 CJ = f UN») o, si solo existe la contraria, 1 / f. null si el artículo no tiene
- * ninguna de las dos (entonces se usan las cajas de SDSQOR).
+ * Unidades que hay en una caja, a partir de las conversiones del artículo en F41002 y de las unidades
+ * de medida de la propia línea: la caja es la UM secundaria (SDUOM2, p. ej. BX) y las unidades, la
+ * principal (SDUOM, p. ej. UN), venga como venga el código. Usa la conversión de la secundaria a la
+ * principal («1 BX = f UN») o, si solo existe la contraria, 1 / f. null si falta alguna UM, son la
+ * misma o el artículo no tiene ninguna de las dos conversiones.
  */
-export function udsPorCaja(conversiones: ConversionUm[]): number | null {
-  const directa = conversiones.find((c) => c.de === UM_CAJA && c.a === UM_UNIDAD && c.factor > 0);
+export function udsPorCaja(conversiones: ConversionUm[], umCaja: string, umUnidad: string): number | null {
+  if (!umCaja || !umUnidad || umCaja === umUnidad) return null;
+  const directa = conversiones.find((c) => c.de === umCaja && c.a === umUnidad && c.factor > 0);
   if (directa) return directa.factor;
-  const inversa = conversiones.find((c) => c.de === UM_UNIDAD && c.a === UM_CAJA && c.factor > 0);
+  const inversa = conversiones.find((c) => c.de === umUnidad && c.a === umCaja && c.factor > 0);
   return inversa ? 1 / inversa.factor : null;
+}
+
+/**
+ * Respaldo para los artículos sin conversión en F41002: uds por caja de cada artículo sacadas de sus
+ * líneas que sí traen cantidad secundaria (suma de SDUORG ÷ suma de SDSQOR). Se aplica a todas sus
+ * líneas, también a las que vienen sin ella (p. ej. las canceladas, que JDE deja sin cajas).
+ */
+export function udsPorCajaDeLineas(lineas: { articulo: string; udsPedidas: number; cajasSecundarias: number }[]): Map<string, number> {
+  const sumas = new Map<string, { uds: number; cajas: number }>();
+  for (const l of lineas) {
+    if (!(l.udsPedidas > 0) || !(l.cajasSecundarias > 0)) continue;
+    const s = sumas.get(l.articulo) ?? { uds: 0, cajas: 0 };
+    s.uds += l.udsPedidas;
+    s.cajas += l.cajasSecundarias;
+    sumas.set(l.articulo, s);
+  }
+  return new Map([...sumas].map(([a, s]) => [a, s.uds / s.cajas]));
+}
+
+/**
+ * Cantidades de una línea de F4211 ya en unidades (SDUORG / SDSOQS ÷ 100). Solo cuenta como enviado
+ * lo que tiene fecha de envío real (SDADDJ, salida de stock 570→580): JDE rellena SDSOQS antes, en el
+ * picking (550), y una línea así aún no ha salido. Cajas = unidades ÷ uds por caja (0 si no se sabe).
+ */
+export function cantidadesLinea(l: { udsPedidas: number; udsServidas: number; fechaEnvio: string | null; udsPorCaja: number | null }) {
+  const udsEnviadas = l.fechaEnvio ? l.udsServidas : 0;
+  const f = l.udsPorCaja && l.udsPorCaja > 0 ? l.udsPorCaja : null;
+  return { udsEnviadas, cajasPedidas: f ? l.udsPedidas / f : 0, cajasEnviadas: f ? udsEnviadas / f : 0 };
 }
 
 // Tipos de pedido de JDE (SDDCTO) que cuentan para el nivel de servicio, con su nombre en pantalla.
@@ -68,15 +93,15 @@ export interface LineaJde {
   destinoNombre: string;
   fechaEnvio: string | null; // SDADDJ — fecha real de envío
   fechaPrometida: string | null; // SDRSDJ
-  udsPedidas: number; // SDUORG
-  udsEnviadas: number; // SDSOQS
-  cajasPedidas: number; // SDSQOR (cantidad pedida secundaria = cajas)
-  cajasEnviadas: number; // proporcional por línea: SDSQOR × SDSOQS / SDUORG
+  udsPedidas: number; // SDUORG, en la UM principal de la línea (SDUOM)
+  udsEnviadas: number; // SDSOQS, solo si la línea tiene fecha de envío (cantidadesLinea)
+  cajasPedidas: number; // udsPedidas ÷ udsPorCaja
+  cajasEnviadas: number; // udsEnviadas ÷ udsPorCaja
   udsCanceladas: number; // SDSOCN — informativo: no genera incidencia sola (ver docs/servicio.md §8)
   canal: string | null; // código F554101.AAZE06 del artículo
   articulo: string; // SDLITM (2º nº de artículo)
   descripcion: string; // SDDSC1
-  udsPorCaja: number | null; // de F41002 o, si no, SDUORG / SDSQOR; null = sin cajas
+  udsPorCaja: number | null; // F41002 de SDUOM2 a SDUOM o, si no, udsPorCajaDeLineas; null = sin cajas
 }
 
 // Un artículo de un envío (suma de sus líneas), para anotar las afectadas por artículo

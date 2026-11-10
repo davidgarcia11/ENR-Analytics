@@ -4,7 +4,7 @@
  * medir por envío (albarán) y no solo por pedido.
  */
 import { describe, it, expect } from 'bun:test'
-import { agruparEnvios, tieneIncidencia, estadoEntrega, resumirPedidos, calcularKpis, resumenMensual, contarIncidencias, incidenciasPorMes, jdeAIso, isoAJde, limpiarNombreCatalogo, udsPorCaja, sinFechaReal, filtrarPorClientes, filtrarPorTipos, TIPOS_PEDIDO, generarEjemplo, validarAfectadasArticulos, totalAfectadas, armarRespuesta, type LineaJde } from '../lib/servicio'
+import { agruparEnvios, tieneIncidencia, estadoEntrega, resumirPedidos, calcularKpis, resumenMensual, contarIncidencias, incidenciasPorMes, jdeAIso, isoAJde, limpiarNombreCatalogo, udsPorCaja, udsPorCajaDeLineas, cantidadesLinea, sinFechaReal, filtrarPorClientes, filtrarPorTipos, TIPOS_PEDIDO, generarEjemplo, validarAfectadasArticulos, totalAfectadas, armarRespuesta, type LineaJde } from '../lib/servicio'
 import { permisoDeRutaAdmin, seccionesAdminPorPermisos } from '../lib/permisos'
 
 const linea = (o: Partial<LineaJde>): LineaJde => ({
@@ -165,13 +165,53 @@ describe('cajas', () => {
   })
 })
 
-describe('udsPorCaja (F41002)', () => {
-  it('usa la conversión CJ→UN, o la inversa UN→CJ', () => {
-    expect(udsPorCaja([{ de: 'CJ', a: 'UN', factor: 12 }])).toBe(12)
-    expect(udsPorCaja([{ de: 'UN', a: 'CJ', factor: 0.25 }])).toBe(4)
-    expect(udsPorCaja([{ de: 'KG', a: 'CJ', factor: 0.5 }])).toBeNull()
-    expect(udsPorCaja([])).toBeNull()
-    expect(udsPorCaja([{ de: 'CJ', a: 'UN', factor: 0 }])).toBeNull()
+describe('udsPorCaja (F41002, con las UM de la línea)', () => {
+  it('usa la conversión de la UM secundaria (caja) a la principal, o la inversa, sea cual sea el código', () => {
+    expect(udsPorCaja([{ de: 'BX', a: 'UN', factor: 6 }], 'BX', 'UN')).toBe(6)
+    expect(udsPorCaja([{ de: 'CJ', a: 'UN', factor: 12 }], 'CJ', 'UN')).toBe(12)
+    expect(udsPorCaja([{ de: 'UN', a: 'BX', factor: 0.25 }], 'BX', 'UN')).toBe(4)
+    expect(udsPorCaja([{ de: 'CJ', a: 'UN', factor: 12 }], 'BX', 'UN')).toBeNull() // otra caja: no vale
+    expect(udsPorCaja([{ de: 'BX', a: 'PL', factor: 80 }, { de: 'BX', a: 'UN', factor: 6 }], 'BX', 'UN')).toBe(6)
+    expect(udsPorCaja([], 'BX', 'UN')).toBeNull()
+    expect(udsPorCaja([{ de: 'BX', a: 'UN', factor: 0 }], 'BX', 'UN')).toBeNull()
+    expect(udsPorCaja([{ de: 'BX', a: 'UN', factor: 6 }], '', 'UN')).toBeNull() // línea sin UM secundaria
+    expect(udsPorCaja([{ de: 'UN', a: 'UN', factor: 1 }], 'UN', 'UN')).toBeNull()
+  })
+})
+
+describe('cajas y enviadas de una línea', () => {
+  it('sin conversión, las uds por caja salen de las líneas del artículo que traen cajas', () => {
+    const r = udsPorCajaDeLineas([
+      { articulo: 'A', udsPedidas: 600, cajasSecundarias: 100 },
+      { articulo: 'A', udsPedidas: 120, cajasSecundarias: 0 }, // cancelada: JDE la deja sin cajas
+      { articulo: 'B', udsPedidas: 50, cajasSecundarias: 0 },
+    ])
+    expect(r.get('A')).toBe(6)
+    expect(r.has('B')).toBe(false)
+  })
+  it('solo cuenta como enviado lo que tiene fecha de envío (en picking aún no ha salido)', () => {
+    expect(cantidadesLinea({ udsPedidas: 60, udsServidas: 60, fechaEnvio: '2024-03-02', udsPorCaja: 6 })).toEqual({ udsEnviadas: 60, cajasPedidas: 10, cajasEnviadas: 10 })
+    expect(cantidadesLinea({ udsPedidas: 42, udsServidas: 42, fechaEnvio: null, udsPorCaja: 6 })).toEqual({ udsEnviadas: 0, cajasPedidas: 7, cajasEnviadas: 0 })
+    expect(cantidadesLinea({ udsPedidas: 120, udsServidas: 0, fechaEnvio: null, udsPorCaja: 6 })).toEqual({ udsEnviadas: 0, cajasPedidas: 20, cajasEnviadas: 0 })
+    expect(cantidadesLinea({ udsPedidas: 10, udsServidas: 10, fechaEnvio: '2024-03-02', udsPorCaja: null })).toEqual({ udsEnviadas: 10, cajasPedidas: 0, cajasEnviadas: 0 })
+  })
+  it('un pedido con canceladas y una línea en picking: faltan unidades y también cajas', () => {
+    // Ficticio: 600 enviadas, 120 canceladas sin cajas y 42 en picking sin albarán, todo de 6 uds/caja
+    const respaldo = udsPorCajaDeLineas([{ articulo: 'A', udsPedidas: 600, cajasSecundarias: 100 }, { articulo: 'A', udsPedidas: 120, cajasSecundarias: 0 }, { articulo: 'A', udsPedidas: 42, cajasSecundarias: 7 }])
+    const f = respaldo.get('A')!
+    const enviada = cantidadesLinea({ udsPedidas: 600, udsServidas: 600, fechaEnvio: '2024-03-02', udsPorCaja: f })
+    const cancelada = cantidadesLinea({ udsPedidas: 120, udsServidas: 0, fechaEnvio: null, udsPorCaja: f })
+    const picking = cantidadesLinea({ udsPedidas: 42, udsServidas: 42, fechaEnvio: null, udsPorCaja: f })
+    const e = agruparEnvios([
+      linea({ udsPedidas: 600, ...enviada }),
+      linea({ albaran: 0, fechaEnvio: null, udsPedidas: 120, ...cancelada }),
+      linea({ albaran: 0, fechaEnvio: null, udsPedidas: 42, ...picking }),
+    ])
+    expect(e.length).toBe(1)
+    expect(e[0].udsEnviadas).toBe(600)
+    expect(e[0].udsPedidas).toBe(762)
+    expect(e[0].cajasEnviadas).toBe(100)
+    expect(e[0].cajasPedidas).toBe(127)
   })
 })
 
