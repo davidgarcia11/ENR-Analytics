@@ -43,9 +43,9 @@ SSCC** enviado o vendido; un pedido puede ir en varios albaranes (entregas).
 | Fecha de envío real | `SDADDJ` | 0 = aún sin enviar |
 | Fecha de entrega **prometida** | `SDRSDJ` | contra ella se compara la entrega real |
 | Uds canceladas | `SDSOCN` | ÷100. Solo informativo: lo cancelado ya cuenta como no enviado; no genera incidencia sola (§15) |
-| Uds pedidas / enviadas | `SDUORG` / `SDSOQS` | ÷100. Todo son unidades (tortillas, migas…), sin cajas |
-| Cajas (pedidas y enviadas) | `F41002` (`UMITM`, `UMUM`, `UMRUM`, `UMCONV` ÷10.000.000) | Unidades ÷ unidades por caja, con la conversión CJ→UN del artículo (o la inversa UN→CJ). **Los códigos `CJ`/`UN` son los del ejemplo de `docs/produccion.md`: confirmar que son los de JDE** (se cambian en `UM_CAJA`/`UM_UNIDAD`, `lib/servicio.ts`) |
-| Cajas, respaldo | `SDSQOR` | Cantidad pedida secundaria (cajas), ÷100 (**suposición: misma escala que `SDUORG`**). Solo si el artículo no tiene conversión CJ↔UN; las enviadas entonces se reparten en proporción: `SDSQOR × SDSOQS / SDUORG` |
+| Uds pedidas / enviadas | `SDUORG` / `SDSOQS` | ÷100, en la UM principal de la línea (`SDUOM`, p. ej. UN). **Enviadas solo si la línea tiene fecha de envío** (`SDADDJ`): JDE rellena `SDSOQS` ya en el picking (550), antes de que salga (`cantidadesLinea`) |
+| Cajas (pedidas y enviadas) | `SDUOM` / `SDUOM2` + `F41002` (`UMITM`, `UMUM`, `UMRUM`, `UMCONV` ÷10.000.000) | Unidades ÷ uds por caja. La caja es la **UM secundaria de la línea** (`SDUOM2`, p. ej. BX) y las unidades, la **principal** (`SDUOM`): se usa la conversión de F41002 de una a otra (o la inversa), sin códigos fijos (`udsPorCaja`) |
+| Cajas, respaldo | `SDSQOR` | Cantidad secundaria (cajas), ÷100. Solo si el artículo no tiene esa conversión: uds por caja = suma de `SDUORG` ÷ suma de `SDSQOR` de sus líneas que la traen, aplicada a **todas** sus líneas (`udsPorCajaDeLineas`). Las canceladas (980) vienen sin cantidad secundaria, así que no se puede usar línea a línea |
 | Cliente / destino | `SDAN8` / `SDSHAN` → `F0101.ABALPH` | |
 | Canal (= Business Line) | `F554101.AAZE06` (UDC `17/B6`) | mismo origen que `/compras`; atributo del artículo |
 
@@ -224,7 +224,7 @@ Los desplegables del diálogo de edición ya no salen del código: se gestionan 
 La celda **Unidades** muestra, del **pedido completo**, «enviadas / pedidas uds» y, debajo,
 «enviadas / pedidas cajas», con la barra de progreso (verde si el pedido está completo, ámbar
 si no). Lo del **albarán** concreto va en el texto emergente de la celda («Este albarán: X uds ·
-Y cajas»). Las cajas salen de la conversión del artículo (F41002); si no la tiene, de `SDSQOR`. Pueden salir con
+Y cajas»). Las cajas salen de la conversión del artículo (F41002, de la UM secundaria a la principal de la línea); si no la tiene, de las uds por caja de sus líneas con `SDSQOR` (§3). Pueden salir con
 un decimal (unidades que no llenan una caja, o el reparto proporcional del respaldo); si no hay ni conversión ni
 `SDSQOR`, se muestra «— cajas». El Excel exportado añade «Cajas enviadas» y «Cajas
 pedidas (envío)». Los KPI siguen calculándose en unidades.
@@ -289,7 +289,7 @@ El motivo, el responsable y el texto de la incidencia siguen siendo **uno por en
 
 - **Artículos del envío:** salen de F4211 (`SDLITM` = «2º nº de artículo», `SDDSC1` = descripción), sumando
   sus líneas; las líneas sin albarán que se suman al último envío (§4) también suman sus artículos. Las uds
-  por caja son las de F41002 (CJ↔UN) o, si el artículo no la tiene, las de la línea (`SDUORG / SDSQOR`).
+  por caja son las de la línea (§3: F41002 de `SDUOM2` a `SDUOM` o, si no, las de las líneas del artículo con `SDSQOR`).
   Sin ninguna de las dos, el artículo se anota solo en unidades («— cajas») y no suma cajas al total.
 - **Almacén:** tabla `order_service_incidencia_articulo(pedido, albaran, articulo, uds, cajas)`, creada sola al
   arrancar. Solo guarda los artículos con algo anotado. `uds_afectadas` / `cajas_afectadas` de
@@ -310,3 +310,16 @@ El motivo, el responsable y el texto de la incidencia siguen siendo **uno por en
   afectadas, motivo, responsable), solo si algún envío tiene desglose.
 - **Datos de ejemplo:** los pedidos pares llevan dos artículos inventados (`9000000001`, de 12 uds/caja, y
   `9000000002`, de 6) y las afectadas van en el primero.
+
+## 19. Cajas con las UM de la línea y enviadas solo con fecha de envío (v1.43.1)
+
+Caso que lo destapó (pedido EDI con 4 líneas canceladas y una en picking): el panel mostraba «508 / 508 cajas»
+con unidades sin completar, y daba por enviadas unidades de una línea que aún estaba en picking.
+
+- **Cajas:** el código buscaba en F41002 la caja con el código fijo `CJ`, pero en JDE es `BX`, así que nunca
+  encontraba la conversión y usaba la cantidad secundaria de cada línea, que las canceladas no tienen (sus
+  unidades sumaban 0 cajas). Ahora cada línea usa sus propias UM (`SDUOM2` → `SDUOM`) y, si el artículo no
+  tiene conversión, las uds por caja de sus otras líneas.
+- **Enviadas:** `SDSOQS` ya viene relleno en las líneas en picking (550), sin albarán ni fecha de envío.
+  Ahora solo cuenta como enviado lo que tiene fecha de envío real (`SDADDJ`). Cambia el % Completo y el OTIF
+  de los pedidos con líneas aún sin salir.

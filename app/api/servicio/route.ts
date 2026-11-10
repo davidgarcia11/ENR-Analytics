@@ -10,7 +10,7 @@ import { requireScreenAccess } from '@/lib/permissions';
 import { getDb } from '@/lib/sqlite';
 import { verifySession } from '@/lib/auth';
 import {
-  EJEMPLO_CANALES, TIPOS_PEDIDO, TIPO_LINEA_STOCK, UM_CAJA, UM_UNIDAD, armarRespuesta, generarEjemplo, isoAJde, jdeAIso, udsPorCaja,
+  EJEMPLO_CANALES, TIPOS_PEDIDO, TIPO_LINEA_STOCK, armarRespuesta, cantidadesLinea, generarEjemplo, isoAJde, jdeAIso, udsPorCaja, udsPorCajaDeLineas,
   totalAfectadas, validarAfectadasArticulos, type AfectadaArticulo, type ConversionUm, type LineaJde, type TipoPedido, type TrackingManual,
 } from '@/lib/servicio';
 import { valorPermitido } from '@/lib/servicio-catalogo';
@@ -74,7 +74,7 @@ export async function GET(req: NextRequest) {
     const result = await conn.execute(
       `SELECT A.SDDOCO, TRIM(A.SDDCTO) AS SDDCTO, TRIM(A.SDVR01) AS SDVR01, A.SDSHPN, A.SDDELN, A.SDAN8, A.SDSHAN,
               A.SDPDDJ, A.SDADDJ, A.SDRSDJ, A.SDUORG, A.SDSOQS, A.SDSOCN, A.SDSQOR, A.SDITM,
-              TRIM(A.SDLITM) AS SDLITM, TRIM(A.SDDSC1) AS SDDSC1,
+              TRIM(A.SDLITM) AS SDLITM, TRIM(A.SDDSC1) AS SDDSC1, TRIM(A.SDUOM) AS SDUOM, TRIM(A.SDUOM2) AS SDUOM2,
               TRIM(B.ABALPH) AS AN8_DESC, TRIM(C.ABALPH) AS SHAN_DESC
        FROM F4211 A
        LEFT JOIN F0101 B ON B.ABAN8 = A.SDAN8
@@ -104,15 +104,16 @@ export async function GET(req: NextRequest) {
       `SELECT TRIM(DRKY) AS CODE, TRIM(DRDL01) AS DESCRIPCION FROM prodctl.f0005
        WHERE TRIM(DRSY) = '17' AND TRIM(DRRT) = 'B6' AND TRIM(DRKY) IS NOT NULL`
     );
-    // Unidades por caja de cada artículo (F41002, factor ÷10.000.000), para pasar unidades a cajas.
+    // Conversiones de unidades de cada artículo (F41002, factor ÷10.000.000). Se traen todas: cada línea
+    // usa la de su UM secundaria (caja, SDUOM2) a su UM principal (SDUOM), sea cual sea el código.
     const convPorItem = new Map<string, ConversionUm[]>();
     for (let i = 0; i < items.length; i += MAX_IN) {
       const chunk = items.slice(i, i + MAX_IN);
-      const binds: Record<string, string | number> = { cj: UM_CAJA, un: UM_UNIDAD };
+      const binds: Record<string, number> = {};
       chunk.forEach((it, j) => { binds[`c${j}`] = Number(it); });
       const r = await conn.execute(
         `SELECT UMITM, TRIM(UMUM) AS UMUM, TRIM(UMRUM) AS UMRUM, UMCONV FROM F41002
-         WHERE UMITM IN (${chunk.map((_, j) => `:c${j}`).join(', ')}) AND TRIM(UMUM) IN (:cj, :un) AND TRIM(UMRUM) IN (:cj, :un)`,
+         WHERE UMITM IN (${chunk.map((_, j) => `:c${j}`).join(', ')})`,
         binds
       );
       for (const x of r.rows as any[]) {
@@ -122,6 +123,15 @@ export async function GET(req: NextRequest) {
     }
     const canalLabels: Record<string, string> = {};
     for (const x of catalogo.rows as any[]) canalLabels[String(x.CODE).trim()] = String(x.DESCRIPCION).trim();
+
+    // Respaldo para artículos sin conversión en F41002: sus uds por caja según las líneas que traen
+    // cantidad secundaria (SDSQOR), aplicadas a todas sus líneas (las canceladas vienen sin ella)
+    const respaldoPorItem = udsPorCajaDeLineas(rows.map((r) => ({
+      articulo: String(r.SDITM).trim(), udsPedidas: (r.SDUORG || 0) / 100, cajasSecundarias: (r.SDSQOR || 0) / 100,
+    })));
+    const udsPorCajaDe = (r: any) =>
+      udsPorCaja(convPorItem.get(String(r.SDITM).trim()) ?? [], String(r.SDUOM2 || '').trim(), String(r.SDUOM || '').trim())
+      ?? respaldoPorItem.get(String(r.SDITM).trim()) ?? null;
 
     const lineas: LineaJde[] = rows.map((r) => ({
       pedido: r.SDDOCO,
@@ -135,25 +145,14 @@ export async function GET(req: NextRequest) {
       fechaEnvio: jdeAIso(r.SDADDJ),
       fechaPrometida: jdeAIso(r.SDRSDJ),
       udsPedidas: (r.SDUORG || 0) / 100,
-      udsEnviadas: (r.SDSOQS || 0) / 100,
       udsCanceladas: (r.SDSOCN || 0) / 100,
-      // Cajas: unidades ÷ unidades por caja (F41002). Si el artículo no tiene esa conversión, se usa
-      // SDSQOR (cantidad pedida secundaria = cajas) y las enviadas se reparten en proporción a lo
-      // enviado de la línea.
-      ...(() => {
-        const f = udsPorCaja(convPorItem.get(String(r.SDITM).trim()) ?? []);
-        const uP = (r.SDUORG || 0) / 100;
-        const uE = (r.SDSOQS || 0) / 100;
-        return f
-          ? { cajasPedidas: uP / f, cajasEnviadas: uE / f }
-          : { cajasPedidas: (r.SDSQOR || 0) / 100, cajasEnviadas: r.SDUORG ? ((r.SDSQOR || 0) / 100) * ((r.SDSOQS || 0) / r.SDUORG) : 0 };
-      })(),
+      // Enviadas solo si la línea ha salido (fecha de envío); cajas con las uds por caja de la línea
+      ...cantidadesLinea({ udsPedidas: (r.SDUORG || 0) / 100, udsServidas: (r.SDSOQS || 0) / 100, fechaEnvio: jdeAIso(r.SDADDJ), udsPorCaja: udsPorCajaDe(r) }),
       canal: canalPorItem.get(String(r.SDITM).trim()) ?? null,
       articulo: String(r.SDLITM || r.SDITM || '').trim(),
       descripcion: String(r.SDDSC1 || '').trim(),
-      // Uds por caja del artículo, para pasar a cajas las afectadas de cada artículo: la de F41002 o, si
-      // no la tiene, la de la línea (SDUORG / SDSQOR)
-      udsPorCaja: udsPorCaja(convPorItem.get(String(r.SDITM).trim()) ?? []) ?? (r.SDSQOR > 0 && r.SDUORG > 0 ? r.SDUORG / r.SDSQOR : null),
+      // Uds por caja de la línea: también pasan a cajas las afectadas de cada artículo
+      udsPorCaja: udsPorCajaDe(r),
     }));
 
     const db = getDb();
