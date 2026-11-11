@@ -75,7 +75,8 @@ export interface Metric {
   desviacionPct: number | null;
 }
 
-export type Unit = "unidades" | "kg" | "importe";
+// unidadObra = unidades × X2 (€) — ver api/compras/route.ts
+export type Unit = "unidades" | "kg" | "importe" | "unidadObra";
 
 export interface ArticuloRow {
   tipo: "articulo";
@@ -84,6 +85,7 @@ export interface ArticuloRow {
   unidades: Metric;
   kg: Metric | null;
   importe: Metric | null;
+  unidadObra: Metric | null;
 }
 
 export interface CanalRow {
@@ -93,6 +95,7 @@ export interface CanalRow {
   unidades: Metric;
   kg: Metric | null;
   importe: Metric | null;
+  unidadObra: Metric | null;
   articulos: ArticuloRow[];
 }
 
@@ -102,16 +105,17 @@ export interface FamiliaRow {
   unidades: Metric;
   kg: Metric | null;
   importe: Metric | null;
+  unidadObra: Metric | null;
   canales: CanalRow[];
 }
 
-function metricPara(unit: Unit, r: { unidades: Metric; kg: Metric | null; importe: Metric | null }): Metric | null {
-  return unit === "kg" ? r.kg : unit === "importe" ? r.importe : r.unidades;
+function metricPara(unit: Unit, r: { unidades: Metric; kg: Metric | null; importe: Metric | null; unidadObra: Metric | null }): Metric | null {
+  return unit === "kg" ? r.kg : unit === "importe" ? r.importe : unit === "unidadObra" ? r.unidadObra : r.unidades;
 }
 
-// Importe siempre con "€" — el resto de unidades no llevan sufijo.
+// Importe y unidades de obra (X2, también €) con "€" — el resto no llevan sufijo.
 function formatNum(v: number, unit: Unit): string {
-  return unit === "importe" ? `${numeroEs(v)} €` : numeroEs(v);
+  return unit === "importe" || unit === "unidadObra" ? `${numeroEs(v)} €` : numeroEs(v);
 }
 
 // Fila unificada para el árbol de TanStack (subRows exige una forma homogénea).
@@ -129,6 +133,7 @@ interface TreeRow {
   unidades: Metric;
   kg: Metric | null;
   importe: Metric | null;
+  unidadObra: Metric | null;
   subRows?: TreeRow[];
 }
 
@@ -141,6 +146,7 @@ function toTree(familias: FamiliaRow[]): TreeRow[] {
     unidades: f.unidades,
     kg: f.kg,
     importe: f.importe,
+    unidadObra: f.unidadObra,
     subRows: f.canales.map((c) => ({
       id: `${f.familia}::${c.canal ?? "__sin_canal__"}`,
       tipo: "canal",
@@ -149,6 +155,7 @@ function toTree(familias: FamiliaRow[]): TreeRow[] {
       unidades: c.unidades,
       kg: c.kg,
       importe: c.importe,
+      unidadObra: c.unidadObra,
       subRows: c.articulos.map((a) => ({
         id: `${f.familia}::${c.canal ?? "__sin_canal__"}::${a.item}`,
         tipo: "articulo",
@@ -157,6 +164,7 @@ function toTree(familias: FamiliaRow[]): TreeRow[] {
         unidades: a.unidades,
         kg: a.kg,
         importe: a.importe,
+        unidadObra: a.unidadObra,
       })),
     })),
   }));
@@ -308,7 +316,7 @@ export default function HierarchicalTable({
   unit: Unit;
   drill: DrillState;
   onDrillChange: (next: DrillState) => void;
-  total?: { unidades: Metric; kg: Metric | null; importe: Metric | null };
+  total?: { unidades: Metric; kg: Metric | null; importe: Metric | null; unidadObra: Metric | null };
 }) {
   const columns = React.useMemo(() => buildColumns(unit), [unit]);
   const data = React.useMemo(() => toTree(familias), [familias]);
