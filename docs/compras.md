@@ -76,6 +76,15 @@ selector PM/PN (default PM) que recarga los datos; el tipo va en el nombre del E
 exportado. Antes de esta rama la consulta no filtraba por `MFTYPF`, así que "previsto"
 sumaba ambos tipos si coexistían para un mismo artículo y mes.
 
+**Filas con cantidad 0 (`MFFQT = 0`) — se ignoran.** Al modificar la PM, los meses que se
+anulan se dejan a 0 con `EP3460` en vez de borrar la fila (en producción, julio y agosto
+de 2026). La consulta las traía y cada una daba de alta el artículo aunque sumara 0: con
+PM ene–oct 2026 salían 8 artículos a 0 / 0 en todas las pestañas (p. ej. los RORIA
+9910100015-17), sin ventas ni previsión real. Ahora la consulta lleva
+`AND MFFQT <> 0`. No cambia ningún total (esas filas sumaban 0) y un artículo con previsión
+0 pero con ventas sigue saliendo (0 / real), porque la consulta de ventas (`F4211`) da de
+alta el artículo por su cuenta.
+
 ### 3.1 Canal (actual) no es Marca (versión anterior) — son campos distintos
 
 **Importante para quien compare contra la versión anterior**: aquella agrupaba/filtraba

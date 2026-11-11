@@ -440,10 +440,15 @@ export async function GET(req: NextRequest) {
     // A) Previsión (F3460) — artículo largo (MFLITM) x mes, planta de presupuestos.
     // MFTYPF: PN = previsión original, PM = modificada — nunca se suman (serían dos
     // versiones de la misma previsión).
+    // MFFQT <> 0: al modificar la PM, los meses que se anulan se dejan a 0 en vez de
+    // borrar la fila. Esas filas no suman nada, pero daban de alta el artículo y salía
+    // en la tabla a 0 / 0. Un artículo con previsión 0 y ventas sigue apareciendo (lo
+    // da de alta la consulta de ventas). Ver docs/compras.md §3.5.
     const forecastSql = `
       SELECT TRIM(MFLITM) AS ITEM, TRIM(MFITM) AS ITEM_CORTO, MFDRQJ AS FECHA_JDE, MFFQT AS CANT_PREV_RAW
       FROM F3460
       WHERE MFMCU = :planta AND MFDRQJ BETWEEN :startJde AND :endJde AND TRIM(MFTYPF) = :tipoPrev
+        AND MFFQT <> 0
     `;
     // B) Venta real (F4211) — mismo filtro que la v1 del panel. Se AGREGA EN ORACLE por
     // artículo x mes (antes se traía una fila por línea de pedido y se sumaba en JS: era lo
