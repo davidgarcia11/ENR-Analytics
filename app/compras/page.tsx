@@ -27,7 +27,7 @@ type TipoPrevision = "PN" | "PM";
 const TODOS_SABORES = "__todos__";
 // Lo que guarda un preset de /compras (además de las fechas, que van aparte)
 type FiltrosCompras = { tipo: TipoPrevision; sabor: string; unit: Unit };
-const UNIDADES: Unit[] = ["unidades", "kg", "importe"];
+const UNIDADES: Unit[] = ["unidades", "kg", "importe", "unidadObra"];
 
 function currentMonthRange(): MonthRange {
   const now = new Date();
@@ -63,22 +63,27 @@ interface ApiResponse {
     unidades: Metric;
     kg: Metric | null;
     importe: Metric | null;
+    unidadObra: Metric | null;
     totalFamilias: number;
     familiasFueraDeUmbral: number;
     umbralPct: number;
     articulosSinGramaje: string[];
     articulosSinCoste: string[];
+    articulosSinUnidadObra: string[];
   };
   mensual: {
     total: MesPunto[];
     totalKg: MesPunto[] | null;
     totalImporte: MesPunto[] | null;
+    totalUnidadObra: MesPunto[] | null;
     porFamilia: Record<string, MesPunto[]>;
     porFamiliaCanal: Record<string, MesPunto[]>;
     kgPorFamilia: Record<string, MesPunto[] | null>;
     kgPorFamiliaCanal: Record<string, MesPunto[] | null>;
     importePorFamilia: Record<string, MesPunto[] | null>;
     importePorFamiliaCanal: Record<string, MesPunto[] | null>;
+    unidadObraPorFamilia: Record<string, MesPunto[] | null>;
+    unidadObraPorFamiliaCanal: Record<string, MesPunto[] | null>;
   };
 }
 
@@ -91,12 +96,13 @@ function numeroEs(v: number) {
   return sign + Math.abs(rounded).toString().replace(/\B(?=(\d{3})+(?!\d))/g, ".");
 }
 
-const UNIT_LABEL: Record<Unit, string> = { unidades: "Unidades", kg: "Kg", importe: "Importe" };
+const UNIT_LABEL: Record<Unit, string> = { unidades: "Unidades", kg: "Kg", importe: "Importe", unidadObra: "Ud. obra" };
+// Importe y unidades de obra (X2) son €
 function formatNum(v: number, unit: Unit) {
-  return unit === "importe" ? `${numeroEs(v)} €` : numeroEs(v);
+  return unit === "importe" || unit === "unidadObra" ? `${numeroEs(v)} €` : numeroEs(v);
 }
-function metricDe(unit: Unit, r: { unidades: Metric; kg: Metric | null; importe: Metric | null }) {
-  return unit === "kg" ? r.kg : unit === "importe" ? r.importe : r.unidades;
+function metricDe(unit: Unit, r: { unidades: Metric; kg: Metric | null; importe: Metric | null; unidadObra: Metric | null }) {
+  return unit === "kg" ? r.kg : unit === "importe" ? r.importe : unit === "unidadObra" ? r.unidadObra : r.unidades;
 }
 
 // Formatos numéricos nativos de Excel (mismo patrón que app/compras/page.tsx — 'xlsx'
@@ -219,9 +225,13 @@ function ComprasV2PagePanel() {
   const monthlyChartData = useMemo(() => {
     if (!data) return undefined;
     const claveCanal = drill.familia && drill.canal ? `${drill.familia}::${drill.canal}` : null;
-    const porFamiliaCanal = unit === "kg" ? data.mensual.kgPorFamiliaCanal : unit === "importe" ? data.mensual.importePorFamiliaCanal : data.mensual.porFamiliaCanal;
-    const porFamilia = unit === "kg" ? data.mensual.kgPorFamilia : unit === "importe" ? data.mensual.importePorFamilia : data.mensual.porFamilia;
-    const total = unit === "kg" ? data.mensual.totalKg : unit === "importe" ? data.mensual.totalImporte : data.mensual.total;
+    const m = data.mensual;
+    const { porFamiliaCanal, porFamilia, total } = {
+      unidades: { porFamiliaCanal: m.porFamiliaCanal, porFamilia: m.porFamilia, total: m.total },
+      kg: { porFamiliaCanal: m.kgPorFamiliaCanal, porFamilia: m.kgPorFamilia, total: m.totalKg },
+      importe: { porFamiliaCanal: m.importePorFamiliaCanal, porFamilia: m.importePorFamilia, total: m.totalImporte },
+      unidadObra: { porFamiliaCanal: m.unidadObraPorFamiliaCanal, porFamilia: m.unidadObraPorFamilia, total: m.totalUnidadObra },
+    }[unit];
     let serie: MesPunto[] | null;
     if (claveCanal) {
       serie = porFamiliaCanal[claveCanal] ?? null;
@@ -233,7 +243,7 @@ function ComprasV2PagePanel() {
     return (serie ?? []).map((m) => ({ month: m.mes, previsto: m.previsto, real: m.real }));
   }, [data, drill, unit]);
 
-  // Exporta el desglose completo (las 3 unidades, no solo la seleccionada) a un único
+  // Exporta el desglose completo (las 4 unidades, no solo la seleccionada) a un único
   // Excel con 3 hojas — mismo patrón que app/compras/page.tsx (v1).
   const exportToExcel = () => {
     if (!data) return;
@@ -250,6 +260,8 @@ function ComprasV2PagePanel() {
       "Kg Real": f.kg?.real ?? "",
       "Importe Previsión (€)": f.importe?.previsto ?? "",
       "Importe Real (€)": f.importe?.real ?? "",
+      "Ud. obra Previsión (€)": f.unidadObra?.previsto ?? "",
+      "Ud. obra Real (€)": f.unidadObra?.real ?? "",
     }));
     resumenRows.push({
       Familia: "TOTAL",
@@ -261,9 +273,11 @@ function ComprasV2PagePanel() {
       "Kg Real": data.resumen.kg?.real ?? "",
       "Importe Previsión (€)": data.resumen.importe?.previsto ?? "",
       "Importe Real (€)": data.resumen.importe?.real ?? "",
+      "Ud. obra Previsión (€)": data.resumen.unidadObra?.previsto ?? "",
+      "Ud. obra Real (€)": data.resumen.unidadObra?.real ?? "",
     });
     const wsResumen = XLSX.utils.json_to_sheet(resumenRows);
-    wsResumen["!cols"] = [{ wch: 28 }, { wch: 14 }, { wch: 14 }, { wch: 12 }, { wch: 12 }, { wch: 12 }, { wch: 12 }, { wch: 16 }, { wch: 16 }];
+    wsResumen["!cols"] = [{ wch: 28 }, { wch: 14 }, { wch: 14 }, { wch: 12 }, { wch: 12 }, { wch: 12 }, { wch: 12 }, { wch: 16 }, { wch: 16 }, { wch: 18 }, { wch: 18 }];
     setColNumFmt(wsResumen, 1, resumenRows.length, XLS_FMT_UD);
     setColNumFmt(wsResumen, 2, resumenRows.length, XLS_FMT_UD);
     setColNumFmt(wsResumen, 3, resumenRows.length, XLS_FMT_UD);
@@ -272,11 +286,14 @@ function ComprasV2PagePanel() {
     setColNumFmt(wsResumen, 6, resumenRows.length, XLS_FMT_KG);
     setColNumFmt(wsResumen, 7, resumenRows.length, XLS_FMT_EUR);
     setColNumFmt(wsResumen, 8, resumenRows.length, XLS_FMT_EUR);
+    setColNumFmt(wsResumen, 9, resumenRows.length, XLS_FMT_EUR);
+    setColNumFmt(wsResumen, 10, resumenRows.length, XLS_FMT_EUR);
     XLSX.utils.book_append_sheet(wb, wsResumen, "Resumen");
 
     // --- Hoja "Tendencia mensual": total general por mes, las 3 unidades ---
     const kgPorMes = new Map((data.mensual.totalKg ?? []).map((m) => [m.sortKey, m]));
     const importePorMes = new Map((data.mensual.totalImporte ?? []).map((m) => [m.sortKey, m]));
+    const unidadObraPorMes = new Map((data.mensual.totalUnidadObra ?? []).map((m) => [m.sortKey, m]));
     const tendenciaRows = data.mensual.total.map((m) => ({
       Mes: m.mes,
       "Ud. Previsión": m.previsto,
@@ -285,15 +302,19 @@ function ComprasV2PagePanel() {
       "Kg Real": kgPorMes.get(m.sortKey)?.real ?? "",
       "Importe Previsión (€)": importePorMes.get(m.sortKey)?.previsto ?? "",
       "Importe Real (€)": importePorMes.get(m.sortKey)?.real ?? "",
+      "Ud. obra Previsión (€)": unidadObraPorMes.get(m.sortKey)?.previsto ?? "",
+      "Ud. obra Real (€)": unidadObraPorMes.get(m.sortKey)?.real ?? "",
     }));
     const wsTendencia = XLSX.utils.json_to_sheet(tendenciaRows);
-    wsTendencia["!cols"] = [{ wch: 10 }, { wch: 14 }, { wch: 14 }, { wch: 12 }, { wch: 12 }, { wch: 16 }, { wch: 16 }];
+    wsTendencia["!cols"] = [{ wch: 10 }, { wch: 14 }, { wch: 14 }, { wch: 12 }, { wch: 12 }, { wch: 16 }, { wch: 16 }, { wch: 18 }, { wch: 18 }];
     setColNumFmt(wsTendencia, 1, tendenciaRows.length, XLS_FMT_UD);
     setColNumFmt(wsTendencia, 2, tendenciaRows.length, XLS_FMT_UD);
     setColNumFmt(wsTendencia, 3, tendenciaRows.length, XLS_FMT_KG);
     setColNumFmt(wsTendencia, 4, tendenciaRows.length, XLS_FMT_KG);
     setColNumFmt(wsTendencia, 5, tendenciaRows.length, XLS_FMT_EUR);
     setColNumFmt(wsTendencia, 6, tendenciaRows.length, XLS_FMT_EUR);
+    setColNumFmt(wsTendencia, 7, tendenciaRows.length, XLS_FMT_EUR);
+    setColNumFmt(wsTendencia, 8, tendenciaRows.length, XLS_FMT_EUR);
     XLSX.utils.book_append_sheet(wb, wsTendencia, "Tendencia mensual");
 
     // --- Hoja "Detalle": familia > canal > artículo aplanado ---
@@ -311,18 +332,21 @@ function ComprasV2PagePanel() {
           "Kg Real": a.kg?.real ?? "",
           "Importe Previsión (€)": a.importe?.previsto ?? "",
           "Importe Real (€)": a.importe?.real ?? "",
+          "Ud. obra Previsión (€)": a.unidadObra?.previsto ?? "",
+          "Ud. obra Real (€)": a.unidadObra?.real ?? "",
         }))
       )
     );
     const wsDetalle = XLSX.utils.json_to_sheet(detalleRows);
     wsDetalle["!cols"] = [
-      { wch: 22 }, { wch: 18 }, { wch: 12 }, { wch: 28 }, { wch: 12 }, { wch: 12 }, { wch: 12 }, { wch: 12 }, { wch: 12 }, { wch: 16 }, { wch: 16 },
+      { wch: 22 }, { wch: 18 }, { wch: 12 }, { wch: 28 }, { wch: 12 }, { wch: 12 }, { wch: 12 }, { wch: 12 }, { wch: 12 }, { wch: 16 }, { wch: 16 }, { wch: 18 }, { wch: 18 },
     ];
     const n = detalleRows.length;
     setColNumFmt(wsDetalle, 4, n, XLS_FMT_UD); setColNumFmt(wsDetalle, 5, n, XLS_FMT_UD);
     setColNumFmt(wsDetalle, 6, n, XLS_FMT_PCT);
     setColNumFmt(wsDetalle, 7, n, XLS_FMT_KG); setColNumFmt(wsDetalle, 8, n, XLS_FMT_KG);
     setColNumFmt(wsDetalle, 9, n, XLS_FMT_EUR); setColNumFmt(wsDetalle, 10, n, XLS_FMT_EUR);
+    setColNumFmt(wsDetalle, 11, n, XLS_FMT_EUR); setColNumFmt(wsDetalle, 12, n, XLS_FMT_EUR);
     XLSX.utils.book_append_sheet(wb, wsDetalle, "Detalle");
 
     XLSX.writeFile(wb, `Compras_${tipo}${sabor ? `_${sabor}` : ""}_${range.startDate}_${range.endDate}.xlsx`);
@@ -363,7 +387,7 @@ function ComprasV2PagePanel() {
             actual={{ filtros: { tipo, sabor, unit }, fechas: range }}
             granularidad="mes"
             onAplicar={aplicarPreset}
-            describir={(f) => [f.tipo === "PN" ? "Original (PN)" : f.tipo === "PM" ? "Modificada (PM)" : null, f.sabor || "Todos los sabores", f.unit].filter(Boolean).join(" · ")}
+            describir={(f) => [f.tipo === "PN" ? "Original (PN)" : f.tipo === "PM" ? "Modificada (PM)" : null, f.sabor || "Todos los sabores", f.unit && (UNIT_LABEL[f.unit] ?? f.unit)].filter(Boolean).join(" · ")}
           />
         </div>
         <div className="flex items-center gap-3">
@@ -379,6 +403,7 @@ function ComprasV2PagePanel() {
               <TabsTrigger value="unidades">Unidades</TabsTrigger>
               <TabsTrigger value="kg">Kg</TabsTrigger>
               <TabsTrigger value="importe">Importe</TabsTrigger>
+              <TabsTrigger value="unidadObra">Ud. obra</TabsTrigger>
             </TabsList>
           </Tabs>
           <Button size="sm" className="gap-1.5" onClick={exportToExcel} disabled={!data}>
@@ -409,7 +434,7 @@ function ComprasV2PagePanel() {
             unit={unit}
             drill={drill}
             onDrillChange={setDrill}
-            total={{ unidades: data.resumen.unidades, kg: data.resumen.kg, importe: data.resumen.importe }}
+            total={{ unidades: data.resumen.unidades, kg: data.resumen.kg, importe: data.resumen.importe, unidadObra: data.resumen.unidadObra }}
           />
 
           {data.resumen.articulosSinGramaje.length > 0 && (
@@ -423,6 +448,12 @@ function ComprasV2PagePanel() {
               {data.resumen.articulosSinCoste.length} artículo(s) sin coste (F4105) — su importe previsto
               no se puede calcular (queda en 0); su importe real sí se cuenta con normalidad:{" "}
               {data.resumen.articulosSinCoste.join(", ")}
+            </p>
+          )}
+          {data.resumen.articulosSinUnidadObra.length > 0 && (
+            <p className="text-sm text-muted-foreground">
+              {data.resumen.articulosSinUnidadObra.length} artículo(s) sin unidad de obra (X2 en F30026, ledger 07) — no
+              entran en los totales de Ud. obra: {data.resumen.articulosSinUnidadObra.join(", ")}
             </p>
           )}
         </>

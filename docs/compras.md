@@ -62,6 +62,7 @@ resolver códigos a descripciones:
 | `F3460` | Previsión (`MFDRQJ`, `MFFQT`) | Igual, más `MFDRQJ` ahora usado para bucket mensual (antes solo se sumaba el periodo completo) |
 | `F4211` | Venta real (`SDADDJ`, `SDSOQS`, `SDUPRC`) | Mismo filtro (`SDDCTO != 'ST'`, `SDADDJ != 0`). Campo de cantidad cambiado de `SDUORG` (el que usaba la versión anterior) a `SDSOQS` |
 | `F4105` | Coste (`COUNCS`, `COLEDG_VIGENTE` constante) | Igual |
+| `F30026` | Unidad de obra: componente de coste `X2` (`IECSL`), planta `10999`, ledger `07` | Nuevo (ver §3.6) |
 | `F4101` | Familia (`IMSRP2`) | **Antes se mostraba el código crudo** (`IMSRP2`, ej. `"101"`) sin resolver. Ahora se resuelve contra `prodctl.f0005` (UDC `41`/`S2`) — bug real encontrado solo con datos reales, ver §8 |
 | `F554101` | Canal (`AAZE06`) + gramaje (`AAZE03`) | Antes no había canal — se usaba **Marca** (`F4101.IMSRP4`) como segunda dimensión. Ahora se usa **Canal**, un campo distinto (ver §3.1) |
 | `prodctl.f0005` | Catálogo UDC — `41/S2` (familia), `17/B6` (canal) | Nuevo. Resuelve código → descripción legible, nunca se muestra el código crudo |
@@ -109,11 +110,43 @@ real     = Σ (SDSOQS/100 × SDUPRC/10000)              (línea a línea, NUNCA 
 Igual que antes (§4 de `docs/compras-v1-historico.md`): el precio de venta real no es el
 coste presupuestado, así que el importe real nunca sale de multiplicar cantidad×coste.
 
+### 3.6 Unidades de obra (€) — X2 del ledger 07 de `F30026`
+
+Pestaña **«Ud. obra»**. A diferencia del importe, es la **misma operación en los dos
+lados** (como los kg):
+
+```
+previsto = unidades_previstas × X2
+real     = unidades_reales    × X2
+X2       = F30026.IECSL / 10000   (IEMMCU = 10999, IELEDG = '07', IECOST = 'X2', IEITM = artículo corto)
+```
+
+**Por qué el ledger `07` y no `P6`** (el `COLEDG_VIGENTE` que usa el Importe): muchos
+artículos 12 no tienen X2 propio — su ruta no lo genera, lo hereda del 11 que consumen.
+En `F30026` cada componente de coste tiene un importe de **este nivel** (`IESTDC`) y un
+**total** (`IECSL` = este nivel + niveles inferiores):
+
+- En `07` la acumulación de costes mantiene separados los componentes: el 12 tiene fila
+  `X2` con `IESTDC = 0` e `IECSL > 0` (el X2 del 11). Es lo que enseña el informe BIP
+  «Costes de Producción», que lee `IECSL`.
+- En `P6` el coste completo del 11 (A1 + X) entra dentro del **A1** del 12, y el 12 se
+  queda sin fila `X2`.
+
+Comprobado contra Oracle (noviembre 2026, previsión `PN` de 2026, planta 10999): de 100
+artículos 12 con previsión, **95** tienen X2 en `07` y solo **56** en `P6`. Los 5 sin X2
+en `07`: dos minitortillas `99…` sin lista de materiales (no tienen X2 en ningún
+ledger, es lo esperado) y tres 12 que solo lo tienen en otros ledgers — se decidió
+**no** completar con `P6` para no mezclar versiones de coste.
+
+Un artículo sin X2 (o con X2 = 0) queda con `unidadObra: null`, se excluye de las sumas
+de Ud. obra en todos los niveles y se lista en `resumen.articulosSinUnidadObra` (aviso
+bajo la tabla). `LEDGER_UNIDAD_OBRA` es fijo: no cambia cada año como `COLEDG_VIGENTE`.
+
 ---
 
 ## 4. Agregación bottom-up (`aggregate()` en `api/compras/route.ts`)
 
-Artículo → Canal → Familia → Total, en las 3 unidades (Unidades/Kg/Importe) y en series
+Artículo → Canal → Familia → Total, en las 4 unidades (Unidades/Kg/Importe/Ud. obra) y en series
 mensuales, con una única función `aggregate()` usada **tanto para datos reales como para
 el modo `?mock=1`** — los totales cuadran por construcción en ambos casos, no hay dos
 implementaciones que puedan desincronizarse.
@@ -122,9 +155,13 @@ implementaciones que puedan desincronizarse.
   Kg en todos los niveles que lo contienen; se reporta en `resumen.articulosSinGramaje`.
 - Un artículo sin coste (`F4105`) se excluye igual de las sumas de Importe; se reporta en
   `resumen.articulosSinCoste`.
+- Un artículo sin X2 (`F30026`, ledger `07`) se excluye de las sumas de Ud. obra; se
+  reporta en `resumen.articulosSinUnidadObra` (§3.6). Kg y Ud. obra comparten
+  `mensualPorFactorDe()` (unidades × factor fijo del artículo) y `sumaMetricas()`.
 - **A diferencia de la versión anterior, no hay avisos por artículo+mes**
   (`"Sin previsión este mes"`, `"Sin venta este mes"`...) — solo estas dos listas a nivel
   de artículo completo. Gap conocido, ver §9.
+  (Ahora son tres listas, con la de unidades de obra.)
 
 ### 4.1 Orden de familias
 
@@ -200,7 +237,7 @@ garantía de "misma función para ambos caminos". **No genera entrada en `query_
 - **Exportación a Excel**: mismo patrón de `xlsx` que la versión anterior (§6.1 de
   `docs/compras-v1-historico.md`, number format nativo, sin color/negrita), adaptado a 3
   hojas (Resumen por familia, Tendencia mensual, Detalle familia›canal›artículo) y a las
-  3 unidades.
+  4 unidades (Unidades, Kg, Importe y Ud. obra).
 - **Header compartido (`topbar-02`) conectado a la sesión real**: el bloque instalado tal
   cual traía logo/avatar/notificaciones de ejemplo (en inglés, sin ninguna conexión a la
   app). `<Header>` acepta `user`/`onLogout`/`onPresetsClick` — la página los obtiene con
@@ -258,30 +295,32 @@ Respuesta (resumida — ver `app/api/compras/route.ts` para el detalle completo 
       "unidades": { "previsto": 605200, "real": 653170, "desviacionAbs": 47970, "desviacionPct": 7.9 },
       "kg": { "previsto": 425640, "real": 461510, "desviacionAbs": 35870, "desviacionPct": 8.4 },
       "importe": { "previsto": 1417832, "real": 1523940, "desviacionAbs": 106108, "desviacionPct": 7.5 },
+      "unidadObra": { "previsto": 60516, "real": 65134, "desviacionAbs": 4618, "desviacionPct": 7.6 },
       "canales": [
         {
           "tipo": "canal", "canal": "HOR", "canalLabel": "Horeca",
-          "unidades": { "...": "..." }, "kg": { "...": "..." }, "importe": { "...": "..." },
+          "unidades": { "...": "..." }, "kg": { "...": "..." }, "importe": { "...": "..." }, "unidadObra": { "...": "..." },
           "articulos": [
             { "tipo": "articulo", "item": "1210100009", "descripcion": "TORT CHORIZO 600g FR BF",
-              "unidades": { "...": "..." }, "kg": { "...": "..." }, "importe": { "...": "..." } }
+              "unidades": { "...": "..." }, "kg": { "...": "..." }, "importe": { "...": "..." }, "unidadObra": { "...": "..." } }
           ]
         }
       ]
     }
   ],
   "resumen": {
-    "unidades": { "...": "..." }, "kg": { "...": "..." }, "importe": { "...": "..." },
+    "unidades": { "...": "..." }, "kg": { "...": "..." }, "importe": { "...": "..." }, "unidadObra": { "...": "..." },
     "totalFamilias": 6, "familiasFueraDeUmbral": 2, "umbralPct": 10,
-    "articulosSinGramaje": [], "articulosSinCoste": []
+    "articulosSinGramaje": [], "articulosSinCoste": [], "articulosSinUnidadObra": []
   },
   "mensual": {
     "total": [ { "sortKey": "2025-09", "mes": "sep", "previsto": 57500, "real": 65300, "importeReal": 0 } ],
-    "totalKg": [ "..." ], "totalImporte": [ "..." ],
+    "totalKg": [ "..." ], "totalImporte": [ "..." ], "totalUnidadObra": [ "..." ],
     "porFamilia": { "Tortilla": [ "..." ] },
     "porFamiliaCanal": { "Tortilla::HOR": [ "..." ] },
     "kgPorFamilia": { "...": "..." }, "kgPorFamiliaCanal": { "...": "..." },
-    "importePorFamilia": { "...": "..." }, "importePorFamiliaCanal": { "...": "..." }
+    "importePorFamilia": { "...": "..." }, "importePorFamiliaCanal": { "...": "..." },
+    "unidadObraPorFamilia": { "...": "..." }, "unidadObraPorFamiliaCanal": { "...": "..." }
   }
 }
 ```
