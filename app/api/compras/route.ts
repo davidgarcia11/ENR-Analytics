@@ -31,8 +31,17 @@ import { verifySession } from '@/lib/auth';
 //   F4105, su importe PREVISTO queda a 0 (no hay con qué calcularlo) — se reporta en
 //   `articulosSinCoste` — pero su importe REAL se suma con normalidad: no depende del
 //   coste, solo de F4211. (Bug real corregido: antes se excluía también el real.)
+// - Unidades de obra (€): previsto Y real = unidades × X2 unitario (F30026, planta 10999,
+//   ledger 07, IECOST='X2', IECSL = TOTAL de este nivel + niveles inferiores). Mismo
+//   factor para los dos lados (como kg, no como importe). Ledger 07 y no P6 (el de
+//   COLEDG_VIGENTE): en P6 el X de un 11 va metido dentro del A1 del 12 y el 12 se queda
+//   sin fila X2; en 07 la acumulación mantiene el X2 heredado del 11 como X2 (comprobado
+//   con datos reales: 95 de 100 artículos 12 con previsión 2026 tienen X2 en 07, solo 56
+//   en P6). Sin X2 -> `null`, se excluye de las sumas y se reporta en
+//   `articulosSinUnidadObra`. Ver docs/compras.md §3.6.
 // - Mensual (para "Evolución mensual"): misma lógica de abajo arriba, por mes, a 3
-//   niveles (total, por familia, por familia+canal) en unidades, kg e importe.
+//   niveles (total, por familia, por familia+canal) en unidades, kg, importe y
+//   unidades de obra.
 //
 // Modo de datos de ejemplo: ?mock=1 devuelve una jerarquía completa generada en código
 // (sin tocar Oracle). Usa la MISMA función de agregación que el camino real. Solo
@@ -48,6 +57,10 @@ const SIN_SABOR = 'Sin sabor';
 // y no hay un patrón año->código confirmado. Actualizar a mano cada enero — mismo
 // mecanismo que api/compras/route.ts (v1), ver docs/compras.md §3.4.
 const COLEDG_VIGENTE = 'P6';
+// Unidad de obra: componente de coste X2 del ledger de coste estándar (07) de F30026.
+// Fijo, no cambia cada año como COLEDG_VIGENTE — ver la nota de cabecera.
+const LEDGER_UNIDAD_OBRA = '07';
+const COSTE_UNIDAD_OBRA = 'X2';
 
 // Orden fijo de familias (no alfabético) para que tabla y gráfico de desviación se
 // puedan cruzar fila a fila. Familias que aparezcan en los datos pero no en esta lista
@@ -88,6 +101,7 @@ interface ArticuloAgg {
   canal: string | null;
   gramaje: number | null;
   costeUnitario: number | null; // F4105.COUNCS — foto por artículo, sin mes propio
+  unidadObra: number | null; // € de X2 por unidad (F30026, ledger 07) — foto por artículo, sin mes propio
   meses: MesPunto[]; // el total del periodo es la suma de estos meses (nunca un dato aparte)
 }
 
@@ -134,14 +148,30 @@ function mensualDe(articulos: { meses: { sortKey: string; mes: string; previsto:
     .map(([sortKey, v]) => ({ sortKey, ...v, importeReal: 0 }));
 }
 
+// Serie mensual de una magnitud que es "unidades × factor fijo del artículo" en los
+// dos lados (kg = gramaje/1000, unidades de obra = X2). Los artículos sin factor se
+// excluyen; si no queda ninguno, `null` (no hay dato, no es un 0).
+function mensualPorFactorDe(articulos: ArticuloAgg[], factor: (a: ArticuloAgg) => number | null): MesPunto[] | null {
+  const conFactor = articulos.flatMap((a) => {
+    const f = factor(a);
+    return f == null ? [] : [{ ...a, meses: a.meses.map((m) => ({ ...m, previsto: m.previsto * f, real: m.real * f })) }];
+  });
+  return conFactor.length > 0 ? mensualDe(conFactor) : null;
+}
+
 function mensualKgDe(articulos: ArticuloAgg[]): MesPunto[] | null {
-  const conGramaje = articulos.filter((a) => a.gramaje != null);
-  if (conGramaje.length === 0) return null;
-  const enKg = conGramaje.map((a) => ({
-    ...a,
-    meses: a.meses.map((m) => ({ ...m, previsto: (m.previsto * a.gramaje!) / 1000, real: (m.real * a.gramaje!) / 1000 })),
-  }));
-  return mensualDe(enKg);
+  return mensualPorFactorDe(articulos, (a) => (a.gramaje != null ? a.gramaje / 1000 : null));
+}
+
+function mensualUnidadObraDe(articulos: ArticuloAgg[]): MesPunto[] | null {
+  return mensualPorFactorDe(articulos, (a) => a.unidadObra);
+}
+
+// Suma de métricas opcionales (kg, unidades de obra): las `null` no cuentan; si todas
+// lo son, el resultado es `null`.
+function sumaMetricas(metricas: (Metric | null)[]): Metric | null {
+  const con = metricas.filter((m): m is Metric => m != null);
+  return con.length > 0 ? buildMetric(con.reduce((s, m) => s + m.previsto, 0), con.reduce((s, m) => s + m.real, 0)) : null;
 }
 
 // Igual patrón que mensualKgDe, pero asimétrico: previsto = unidades del mes × coste
@@ -168,6 +198,7 @@ function mensualImporteDe(articulos: ArticuloAgg[]): MesPunto[] | null {
 function aggregate(articulos: ArticuloAgg[], umbralPct: number, canalLabels: Map<string, string>) {
   const articulosSinGramaje = new Set<string>();
   const articulosSinCoste = new Set<string>();
+  const articulosSinUnidadObra = new Set<string>();
 
   const familiaMap = new Map<string, Map<string | null, ArticuloAgg[]>>();
   for (const a of articulos) {
@@ -177,6 +208,7 @@ function aggregate(articulos: ArticuloAgg[], umbralPct: number, canalLabels: Map
     canalMap.get(a.canal)!.push(a);
     if (a.gramaje == null) articulosSinGramaje.add(a.item);
     if (a.costeUnitario == null) articulosSinCoste.add(a.item);
+    if (a.unidadObra == null) articulosSinUnidadObra.add(a.item);
   }
 
   const mensualPorFamilia: Record<string, MesPunto[]> = {};
@@ -185,6 +217,8 @@ function aggregate(articulos: ArticuloAgg[], umbralPct: number, canalLabels: Map
   const mensualKgPorFamiliaCanal: Record<string, MesPunto[] | null> = {};
   const mensualImportePorFamilia: Record<string, MesPunto[] | null> = {};
   const mensualImportePorFamiliaCanal: Record<string, MesPunto[] | null> = {};
+  const mensualUnidadObraPorFamilia: Record<string, MesPunto[] | null> = {};
+  const mensualUnidadObraPorFamiliaCanal: Record<string, MesPunto[] | null> = {};
 
   const familias = Array.from(familiaMap.entries()).map(([familia, canalMap]) => {
     const articulosFamilia: ArticuloAgg[] = [];
@@ -196,7 +230,8 @@ function aggregate(articulos: ArticuloAgg[], umbralPct: number, canalLabels: Map
         const kg = a.gramaje != null ? buildMetric((t.previsto * a.gramaje) / 1000, (t.real * a.gramaje) / 1000) : null;
         const importeTotal = totalImporteArticulo(a);
         const importe = buildMetric(importeTotal.previsto, importeTotal.real);
-        return { tipo: 'articulo' as const, item: a.item, descripcion: a.descripcion, gramaje: a.gramaje, unidades, kg, importe };
+        const unidadObra = a.unidadObra != null ? buildMetric(t.previsto * a.unidadObra, t.real * a.unidadObra) : null;
+        return { tipo: 'articulo' as const, item: a.item, descripcion: a.descripcion, gramaje: a.gramaje, unidades, kg, importe, unidadObra };
       });
 
       const unidadesCanal = buildMetric(
@@ -211,6 +246,7 @@ function aggregate(articulos: ArticuloAgg[], umbralPct: number, canalLabels: Map
       const importeCanal = conImporte.length > 0
         ? buildMetric(conImporte.reduce((s, r) => s + r.importe!.previsto, 0), conImporte.reduce((s, r) => s + r.importe!.real, 0))
         : null;
+      const unidadObraCanal = sumaMetricas(articulosRow.map((r) => r.unidadObra));
 
       // Mismo sentinel que components/nova/hierarchical-table.tsx (toTree) y el
       // estado `drill` de la página — una sola forma de nombrar "sin canal" en todo
@@ -219,9 +255,10 @@ function aggregate(articulos: ArticuloAgg[], umbralPct: number, canalLabels: Map
       mensualPorFamiliaCanal[claveCanal] = mensualDe(arts);
       mensualKgPorFamiliaCanal[claveCanal] = mensualKgDe(arts);
       mensualImportePorFamiliaCanal[claveCanal] = mensualImporteDe(arts);
+      mensualUnidadObraPorFamiliaCanal[claveCanal] = mensualUnidadObraDe(arts);
 
       const canalLabel = canal ? (canalLabels.get(canal) ?? canal) : 'Sin canal';
-      return { tipo: 'canal' as const, canal, canalLabel, unidades: unidadesCanal, kg: kgCanal, importe: importeCanal, articulos: articulosRow };
+      return { tipo: 'canal' as const, canal, canalLabel, unidades: unidadesCanal, kg: kgCanal, importe: importeCanal, unidadObra: unidadObraCanal, articulos: articulosRow };
     });
 
     const unidadesFamilia = buildMetric(
@@ -236,12 +273,14 @@ function aggregate(articulos: ArticuloAgg[], umbralPct: number, canalLabels: Map
     const importeFamilia = canalesConImporte.length > 0
       ? buildMetric(canalesConImporte.reduce((s, c) => s + c.importe!.previsto, 0), canalesConImporte.reduce((s, c) => s + c.importe!.real, 0))
       : null;
+    const unidadObraFamilia = sumaMetricas(canales.map((c) => c.unidadObra));
 
     mensualPorFamilia[familia] = mensualDe(articulosFamilia);
     mensualKgPorFamilia[familia] = mensualKgDe(articulosFamilia);
     mensualImportePorFamilia[familia] = mensualImporteDe(articulosFamilia);
+    mensualUnidadObraPorFamilia[familia] = mensualUnidadObraDe(articulosFamilia);
 
-    return { tipo: 'familia' as const, familia, unidades: unidadesFamilia, kg: kgFamilia, importe: importeFamilia, canales };
+    return { tipo: 'familia' as const, familia, unidades: unidadesFamilia, kg: kgFamilia, importe: importeFamilia, unidadObra: unidadObraFamilia, canales };
   }).sort((a, b) => ordenFamilia(a.familia) - ordenFamilia(b.familia) || a.familia.localeCompare(b.familia));
 
   const totalU = buildMetric(
@@ -256,6 +295,7 @@ function aggregate(articulos: ArticuloAgg[], umbralPct: number, canalLabels: Map
   const totalImporte = familiasConImporte.length > 0
     ? buildMetric(familiasConImporte.reduce((s, f) => s + f.importe!.previsto, 0), familiasConImporte.reduce((s, f) => s + f.importe!.real, 0))
     : null;
+  const totalUnidadObra = sumaMetricas(familias.map((f) => f.unidadObra));
 
   const familiasFueraDeUmbral = familias.filter(
     (f) => f.unidades.desviacionPct != null && Math.abs(f.unidades.desviacionPct) > umbralPct
@@ -267,22 +307,27 @@ function aggregate(articulos: ArticuloAgg[], umbralPct: number, canalLabels: Map
       unidades: totalU,
       kg: totalKg,
       importe: totalImporte,
+      unidadObra: totalUnidadObra,
       totalFamilias: familias.length,
       familiasFueraDeUmbral,
       umbralPct,
       articulosSinGramaje: Array.from(articulosSinGramaje).sort(),
       articulosSinCoste: Array.from(articulosSinCoste).sort(),
+      articulosSinUnidadObra: Array.from(articulosSinUnidadObra).sort(),
     },
     mensual: {
       total: mensualDe(articulos),
       totalKg: mensualKgDe(articulos),
       totalImporte: mensualImporteDe(articulos),
+      totalUnidadObra: mensualUnidadObraDe(articulos),
       porFamilia: mensualPorFamilia,
       porFamiliaCanal: mensualPorFamiliaCanal,
       kgPorFamilia: mensualKgPorFamilia,
       kgPorFamiliaCanal: mensualKgPorFamiliaCanal,
       importePorFamilia: mensualImportePorFamilia,
       importePorFamiliaCanal: mensualImportePorFamiliaCanal,
+      unidadObraPorFamilia: mensualUnidadObraPorFamilia,
+      unidadObraPorFamiliaCanal: mensualUnidadObraPorFamiliaCanal,
     },
   };
 }
@@ -329,19 +374,19 @@ const MOCK_CANAL_LABELS = new Map([
 
 function getMockArticulos(): ArticuloAgg[] {
   const base = [
-    { item: '1210100009', descripcion: 'TORT CHORIZO 600g FR BF', familia: 'Tortilla', canal: 'HOR', gramaje: 600, coste: 2.1, unidadesPrevisto: 210000, unidadesReal: 228000 },
-    { item: '1210100010', descripcion: 'TORT CEBOLLA 1Kg FR BF', familia: 'Tortilla', canal: 'RET', gramaje: 1000, coste: 3.4, unidadesPrevisto: 250000, unidadesReal: 265000 },
-    { item: '1210100011', descripcion: 'TORT POMME T 500g TP GS', familia: 'Tortilla', canal: 'MLS', gramaje: 500, coste: 1.8, unidadesPrevisto: 145200, unidadesReal: 160170 },
-    { item: '1310200004', descripcion: 'PIM ASADO TIRAS 500g FR BF', familia: 'Pimiento asado', canal: 'RET', gramaje: 500, coste: 2.6, unidadesPrevisto: 22100, unidadesReal: 19370 },
-    { item: '1310200007', descripcion: 'PIM ASADO ENTERO 1Kg TP GS', familia: 'Pimiento asado', canal: 'RET', gramaje: 1000, coste: 4.2, unidadesPrevisto: 31000, unidadesReal: 25340 },
-    { item: '1310200011', descripcion: 'PIM ASADO TIRAS 800g FR BF', familia: 'Pimiento asado', canal: 'HOR', gramaje: 800, coste: 3.5, unidadesPrevisto: 85700, unidadesReal: 96030 },
-    { item: '1310200015', descripcion: 'PIM ASADO GRANEL 5Kg FR BF', familia: 'Pimiento asado', canal: null, gramaje: null, coste: null, unidadesPrevisto: 220200, unidadesReal: 252900 },
-    { item: '1410300002', descripcion: 'PREP PATATA GAJO 750g FR BF', familia: 'Preparados a base de patata', canal: 'HOR', gramaje: 750, coste: 1.5, unidadesPrevisto: 180000, unidadesReal: 181080 },
-    { item: '1410300006', descripcion: 'PREP PATATA CUBO 1Kg TP GS', familia: 'Preparados a base de patata', canal: 'MLPC', gramaje: 1000, coste: 1.9, unidadesPrevisto: 96000, unidadesReal: 96580 },
-    { item: '1510400003', descripcion: 'MIGAS TRADICIONAL 600g FR BF', familia: 'Migas', canal: 'RET', gramaje: 600, coste: 2.2, unidadesPrevisto: 140000, unidadesReal: 136360 },
-    { item: '1610500001', descripcion: 'VERDURAS SALTEADAS 500g FR BF', familia: 'Verduras', canal: 'MLS', gramaje: 500, coste: 2.0, unidadesPrevisto: 98000, unidadesReal: 109466 },
-    { item: '1610500005', descripcion: 'VERDURAS PARRILLA 400g TP GS', familia: 'Verduras', canal: 'EXP', gramaje: 400, coste: 1.7, unidadesPrevisto: 42000, unidadesReal: 46914 },
-    { item: '1710600002', descripcion: 'OTROS SURTIDO 300g FR BF', familia: 'Otros', canal: 'HOR', gramaje: 300, coste: 1.3, unidadesPrevisto: 61000, unidadesReal: 67405 },
+    { item: '1210100009', descripcion: 'TORT CHORIZO 600g FR BF', familia: 'Tortilla', canal: 'HOR', gramaje: 600, coste: 2.1, x2: 0.09, unidadesPrevisto: 210000, unidadesReal: 228000 },
+    { item: '1210100010', descripcion: 'TORT CEBOLLA 1Kg FR BF', familia: 'Tortilla', canal: 'RET', gramaje: 1000, coste: 3.4, x2: 0.12, unidadesPrevisto: 250000, unidadesReal: 265000 },
+    { item: '1210100011', descripcion: 'TORT POMME T 500g TP GS', familia: 'Tortilla', canal: 'MLS', gramaje: 500, coste: 1.8, x2: 0.08, unidadesPrevisto: 145200, unidadesReal: 160170 },
+    { item: '1310200004', descripcion: 'PIM ASADO TIRAS 500g FR BF', familia: 'Pimiento asado', canal: 'RET', gramaje: 500, coste: 2.6, x2: 0.1, unidadesPrevisto: 22100, unidadesReal: 19370 },
+    { item: '1310200007', descripcion: 'PIM ASADO ENTERO 1Kg TP GS', familia: 'Pimiento asado', canal: 'RET', gramaje: 1000, coste: 4.2, x2: 0.14, unidadesPrevisto: 31000, unidadesReal: 25340 },
+    { item: '1310200011', descripcion: 'PIM ASADO TIRAS 800g FR BF', familia: 'Pimiento asado', canal: 'HOR', gramaje: 800, coste: 3.5, x2: 0.11, unidadesPrevisto: 85700, unidadesReal: 96030 },
+    { item: '1310200015', descripcion: 'PIM ASADO GRANEL 5Kg FR BF', familia: 'Pimiento asado', canal: null, gramaje: null, coste: null, x2: null, unidadesPrevisto: 220200, unidadesReal: 252900 },
+    { item: '1410300002', descripcion: 'PREP PATATA GAJO 750g FR BF', familia: 'Preparados a base de patata', canal: 'HOR', gramaje: 750, coste: 1.5, x2: 0.06, unidadesPrevisto: 180000, unidadesReal: 181080 },
+    { item: '1410300006', descripcion: 'PREP PATATA CUBO 1Kg TP GS', familia: 'Preparados a base de patata', canal: 'MLPC', gramaje: 1000, coste: 1.9, x2: 0.07, unidadesPrevisto: 96000, unidadesReal: 96580 },
+    { item: '1510400003', descripcion: 'MIGAS TRADICIONAL 600g FR BF', familia: 'Migas', canal: 'RET', gramaje: 600, coste: 2.2, x2: 0.09, unidadesPrevisto: 140000, unidadesReal: 136360 },
+    { item: '1610500001', descripcion: 'VERDURAS SALTEADAS 500g FR BF', familia: 'Verduras', canal: 'MLS', gramaje: 500, coste: 2.0, x2: 0.08, unidadesPrevisto: 98000, unidadesReal: 109466 },
+    { item: '1610500005', descripcion: 'VERDURAS PARRILLA 400g TP GS', familia: 'Verduras', canal: 'EXP', gramaje: 400, coste: 1.7, x2: 0.06, unidadesPrevisto: 42000, unidadesReal: 46914 },
+    { item: '1710600002', descripcion: 'OTROS SURTIDO 300g FR BF', familia: 'Otros', canal: 'HOR', gramaje: 300, coste: 1.3, x2: 0.05, unidadesPrevisto: 61000, unidadesReal: 67405 },
   ];
   return base.map((b) => ({
     item: b.item,
@@ -350,6 +395,7 @@ function getMockArticulos(): ArticuloAgg[] {
     canal: b.canal,
     gramaje: b.gramaje,
     costeUnitario: b.coste,
+    unidadObra: b.x2,
     meses: repartirMeses(b.unidadesPrevisto, b.unidadesReal, b.coste),
   }));
 }
@@ -485,13 +531,25 @@ export async function GET(req: NextRequest) {
       WHERE COMCU = :planta AND COLEDG = :coledg AND TRIM(COLITM) IN (${longIdPlaceholders})
     `;
 
-    const [metaResult, extResult, canalCatalogResult, familiaCatalogResult, saborCatalogResult, costResult] = await Promise.all([
+    // H) Unidad de obra: X2 por unidad del ledger estándar 07 (F30026). IEITM es el
+    // artículo CORTO (mismo espacio que IMITM). IECSL es el TOTAL (este nivel + inferiores):
+    // es lo que lleva al 12 el X2 de su 11 (este nivel, IESTDC, vale 0 en esos 12). IEMMCU,
+    // IELEDG e IECOST son NCHAR con relleno -> TRIM.
+    const unidadObraSql = `
+      SELECT TRIM(IEITM) AS ITEM, IECSL AS X2_RAW
+      FROM F30026
+      WHERE TRIM(IEMMCU) = :plantaTxt AND TRIM(IELEDG) = :ledger AND TRIM(IECOST) = :coste
+        AND IEITM IN (${idPlaceholders})
+    `;
+
+    const [metaResult, extResult, canalCatalogResult, familiaCatalogResult, saborCatalogResult, costResult, unidadObraResult] = await Promise.all([
       conn.execute(metaSql, idBinds),
       conn.execute(extSql, idBinds),
       conn.execute(canalCatalogSql),
       conn.execute(familiaCatalogSql),
       conn.execute(saborCatalogSql),
       conn.execute(costSql, { planta: PLANTA_PRESUPUESTOS, coledg: COLEDG_VIGENTE, ...longIdBinds }),
+      conn.execute(unidadObraSql, { plantaTxt: String(PLANTA_PRESUPUESTOS), ledger: LEDGER_UNIDAD_OBRA, coste: COSTE_UNIDAD_OBRA, ...idBinds }),
     ]);
 
     const canalLabels = new Map<string, string>();
@@ -542,6 +600,14 @@ export async function GET(req: NextRequest) {
       if (!costeMap.has(item)) costeMap.set(item, (r.COSTE_RAW || 0) / 10000);
     });
 
+    // X2 a 0 se trata como "sin X2": así aparece en el aviso en vez de sumar 0 sin avisar.
+    const unidadObraMap = new Map<string, number>();
+    (unidadObraResult.rows as any[]).forEach((r) => {
+      const item = String(r.ITEM).trim();
+      const x2 = (r.X2_RAW || 0) / 10000;
+      if (x2 !== 0 && !unidadObraMap.has(item)) unidadObraMap.set(item, x2);
+    });
+
     // Acumulador por artículo largo x mes (parseJdeDate ya resuelve el año/mes real).
     const porArticulo = new Map<string, Map<string, { previsto: number; real: number; importeReal: number }>>();
     const getBucketMes = (item: string, sortKey: string) => {
@@ -584,6 +650,7 @@ export async function GET(req: NextRequest) {
         canal: canalMap.get(corto) ?? null,
         gramaje: gramajeMap.get(corto) ?? null,
         costeUnitario: costeMap.get(item) ?? null,
+        unidadObra: unidadObraMap.get(corto) ?? null,
         meses,
       };
     });
