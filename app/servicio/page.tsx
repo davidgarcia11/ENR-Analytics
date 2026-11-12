@@ -10,7 +10,7 @@ import { Download, Filter, Loader2, Tags } from "lucide-react";
 import NovaPanelShell from "@/components/nova/panel-shell";
 import Statistics from "@/components/shadcn-space/blocks/statistics-04/statistics";
 import ServicioIndicadores from "@/components/nova/servicio-indicadores";
-import ServicioTable, { type CatalogosServicio, type EnvioDto, type PatchEnvio, ENTREGA_LABEL } from "@/components/nova/servicio-table";
+import ServicioTable, { type CatalogosServicio, type EnvioDto, type FiltrosTabla, type PatchEnvio, ENTREGA_LABEL, FILTROS_TABLA_INICIALES } from "@/components/nova/servicio-table";
 import DateRangePicker, { type DateRange } from "@/components/nova/date-range-picker";
 import ServicioClientesFiltro, { type OpcionCliente, type OpcionFiltro, type TextosFiltro } from "@/components/nova/servicio-clientes-filtro";
 import NovaPresets, { useNovaPresets } from "@/components/nova/presets";
@@ -57,6 +57,9 @@ function ServicioPagePanel() {
   // Opciones de los desplegables (motivos, responsables, transportistas): se editan en /admin → Listas de servicio
   const [catalogos, setCatalogos] = useState<CatalogosServicio>({ motivos: [], responsables: [], transportistas: [] });
   const [vista, setVista] = useState<"seguimiento" | "indicadores">("seguimiento");
+  // Filtros de la tabla de envíos (buscador, estado, incidencia, página): aquí para que sigan igual al ir a
+  // Indicadores y volver. Indicadores no los aplica: usa solo los de arriba (fechas, clientes, tipos).
+  const [filtrosTabla, setFiltrosTabla] = useState<FiltrosTabla>(FILTROS_TABLA_INICIALES);
   // /servicio?mock=1: entregas ficticias de ene–jul 2024 (sin Oracle ni SQLite). Los cambios
   // del lápiz solo quedan en pantalla. Se lee en el efecto de montaje para no desajustar la hidratación.
   const mockRef = useRef(false);
@@ -287,7 +290,7 @@ function ServicioPagePanel() {
                 <Statistics data={stats} columns={3} accion={boton} />
               )}</Compartible>
               <Compartible titulo="Envíos">{(boton) => (
-                <ServicioTable data={visibles ?? []} catalogos={catalogos} onSave={handleSave} accion={boton} />
+                <ServicioTable data={visibles ?? []} catalogos={catalogos} onSave={handleSave} accion={boton} filtros={filtrosTabla} onFiltros={setFiltrosTabla} />
               )}</Compartible>
             </>
           ) : (

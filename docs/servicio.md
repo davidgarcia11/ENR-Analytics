@@ -276,6 +276,7 @@ Para que el KPI no engañe:
 - **Presets:** los filtros guardados comunes de Nova (botón «Mis filtros», ver `components/nova/README.md` punto 15). En este panel guardan `{ clientes, excluir, tipos, excluirTipos }` (`excluir` es el «todos menos» de los clientes, con ese nombre porque es anterior al filtro de tipos; un filtro guardado sin `tipos` los coge todos) y, si se elige, las fechas (fijas o un periodo relativo como «Últimos 30 días»). `screen = 'servicio'`; en `?mock=1`, `'servicio-ejemplo'` para no mezclar clientes inventados con los reales. Los presets guardados con la v1.39.0 (solo `{ clientes }`) se siguen leyendo.
 - **Predeterminado:** el marcado con la estrella se aplica al abrir el panel, antes de la primera consulta (si trae fechas, se consulta directamente ese rango).
 - **Un cliente que ya no aparece** en el periodo sigue en el preset: no rompe nada, solo no se ve en la lista.
+- **Filtros de la tabla de envíos** (buscador, estado de entrega, «Con / sin incidencia» y la página): viven en la página (`FiltrosTabla`, `filtrosTabla` en `app/servicio/page.tsx`), no dentro de `ServicioTable`, para que **sigan igual al ir a Indicadores y volver** (al cambiar de sección la tabla se desmonta). Indicadores **no** los aplica: usa solo los de arriba (fechas, clientes, tipos), para que sus porcentajes sean siempre los de todos los pedidos. Cambiar un filtro de la tabla vuelve a la página 1. No se guardan en los presets ni al recargar.
 
 ## 18. Afectadas por artículo
 
