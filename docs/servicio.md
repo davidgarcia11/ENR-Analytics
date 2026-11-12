@@ -336,7 +336,7 @@ si son 3 o menos), «Datos de ejemplo» si es `?mock=1`, y «Uso interno · Gene
 - En producción (HTTP) solo se puede descargar; «Copiar» sale con HTTPS o en localhost.
 - Mecanismo y cómo ponerlo en otro panel: `components/nova/README.md` punto 16.
 
-## 21. Uds con incidencia = solo lo anotado, y restos del reparto por palet (v1.45.1)
+## 21. Uds con incidencia = solo lo anotado, y restos del reparto por palet (v1.46.2)
 
 Con datos reales, Indicadores marcaba cientos de veces más uds con incidencia que las anotadas a mano. Eran
 dos fallos:
@@ -351,3 +351,33 @@ dos fallos:
 - **Lo anotado se contaba dos veces.** Las uds con incidencia eran lo no enviado más lo anotado, y al anotar
   una incidencia se ponen como afectadas justo las unidades que faltan. Ahora **las uds y cajas con
   incidencia son solo las anotadas** (`calcularKpis`).
+
+## 22. Pedidos duplicados: uno enviado y otro cancelado entero
+
+A veces un pedido entra dos veces en JDE (dos `SDDOCO` distintos con la misma referencia del cliente,
+`SDVR01`): uno se sirve y el otro se cancela entero. El cancelado no es un incumplimiento, pero contaba como
+pedido vencido sin enviar y bajaba el % Completo y el OTIF.
+
+**Regla** (`detectarDuplicados`, `lib/servicio.ts`): un pedido es **duplicado** si
+
+1. está **cancelado entero**: todas sus líneas tienen unidades canceladas (`SDSOCN` > 0) y no se ha enviado
+   nada (`pedidosCanceladosEnteros`), y
+2. otro pedido del **mismo cliente** (`SDAN8`) y con la **misma `SDVR01`** tiene algo enviado (su gemelo).
+
+Sin `SDVR01` nunca se marca. Una cancelación sin gemelo sigue contando como incumplida (§21).
+
+**Gemelo fuera del rango.** Si el gemelo enviado tiene la fecha prometida fuera del rango elegido, no está en
+las líneas cargadas. Para esos casos la API hace una consulta más a F4211 (solo lectura, con variables de
+enlace): los pedidos con algo enviado (`SDADDJ` > 0 y `SDSOQS` > 0, líneas de stock) de esos `SDAN8` y
+`SDVR01`, sin filtro de fecha. Solo se lanza si queda algún cancelado entero sin gemelo en el rango, que es
+lo raro.
+
+**Qué se ve:**
+
+- En la tabla de envíos sale, con la etiqueta **«Duplicado — de <pedido> · fuera de KPI»** en la columna
+  Estado. La barra del pedido es la suya (nada enviado).
+- **No cuenta en ningún KPI** (`calcularKpis` lo quita antes de evaluar: ni evaluado, ni abierto) ni en
+  Indicadores (por mes y canal, motivos y responsables). El KPI «% OTIF» indica cuántos duplicados se han
+  dejado fuera.
+- En el Excel, Estado = «Duplicado» y columna «Duplicado de».
+- Los datos de ejemplo (`?mock=1`) traen uno (pedido 999001, copia cancelada del 900001).

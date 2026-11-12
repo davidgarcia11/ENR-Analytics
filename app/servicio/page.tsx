@@ -168,7 +168,7 @@ function ServicioPagePanel() {
       Pedido: e.pedido, "Tipo pedido": e.tipoPedido, "Su pedido": e.suPedido, Cliente: e.clienteNombre, Destino: e.destinoNombre, Canal: e.canalLabel ?? "",
       Albarán: e.albaran || "", "Fecha envío": e.fechaEnvio ?? "",
       "Fecha prometida": e.fechaPrometida ?? "", "Fecha entrega real": e.fechaEntregaReal ?? "", "Uds enviadas": e.udsEnviadas,
-      "Uds pedidas (envío)": e.udsPedidas, "Cajas enviadas": Math.round(e.cajasEnviadas * 10) / 10, "Cajas pedidas (envío)": Math.round(e.cajasPedidas * 10) / 10, Transportista: e.transportista, Estado: ENTREGA_LABEL[e.entrega],
+      "Uds pedidas (envío)": e.udsPedidas, "Cajas enviadas": Math.round(e.cajasEnviadas * 10) / 10, "Cajas pedidas (envío)": Math.round(e.cajasPedidas * 10) / 10, Transportista: e.transportista, Estado: e.duplicadoDe ? "Duplicado" : ENTREGA_LABEL[e.entrega], "Duplicado de": e.duplicadoDe ?? "",
       Responsable: e.responsable, Motivo: e.motivo, Incidencia: e.incidencia, "Uds afectadas": e.udsAfectadas, "Cajas afectadas": e.cajasAfectadas,
     }));
     const wb = XLSX.utils.book_new();
@@ -199,7 +199,7 @@ function ServicioPagePanel() {
 
   const stats = kpis
     ? [
-        kpi("% OTIF", kpis.pctOtif, `${kpis.pedidos} pedidos evaluados`),
+        kpi("% OTIF", kpis.pctOtif, `${kpis.pedidos} pedidos evaluados${kpis.duplicados ? ` · ${kpis.duplicados} duplicado${kpis.duplicados === 1 ? "" : "s"} fuera` : ""}`),
         kpi("% A tiempo", kpis.pctATiempo, `${kpis.aTiempo} de ${kpis.pedidos} pedidos`),
         kpi("% Completo", kpis.pctCompleto, `${kpis.udsEnviadas.toLocaleString("es-ES")} de ${kpis.udsPedidas.toLocaleString("es-ES")} uds`),
       ]
