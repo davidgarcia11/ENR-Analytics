@@ -118,8 +118,9 @@ describe('indicadores', () => {
     expect(f.map((x) => `${x.mes}/${x.canal}`)).toEqual(['2024-03/HOR', '2024-04/EXP'])
     const hor = f[0].kpis
     expect(hor.pedidos).toBe(2)
-    expect(hor.udsIncidencia).toBe(5) // solo las 5 afectadas anotadas; las 10 no enviadas no suman aquí
-    expect(hor.pctOtifUds).toBeCloseTo(97.5, 1)
+    expect(hor.udsIncidencia).toBe(5) // solo las 5 afectadas anotadas
+    expect(hor.udsNoServidas).toBe(10) // las 10 no enviadas, en su propia columna
+    expect(hor.pctOtifUds).toBeCloseTo(95, 1) // 1 − máx(10, 5) / 200
     expect(hor.pctCompleto).toBe(50) // pero el pedido 2 no está completo
   })
   it('cuenta incidencias por motivo/responsable y por mes', () => {
@@ -223,7 +224,8 @@ describe('cancelaciones y cajas', () => {
     expect(contarIncidencias(d, 'motivo')).toEqual({})
     const k = resumenMensual(d, '2024-06-01')[0].kpis
     expect(k.udsIncidencia).toBe(0) // solo cuenta lo anotado a mano
-    expect(k.pctOtifUds).toBe(100)
+    expect(k.udsNoServidas).toBe(10)
+    expect(k.pctOtifUds).toBeCloseTo(90, 5) // pero lo no servido sí resta del OTIF en unidades
     expect(k.pctCompleto).toBe(0)
   })
   it('OTIF por cajas: solo las cajas afectadas anotadas, una sola vez aunque coincidan con lo no enviado', () => {
@@ -232,8 +234,18 @@ describe('cancelaciones y cajas', () => {
     const k = calcularKpis(resumirPedidos([e(1, 'a_tiempo'), e(2, 'a_tiempo'), e(3, 'a_tiempo', { cajasEnviadas: 8, udsEnviadas: 96, udsAfectadas: 24, cajasAfectadas: 2 }), e(4, 'a_tiempo')]), '2024-04-01')
     expect(k.cajasIncidencia).toBe(2)
     expect(k.udsIncidencia).toBe(24)
-    expect(k.pctOtifCajas).toBeCloseTo(95, 5) // 1 − 2/40
+    expect(k.pctOtifCajas).toBeCloseTo(95, 5) // 1 − máx(2, 2)/40
+    expect(k.cajasNoServidas).toBe(2)
+    expect(k.pctOtifUds).toBeCloseTo(95, 5) // 1 − máx(24, 24)/480: no se cuentan dos veces
     expect(k.pctCompleto).toBe(75)
+  })
+  it('OTIF en unidades: lo anotado de un pedido enviado entero (cajas rotas) también resta', () => {
+    const e = (pedido: number, o: any = {}) => ({ pedido, udsPedidas: 120, udsEnviadas: 120, cajasPedidas: 10, cajasEnviadas: 10, udsAfectadas: 0, fechaPrometida: '2024-03-04', entrega: 'a_tiempo' as const, ...o })
+    const k = calcularKpis(resumirPedidos([e(1, { udsAfectadas: 12, cajasAfectadas: 1 }), e(2, { udsEnviadas: 60, cajasEnviadas: 5, udsAfectadas: 12, cajasAfectadas: 1 })]), '2024-04-01')
+    expect(k.udsNoServidas).toBe(60)
+    expect(k.udsIncidencia).toBe(24)
+    expect(k.pctOtifUds).toBeCloseTo(100 - ((12 + 60) / 240) * 100, 5) // pedido 1: 12 rotas; pedido 2: máx(60, 12)
+    expect(k.pctOtifCajas).toBeCloseTo(100 - ((1 + 5) / 20) * 100, 5)
   })
 })
 

@@ -145,15 +145,15 @@ página), con `resumenMensual`, `contarIncidencias` e `incidenciasPorMes` de
 
 | Bloque | Sustituye en el Excel a | Notas |
 |---|---|---|
-| Tabla resumen mes × canal (con total por mes) | Tabla dinámica `TD % NS OTIF` | % a tiempo, % completo, % OTIF por pedido, uds pedidas, uds con incidencia, % OTIF uds. En rojo por debajo del 98 % |
+| Tabla resumen mes × canal (con total por mes) | Tabla dinámica `TD % NS OTIF` | % a tiempo, % completo, % OTIF por pedido, uds pedidas, uds no servidas, uds con incidencia, % OTIF uds, % OTIF cajas (ver §23). En rojo, solo % OTIF uds y cajas por debajo del 98 % (los % por pedido van sin color) |
 | Áreas del % OTIF por pedido, una por canal (`chart-16`) | Columnas OTIF de esa tabla | Línea de referencia en el 98 % |
 | Donut de incidencias por motivo (`chart-02`) | Tabla «Incidencias» | Cuenta envíos con motivo anotado: los 4 motivos más frecuentes y «Otros motivos» |
 | Barras de responsabilidad, últimos 3 meses (`chart-12`) | Gráfico circular 3D | El mes más reciente con datos y los 2 anteriores. Antes era el donut y motivos las barras; se intercambiaron a petición del negocio |
 | Barras apiladas por mes y motivo (`chart-01`) | — | Para ver si un motivo crece |
 
 **Uds con incidencia = solo las afectadas anotadas a mano** en «Editar datos» (decisión del negocio,
-nov. 2026; ver §21). **% OTIF en unidades** = 1 − uds con incidencia / uds pedidas (en cajas, igual).
-Lo no enviado no suma aquí: deja el pedido incompleto (% Completo y % OTIF por pedido). El objetivo del 98 % es el de Makro; Carrefour exige
+nov. 2026; ver §21). **% OTIF en unidades** = 1 − Σ máx(no servidas, anotadas) por pedido / uds pedidas (en cajas, igual; ver
+§23). El objetivo del 98 % es el de Makro; Carrefour exige
 el 99 % por cajas (irá por cliente al hacer la pestaña de penalizaciones).
 
 ## 9. Datos de ejemplo (`/servicio?mock=1`)
@@ -244,16 +244,16 @@ Para que el KPI no engañe:
 - **Con fecha real** (columna de la tabla de Indicadores): % de pedidos evaluados con todas sus fechas
   reales anotadas (`pctConFechaReal`); los demás cuentan como a tiempo con la fecha prometida. Hubo también
   una tarjeta KPI «Sin fecha real» (v1.43); se quitó a petición del negocio, así que las tarjetas son tres:
-  % OTIF, % A tiempo y % Completo.
+  % OTIF pedidos, % A tiempo y % OTIF uds (hasta la v1.46.3 la tercera era % Completo; ver §23).
 - **«Editar datos»:** si el envío no tiene fecha real, el campo sale relleno con la fecha prometida (con un
   aviso debajo); al guardar se queda anotada.
-- **% OTIF cajas** = 1 − cajas afectadas anotadas / cajas pedidas (las cajas afectadas son las anotadas o, si
-  solo se anotaron unidades, esas unidades pasadas a cajas). Carrefour mide por cajas y
+- **% OTIF cajas**: como el de unidades, pero en cajas (ver §23 para la fórmula actual). Las cajas afectadas
+  son las anotadas o, si solo se anotaron unidades, esas unidades pasadas a cajas. Carrefour mide por cajas y
   Makro por unidades.
 
 ## 16. Color de los KPI y afectadas en unidades o cajas
 
-- **Color de las tarjetas:** el % OTIF, el % A tiempo y el % Completo se pintan frente al objetivo
+- **Color de las tarjetas:** el % OTIF pedidos, el % A tiempo y el % OTIF uds se pintan frente al objetivo
   (`OBJETIVO_OTIF_PCT` = 98 %, `lib/servicio.ts`): verde si lo cumple, ámbar hasta 8 puntos por debajo y
   rojo si está más lejos. Cada una lleva una insignia con la distancia al objetivo («−3,9 pp»).
 - **Afectadas en unidades o en cajas:** en «Editar datos» el campo «Afectadas» tiene un selector
@@ -381,3 +381,29 @@ lo raro.
   dejado fuera.
 - En el Excel, Estado = «Duplicado» y columna «Duplicado de».
 - Los datos de ejemplo (`?mock=1`) traen uno (pedido 999001, copia cancelada del 900001).
+
+## 23. Uds no servidas y OTIF en unidades / cajas
+
+La tabla «Resumen por mes y canal» de Indicadores mostraba % Completo bajo (pedidos a los que les falta algo)
+con % OTIF uds al 100 %, porque el OTIF en unidades solo restaba lo anotado a mano (§21). Ahora:
+
+- **Uds no servidas** (columna nueva, `udsNoServidas`): pedidas − enviadas de cada pedido evaluado (nunca
+  negativo), sumado. Sale todo de JDE: incluye lo pendiente de un pedido vencido y lo cancelado de verdad.
+- **Uds con incidencia** (`udsIncidencia`): sigue siendo solo lo anotado en «Editar datos».
+- **% OTIF uds** = 1 − Σ máx(no servidas, anotadas) por pedido ÷ uds pedidas (`calcularKpis`).
+  - Lo **mayor de las dos, pedido a pedido**: al anotar una incidencia suelen poner como afectadas justo las
+    unidades que faltan, así que sumarlas contaría dos veces (el fallo de §21). Y las incidencias de lo que
+    sí se envió (p. ej. cajas rotas en un pedido completo) también restan.
+  - Ejemplos: faltan 10 y anotan 10 → resta 10; faltan 10 y anotan 5 → resta 10; no falta nada y anotan 6
+    rotas → resta 6.
+- **% OTIF cajas**: la misma regla en cajas (`cajasNoServidas`, `cajasIncidencia`). No tiene columna propia
+  de cajas no servidas; salen en el tooltip de la celda.
+
+Los abiertos y los duplicados (§22) no cuentan, igual que en el resto de KPI.
+
+**Tarjetas de arriba** (Seguimiento): a la izquierda **% OTIF pedidos** (`pctOtif`, a tiempo y completo
+por pedido) y a la derecha **% OTIF uds** (`pctOtifUds`), con «X no servidas · Y con incidencia de Z uds».
+La tarjeta % Completo se quitó: el % Completo sigue en la tabla de Indicadores.
+
+En la tabla de Indicadores solo se pintan en rojo (por debajo del 98 %) el % OTIF uds y el % OTIF cajas; % A tiempo,
+% Completo y % OTIF pedido van sin color.

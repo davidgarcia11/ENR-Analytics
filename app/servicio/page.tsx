@@ -199,9 +199,10 @@ function ServicioPagePanel() {
 
   const stats = kpis
     ? [
-        kpi("% OTIF", kpis.pctOtif, `${kpis.pedidos} pedidos evaluados${kpis.duplicados ? ` · ${kpis.duplicados} duplicado${kpis.duplicados === 1 ? "" : "s"} fuera` : ""}`),
+        // Izquierda: OTIF por pedidos; derecha: OTIF en unidades (lo mayor entre no servidas y anotadas, §23)
+        kpi("% OTIF pedidos", kpis.pctOtif, `${kpis.pedidos} pedidos evaluados${kpis.duplicados ? ` · ${kpis.duplicados} duplicado${kpis.duplicados === 1 ? "" : "s"} fuera` : ""}`),
         kpi("% A tiempo", kpis.pctATiempo, `${kpis.aTiempo} de ${kpis.pedidos} pedidos`),
-        kpi("% Completo", kpis.pctCompleto, `${kpis.udsEnviadas.toLocaleString("es-ES")} de ${kpis.udsPedidas.toLocaleString("es-ES")} uds`),
+        kpi("% OTIF uds", kpis.pctOtifUds, `${Math.round(kpis.udsNoServidas).toLocaleString("es-ES")} no servidas · ${kpis.udsIncidencia.toLocaleString("es-ES")} con incidencia de ${kpis.udsPedidas.toLocaleString("es-ES")} uds`),
       ]
     : [];
 
