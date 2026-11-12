@@ -53,6 +53,7 @@ export interface EnvioDto {
   articulos: ArticuloEnvio[]; // artículos del envío, para anotar las afectadas de cada uno
   afectadasArticulos: AfectadaArticulo[]; // desglose anotado (vacío = sin desglose)
   entrega: EstadoEntrega;
+  duplicadoDe: number | null; // pedido gemelo si este es un duplicado cancelado: no cuenta en los KPI
 }
 
 export interface PatchEnvio {
@@ -446,7 +447,15 @@ export default function ServicioTable({ data, catalogos, onSave, accion }: { dat
                         )}
                       </TableCell>
                       <TableCell className="py-3">
-                        <Badge className={cn("text-xs font-normal", ENTREGA_CLASS[e.entrega])}>{ENTREGA_LABEL[e.entrega]}</Badge>
+                        {/* Duplicado cancelado de otro pedido (misma ref. del cliente): se ve, pero no cuenta en los KPI */}
+                        {e.duplicadoDe ? (
+                          <>
+                            <Badge className="bg-muted text-xs font-normal text-muted-foreground">Duplicado</Badge>
+                            <p className="mt-1 text-xs text-muted-foreground">de {e.duplicadoDe} · fuera de KPI</p>
+                          </>
+                        ) : (
+                          <Badge className={cn("text-xs font-normal", ENTREGA_CLASS[e.entrega])}>{ENTREGA_LABEL[e.entrega]}</Badge>
+                        )}
                       </TableCell>
                       <TableCell data-compartir-ocultar className="py-3 pe-4">
                         <DropdownMenu>
