@@ -58,6 +58,19 @@ export function udsPorCajaDeLineas(lineas: { articulo: string; udsPedidas: numbe
   return new Map([...sumas].map(([a, s]) => [a, s.uds / s.cajas]));
 }
 
+/** Estado de JDE (SDLTTR) de una línea cancelada. */
+export const ESTADO_CANCELADA = '980';
+
+/**
+ * ¿Es la línea un resto intermedio del reparto por palet y no parte del pedido? Al enviar una línea palet
+ * a palet (SSCC), JDE pasa a 980 la línea con lo que quedaba y crea otra con el nuevo resto (p. ej. 300 →
+ * 200 → 100 con palets de 100), sin poner nada en SDSOCN. Sumarlas inflaba las unidades pedidas (pedidos completos salían
+ * incompletos). Una cancelación de verdad también va a 980, pero con las unidades en SDSOCN: esa sí cuenta.
+ * Ver docs/servicio.md §21.
+ */
+export const esRestoDeReparto = (l: { estado: string; udsCanceladas: number }): boolean =>
+  l.estado === ESTADO_CANCELADA && !(l.udsCanceladas > 0);
+
 /**
  * Cantidades de una línea de F4211 ya en unidades (SDUORG / SDSOQS ÷ 100). Solo cuenta como enviado
  * lo que tiene fecha de envío real (SDADDJ, salida de stock 570→580): JDE rellena SDSOQS antes, en el
@@ -304,9 +317,9 @@ export interface Kpis {
   pctOtif: number | null;
   udsPedidas: number;
   udsEnviadas: number;
-  udsIncidencia: number; // no enviadas + afectadas (anotadas a mano)
+  udsIncidencia: number; // solo las afectadas anotadas a mano (lo no enviado no cuenta aquí)
   pctOtifUds: number | null; // 1 − uds con incidencia / uds pedidas
-  cajasIncidencia: number; // no enviadas + afectadas, en cajas
+  cajasIncidencia: number; // solo las afectadas anotadas a mano, en cajas
   pctOtifCajas: number | null; // 1 − cajas con incidencia / cajas pedidas (Carrefour mide por cajas)
   pctConFechaReal: number | null; // % de pedidos evaluados con todas sus fechas de entrega reales anotadas
 }
@@ -316,15 +329,18 @@ const pct = (n: number, d: number) => (d > 0 ? (n / d) * 100 : null);
 // Un pedido "abierto" (incompleto y con la fecha prometida aún por llegar) todavía puede
 // cumplirse, así que no se evalúa. A tiempo, completo y OTIF se miden sobre todos los evaluados:
 // un pedido vencido sin nada enviado no está a tiempo.
+// Uds/cajas con incidencia = SOLO lo anotado a mano (decisión del negocio, nov. 2026): al anotar una
+// incidencia ponen como afectadas las unidades que faltan, así que sumar además lo no enviado las
+// contaba dos veces. Lo no enviado sigue haciendo el pedido incompleto (% Completo, OTIF por pedido).
 export function calcularKpis(pedidos: PedidoResumen[], hoy: string): Kpis {
   const abierto = (p: PedidoResumen) => !p.completo && (!p.fechaPrometida || p.fechaPrometida >= hoy);
   const evaluados = pedidos.filter((p) => !abierto(p));
   const aTiempo = evaluados.filter((p) => p.entrega === 'a_tiempo');
   const sinFecha = evaluados.filter((p) => p.sinFechaReal).length;
   const udsPedidas = evaluados.reduce((s, p) => s + p.udsPedidas, 0);
-  const udsIncidencia = evaluados.reduce((s, p) => s + Math.max(0, p.udsPedidas - p.udsEnviadas) + p.udsAfectadas, 0);
+  const udsIncidencia = evaluados.reduce((s, p) => s + p.udsAfectadas, 0);
   const cajasPedidas = evaluados.reduce((s, p) => s + p.cajasPedidas, 0);
-  const cajasIncidencia = evaluados.reduce((s, p) => s + Math.max(0, p.cajasPedidas - p.cajasEnviadas) + p.cajasAfectadas, 0);
+  const cajasIncidencia = evaluados.reduce((s, p) => s + p.cajasAfectadas, 0);
   return {
     pedidos: evaluados.length,
     abiertos: pedidos.length - evaluados.length,

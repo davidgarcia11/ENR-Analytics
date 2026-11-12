@@ -4,7 +4,7 @@
  * medir por envío (albarán) y no solo por pedido.
  */
 import { describe, it, expect } from 'bun:test'
-import { agruparEnvios, tieneIncidencia, estadoEntrega, resumirPedidos, calcularKpis, resumenMensual, contarIncidencias, incidenciasPorMes, jdeAIso, isoAJde, limpiarNombreCatalogo, udsPorCaja, udsPorCajaDeLineas, cantidadesLinea, sinFechaReal, filtrarPorClientes, filtrarPorTipos, TIPOS_PEDIDO, generarEjemplo, validarAfectadasArticulos, totalAfectadas, armarRespuesta, type LineaJde } from '../lib/servicio'
+import { agruparEnvios, tieneIncidencia, estadoEntrega, resumirPedidos, calcularKpis, resumenMensual, contarIncidencias, incidenciasPorMes, jdeAIso, isoAJde, limpiarNombreCatalogo, udsPorCaja, udsPorCajaDeLineas, cantidadesLinea, esRestoDeReparto, sinFechaReal, filtrarPorClientes, filtrarPorTipos, TIPOS_PEDIDO, generarEjemplo, validarAfectadasArticulos, totalAfectadas, armarRespuesta, type LineaJde } from '../lib/servicio'
 import { permisoDeRutaAdmin, seccionesAdminPorPermisos } from '../lib/permisos'
 
 const linea = (o: Partial<LineaJde>): LineaJde => ({
@@ -118,8 +118,9 @@ describe('indicadores', () => {
     expect(f.map((x) => `${x.mes}/${x.canal}`)).toEqual(['2024-03/HOR', '2024-04/EXP'])
     const hor = f[0].kpis
     expect(hor.pedidos).toBe(2)
-    expect(hor.udsIncidencia).toBe(15) // 10 no enviadas + 5 afectadas
-    expect(hor.pctOtifUds).toBeCloseTo(92.5, 1)
+    expect(hor.udsIncidencia).toBe(5) // solo las 5 afectadas anotadas; las 10 no enviadas no suman aquí
+    expect(hor.pctOtifUds).toBeCloseTo(97.5, 1)
+    expect(hor.pctCompleto).toBe(50) // pero el pedido 2 no está completo
   })
   it('cuenta incidencias por motivo/responsable y por mes', () => {
     const d = [e(1, 'HOR', '2024-03', { motivo: 'Preparación', responsable: 'Elaborados' }), e(2, 'HOR', '2024-03', { motivo: 'Preparación' }), e(3, 'HOR', '2024-04', { motivo: 'Transporte', responsable: 'Transportista' }), e(4, 'HOR', '2024-04')]
@@ -216,19 +217,23 @@ describe('cajas y enviadas de una línea', () => {
 })
 
 describe('cancelaciones y cajas', () => {
-  it('una cancelación no es incidencia sola: solo cuenta como no enviada', () => {
+  it('una cancelación no es incidencia sola: deja el pedido incompleto pero no suma uds con incidencia', () => {
     const d = [{ pedido: 1, canal: 'HOR', udsPedidas: 100, udsEnviadas: 90, udsAfectadas: 0, fechaPrometida: '2024-03-10', entrega: 'a_tiempo' as const, motivo: '', responsable: '' }]
     expect(tieneIncidencia({ motivo: '', incidencia: '', udsAfectadas: 0 })).toBe(false)
     expect(contarIncidencias(d, 'motivo')).toEqual({})
     const k = resumenMensual(d, '2024-06-01')[0].kpis
-    expect(k.udsIncidencia).toBe(10) // las 10 canceladas, una sola vez
+    expect(k.udsIncidencia).toBe(0) // solo cuenta lo anotado a mano
+    expect(k.pctOtifUds).toBe(100)
     expect(k.pctCompleto).toBe(0)
   })
-  it('OTIF por cajas', () => {
+  it('OTIF por cajas: solo las cajas afectadas anotadas, una sola vez aunque coincidan con lo no enviado', () => {
     const e = (pedido: number, entrega: any, o: any = {}) => ({ pedido, udsPedidas: 120, udsEnviadas: 120, cajasPedidas: 10, cajasEnviadas: 10, udsAfectadas: 0, fechaPrometida: '2024-03-04', entrega, ...o })
-    const k = calcularKpis(resumirPedidos([e(1, 'a_tiempo'), e(2, 'a_tiempo'), e(3, 'a_tiempo', { cajasEnviadas: 8, udsEnviadas: 96 }), e(4, 'a_tiempo')]), '2024-04-01')
-    expect(k.cajasIncidencia).toBe(2) // faltan 2 cajas del pedido 3
+    // Pedido 3: faltan 2 cajas (24 uds) y se anotan esas mismas 24 uds / 2 cajas como incidencia
+    const k = calcularKpis(resumirPedidos([e(1, 'a_tiempo'), e(2, 'a_tiempo'), e(3, 'a_tiempo', { cajasEnviadas: 8, udsEnviadas: 96, udsAfectadas: 24, cajasAfectadas: 2 }), e(4, 'a_tiempo')]), '2024-04-01')
+    expect(k.cajasIncidencia).toBe(2)
+    expect(k.udsIncidencia).toBe(24)
     expect(k.pctOtifCajas).toBeCloseTo(95, 5) // 1 − 2/40
+    expect(k.pctCompleto).toBe(75)
   })
 })
 
@@ -371,5 +376,28 @@ describe('PATCH /api/servicio con desglose por artículo', async () => {
     expect(r.status).toBe(400)
     expect(fila()).toBeNull()
     expect(desglose()).toEqual([])
+  })
+})
+
+describe('restos del reparto por palet (980 sin SDSOCN)', () => {
+  it('una línea en 980 sin unidades canceladas es un resto del reparto; con SDSOCN es una cancelación real', () => {
+    expect(esRestoDeReparto({ estado: '980', udsCanceladas: 0 })).toBe(true)
+    expect(esRestoDeReparto({ estado: '980', udsCanceladas: 85 })).toBe(false)
+    expect(esRestoDeReparto({ estado: '620', udsCanceladas: 0 })).toBe(false)
+    expect(esRestoDeReparto({ estado: '550', udsCanceladas: 0 })).toBe(false)
+  })
+  it('sin los restos, un artículo enviado palet a palet sale completo', () => {
+    // Ficticio: 3 palets de 100 enviados; al salir cada palet JDE dejó en 980 el resto (200, 100) sin SDSOCN
+    const lineas = [
+      { estado: '620', udsCanceladas: 0, l: linea({ udsPedidas: 100, udsEnviadas: 100 }) },
+      { estado: '980', udsCanceladas: 0, l: linea({ albaran: 0, fechaEnvio: null, udsPedidas: 200, udsEnviadas: 0 }) },
+      { estado: '620', udsCanceladas: 0, l: linea({ udsPedidas: 100, udsEnviadas: 100 }) },
+      { estado: '980', udsCanceladas: 0, l: linea({ albaran: 0, fechaEnvio: null, udsPedidas: 100, udsEnviadas: 0 }) },
+      { estado: '620', udsCanceladas: 0, l: linea({ udsPedidas: 100, udsEnviadas: 100 }) },
+    ]
+    const e = agruparEnvios(lineas.filter((x) => !esRestoDeReparto(x)).map((x) => x.l))
+    expect(e.length).toBe(1)
+    expect(e[0].udsPedidas).toBe(300)
+    expect(e[0].udsEnviadas).toBe(300)
   })
 })
