@@ -62,10 +62,10 @@ estados por tipo de pedido de JDE:
 | `CO` / `C1` | Devolución y abonos | No |
 
 Además, **solo líneas de stock** (`SDLNTY = 'S'`): las líneas `N` de un pedido de venta (portes, cargos)
-pasan de 520 a 580 sin albarán ni envío y dejarían el pedido siempre incompleto. Los estados
-(`SDLTTR`/`SDNXTR`) no se leen: el albarán (`SDDELN`, se pone en 550→570) y la fecha de envío (`SDADDJ`,
-salida de stock 570→580) ya dicen si una línea se ha enviado, y una cancelada (980) se trata como no
-enviada igual que una pendiente. El rango de fechas de la pantalla se aplica sobre `SDRSDJ`. Fechas JDE
+pasan de 520 a 580 sin albarán ni envío y dejarían el pedido siempre incompleto. El albarán (`SDDELN`, se
+pone en 550→570) y la fecha de envío (`SDADDJ`, salida de stock 570→580) dicen si una línea se ha enviado.
+Del estado (`SDLTTR`) solo se usa el 980: **una línea en 980 sin unidades en `SDSOCN` es un resto del reparto
+por palet y no se lee** (§21); una con `SDSOCN` es una cancelación real y cuenta como no enviada. El rango de fechas de la pantalla se aplica sobre `SDRSDJ`. Fechas JDE
 (CYYDDD) ↔ ISO en `jdeAIso` / `isoAJde`.
 
 **Canal del pedido**: un pedido tiene un solo canal; se toma el de sus artículos (si JDE
@@ -151,9 +151,9 @@ página), con `resumenMensual`, `contarIncidencias` e `incidenciasPorMes` de
 | Barras de responsabilidad, últimos 3 meses (`chart-12`) | Gráfico circular 3D | El mes más reciente con datos y los 2 anteriores. Antes era el donut y motivos las barras; se intercambiaron a petición del negocio |
 | Barras apiladas por mes y motivo (`chart-01`) | — | Para ver si un motivo crece |
 
-**% OTIF en unidades** = 1 − (uds no enviadas + uds afectadas anotadas a mano) / uds
-pedidas. Es una interpretación de la columna «Uds con incidencia» del Excel: **confirmar
-con negocio** que esa es la fórmula. El objetivo del 98 % es el de Makro; Carrefour exige
+**Uds con incidencia = solo las afectadas anotadas a mano** en «Editar datos» (decisión del negocio,
+nov. 2026; ver §21). **% OTIF en unidades** = 1 − uds con incidencia / uds pedidas (en cajas, igual).
+Lo no enviado no suma aquí: deja el pedido incompleto (% Completo y % OTIF por pedido). El objetivo del 98 % es el de Makro; Carrefour exige
 el 99 % por cajas (irá por cliente al hacer la pestaña de penalizaciones).
 
 ## 9. Datos de ejemplo (`/servicio?mock=1`)
@@ -234,11 +234,10 @@ pedidas (envío)». Los KPI siguen calculándose en unidades.
 Decisiones tomadas con el negocio:
 - **A tiempo** = fecha de entrega real ≤ fecha prometida, sin tolerancia. Sin fecha real anotada, cuenta la
   prometida (§4).
-- **Cancelaciones:** las unidades canceladas (`SDSOCN`) cuentan como **no enviadas** (el pedido sale incompleto
-  y bajan el OTIF), una sola vez. **No generan una incidencia automática** (hasta la v1.42 se ponía sola
-  «Cancelación del cliente» con responsable «Cliente»): quien revise el pedido ve la barra incompleta y anota
-  el motivo y el responsable si lo ve conveniente. Al anotarlo, **no** hay que poner esas unidades también como
-  afectadas: ya cuentan como no enviadas y saldrían dos veces en el OTIF por unidades.
+- **Cancelaciones:** las unidades canceladas (`SDSOCN`) cuentan como **no enviadas**: el pedido sale incompleto
+  (baja el % Completo y el OTIF por pedido). **No generan una incidencia automática** (hasta la v1.42 se ponía
+  sola «Cancelación del cliente»): quien revise el pedido ve la barra incompleta y, si quiere que cuente en las
+  uds con incidencia, la anota con sus unidades, motivo y responsable.
 - **Periodo:** sin cambios; no se compara con periodos anteriores (la tendencia es la del rango cargado).
 
 Para que el KPI no engañe:
@@ -248,8 +247,8 @@ Para que el KPI no engañe:
   % OTIF, % A tiempo y % Completo.
 - **«Editar datos»:** si el envío no tiene fecha real, el campo sale relleno con la fecha prometida (con un
   aviso debajo); al guardar se queda anotada.
-- **% OTIF cajas** = 1 − (cajas no enviadas + cajas afectadas) / cajas pedidas, donde las cajas afectadas son
-  las unidades afectadas anotadas, pasadas a cajas con la proporción de su envío. Carrefour mide por cajas y
+- **% OTIF cajas** = 1 − cajas afectadas anotadas / cajas pedidas (las cajas afectadas son las anotadas o, si
+  solo se anotaron unidades, esas unidades pasadas a cajas). Carrefour mide por cajas y
   Makro por unidades.
 
 ## 16. Color de los KPI y afectadas en unidades o cajas
@@ -336,3 +335,19 @@ si son 3 o menos), «Datos de ejemplo» si es `?mock=1`, y «Uso interno · Gene
   y el cliente y el canal, sin recortar.
 - En producción (HTTP) solo se puede descargar; «Copiar» sale con HTTPS o en localhost.
 - Mecanismo y cómo ponerlo en otro panel: `components/nova/README.md` punto 16.
+
+## 21. Uds con incidencia = solo lo anotado, y restos del reparto por palet (v1.45.1)
+
+Con datos reales, Indicadores marcaba cientos de veces más uds con incidencia que las anotadas a mano. Eran
+dos fallos:
+
+- **Restos del reparto por palet.** Al enviar una línea palet a palet (SSCC), JDE pasa a 980 la línea con lo
+  que quedaba y crea otra con el nuevo resto (p. ej. con palets de 100: 300 → 200 → 100), sin nada en
+  `SDSOCN`. Se sumaban como pedidas no enviadas, así que un artículo enviado entero salía con miles de
+  unidades «sin enviar». Ahora la consulta lee `SDLTTR` y descarta las líneas en 980 sin unidades canceladas
+  (`esRestoDeReparto`, `lib/servicio.ts`). Las de 980 con `SDSOCN` son cancelaciones reales y siguen
+  contando (en los datos revisados, en todas ellas `SDSOCN` = `SDUORG`). Arregla también las unidades
+  pedidas de la tabla, el % Completo y el OTIF por pedido, que salían más bajos de lo real.
+- **Lo anotado se contaba dos veces.** Las uds con incidencia eran lo no enviado más lo anotado, y al anotar
+  una incidencia se ponen como afectadas justo las unidades que faltan. Ahora **las uds y cajas con
+  incidencia son solo las anotadas** (`calcularKpis`).

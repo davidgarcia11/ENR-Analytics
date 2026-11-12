@@ -108,7 +108,7 @@ export default function ServicioIndicadores({ envios }: { envios: EnvioDto[] }) 
           <CardTitle className="text-lg font-medium text-foreground">Resumen por mes y canal</CardTitle>
           {filas.length > 0 && <CardAction>{boton}</CardAction>}
           <p className="text-sm font-normal text-muted-foreground">
-            Por mes de la fecha prometida. En rojo, por debajo del {OBJETIVO_PCT} %. OTIF en unidades (o cajas) = 1 − (no enviadas + afectadas) / pedidas. Con fecha real = pedidos con la fecha de entrega real anotada; los demás cuentan como entregados en la fecha prometida.
+            Por mes de la fecha prometida. En rojo, por debajo del {OBJETIVO_PCT} %. Uds con incidencia = las afectadas anotadas en «Editar datos». OTIF en unidades (o cajas) = 1 − afectadas anotadas / pedidas. Con fecha real = pedidos con la fecha de entrega real anotada; los demás cuentan como entregados en la fecha prometida.
           </p>
         </CardHeader>
         <CardContent className="overflow-hidden rounded-b-xl border-t border-border p-0">
