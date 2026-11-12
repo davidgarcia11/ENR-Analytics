@@ -309,11 +309,24 @@ function EditarEnvio({ envio, catalogos, onClose, onSave }: { envio: EnvioDto | 
 
 // `accion`: botón «Compartir» junto al título (components/nova/compartir.tsx). En la imagen no salen los
 // filtros de la tabla, el menú «⋮» ni la paginación, y la incidencia sale con su texto completo.
-export default function ServicioTable({ data, catalogos, onSave, accion }: { data: EnvioDto[]; catalogos: CatalogosServicio; onSave: (e: EnvioDto, p: PatchEnvio) => Promise<void>; accion?: ReactNode }) {
-  const [busqueda, setBusqueda] = useState("");
-  const [filtro, setFiltro] = useState<EstadoEntrega | "todos">("todos");
-  const [filtroInc, setFiltroInc] = useState<"todas" | "con" | "sin">("todas");
-  const [pagina, setPagina] = useState(1);
+// Filtros de la tabla. Viven en la página (no aquí) para que sigan igual al ir a Indicadores y volver,
+// porque al cambiar de sección la tabla se desmonta.
+export interface FiltrosTabla {
+  busqueda: string;
+  estado: EstadoEntrega | "todos";
+  incidencia: "todas" | "con" | "sin";
+  pagina: number;
+}
+export const FILTROS_TABLA_INICIALES: FiltrosTabla = { busqueda: "", estado: "todos", incidencia: "todas", pagina: 1 };
+
+export default function ServicioTable({ data, catalogos, onSave, accion, filtros, onFiltros }: {
+  data: EnvioDto[]; catalogos: CatalogosServicio; onSave: (e: EnvioDto, p: PatchEnvio) => Promise<void>; accion?: ReactNode;
+  filtros: FiltrosTabla; onFiltros: (f: FiltrosTabla) => void;
+}) {
+  const { busqueda, estado: filtro, incidencia: filtroInc, pagina } = filtros;
+  // Cambiar un filtro vuelve a la página 1 (aquí y no en un efecto: un efecto lo haría también al volver de Indicadores)
+  const filtrar = (c: Partial<FiltrosTabla>) => onFiltros({ ...filtros, pagina: 1, ...c });
+  const setPagina = (p: number) => onFiltros({ ...filtros, pagina: p });
   const [editando, setEditando] = useState<EnvioDto | null>(null);
 
   const filtradas = useMemo(() => {
@@ -328,8 +341,9 @@ export default function ServicioTable({ data, catalogos, onSave, accion }: { dat
   }, [data, busqueda, filtro, filtroInc]);
 
   const totalPaginas = Math.max(1, Math.ceil(filtradas.length / PAGE_SIZE));
-  useEffect(() => { setPagina(1); }, [busqueda, filtro, filtroInc]);
-  useEffect(() => { if (pagina > totalPaginas) setPagina(totalPaginas); }, [pagina, totalPaginas]);
+  useEffect(() => {
+    if (pagina > totalPaginas) onFiltros({ ...filtros, pagina: totalPaginas });
+  }, [pagina, totalPaginas, filtros, onFiltros]);
   const paginadas = useMemo(() => filtradas.slice((pagina - 1) * PAGE_SIZE, pagina * PAGE_SIZE), [filtradas, pagina]);
 
   return (
@@ -344,8 +358,8 @@ export default function ServicioTable({ data, catalogos, onSave, accion }: { dat
             <p className="text-sm text-muted-foreground">{filtradas.length} de {data.length} envío{data.length === 1 ? "" : "s"}</p>
           </div>
           <div data-compartir-ocultar className="flex flex-wrap items-center gap-2">
-            <Input placeholder="Buscar pedido, su pedido, cliente, albarán…" value={busqueda} onChange={(e) => setBusqueda(e.target.value)} className="h-8 w-72" />
-            <Select value={filtro} onValueChange={(v) => setFiltro(v as EstadoEntrega | "todos")}>
+            <Input placeholder="Buscar pedido, su pedido, cliente, albarán…" value={busqueda} onChange={(e) => filtrar({ busqueda: e.target.value })} className="h-8 w-72" />
+            <Select value={filtro} onValueChange={(v) => filtrar({ estado: v as EstadoEntrega | "todos" })}>
               <SelectTrigger size="sm" className="w-40">
                 <SelectValue>{(v: EstadoEntrega | "todos") => (v === "todos" ? "Todos los estados" : ENTREGA_LABEL[v])}</SelectValue>
               </SelectTrigger>
@@ -354,7 +368,7 @@ export default function ServicioTable({ data, catalogos, onSave, accion }: { dat
                 {(Object.keys(ENTREGA_LABEL) as EstadoEntrega[]).map((k) => <SelectItem key={k} value={k}>{ENTREGA_LABEL[k]}</SelectItem>)}
               </SelectContent>
             </Select>
-            <Select value={filtroInc} onValueChange={(v) => setFiltroInc(v as "todas" | "con" | "sin")}>
+            <Select value={filtroInc} onValueChange={(v) => filtrar({ incidencia: v as "todas" | "con" | "sin" })}>
               <SelectTrigger size="sm" className="w-44">
                 <SelectValue>{(v: string) => ({ todas: "Con y sin incidencia", con: "Con incidencia", sin: "Sin incidencia" })[v]}</SelectValue>
               </SelectTrigger>

@@ -365,10 +365,12 @@ export interface Kpis {
   pctOtif: number | null;
   udsPedidas: number;
   udsEnviadas: number;
-  udsIncidencia: number; // solo las afectadas anotadas a mano (lo no enviado no cuenta aquí)
-  pctOtifUds: number | null; // 1 − uds con incidencia / uds pedidas
+  udsNoServidas: number; // pedidas − enviadas, pedido a pedido (nunca negativo)
+  udsIncidencia: number; // solo las afectadas anotadas a mano
+  pctOtifUds: number | null; // 1 − Σ máx(no servidas, anotadas) por pedido / uds pedidas
+  cajasNoServidas: number; // ídem en cajas
   cajasIncidencia: number; // solo las afectadas anotadas a mano, en cajas
-  pctOtifCajas: number | null; // 1 − cajas con incidencia / cajas pedidas (Carrefour mide por cajas)
+  pctOtifCajas: number | null; // ídem en cajas (Carrefour mide por cajas)
   pctConFechaReal: number | null; // % de pedidos evaluados con todas sus fechas de entrega reales anotadas
 }
 
@@ -377,9 +379,10 @@ const pct = (n: number, d: number) => (d > 0 ? (n / d) * 100 : null);
 // Un pedido "abierto" (incompleto y con la fecha prometida aún por llegar) todavía puede
 // cumplirse, así que no se evalúa. A tiempo, completo y OTIF se miden sobre todos los evaluados:
 // un pedido vencido sin nada enviado no está a tiempo.
-// Uds/cajas con incidencia = SOLO lo anotado a mano (decisión del negocio, nov. 2026): al anotar una
-// incidencia ponen como afectadas las unidades que faltan, así que sumar además lo no enviado las
-// contaba dos veces. Lo no enviado sigue haciendo el pedido incompleto (% Completo, OTIF por pedido).
+// Uds/cajas con incidencia = SOLO lo anotado a mano; uds/cajas no servidas = lo que falta por enviar.
+// Se muestran por separado; el OTIF en unidades (y cajas) usa lo mayor de las dos por pedido, porque al
+// anotar una incidencia suelen poner como afectadas justo las unidades que faltan (sumarlas contaba dos
+// veces). Lo no enviado también hace el pedido incompleto (% Completo, OTIF por pedido).
 // Los duplicados cancelados de otro pedido (detectarDuplicados) no cuentan en nada.
 export function calcularKpis(todos: PedidoResumen[], hoy: string): Kpis {
   const pedidos = todos.filter((p) => !p.duplicadoDe);
@@ -391,6 +394,15 @@ export function calcularKpis(todos: PedidoResumen[], hoy: string): Kpis {
   const udsIncidencia = evaluados.reduce((s, p) => s + p.udsAfectadas, 0);
   const cajasPedidas = evaluados.reduce((s, p) => s + p.cajasPedidas, 0);
   const cajasIncidencia = evaluados.reduce((s, p) => s + p.cajasAfectadas, 0);
+  // No servidas = lo que falta por enviar de cada pedido. El OTIF en unidades (y cajas) resta, pedido a
+  // pedido, lo mayor entre lo no servido y lo anotado: así cuentan también las incidencias de lo que sí
+  // se envió (p. ej. cajas rotas) y no se cuenta dos veces cuando anotan justo lo que falta (§23).
+  const noServidas = (p: PedidoResumen) => Math.max(0, p.udsPedidas - p.udsEnviadas);
+  const cajasNoServidasDe = (p: PedidoResumen) => Math.max(0, p.cajasPedidas - p.cajasEnviadas);
+  const udsNoServidas = evaluados.reduce((s, p) => s + noServidas(p), 0);
+  const cajasNoServidas = evaluados.reduce((s, p) => s + cajasNoServidasDe(p), 0);
+  const udsFallo = evaluados.reduce((s, p) => s + Math.max(noServidas(p), p.udsAfectadas), 0);
+  const cajasFallo = evaluados.reduce((s, p) => s + Math.max(cajasNoServidasDe(p), p.cajasAfectadas), 0);
   return {
     pedidos: evaluados.length,
     abiertos: pedidos.length - evaluados.length,
@@ -402,10 +414,12 @@ export function calcularKpis(todos: PedidoResumen[], hoy: string): Kpis {
     pctOtif: pct(aTiempo.filter((p) => p.completo).length, evaluados.length),
     udsPedidas,
     udsEnviadas: evaluados.reduce((s, p) => s + p.udsEnviadas, 0),
+    udsNoServidas,
     udsIncidencia,
-    pctOtifUds: udsPedidas > 0 ? 100 - (udsIncidencia / udsPedidas) * 100 : null,
+    pctOtifUds: udsPedidas > 0 ? 100 - (udsFallo / udsPedidas) * 100 : null,
+    cajasNoServidas,
     cajasIncidencia,
-    pctOtifCajas: cajasPedidas > 0 ? 100 - (cajasIncidencia / cajasPedidas) * 100 : null,
+    pctOtifCajas: cajasPedidas > 0 ? 100 - (cajasFallo / cajasPedidas) * 100 : null,
     pctConFechaReal: pct(evaluados.length - sinFecha, evaluados.length),
   };
 }

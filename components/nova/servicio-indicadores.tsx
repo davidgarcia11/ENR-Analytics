@@ -30,8 +30,9 @@ const pct = (n: number | null) => (n === null ? "—" : `${n.toLocaleString("es-
 const num = (n: number) => n.toLocaleString("es-ES");
 const hoyIso = () => new Date().toISOString().slice(0, 10);
 
-function Pct({ v }: { v: number | null }) {
-  return <span className={cn("tabular-nums", v !== null && v < OBJETIVO_PCT && "font-medium text-destructive")}>{pct(v)}</span>;
+// `objetivo`: en rojo por debajo del objetivo. Solo los % en unidades y cajas; los de pedidos van sin color
+function Pct({ v, objetivo = false }: { v: number | null; objetivo?: boolean }) {
+  return <span className={cn("tabular-nums", objetivo && v !== null && v < OBJETIVO_PCT && "font-medium text-destructive")}>{pct(v)}</span>;
 }
 
 function Vacio({ texto }: { texto: string }) {
@@ -92,9 +93,10 @@ export default function ServicioIndicadores({ envios }: { envios: EnvioDto[] }) 
       <TableCell className="px-4 text-right"><Pct v={k.pctCompleto} /></TableCell>
       <TableCell className="px-4 text-right"><Pct v={k.pctOtif} /></TableCell>
       <TableCell className="px-4 text-right tabular-nums">{num(k.udsPedidas)}</TableCell>
+      <TableCell className="px-4 text-right tabular-nums">{num(Math.round(k.udsNoServidas))}</TableCell>
       <TableCell className="px-4 text-right tabular-nums">{num(k.udsIncidencia)}</TableCell>
-      <TableCell className="px-4 text-right"><Pct v={k.pctOtifUds} /></TableCell>
-      <TableCell className="px-4 text-right"><Pct v={k.pctOtifCajas} /></TableCell>
+      <TableCell className="px-4 text-right"><Pct v={k.pctOtifUds} objetivo /></TableCell>
+      <TableCell className="px-4 text-right" title={`Cajas no servidas: ${num(Math.round(k.cajasNoServidas))} · con incidencia: ${num(Math.round(k.cajasIncidencia))}`}><Pct v={k.pctOtifCajas} objetivo /></TableCell>
       <TableCell className="px-4 text-right text-muted-foreground">{pct(k.pctConFechaReal)}</TableCell>
     </>
   );
@@ -108,7 +110,7 @@ export default function ServicioIndicadores({ envios }: { envios: EnvioDto[] }) 
           <CardTitle className="text-lg font-medium text-foreground">Resumen por mes y canal</CardTitle>
           {filas.length > 0 && <CardAction>{boton}</CardAction>}
           <p className="text-sm font-normal text-muted-foreground">
-            Por mes de la fecha prometida. En rojo, por debajo del {OBJETIVO_PCT} %. Uds con incidencia = las afectadas anotadas en «Editar datos». OTIF en unidades (o cajas) = 1 − afectadas anotadas / pedidas. Con fecha real = pedidos con la fecha de entrega real anotada; los demás cuentan como entregados en la fecha prometida.
+            Por mes de la fecha prometida. En rojo, el % OTIF en unidades o cajas por debajo del {OBJETIVO_PCT} %. Uds no servidas = pedidas − enviadas de cada pedido. Uds con incidencia = las afectadas anotadas en «Editar datos». OTIF en unidades (o cajas) = 1 − (por pedido, lo mayor entre no servidas y anotadas) / pedidas. Con fecha real = pedidos con la fecha de entrega real anotada; los demás cuentan como entregados en la fecha prometida.
           </p>
         </CardHeader>
         <CardContent className="overflow-hidden rounded-b-xl border-t border-border p-0">
@@ -124,6 +126,7 @@ export default function ServicioIndicadores({ envios }: { envios: EnvioDto[] }) 
                     <TableHead className={th}>% Completo</TableHead>
                     <TableHead className={th}>% OTIF pedido</TableHead>
                     <TableHead className={th}>Uds pedidas</TableHead>
+                    <TableHead className={th}>Uds no servidas</TableHead>
                     <TableHead className={th}>Uds con incidencia</TableHead>
                     <TableHead className={th}>% OTIF uds</TableHead>
                     <TableHead className={th}>% OTIF cajas</TableHead>
