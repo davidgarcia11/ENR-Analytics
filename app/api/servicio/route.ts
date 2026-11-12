@@ -10,8 +10,9 @@ import { requireScreenAccess } from '@/lib/permissions';
 import { getDb } from '@/lib/sqlite';
 import { verifySession } from '@/lib/auth';
 import {
-  EJEMPLO_CANALES, TIPOS_PEDIDO, TIPO_LINEA_STOCK, armarRespuesta, cantidadesLinea, esRestoDeReparto, generarEjemplo, isoAJde, jdeAIso, udsPorCaja, udsPorCajaDeLineas,
-  totalAfectadas, validarAfectadasArticulos, type AfectadaArticulo, type ConversionUm, type LineaJde, type TipoPedido, type TrackingManual,
+  EJEMPLO_CANALES, TIPOS_PEDIDO, TIPO_LINEA_STOCK, armarRespuesta, cantidadesLinea, detectarDuplicados, esRestoDeReparto, generarEjemplo, isoAJde, jdeAIso,
+  pedidosCanceladosEnteros, udsPorCaja, udsPorCajaDeLineas, totalAfectadas, validarAfectadasArticulos,
+  type AfectadaArticulo, type ConversionUm, type LineaJde, type PedidoEnviado, type TipoPedido, type TrackingManual,
 } from '@/lib/servicio';
 import { valorPermitido } from '@/lib/servicio-catalogo';
 
@@ -156,10 +157,30 @@ export async function GET(req: NextRequest) {
       udsPorCaja: udsPorCajaDe(r),
     }));
 
+    // Pedidos duplicados (uno enviado y otro cancelado entero, con la misma SDVR01): si el gemelo enviado de
+    // un cancelado no está en el rango cargado, se busca aparte en F4211 sin filtro de fecha. Casi siempre
+    // no hay ninguno y no se consulta. Ver docs/servicio.md §22.
+    const enRango = detectarDuplicados(lineas);
+    const sinGemelo = [...pedidosCanceladosEnteros(lineas)].filter(([pedido]) => !enRango.has(pedido)).map(([, c]) => c);
+    const enviadosFuera: PedidoEnviado[] = [];
+    for (let i = 0; i < sinGemelo.length; i += MAX_IN / 2) {
+      const chunk = sinGemelo.slice(i, i + MAX_IN / 2);
+      const binds: Record<string, string | number> = { tipoLinea: TIPO_LINEA_STOCK };
+      chunk.forEach((c, j) => { binds[`a${j}`] = c.cliente; binds[`v${j}`] = c.suPedido; });
+      const r = await conn.execute(
+        `SELECT DISTINCT SDDOCO, SDAN8, TRIM(SDVR01) AS SDVR01 FROM F4211
+         WHERE SDAN8 IN (${chunk.map((_, j) => `:a${j}`).join(', ')})
+           AND TRIM(SDVR01) IN (${chunk.map((_, j) => `:v${j}`).join(', ')})
+           AND TRIM(SDLNTY) = :tipoLinea AND SDADDJ > 0 AND SDSOQS > 0`,
+        binds
+      );
+      for (const x of r.rows as any[]) enviadosFuera.push({ pedido: x.SDDOCO, cliente: x.SDAN8, suPedido: String(x.SDVR01 || '').trim() });
+    }
+
     const db = getDb();
     const tracking = leerTracking(db);
 
-    const { envios: enviosDto, kpis } = armarRespuesta(lineas, tracking, canalLabels, hoy);
+    const { envios: enviosDto, kpis } = armarRespuesta(lineas, tracking, canalLabels, hoy, enviadosFuera);
 
     // Registrar consulta en logs (nunca bloquea la respuesta).
     try {

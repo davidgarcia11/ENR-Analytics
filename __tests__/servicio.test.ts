@@ -4,7 +4,7 @@
  * medir por envío (albarán) y no solo por pedido.
  */
 import { describe, it, expect } from 'bun:test'
-import { agruparEnvios, tieneIncidencia, estadoEntrega, resumirPedidos, calcularKpis, resumenMensual, contarIncidencias, incidenciasPorMes, jdeAIso, isoAJde, limpiarNombreCatalogo, udsPorCaja, udsPorCajaDeLineas, cantidadesLinea, esRestoDeReparto, sinFechaReal, filtrarPorClientes, filtrarPorTipos, TIPOS_PEDIDO, generarEjemplo, validarAfectadasArticulos, totalAfectadas, armarRespuesta, type LineaJde } from '../lib/servicio'
+import { agruparEnvios, tieneIncidencia, estadoEntrega, resumirPedidos, calcularKpis, resumenMensual, contarIncidencias, incidenciasPorMes, jdeAIso, isoAJde, limpiarNombreCatalogo, udsPorCaja, udsPorCajaDeLineas, cantidadesLinea, esRestoDeReparto, sinFechaReal, filtrarPorClientes, filtrarPorTipos, TIPOS_PEDIDO, generarEjemplo, validarAfectadasArticulos, totalAfectadas, armarRespuesta, detectarDuplicados, pedidosCanceladosEnteros, type LineaJde } from '../lib/servicio'
 import { permisoDeRutaAdmin, seccionesAdminPorPermisos } from '../lib/permisos'
 
 const linea = (o: Partial<LineaJde>): LineaJde => ({
@@ -399,5 +399,52 @@ describe('restos del reparto por palet (980 sin SDSOCN)', () => {
     expect(e.length).toBe(1)
     expect(e[0].udsPedidas).toBe(300)
     expect(e[0].udsEnviadas).toBe(300)
+  })
+})
+
+describe('pedidos duplicados (uno enviado y otro cancelado entero, misma ref. del cliente)', () => {
+  // Ficticio: el pedido 2 entró dos veces; el 3 se sirvió y el 2 se canceló entero
+  const enviado = linea({ pedido: 3, suPedido: 'REF-1', fechaPrometida: '2024-03-04' })
+  const cancelado = linea({ pedido: 2, suPedido: 'REF-1', albaran: 0, fechaEnvio: null, udsEnviadas: 0, cajasEnviadas: 0, udsCanceladas: 100, fechaPrometida: '2024-03-04' })
+
+  it('el cancelado con gemelo enviado es duplicado y no cuenta en los KPI', () => {
+    expect(detectarDuplicados([enviado, cancelado])).toEqual(new Map([[2, 3]]))
+    const { envios, kpis } = armarRespuesta([enviado, cancelado], new Map(), {}, '2024-04-01')
+    expect(envios.find((e) => e.pedido === 2)?.duplicadoDe).toBe(3)
+    expect(envios.find((e) => e.pedido === 3)?.duplicadoDe).toBeNull()
+    expect(kpis.pedidos).toBe(1)
+    expect(kpis.duplicados).toBe(1)
+    expect(kpis.pctCompleto).toBe(100)
+    expect(kpis.udsPedidas).toBe(100)
+  })
+  it('una cancelación sin gemelo sigue contando como incumplida', () => {
+    const { kpis } = armarRespuesta([cancelado], new Map(), {}, '2024-04-01')
+    expect(kpis.duplicados).toBe(0)
+    expect(kpis.pedidos).toBe(1)
+    expect(kpis.pctCompleto).toBe(0)
+  })
+  it('sin ref. del cliente, o de otro cliente, no es duplicado', () => {
+    expect(detectarDuplicados([linea({ pedido: 3, suPedido: '' }), { ...cancelado, suPedido: '' }]).size).toBe(0)
+    expect(detectarDuplicados([linea({ pedido: 3, suPedido: 'REF-1', cliente: 9 }), cancelado]).size).toBe(0)
+  })
+  it('un pedido con alguna línea enviada o sin cancelar no es cancelado entero', () => {
+    expect(pedidosCanceladosEnteros([cancelado, { ...cancelado, udsCanceladas: 0 }]).size).toBe(0)
+    expect(pedidosCanceladosEnteros([cancelado, { ...cancelado, udsEnviadas: 10 }]).size).toBe(0)
+    expect(pedidosCanceladosEnteros([cancelado]).get(2)).toEqual({ cliente: 1, suPedido: 'REF-1' })
+  })
+  it('detecta el gemelo enviado aunque esté fuera del rango cargado', () => {
+    expect(detectarDuplicados([cancelado]).size).toBe(0)
+    const { kpis } = armarRespuesta([cancelado], new Map(), {}, '2024-04-01', [{ pedido: 3, cliente: 1, suPedido: 'REF-1' }])
+    expect(kpis.duplicados).toBe(1)
+    expect(kpis.pedidos).toBe(0)
+  })
+  it('los duplicados no suman en los gráficos de incidencias', () => {
+    const e = { pedido: 2, canal: 'HOR', udsPedidas: 100, udsEnviadas: 0, udsAfectadas: 0, fechaPrometida: '2024-03-04', entrega: 'pendiente_envio' as const, motivo: 'Cliente', responsable: 'Cliente', duplicadoDe: 3 }
+    expect(contarIncidencias([e], 'motivo')).toEqual({})
+    expect(incidenciasPorMes([e])).toEqual([])
+  })
+  it('los datos de ejemplo traen un duplicado', () => {
+    const { lineas, tracking } = generarEjemplo()
+    expect(armarRespuesta(lineas, tracking, {}, '2024-08-01').kpis.duplicados).toBe(1)
   })
 })

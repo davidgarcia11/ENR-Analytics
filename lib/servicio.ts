@@ -71,6 +71,50 @@ export const ESTADO_CANCELADA = '980';
 export const esRestoDeReparto = (l: { estado: string; udsCanceladas: number }): boolean =>
   l.estado === ESTADO_CANCELADA && !(l.udsCanceladas > 0);
 
+/** Pedido con algo enviado (posible gemelo de un duplicado), leído fuera del rango cargado. */
+export interface PedidoEnviado { pedido: number; cliente: number; suPedido: string }
+
+const claveGemelo = (cliente: number, suPedido: string) => `${cliente}|${suPedido}`;
+
+/**
+ * Pedidos cancelados enteros: todas sus líneas con unidades canceladas (SDSOCN) y nada enviado. Solo
+ * los que tienen referencia del cliente (SDVR01), que es lo que permite buscarles un gemelo.
+ */
+export function pedidosCanceladosEnteros(lineas: Pick<LineaJde, 'pedido' | 'cliente' | 'suPedido' | 'udsCanceladas' | 'udsEnviadas'>[]): Map<number, { cliente: number; suPedido: string }> {
+  const r = new Map<number, { cliente: number; suPedido: string; cancelado: boolean }>();
+  for (const l of lineas) {
+    const p = r.get(l.pedido) ?? { cliente: l.cliente, suPedido: l.suPedido.trim(), cancelado: true };
+    if (!(l.udsCanceladas > 0) || l.udsEnviadas > 0) p.cancelado = false;
+    r.set(l.pedido, p);
+  }
+  return new Map([...r].filter(([, p]) => p.cancelado && p.suPedido).map(([k, p]) => [k, { cliente: p.cliente, suPedido: p.suPedido }]));
+}
+
+/**
+ * Pedidos duplicados → pedido gemelo. A veces un pedido entra dos veces en JDE: uno se sirve y el otro
+ * se cancela entero, y los dos llevan la misma referencia del cliente (SDVR01). El cancelado no es un
+ * incumplimiento, así que se marca y no cuenta en los KPI (sí sale en la tabla, etiquetado). Gemelo =
+ * otro pedido del mismo cliente (SDAN8) y misma SDVR01 con algo enviado, del rango cargado o de
+ * `enviadosFuera` (consulta aparte sin filtro de fecha). Ver docs/servicio.md §22.
+ */
+export function detectarDuplicados(lineas: LineaJde[], enviadosFuera: PedidoEnviado[] = []): Map<number, number> {
+  const cancelados = pedidosCanceladosEnteros(lineas);
+  if (cancelados.size === 0) return new Map();
+  const enviados = new Map<string, number>();
+  const anotar = (p: PedidoEnviado) => {
+    const k = claveGemelo(p.cliente, p.suPedido.trim());
+    if (p.suPedido.trim() && !enviados.has(k)) enviados.set(k, p.pedido);
+  };
+  for (const l of lineas) if (l.udsEnviadas > 0) anotar(l);
+  for (const p of enviadosFuera) anotar(p);
+  const r = new Map<number, number>();
+  for (const [pedido, c] of cancelados) {
+    const gemelo = enviados.get(claveGemelo(c.cliente, c.suPedido));
+    if (gemelo !== undefined && gemelo !== pedido) r.set(pedido, gemelo);
+  }
+  return r;
+}
+
 /**
  * Cantidades de una línea de F4211 ya en unidades (SDUORG / SDSOQS ÷ 100). Solo cuenta como enviado
  * lo que tiene fecha de envío real (SDADDJ, salida de stock 570→580): JDE rellena SDSOQS antes, en el
@@ -154,6 +198,7 @@ export interface Envio {
   cajasEnviadas: number;
   udsCanceladas: number;
   articulos: ArticuloEnvio[];
+  duplicadoDe: number | null; // pedido gemelo si este es un duplicado cancelado (detectarDuplicados): no cuenta en los KPI
 }
 
 // Suma una línea (o un artículo de otro envío) a la lista de artículos de un envío
@@ -188,7 +233,7 @@ const max = (a: string | null, b: string | null) => (a && b ? (a > b ? a : b) : 
 // Agrupa las líneas por (pedido, albarán). El canal es el del pedido entero: un pedido
 // tiene un solo canal (confirmado), así que se toma el que más unidades pide — si JDE
 // devolviera varios, gana el mayoritario en vez de partir el pedido.
-export function agruparEnvios(lineas: LineaJde[]): Envio[] {
+export function agruparEnvios(lineas: LineaJde[], duplicados: Map<number, number> = new Map()): Envio[] {
   const canalPorPedido = new Map<number, Map<string, number>>();
   for (const l of lineas) {
     if (!l.canal) continue;
@@ -214,6 +259,7 @@ export function agruparEnvios(lineas: LineaJde[]): Envio[] {
         fechaEnvio: l.fechaEnvio, fechaPrometida: l.fechaPrometida,
         udsPedidas: l.udsPedidas, udsEnviadas: l.udsEnviadas, cajasPedidas: l.cajasPedidas, cajasEnviadas: l.cajasEnviadas, udsCanceladas: l.udsCanceladas,
         articulos: [articuloDe(l)],
+        duplicadoDe: duplicados.get(l.pedido) ?? null,
       });
       continue;
     }
@@ -280,15 +326,16 @@ export interface PedidoResumen {
   fechaPrometida: string | null;
   entrega: EstadoEntrega;
   sinFechaReal: boolean; // algún envío enviado sin fecha de entrega real anotada (su «a tiempo» es supuesto)
+  duplicadoDe: number | null; // duplicado cancelado de otro pedido: no cuenta en los KPI
 }
 
 // Resumen por pedido a partir de sus envíos (con el estado de entrega ya calculado).
 // Completo = se ha enviado todo lo pedido. Entrega del pedido: cualquier envío tarde →
 // tarde; si no, alguno a tiempo → a tiempo; si no (nada enviado) → pendiente de envío.
-export function resumirPedidos(envios: { pedido: number; udsPedidas: number; udsEnviadas: number; cajasPedidas?: number; cajasEnviadas?: number; udsAfectadas?: number; cajasAfectadas?: number; fechaPrometida: string | null; entrega: EstadoEntrega; fechaEnvio?: string | null; fechaEntregaReal?: string | null }[]): PedidoResumen[] {
+export function resumirPedidos(envios: { pedido: number; udsPedidas: number; udsEnviadas: number; cajasPedidas?: number; cajasEnviadas?: number; udsAfectadas?: number; cajasAfectadas?: number; fechaPrometida: string | null; entrega: EstadoEntrega; fechaEnvio?: string | null; fechaEntregaReal?: string | null; duplicadoDe?: number | null }[]): PedidoResumen[] {
   const pedidos = new Map<number, PedidoResumen>();
   for (const e of envios) {
-    const p = pedidos.get(e.pedido) ?? { pedido: e.pedido, udsPedidas: 0, udsEnviadas: 0, cajasPedidas: 0, cajasEnviadas: 0, cajasAfectadas: 0, udsAfectadas: 0, completo: false, fechaPrometida: null, entrega: 'pendiente_envio' as EstadoEntrega, sinFechaReal: false };
+    const p = pedidos.get(e.pedido) ?? { pedido: e.pedido, udsPedidas: 0, udsEnviadas: 0, cajasPedidas: 0, cajasEnviadas: 0, cajasAfectadas: 0, udsAfectadas: 0, completo: false, fechaPrometida: null, entrega: 'pendiente_envio' as EstadoEntrega, sinFechaReal: false, duplicadoDe: e.duplicadoDe ?? null };
     if (sinFechaReal({ fechaEnvio: e.fechaEnvio ?? null, fechaEntregaReal: e.fechaEntregaReal })) p.sinFechaReal = true;
     p.udsPedidas += e.udsPedidas;
     p.udsEnviadas += e.udsEnviadas;
@@ -308,8 +355,9 @@ export function resumirPedidos(envios: { pedido: number; udsPedidas: number; uds
 }
 
 export interface Kpis {
-  pedidos: number; // evaluados (los abiertos no cuentan)
+  pedidos: number; // evaluados (los abiertos y los duplicados no cuentan)
   abiertos: number; // incompletos con fecha prometida aún no vencida
+  duplicados: number; // duplicados cancelados de otro pedido, fuera de todos los KPI
   aTiempo: number; // evaluados a tiempo
   sinFechaReal: number; // evaluados con algún envío sin fecha real anotada (a tiempo supuesto)
   pctATiempo: number | null;
@@ -332,7 +380,9 @@ const pct = (n: number, d: number) => (d > 0 ? (n / d) * 100 : null);
 // Uds/cajas con incidencia = SOLO lo anotado a mano (decisión del negocio, nov. 2026): al anotar una
 // incidencia ponen como afectadas las unidades que faltan, así que sumar además lo no enviado las
 // contaba dos veces. Lo no enviado sigue haciendo el pedido incompleto (% Completo, OTIF por pedido).
-export function calcularKpis(pedidos: PedidoResumen[], hoy: string): Kpis {
+// Los duplicados cancelados de otro pedido (detectarDuplicados) no cuentan en nada.
+export function calcularKpis(todos: PedidoResumen[], hoy: string): Kpis {
+  const pedidos = todos.filter((p) => !p.duplicadoDe);
   const abierto = (p: PedidoResumen) => !p.completo && (!p.fechaPrometida || p.fechaPrometida >= hoy);
   const evaluados = pedidos.filter((p) => !abierto(p));
   const aTiempo = evaluados.filter((p) => p.entrega === 'a_tiempo');
@@ -344,6 +394,7 @@ export function calcularKpis(pedidos: PedidoResumen[], hoy: string): Kpis {
   return {
     pedidos: evaluados.length,
     abiertos: pedidos.length - evaluados.length,
+    duplicados: todos.length - pedidos.length,
     aTiempo: aTiempo.length,
     sinFechaReal: sinFecha,
     pctATiempo: pct(aTiempo.length, evaluados.length),
@@ -364,7 +415,7 @@ export function calcularKpis(pedidos: PedidoResumen[], hoy: string): Kpis {
 type EnvioIndicadores = {
   pedido: number; canal: string | null; udsPedidas: number; udsEnviadas: number; udsAfectadas: number;
   fechaPrometida: string | null; entrega: EstadoEntrega; motivo: string; responsable: string;
-  fechaEnvio?: string | null; fechaEntregaReal?: string | null;
+  fechaEnvio?: string | null; fechaEntregaReal?: string | null; duplicadoDe?: number | null;
 };
 
 export interface FilaMes { mes: string; canal: string | null; kpis: Kpis }
@@ -387,11 +438,11 @@ export function resumenMensual(envios: EnvioIndicadores[], hoy: string): FilaMes
     .map((g) => ({ mes: g.mes, canal: g.canal, kpis: calcularKpis(resumirPedidos(g.envios), hoy) }));
 }
 
-// Incidencias = envíos con motivo anotado. Cuenta por motivo o por responsable.
+// Incidencias = envíos con motivo anotado (sin los duplicados). Cuenta por motivo o por responsable.
 export function contarIncidencias(envios: EnvioIndicadores[], por: 'motivo' | 'responsable'): Record<string, number> {
   const r: Record<string, number> = {};
   for (const e of envios) {
-    if (!e.motivo) continue;
+    if (!e.motivo || e.duplicadoDe) continue;
     const clave = (por === 'motivo' ? e.motivo : e.responsable) || 'Sin indicar';
     r[clave] = (r[clave] ?? 0) + 1;
   }
@@ -404,7 +455,7 @@ export function incidenciasPorMes(envios: EnvioIndicadores[]): { mes: string; [m
   for (const e of envios) {
     const mes = e.fechaPrometida?.slice(0, 7);
     const motivo = e.motivo;
-    if (!mes || !motivo) continue;
+    if (!mes || !motivo || e.duplicadoDe) continue;
     const m = meses.get(mes) ?? {};
     m[motivo] = (m[motivo] ?? 0) + 1;
     meses.set(mes, m);
@@ -450,9 +501,10 @@ export const totalAfectadas = (lista: AfectadaArticulo[]) => ({
 
 // Cruza las líneas de JDE con los datos manuales y calcula todo lo que devuelve la API:
 // envíos con estado de entrega, unidades del pedido completo y KPIs. Es la misma ruta
-// para datos reales y de ejemplo (?mock=1), así que no hay lógica duplicada.
-export function armarRespuesta(lineas: LineaJde[], tracking: Map<string, TrackingManual>, canalLabels: Record<string, string>, hoy: string) {
-  const envios = agruparEnvios(lineas).map((e) => {
+// para datos reales y de ejemplo (?mock=1), así que no hay lógica duplicada. `enviadosFuera`: posibles
+// gemelos de los cancelados enteros con fecha fuera del rango (ver detectarDuplicados).
+export function armarRespuesta(lineas: LineaJde[], tracking: Map<string, TrackingManual>, canalLabels: Record<string, string>, hoy: string, enviadosFuera: PedidoEnviado[] = []) {
+  const envios = agruparEnvios(lineas, detectarDuplicados(lineas, enviadosFuera)).map((e) => {
     const t = tracking.get(`${e.pedido}|${e.albaran}`);
     const entregaReal = t?.fecha_entrega_real ?? null;
     return {
@@ -577,6 +629,10 @@ export function generarEjemplo(): { lineas: LineaJde[]; tracking: Map<string, Tr
       }
     }
   }
+  // Un pedido que entró dos veces: copia del primero, cancelada entera y con su misma referencia del
+  // cliente, para ver la etiqueta «Duplicado» (no cuenta en los KPI)
+  const original = lineas.find((l) => l.pedido === 900001)!;
+  lineas.push({ ...original, pedido: 999001, albaran: 0, fechaEnvio: null, udsEnviadas: 0, cajasEnviadas: 0, udsCanceladas: original.udsPedidas });
   return { lineas, tracking };
 }
 
