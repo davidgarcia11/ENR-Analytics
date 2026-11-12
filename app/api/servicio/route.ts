@@ -10,7 +10,7 @@ import { requireScreenAccess } from '@/lib/permissions';
 import { getDb } from '@/lib/sqlite';
 import { verifySession } from '@/lib/auth';
 import {
-  EJEMPLO_CANALES, TIPOS_PEDIDO, TIPO_LINEA_STOCK, armarRespuesta, cantidadesLinea, generarEjemplo, isoAJde, jdeAIso, udsPorCaja, udsPorCajaDeLineas,
+  EJEMPLO_CANALES, TIPOS_PEDIDO, TIPO_LINEA_STOCK, armarRespuesta, cantidadesLinea, esRestoDeReparto, generarEjemplo, isoAJde, jdeAIso, udsPorCaja, udsPorCajaDeLineas,
   totalAfectadas, validarAfectadasArticulos, type AfectadaArticulo, type ConversionUm, type LineaJde, type TipoPedido, type TrackingManual,
 } from '@/lib/servicio';
 import { valorPermitido } from '@/lib/servicio-catalogo';
@@ -74,7 +74,7 @@ export async function GET(req: NextRequest) {
     const result = await conn.execute(
       `SELECT A.SDDOCO, TRIM(A.SDDCTO) AS SDDCTO, TRIM(A.SDVR01) AS SDVR01, A.SDSHPN, A.SDDELN, A.SDAN8, A.SDSHAN,
               A.SDPDDJ, A.SDADDJ, A.SDRSDJ, A.SDUORG, A.SDSOQS, A.SDSOCN, A.SDSQOR, A.SDITM,
-              TRIM(A.SDLITM) AS SDLITM, TRIM(A.SDDSC1) AS SDDSC1, TRIM(A.SDUOM) AS SDUOM, TRIM(A.SDUOM2) AS SDUOM2,
+              TRIM(A.SDLITM) AS SDLITM, TRIM(A.SDDSC1) AS SDDSC1, TRIM(A.SDUOM) AS SDUOM, TRIM(A.SDUOM2) AS SDUOM2, TRIM(A.SDLTTR) AS SDLTTR,
               TRIM(B.ABALPH) AS AN8_DESC, TRIM(C.ABALPH) AS SHAN_DESC
        FROM F4211 A
        LEFT JOIN F0101 B ON B.ABAN8 = A.SDAN8
@@ -84,7 +84,8 @@ export async function GET(req: NextRequest) {
          AND A.SDRSDJ BETWEEN :startJde AND :endJde`,
       { ...BINDS_TIPOS, tipoLinea: TIPO_LINEA_STOCK, startJde: isoAJde(startDate), endJde: isoAJde(endDate) }
     );
-    const rows = result.rows as any[];
+    // Fuera los restos intermedios del reparto por palet (980 sin unidades canceladas): no son pedido
+    const rows = (result.rows as any[]).filter((r) => !esRestoDeReparto({ estado: String(r.SDLTTR || '').trim(), udsCanceladas: (r.SDSOCN || 0) / 100 }));
 
     // Canal del artículo (F554101.AAZE06, UDC 17/B6) — mismo origen que /compras: el
     // canal es atributo del artículo y un pedido tiene un solo canal.
